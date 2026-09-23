@@ -1,0 +1,18 @@
+[package]
+name = "aienos-aegis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "AIENOS Phase 4: AEGIS Capability Graph, Effect Intent Pipeline, and J-Space Worlds"
+
+[dependencies]
+aienos-kernel = { workspace = true }
+aienos-agent-state = { workspace = true }
+aienos-cortex = { workspace = true }
+serde = { workspace = true, features = ["derive", "alloc"] }
+serde_json = { workspace = true, features = ["alloc"] }
+
+[dev-dependencies]
+aienos-c1-tree = { workspace = true }

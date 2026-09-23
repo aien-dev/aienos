@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/aienos-kernel",
+    "crates/aienos-agent-state",
+    "crates/aienos-cortex",
+    "crates/aienos-aegis",
+    "crates/aienos-c1-tree",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["AIENOS Sovereign Contributors"]
+license = "Apache-2.0 WITH LLVM-exception"
+repository = "https://github.com/aien-dev/aienos"
+
+[workspace.dependencies]
+aienos-kernel = { path = "crates/aienos-kernel" }
+aienos-agent-state = { path = "crates/aienos-agent-state" }
+aienos-cortex = { path = "crates/aienos-cortex" }
+aienos-aegis = { path = "crates/aienos-aegis" }
+aienos-c1-tree = { path = "crates/aienos-c1-tree" }
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }

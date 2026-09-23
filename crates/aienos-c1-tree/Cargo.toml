@@ -1,0 +1,14 @@
+[package]
+name = "aienos-c1-tree"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "AIENOS Phase 4: C1 Copy-On-Write Prefix Tree with physical KV page sharing (hardware-accelerated in Phase 5)"
+
+[dependencies]
+aienos-kernel = { workspace = true }
+aienos-agent-state = { workspace = true }
+serde = { workspace = true, features = ["derive", "alloc"] }
+serde_json = { workspace = true, features = ["alloc"] }

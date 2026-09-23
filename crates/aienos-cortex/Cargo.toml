@@ -1,0 +1,13 @@
+[package]
+name = "aienos-cortex"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "AIENOS Phase 3: Cortex Epistemic Store with verifiable provenance"
+
+[dependencies]
+aienos-kernel = { workspace = true }
+serde = { workspace = true, features = ["derive", "alloc"] }
+serde_json = { workspace = true, features = ["alloc"] }

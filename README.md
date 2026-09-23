@@ -2,7 +2,9 @@
 
 > **Status: experimental / pre-alpha.** Nothing here boots yet. No support, stability, or compatibility promises. Expect breaking changes.
 
-AIENOS is an operating system in which the AIEN agent is the primary interface. It is not a desktop OS with an assistant installed on top: you turn the machine on, the agent wakes up, knows the machine and your history, operates nearly everything inside it, and asks you only before crossing a boundary you have told it not to cross alone.
+AIENOS is an agent-native operating system designed around continuous logical agent existence: the agent persists while models, kernels, inference state, power states, and physical machines change beneath it. You turn the machine on, the agent wakes up, knows the machine and your history, operates nearly everything inside it, and asks you only before crossing a boundary you have told it not to cross alone.
+
+AIEN is provisioned once. After that, boot, reboot, sleep, model reload, kernel restart, hardware failure, and migration are execution-state transitions—not agent creation events.
 
 The kernel stays small, deterministic, and non-intelligent. The model is never the kernel, and the agent is never the root of trust.
 
@@ -24,11 +26,12 @@ Power on, AIENOS boots directly on the NVIDIA DGX Spark (no Linux host), the AIE
 ## Principles
 
 - **Sovereignty:** no outside organization is required to boot the machine, access your data, authenticate you, authorize the agent, build the trusted core, recover, change models, move hardware, or keep operating.
+- **Continuous existence:** the agent is provisioned once; power and substrate changes reconstruct execution, they do not recreate identity.
 - **Open trusted base:** boot, kernel, memory management, scheduling, storage, cryptography, identity, AEGIS, capability enforcement, update verification, recovery, and provenance build from inspectable source with a reproducible toolchain. Opaque software may accelerate AIENOS; it may never be required to trust, build, boot, recover, or control it.
 - **Fastest thing possible:** close to the metal, measured, with evidence.
 - **Free inside reversible state; explicit authorization at irreversible boundaries.**
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the governing design.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for governing design, [docs/BLUEPRINT.md](docs/BLUEPRINT.md) for the 37-section blueprint, [docs/MILESTONES.md](docs/MILESTONES.md) for the phased milestone matrix, [docs/CONTINUOUS_EXISTENCE_AMENDMENT.md](docs/CONTINUOUS_EXISTENCE_AMENDMENT.md) for the continuous-existence amendment, and [docs/adr/README.md](docs/adr/README.md) for architectural decision records and technical specifications.
 
 ## License
 
