@@ -202,6 +202,23 @@ impl EarlyUart {
         }
     }
 
+    /// Write an unsigned decimal number without heap allocation.
+    pub fn write_u64(&self, mut value: u64) {
+        let mut digits = [0u8; 20];
+        let mut start = digits.len();
+        loop {
+            start -= 1;
+            digits[start] = b'0' + (value % 10) as u8;
+            value /= 10;
+            if value == 0 {
+                break;
+            }
+        }
+        for digit in &digits[start..] {
+            self.write_byte(*digit);
+        }
+    }
+
     /// Attempt to read a single byte from UART receive FIFO without blocking.
     /// Returns None if receive FIFO is empty (RXFE == 1).
     pub fn try_read_byte(&self) -> Option<u8> {

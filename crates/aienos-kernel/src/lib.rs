@@ -16,7 +16,7 @@ pub mod recovery;
 pub mod store;
 pub mod sync;
 
-#[cfg(all(not(feature = "std"), not(test)))]
+#[cfg(all(target_os = "none", not(feature = "std"), not(test)))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     arch::aarch64::halt();
