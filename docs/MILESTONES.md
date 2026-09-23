@@ -3,10 +3,17 @@
 **Status:** Confirmed Architectural Specification  
 **Version:** 1.0.0  
 **Governing Documents:**
-- `docs/ARCHITECTURE.md` (Governing Architecture)
-- `docs/BLUEPRINT.md` (Final Architectural Blueprint, 37 Sections)
-- `docs/adr/0001-native-boot-milestone-and-linux-island.md` (ADR 0001)
-- `docs/adr/0002-incumbent-os-as-migration-environment.md` (ADR 0002)
+- [AIENOS Governing Architecture](ARCHITECTURE.md)
+- [AIENOS Final Architectural Blueprint (37 Sections)](BLUEPRINT.md)
+- [AIENOS Technical Specification & Contracts (Phases 3–5)](PHASE_3_TO_5_SPECIFICATION.md)
+- [AIENOS Systems Integration Sequence & Epistemic Calibration](SYSTEMS_INTEGRATION_SEQUENCE.md)
+- [Architectural Decision Records (ADRs) Index](adr/README.md):
+  - [ADR 0001: Native Boot Milestone & Linux Island](adr/0001-native-boot-milestone-and-linux-island.md)
+  - [ADR 0002: Incumbent OS as Migration Environment](adr/0002-incumbent-os-as-migration-environment.md)
+  - [ADR 0003: Bootstrap Firmware Handoff & Minimal Object Store](adr/0003-bootstrap-firmware-handoff-and-minimal-object-store.md)
+  - [ADR 0004: Reversibility Definition & Network Effect Boundary](adr/0004-reversibility-definition-and-network-effect-boundary.md)
+  - [ADR 0005: Unified Memory C1 CoW & Reservation Accounting](adr/0005-unified-memory-c1-cow-and-reservation-accounting.md)
+  - [ADR 0006: Deterministic Recovery Core & Offline Operator Authority](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md)
 
 > **Foundational Mandate to the Engineering Agent:**  
 > *“You own the route; this document owns the destination.”*
@@ -43,17 +50,16 @@ MATURE AIENOS: Sovereign Agent-Native Personal Computing
 
 Every implementation artifact must preserve these ten foundational invariants:
 
-1. **Model is Never the Kernel (Blueprint §6, ARCHITECTURE.md §1):** Kernel schedules CPU, manages memory, services interrupts, mounts storage, and authenticates the operator with zero AI models loaded.
-2. **Separation of Authority and Proposal (Blueprint §5, ARCHITECTURE.md §1):** The agent cannot authorize itself. Irreversible actions strictly flow: `Model Proposal -> EffectIntent -> AEGIS Policy -> Effect Broker -> Driver`.
-3. **Identity vs. Execution Separation (Blueprint §2):** Losing physical inference state (GPU crash, bus reset, KV cache eviction, process restart) costs computation, never logical identity.
-4. **Sovereign Trusted Base (Blueprint §4, ARCHITECTURE.md §3):** Boot, kernel, memory management, scheduler, storage core, cryptography, and AEGIS build from inspectable open-source code with zero mandatory proprietary or cloud dependencies.
-5. **Compatibility as Island, Not Foundation (Blueprint §8, ADR 0001):** Compatibility layers (e.g. minimal Linux GPU island / Config B) are temporary acceleration mechanisms. Removing them must leave native AIENOS fully buildable, bootable, and recoverable.
-6. **Reversible Autonomy (Blueprint §12, ARCHITECTURE.md §5):** Agent is fully autonomous inside reversible Worlds; explicit operator cryptographic approval is required at irreversible boundaries.
+1. **Model is Never the Kernel (Blueprint §6, ARCHITECTURE.md §1, ADR 0006):** Kernel schedules CPU, manages memory, services interrupts, mounts storage, authenticates the operator with offline credentials, and executes deterministic recovery with zero AI models loaded.
+2. **Separation of Authority and Proposal (Blueprint §5, ARCHITECTURE.md §1, ADR 0004):** The agent cannot authorize itself. Irreversible actions and external effects strictly flow: `Model Proposal -> EffectIntent -> AEGIS Policy -> Effect Broker -> Driver`.
+3. **Identity vs. Execution Separation & C1 Branch Isolation (Blueprint §2, §28, ADR 0005):** Losing physical inference state (GPU crash, bus reset, KV cache eviction, process restart) costs computation, never logical identity. Physical KV blocks are managed via explicit block tables and reservations; child branch memory corruption can never leak into parent state; logical token lineage survives indefinitely.
+4. **Sovereign Trusted Base (Blueprint §4, ARCHITECTURE.md §3, ADR 0006):** Boot, kernel, memory management, scheduler, storage core, cryptography, recovery core, and AEGIS build from inspectable open-source code with zero mandatory proprietary or cloud dependencies.
+5. **Compatibility as Island, Not Foundation (Blueprint §8, ADR 0001):** Compatibility layers (e.g. minimal Linux GPU island / Config B) are temporary acceleration mechanisms. Native Config C must never depend on Config B artifacts, CUDA userspace, or Linux kernel modules; removing Config B leaves native AIENOS fully buildable, bootable, and recoverable.
+6. **Reversible Autonomy & Explicit Effect Boundary (Blueprint §12, ARCHITECTURE.md §5, ADR 0004):** Agent is fully autonomous inside reversible Worlds where state changes remain under AIENOS transactional control. All outbound network traffic, telemetry, and uncheckpointed device state changes cross into AEGIS as external effects requiring explicit capability authorization, even when read-only.
 7. **Capability-Centric Computing (Blueprint §13, ARCHITECTURE.md §2):** Functionality is organized into composable capabilities (`filesystem.read`, `mail.send`, `code.build`). Applications do not own underlying capabilities or personal data; personal data is native OS state.
 8. **Replaceable Model Intelligence (Blueprint §14):** The Model ABI decouples weights, tokenizers, backends, and sampling from agent identity. Changing models does not redefine agent identity.
 9. **Constrained "Fastest Wins" (Blueprint §31, ADR 0001):** Among implementations satisfying correctness, security, sovereignty, and interface contracts, the fastest measured implementation wins. Speed never overrides sovereignty.
 10. **Controlled Self-Improvement (Blueprint §32, ARCHITECTURE.md §5):** Recursive self-improvement occurs strictly out-of-band in isolated Worlds via candidate evaluation, signing, and canary deployment; the agent never mutates the running kernel in-place.
-
 ---
 
 ## 3. Autonomous Engineering Protocol & Escalation Triggers
@@ -61,18 +67,21 @@ Every implementation artifact must preserve these ten foundational invariants:
 Engineering agents operate autonomously within milestone boundaries (Blueprint §4, §29, §30):
 - **Autonomous Authority:** Agents freely select data structures, crate layouts, memory allocators, scheduling algorithms, low-level assembly routines, build scripts, and optimization passes.
 - **Goal Immutability:** If an implementation approach fails, the agent iterates or replaces the implementation (Blueprint §30); the destination milestone and architectural invariants remain fixed.
-- **The 10 Mandatory Escalation Triggers (Requiring Immediate Operator Signoff):**
+- **The 14 Mandatory Escalation Triggers (Requiring Immediate Operator Signoff):**
   1. Alteration of the root of trust, Secure Boot policy, or cryptographic boot verification chain.
-  2. Broadening of operator authority, removal of AEGIS policy gates, or bypass of the Effect Broker.
+  2. Broadening of agent, service, or operator authority, autonomous expansion of capability grants, elevation of synthetic process privileges, removal of AEGIS policy gates, or bypass of the Effect Broker without explicit operator cryptographic authorization.
   3. Modification of persistent identity semantics or the Agent State ABI hierarchy.
   4. Weakening of security boundaries, memory isolation, or J-Space World containment.
   5. Introduction of irreversible data formats into Cortex or persistent storage.
-  6. Permitting compatibility infrastructure (e.g. Linux or proprietary CUDA) to become a mandatory prerequisite for native AIENOS build, boot, or recovery.
+  6. Permitting compatibility infrastructure (e.g. Linux or proprietary CUDA) to become a mandatory prerequisite for native AIENOS build, boot, or recovery (ADR 0001).
   7. Introducing closed-source proprietary binaries, external cloud licensing, or opaque compiler toolchains into the trusted base.
   8. Removing or disabling recovery media, fallback boot targets, or system rollback guarantees.
   9. Alteration of externally visible protocol commitments or API contracts.
   10. Structural modifications to the 7-layer architecture stack.
-
+  11. Retaining firmware/UEFI runtime storage services beyond boot handoff, or introducing general-purpose POSIX filesystem dependencies (e.g. ext4, btrfs) instead of the native minimal persistent object store (ADR 0003).
+  12. Bypassing AEGIS capability evaluation for outbound network traffic, external telemetry, or uncheckpointed device effects under the pretext of 'reversible' execution within a World (ADR 0004).
+  13. Unstructured or untracked physical KV memory allocation, admitting multi-branch inference steps without transactional KV block reservations, or violating C1 CoW block refcounting rules (ADR 0005).
+  14. Introducing AI model inference, cloud identity, or network dependencies into the Recovery Core, health milestone verification, A/B slot rollback, or WAL corruption repair (ADR 0006).
 ---
 
 ## 4. Detailed Phase Specifications
@@ -97,14 +106,15 @@ Engineering agents operate autonomously within milestone boundaries (Blueprint �
   - `bash scripts/verify_evidence.sh evidence/config_a_reference_bundle.json` exits with return code `0`, confirming schema validity and SHA-256 self-consistency.
 - **Escalation Triggers:**
   - Hardware inspection requiring destructive host actions or privileged modifications.
-  - Missing critical hardware descriptors in sysfs/DMI preventing Section 21 compliance.
+  - Any unreadable, inaccessible, or non-verifiable hardware descriptor required by the Blueprint Section 21 Machine Capsule specification (no descriptors may be mocked, synthesized, or assumed).
+  - Any write operation or modification to host storage, partition tables, EFI boot entries, or host NVRAM during evidence capture.
 
 ---
 
 ### Phase 2: Native AIENOS Boot (Minimal Bare-Metal Substrate)
 - **Blueprint Sections Mapped:** §6 (The AIENOS Kernel), §16 (Phase 2 Native AIENOS boot).
 - **Secondary Sections:** §4 (Sovereignty Boundaries), §5 (Boot & Trust Substrate), §7 (Hardware Ownership), §27 (Evidence Architecture).
-- **Governing ADR:** [ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md) (mandates native AIENOS boot on bare-metal ARM64 as primary milestone; minimal Linux wrappers prohibited as native substrate).
+- **Governing ADRs:** [ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md) (mandates native AIENOS boot on bare-metal ARM64 as primary milestone; minimal Linux wrappers prohibited as native substrate), [ADR 0003](adr/0003-bootstrap-firmware-handoff-and-minimal-object-store.md) (firmware loads boot bundle; storage services are bootstrap only), [ADR 0006](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md) (deterministic non-model Recovery Core and raw panic crash records).
 - **Mission:** Power on the DGX Spark and boot the sovereign `no_std` AIENOS kernel targeting 64-bit ARM (`aarch64`) directly on bare metal without Linux hosting the system.
 - **Deliverables & Artifacts:**
   - `crates/aienos-kernel/Cargo.toml`: Standalone `no_std`, `no_main` bare-metal kernel crate targeting `aarch64-unknown-none`.
@@ -126,15 +136,20 @@ Engineering agents operate autonomously within milestone boundaries (Blueprint �
 - **Escalation Triggers:**
   - Any compilation requirement introducing dependencies on Linux libc, POSIX headers, or host kernel modules.
   - Firmware incompatibility requiring proprietary binary shims to achieve early CPU control.
-  - Modification of the physical host EFI system partition (`/boot/efi`) without prior operator authorization.
+  - Any modification, deletion, or tampering with host disk partitions, the physical EFI system partition (`/boot/efi`), host bootloaders, or firmware NVRAM bootloader variables (`efibootmgr`, `/sys/firmware/efi/efivars`, `BootOrder`, `BootNext`) outside the repository workspace without prior operator cryptographic authorization.
+  - Retaining UEFI/firmware runtime storage services as an AIENOS runtime dependency beyond the initial immutable boot bundle handoff (violating ADR 0003).
+  - Introducing AI model or external network dependencies into early kernel panic handling or recovery console routines (violating ADR 0006).
 
 ---
 
 ### Phase 3: The Agent Wakes Up (Persistent Agent & Early Memory)
 - **Blueprint Sections Mapped:** §2 (Central Architectural Principle), §11 (Cortex), §14 (Model ABI), §17 (Phase 3 The agent wakes up).
 - **Secondary Sections:** §5 (Boot Trust), §9 (Agent State ABI), §33 (UX Feel).
+- **Governing ADRs:** [ADR 0003](adr/0003-bootstrap-firmware-handoff-and-minimal-object-store.md) (minimal persistent object store for model extents and Cortex WAL).
+- **Technical Specification:** [Phase 3 Technical Specification](PHASE_3_TO_5_SPECIFICATION.md#2-phase-3-the-persistent-agent-wakes-up) (Agent State ABI & Cortex Epistemic Store).
 - **Mission:** Initialize the AIEN Neural Runtime on the native kernel, load a local CPU inference model, wake the persistent resident AIEN agent, and verify that Cortex persists epistemic memory across reboots.
 - **Deliverables & Artifacts:**
+  - `crates/aienos-agent-state/`: Foundational Persistent Agent State ABI managing sovereign `LogicalAgentId` and execution incarnation decoupling (`ExecutionIncarnation`).
   - `crates/aienos-runtime/`: Native neural runtime executive operating directly on kernel substrate.
   - `crates/aienos-model-abi/`: Model ABI implementation abstracting weights, tokenizers, and execution backends from agent identity.
   - `crates/aienos-cortex/`: Early durable Cortex storage engine supporting write-ahead epistemic logging on NVMe storage.

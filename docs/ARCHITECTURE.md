@@ -5,13 +5,15 @@ Status: confirmed by the operator on 2026-09-23. Changes to anything in this doc
 For complete architectural specifications, execution milestones, and decision records, see:
 - [AIENOS Final Architectural Blueprint](BLUEPRINT.md) (Complete 37-section architectural foundation)
 - [AIENOS Architectural Milestones Matrix](MILESTONES.md) (8-phase execution roadmap, invariants, and contracts)
-- [Architectural Decision Records](adr/README.md) (Accepted architectural decisions: [ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md), [ADR 0002](adr/0002-incumbent-os-as-migration-environment.md))
+- [AIENOS Technical Specification & Contracts (Phases 3–5)](PHASE_3_TO_5_SPECIFICATION.md) (Agent State ABI, Cortex, AEGIS & Worlds, and C1 CoW Prefix Tree)
+- [AIENOS Systems Integration Sequence & Epistemic Calibration](SYSTEMS_INTEGRATION_SEQUENCE.md) (10-step empirical verification sequence and host vs. native qualification)
+- [Architectural Decision Records](adr/README.md) (Accepted architectural decisions: [ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md), [ADR 0002](adr/0002-incumbent-os-as-migration-environment.md), [ADR 0003](adr/0003-bootstrap-firmware-handoff-and-minimal-object-store.md), [ADR 0004](adr/0004-reversibility-definition-and-network-effect-boundary.md), [ADR 0005](adr/0005-unified-memory-c1-cow-and-reservation-accounting.md), [ADR 0006](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md))
 
 ## 1. What AIENOS is
 
 AIENOS is the operating system. The resident AIEN agent is its primary user interface, coordinator, and policy-aware control plane. Graphical interfaces are projections of agent state that the agent can construct and change on request; there is no fixed desktop.
 
-The model is never the kernel. The kernel is small, deterministic, auditable, and must function with no model loaded. It schedules CPU time, manages memory, services interrupts, mounts storage, enforces capability boundaries, restores a known World, authenticates the operator, recovers networking, kills processes, rolls back updates, and boots into recovery.
+The model is never the kernel. The kernel is small, deterministic, auditable, and must function with no model loaded. It schedules CPU time, manages memory, services interrupts, mounts storage, enforces capability boundaries, restores a known World, authenticates the operator, recovers networking, kills processes, rolls back updates, and boots into recovery. The kernel operates deterministically without an AI model; recovery is governed by the deterministic Recovery Core ([ADR 0006](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md)).
 
 The agent is the operating interface, not the root of trust:
 
@@ -43,6 +45,7 @@ You
 - **Personal data is OS state:** Person, Conversation, Message, Document, Photo, Video, Project, Repository, CalendarEvent, Device, CredentialRef, Task, World, Memory.
 - **Personal Fabric:** a given computer is Machine N, not "the AIEN computer." Hardware and vendor details are capabilities, not identities.
 - **Models are replaceable components** behind a Model ABI: locally stored, no cloud or provider account required. The model proposes thought and action; it does not define truth, authority, policy, identity, storage, or the OS.
+- **Unified memory and explicit block accounting:** Hardware unified addressability (NVLink-C2C) is managed via explicit block ownership, distinct subsystem memory budgets, and copy-on-write prefix trees ([ADR 0005](adr/0005-unified-memory-c1-cow-and-reservation-accounting.md)).
 
 ## 3. Sovereignty and the trusted base
 
@@ -58,6 +61,8 @@ Accepted exception: silicon that physically requires vendor-signed firmware (for
 
 **Host operating systems:** Windows, macOS, and Linux are bootstrap and migration environments, not the target runtime. **AIENOS may learn from the host, but it must not require the host to survive** ([ADR 0002](adr/0002-incumbent-os-as-migration-environment.md)).
 
+**Persistent storage:** Persistent storage avoids POSIX filesystem complexity in favor of the native AIEN System Store with content-addressed model extents and append-only journals ([ADR 0003](adr/0003-bootstrap-firmware-handoff-and-minimal-object-store.md)).
+
 ## 4. Security
 
 - **Boot trust:** Secure Boot off during early development. Before daily use: firmware verifies the operator's key, the operator's key verifies AIENOS boot artifacts, AIENOS verifies kernel and runtime components. An offline recovery key and recovery media are designed before enforcement.
@@ -70,7 +75,7 @@ Free inside reversible state; explicit authorization at irreversible boundaries.
 
 Autonomous by default: read local files, search Cortex, run inference, inspect hardware and system state, run tests and diagnostics, create temporary files and Worlds, make rollback-safe changes inside a reversible World, change ordinary agent preferences.
 
-Operator approval required: permanent deletion, overwriting important data, external email or messages, publishing code, spending money, credential changes, exporting private information, contacting untrusted machines, installing privileged components, boot or security policy changes, changing AEGIS, replacing the kernel, promoting RSI-generated system changes.
+Operator approval required: permanent deletion, overwriting important data, external email or messages, publishing code, spending money, credential changes, exporting private information, contacting untrusted machines, installing privileged components, boot or security policy changes, changing AEGIS, replacing the kernel, promoting RSI-generated system changes. All outbound network traffic, external device state, and telemetry are external effects requiring AEGIS capability evaluation, even when read-only ([ADR 0004](adr/0004-reversibility-definition-and-network-effect-boundary.md)).
 
 Self-improvement may tune scheduler, allocator, KV, caching, UI, routing, network, kernel implementation, placement, and power policy only out of band, through evaluation, canary, signing, and promotion gates, never by rewriting the running kernel.
 
@@ -90,7 +95,9 @@ The first agent's job is running, understanding, diagnosing, repairing, and impr
 
 Every stage boots and does something real.
 
-Steps 2 and 3 are the primary milestone (native AIENOS boot with CPU inference). A minimal-Linux image booting straight into `aien-init` exists only as Benchmark Config B and the temporary GPU compatibility island, and it is never a prerequisite for the native path. Configs A (Ubuntu reference), B (minimal-Linux island), and C (native AIENOS) run the same frozen workload and report boot-to-ready, ready-to-model, TTFT, throughput, idle and available memory, jitter, power, and branch cost separately ([ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md)).
+Steps 2 and 3 are the primary milestone (native AIENOS boot with CPU inference). A minimal-Linux image booting straight into `aien-init` exists only as Benchmark Config B and the temporary GPU compatibility island, and it is never a prerequisite for the native path.
+
+Configs A (Ubuntu reference), B (minimal-Linux island), and C (native AIENOS) run the same frozen workload and report boot-to-ready, ready-to-model, TTFT, throughput, idle and available memory, jitter, power, and branch cost separately ([ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md)).
 
 Native capability migration order: Runtime, Cortex, AEGIS, World/J-Space, Capability Graph, local inference, storage, networking, operator interface, developer tools, mail, cockpit, others. Nothing is rebuilt merely because it exists today.
 

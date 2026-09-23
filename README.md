@@ -28,7 +28,7 @@ Power on, AIENOS boots directly on the NVIDIA DGX Spark (no Linux host), the AIE
 - **Fastest thing possible:** close to the metal, measured, with evidence.
 - **Free inside reversible state; explicit authorization at irreversible boundaries.**
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the governing design.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the governing design, [docs/BLUEPRINT.md](docs/BLUEPRINT.md) for the 37-section blueprint, [docs/MILESTONES.md](docs/MILESTONES.md) for the phased milestone matrix, and [docs/adr/README.md](docs/adr/README.md) for architectural decision records and technical specifications.
 
 ## License
 
