@@ -1,0 +1,20 @@
+[package]
+name = "aienos-boot"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "AArch64 UEFI entry diagnostic for AIENOS native boot bring-up"
+
+[features]
+default = []
+firmware = ["dep:uefi"]
+
+[dependencies]
+uefi = { version = "0.41", default-features = false, features = ["panic_handler"], optional = true }
+
+[[bin]]
+name = "aienos-boot"
+path = "src/main.rs"
+required-features = ["firmware"]

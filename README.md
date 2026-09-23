@@ -23,6 +23,8 @@ An optional compatibility island (for example, Linux with vendor drivers) may si
 
 Power on, AIENOS boots directly on the NVIDIA DGX Spark (no Linux host), the AIEN agent starts on a local console, a local model loads, you talk to it, and its state persists across reboot. CPU inference is acceptable for this milestone.
 
+The current UEFI image is a firmware-entry diagnostic. It prints a banner and returns to firmware. It does not yet transfer control to the native kernel, load a model, or meet this milestone. The host verification script checks its AArch64 EFI image format without changing the host boot configuration.
+
 ## Principles
 
 - **Sovereignty:** no outside organization is required to boot the machine, access your data, authenticate you, authorize the agent, build the trusted core, recover, change models, move hardware, or keep operating.
