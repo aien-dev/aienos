@@ -27,6 +27,7 @@ dependencies = [
 name = "aienos-boot"
 version = "0.1.0"
 dependencies = [
+ "aienos-kernel",
  "uefi",
 ]
 

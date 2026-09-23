@@ -41,14 +41,16 @@ cargo build -p aienos-kernel --target aarch64-unknown-none --no-default-features
 # Step 5: Build an AArch64 UEFI diagnostic image and inspect its PE header.
 # This verifies the firmware entry artifact format, not a hardware boot.
 echo ""
-echo "--- [AArch64 UEFI Diagnostic Image Build] ---"
-cargo build -p aienos-boot --target aarch64-unknown-uefi --features firmware --bin aienos-boot
-python3 scripts/verify_uefi_image.py target/aarch64-unknown-uefi/debug/aienos-boot.efi
+echo "--- [AArch64 UEFI Image Builds] ---"
+cargo build --release -p aienos-boot --target aarch64-unknown-uefi --features firmware --bin aienos-boot
+python3 scripts/verify_uefi_image.py target/aarch64-unknown-uefi/release/aienos-boot.efi
+cargo build --release -p aienos-boot --target aarch64-unknown-uefi --features handoff --bin aienos-handoff
+python3 scripts/verify_uefi_image.py target/aarch64-unknown-uefi/release/aienos-handoff.efi
 
 echo ""
 echo "============================================================"
 echo "HOST VERIFICATIONS PASSED."
 echo "Config A: observed capture and three local inference samples verified."
 echo "Kernel: aarch64-unknown-none library compiles. Native boot remains untested."
-echo "UEFI: AArch64 EFI application builds; kernel handoff remains unimplemented."
+echo "UEFI: diagnostic and ExitBootServices handoff images build; hardware boot remains untested."
 echo "============================================================"

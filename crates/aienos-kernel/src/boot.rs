@@ -1,7 +1,6 @@
 //! AIENOS Bare-Metal Boot Spine (§Step 2 of Systems Integration Sequence).
 //!
-//! Provides the canonical reset vector / UEFI entry point `_start`,
-//! the unadorned console banner, and the structured BootReceipt definition.
+//! Provides the bare-metal entry path, early serial banner, and BootReceipt.
 
 use crate::arch::aarch64::{
     current_el, disable_interrupts, dsb, halt, isb, EarlyUart, SPARK_16550_UART_BASE,
@@ -36,7 +35,7 @@ impl BootReceipt {
 }
 
 /// Early kernel boot initialization executed directly from UEFI or reset vector.
-pub fn early_kernel_init() -> ! {
+pub fn early_kernel_init(conventional_memory_kb: u64) -> ! {
     // 1. Disable maskable interrupts
     disable_interrupts();
 
@@ -50,6 +49,9 @@ pub fn early_kernel_init() -> ! {
     uart.write_str("\nAIENOS\n");
     uart.write_str("arch: aarch64\n");
     uart.write_str("boot: native\n");
+    uart.write_str("conventional_memory_kb: ");
+    uart.write_u64(conventional_memory_kb);
+    uart.write_str("\n");
 
     let el = current_el();
     uart.write_str("exception_level: EL");
@@ -64,8 +66,8 @@ pub fn early_kernel_init() -> ! {
 }
 
 /// Canonical bare-metal entry point when compiling for `#![no_std]` targets.
-#[cfg(all(not(feature = "std"), not(test)))]
+#[cfg(all(target_os = "none", not(feature = "std"), not(test)))]
 #[no_mangle]
 pub unsafe extern "C" fn _start() -> ! {
-    early_kernel_init();
+    early_kernel_init(0);
 }
