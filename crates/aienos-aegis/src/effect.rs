@@ -20,6 +20,11 @@ pub struct EffectIntent {
 }
 
 impl EffectIntent {
+    fn hash_field(hasher: &mut sha256::Sha256, field: &[u8]) {
+        hasher.update(&(field.len() as u64).to_be_bytes());
+        hasher.update(field);
+    }
+
     /// Create a new effect intent.
     pub fn new(
         agent_id: LogicalAgentId,
@@ -31,16 +36,21 @@ impl EffectIntent {
     ) -> Self {
         let action_str = action.into();
         let mut hasher = sha256::Sha256::new();
+        hasher.update(b"AIENOS_INTENT_V1");
         hasher.update(agent_id.as_bytes());
-        hasher.update(action_str.as_bytes());
+        Self::hash_field(&mut hasher, action_str.as_bytes());
         hasher.update(&claimed_capability_id);
         hasher.update(&[is_reversible as u8]);
         if let Some(wid) = &world_id {
+            hasher.update(&[1]);
             hasher.update(wid);
+        } else {
+            hasher.update(&[0]);
         }
+        hasher.update(&(parameters.len() as u64).to_be_bytes());
         for (k, v) in &parameters {
-            hasher.update(k.as_bytes());
-            hasher.update(v.as_bytes());
+            Self::hash_field(&mut hasher, k.as_bytes());
+            Self::hash_field(&mut hasher, v.as_bytes());
         }
         let digest = hasher.finalize();
         let mut id = [0u8; 16];
@@ -55,6 +65,23 @@ impl EffectIntent {
             is_reversible,
             world_id,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn intent_id_distinguishes_parameter_boundaries() {
+        let agent = LogicalAgentId::from_seed("intent-boundaries");
+        let mut first = BTreeMap::new();
+        first.insert("ab".into(), "c".into());
+        let mut second = BTreeMap::new();
+        second.insert("a".into(), "bc".into());
+        let first = EffectIntent::new(agent, "fs.write", first, [1; 16], false, None);
+        let second = EffectIntent::new(agent, "fs.write", second, [1; 16], false, None);
+        assert_ne!(first.id, second.id);
     }
 }
 
@@ -75,12 +102,8 @@ impl OperatorGrant {
         operator_secret: &[u8; 32],
         granted_at_utc: u64,
     ) -> Self {
-        let mut hasher = sha256::Sha256::new();
-        hasher.update(operator_secret);
-        hasher.update(&intent_id);
-        hasher.update(operator_id.as_bytes());
-        hasher.update(&granted_at_utc.to_be_bytes());
-        let signature = hasher.finalize();
+        let signature =
+            Self::signature_for(&intent_id, operator_id, granted_at_utc, operator_secret);
 
         Self {
             intent_id,
@@ -92,11 +115,30 @@ impl OperatorGrant {
 
     /// Verify operator grant signature.
     pub fn verify(&self, operator_secret: &[u8; 32]) -> bool {
-        let mut hasher = sha256::Sha256::new();
-        hasher.update(operator_secret);
-        hasher.update(&self.intent_id);
-        hasher.update(self.operator_id.as_bytes());
-        hasher.update(&self.granted_at_utc.to_be_bytes());
-        hasher.finalize() == self.signature
+        Self::signature_for(
+            &self.intent_id,
+            &self.operator_id,
+            self.granted_at_utc,
+            operator_secret,
+        ) == self.signature
+    }
+
+    fn signature_for(
+        intent_id: &[u8; 16],
+        operator_id: &str,
+        granted_at_utc: u64,
+        operator_secret: &[u8; 32],
+    ) -> [u8; 32] {
+        let operator_len = (operator_id.len() as u64).to_be_bytes();
+        sha256::hmac_sha256(
+            operator_secret,
+            &[
+                b"AIENOS_GRANT_V1",
+                intent_id,
+                &operator_len,
+                operator_id.as_bytes(),
+                &granted_at_utc.to_be_bytes(),
+            ],
+        )
     }
 }

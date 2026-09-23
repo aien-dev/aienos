@@ -1,6 +1,6 @@
 //! AEGIS Policy Evaluator: Enforcing cryptographic capabilities and reversibility invariants (§5).
 
-use crate::capability::{CapabilityGraph, CapabilityScope};
+use crate::capability::{path_within, CapabilityGraph, CapabilityScope};
 use crate::effect::{EffectIntent, OperatorGrant};
 use serde::{Deserialize, Serialize};
 
@@ -69,17 +69,9 @@ impl AegisEvaluator {
             };
         }
 
-        // 4. Evaluate Reversibility & Standing Authority Policy (ADR 0004)
-        // Decouple Reversible from Authorized:
-        // - Free inside reversible state (J-Space World) -> Auto-Approved
-        // - Non-destructive autonomous reads/fetches authorized via Standing Capabilities -> Auto-Approved
-        // - Irreversible, destructive, or boundary operations -> Strictly require OperatorGrant
-        if intent.is_reversible && intent.world_id.is_some() {
-            return AegisDecision::Approved {
-                reason: "Reversible effect inside J-Space World auto-approved".to_string(),
-            };
-        }
-
+        // 4. A caller-provided World ID and reversibility flag are not proof of
+        // isolation. Until the broker can bind handlers to a real World delta,
+        // writes still require an operator grant (ADR 0004).
         let is_standing_fetch = matches!(token.scope, CapabilityScope::StandingFetch { .. })
             || (intent.action == "fs.read" || intent.action == "hardware.inspect");
 
@@ -150,7 +142,7 @@ impl AegisEvaluator {
             } => {
                 if action == "fs.read" {
                     if let Some(path) = params.get("path") {
-                        path.starts_with(path_prefix)
+                        path_within(path, path_prefix)
                     } else {
                         false
                     }
@@ -158,7 +150,7 @@ impl AegisEvaluator {
                     if *read_only {
                         false
                     } else if let Some(path) = params.get("path") {
-                        path.starts_with(path_prefix)
+                        path_within(path, path_prefix)
                     } else {
                         false
                     }

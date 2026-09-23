@@ -185,9 +185,45 @@ pub fn hash(data: &[u8]) -> Digest {
     hasher.finalize()
 }
 
+/// HMAC-SHA256 for a 32-byte secret and a sequence of message slices.
+pub fn hmac_sha256(key: &[u8; 32], parts: &[&[u8]]) -> Digest {
+    let mut inner_pad = [0x36u8; 64];
+    let mut outer_pad = [0x5cu8; 64];
+    for (index, byte) in key.iter().enumerate() {
+        inner_pad[index] ^= byte;
+        outer_pad[index] ^= byte;
+    }
+
+    let mut inner = Sha256::new();
+    inner.update(&inner_pad);
+    for part in parts {
+        inner.update(part);
+    }
+    let inner_digest = inner.finalize();
+
+    let mut outer = Sha256::new();
+    outer.update(&outer_pad);
+    outer.update(&inner_digest);
+    outer.finalize()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_hmac_sha256_rfc4231_case_1() {
+        let mut key = [0u8; 32];
+        key[..20].fill(0x0b);
+        assert_eq!(
+            hmac_sha256(&key, &[b"Hi ", b"There"]),
+            [
+                0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53, 0x5c, 0xa8, 0xaf, 0xce, 0xaf, 0x0b,
+                0xf1, 0x2b, 0x88, 0x1d, 0xc2, 0x00, 0xc9, 0x83, 0x3d, 0xa7, 0x26, 0xe9, 0x37, 0x6c,
+                0x2e, 0x32, 0xcf, 0xf7,
+            ]
+        );
+    }
 
     #[test]
     fn test_sha256_empty() {

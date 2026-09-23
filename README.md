@@ -25,6 +25,8 @@ Power on, AIENOS boots directly on the NVIDIA DGX Spark (no Linux host), the AIE
 
 Two UEFI images are available. The default diagnostic prints a banner and returns to firmware. The separate handoff image exits UEFI boot services, counts conventional-memory pages, enters the early kernel UART path, and halts. Neither image has been booted on the DGX Spark. The handoff does not yet initialize the frame allocator, mount storage, recover agent state, or load a model, so this milestone remains open. Host verification checks their AArch64 EFI image format without changing the boot configuration.
 
+AEGIS currently checks capability scope, uses HMAC-SHA256 for capability tokens and operator grants, and requires an operator grant for writes even when an intent claims a World ID. The broker does not yet bind effects to a verified transactional World; World-local write auto-approval remains disabled. Filesystem scope checks enforce lexical path boundaries; native handlers must also resolve symlinks safely before filesystem effects can be considered contained.
+
 ## Principles
 
 - **Sovereignty:** no outside organization is required to boot the machine, access your data, authenticate you, authorize the agent, build the trusted core, recover, change models, move hardware, or keep operating.
