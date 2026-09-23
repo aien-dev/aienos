@@ -15,8 +15,8 @@ The persistent logical intelligence entity that acts as the primary interface, p
 _Avoid_: Assistant, bot, chatbot, process
 
 **Logical Agent Identity**:
-The immutable cryptographic and semantic identity (`LogicalAgentId`, lineage, token history, provenance) that persists across hardware swaps, crashes, and reboots.
-_Avoid_: PID, session, instance, thread
+The immutable cryptographic and semantic identity (`LogicalAgentId`, lineage, token history, provenance) that persists across hardware swaps, crashes, and reboots. Created only by initial provisioning; boot, sleep, model reload, kernel restart, and migration resume it—they do not create it (Continuous-Existence Amendment).
+_Avoid_: PID, session, instance, thread, recreated agent
 
 **Physical Execution State**:
 The ephemeral, disposable hardware state (KV cache pages, GPU buffers, scheduler slots, registers) utilized to run inference.

@@ -1,12 +1,13 @@
 # AIENOS Architectural Milestones Matrix & Execution Plan
 
-**Status:** Confirmed Architectural Specification  
-**Version:** 1.0.0  
+**Status:** Confirmed Architectural Specification
+**Version:** 1.0.0
 **Governing Documents:**
 - [AIENOS Governing Architecture](ARCHITECTURE.md)
 - [AIENOS Final Architectural Blueprint (37 Sections)](BLUEPRINT.md)
 - [AIENOS Technical Specification & Contracts (Phases 3–5)](PHASE_3_TO_5_SPECIFICATION.md)
 - [AIENOS Systems Integration Sequence & Epistemic Calibration](SYSTEMS_INTEGRATION_SEQUENCE.md)
+- [AIENOS Continuous-Existence Amendment](CONTINUOUS_EXISTENCE_AMENDMENT.md) (Operator-approved governing amendment: lifecycle semantics binding on all phases and the 10-gate sequence; gate order unchanged)
 - [Architectural Decision Records (ADRs) Index](adr/README.md):
   - [ADR 0001: Native Boot Milestone & Linux Island](adr/0001-native-boot-milestone-and-linux-island.md)
   - [ADR 0002: Incumbent OS as Migration Environment](adr/0002-incumbent-os-as-migration-environment.md)
@@ -14,8 +15,9 @@
   - [ADR 0004: Reversibility Definition & Network Effect Boundary](adr/0004-reversibility-definition-and-network-effect-boundary.md)
   - [ADR 0005: Unified Memory C1 CoW & Reservation Accounting](adr/0005-unified-memory-c1-cow-and-reservation-accounting.md)
   - [ADR 0006: Deterministic Recovery Core & Offline Operator Authority](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md)
+  - [ADR 0007: Continuous Existence & Provisioning-Once](adr/0007-continuous-existence-provisioning-once.md)
 
-> **Foundational Mandate to the Engineering Agent:**  
+> **Foundational Mandate to the Engineering Agent:**
 > *“You own the route; this document owns the destination.”*
 
 ---
@@ -48,7 +50,7 @@ MATURE AIENOS: Sovereign Agent-Native Personal Computing
 
 ## 2. Core Architectural Invariants Governing All Phases
 
-Every implementation artifact must preserve these ten foundational invariants:
+Every implementation artifact must preserve these eleven foundational invariants:
 
 1. **Model is Never the Kernel (Blueprint §6, ARCHITECTURE.md §1, ADR 0006):** Kernel schedules CPU, manages memory, services interrupts, mounts storage, authenticates the operator with offline credentials, and executes deterministic recovery with zero AI models loaded.
 2. **Separation of Authority and Proposal (Blueprint §5, ARCHITECTURE.md §1, ADR 0004):** The agent cannot authorize itself. Irreversible actions and external effects strictly flow: `Model Proposal -> EffectIntent -> AEGIS Policy -> Effect Broker -> Driver`.
@@ -60,6 +62,8 @@ Every implementation artifact must preserve these ten foundational invariants:
 8. **Replaceable Model Intelligence (Blueprint §14):** The Model ABI decouples weights, tokenizers, backends, and sampling from agent identity. Changing models does not redefine agent identity.
 9. **Constrained "Fastest Wins" (Blueprint §31, ADR 0001):** Among implementations satisfying correctness, security, sovereignty, and interface contracts, the fastest measured implementation wins. Speed never overrides sovereignty.
 10. **Controlled Self-Improvement (Blueprint §32, ARCHITECTURE.md §5):** Recursive self-improvement occurs strictly out-of-band in isolated Worlds via candidate evaluation, signing, and canary deployment; the agent never mutates the running kernel in-place.
+11. **Continuous Existence / Provisioning-Once (Continuous-Existence Amendment, ADR 0007):** AIEN is provisioned once; boot, reboot, sleep, model reload, kernel restart, hardware failure, and migration are execution-state transitions—not agent creation events. Cold boot initializes hardware and must never silently mint a replacement `LogicalAgentId`. Losing physical execution state costs recovery or computation, not identity.
+
 ---
 
 ## 3. Autonomous Engineering Protocol & Escalation Triggers
@@ -67,7 +71,7 @@ Every implementation artifact must preserve these ten foundational invariants:
 Engineering agents operate autonomously within milestone boundaries (Blueprint §4, §29, §30):
 - **Autonomous Authority:** Agents freely select data structures, crate layouts, memory allocators, scheduling algorithms, low-level assembly routines, build scripts, and optimization passes.
 - **Goal Immutability:** If an implementation approach fails, the agent iterates or replaces the implementation (Blueprint §30); the destination milestone and architectural invariants remain fixed.
-- **The 14 Mandatory Escalation Triggers (Requiring Immediate Operator Signoff):**
+- **The 15 Mandatory Escalation Triggers (Requiring Immediate Operator Signoff):**
   1. Alteration of the root of trust, Secure Boot policy, or cryptographic boot verification chain.
   2. Broadening of agent, service, or operator authority, autonomous expansion of capability grants, elevation of synthetic process privileges, removal of AEGIS policy gates, or bypass of the Effect Broker without explicit operator cryptographic authorization.
   3. Modification of persistent identity semantics or the Agent State ABI hierarchy.
@@ -82,6 +86,8 @@ Engineering agents operate autonomously within milestone boundaries (Blueprint �
   12. Bypassing AEGIS capability evaluation for outbound network traffic, external telemetry, or uncheckpointed device effects under the pretext of 'reversible' execution within a World (ADR 0004).
   13. Unstructured or untracked physical KV memory allocation, admitting multi-branch inference steps without transactional KV block reservations, or violating C1 CoW block refcounting rules (ADR 0005).
   14. Introducing AI model inference, cloud identity, or network dependencies into the Recovery Core, health milestone verification, A/B slot rollback, or WAL corruption repair (ADR 0006).
+  15. Silently creating a replacement `LogicalAgentId` on boot, wake, recovery, or migration when durable identity state is missing or unverifiable; treating cold boot, sleep, model reload, kernel restart, or hardware failure as agent-creation events (Continuous-Existence Amendment, ADR 0007).
+
 ---
 
 ## 4. Detailed Phase Specifications
@@ -145,7 +151,7 @@ Engineering agents operate autonomously within milestone boundaries (Blueprint �
 ### Phase 3: The Agent Wakes Up (Persistent Agent & Early Memory)
 - **Blueprint Sections Mapped:** §2 (Central Architectural Principle), §11 (Cortex), §14 (Model ABI), §17 (Phase 3 The agent wakes up).
 - **Secondary Sections:** §5 (Boot Trust), §9 (Agent State ABI), §33 (UX Feel).
-- **Governing ADRs:** [ADR 0003](adr/0003-bootstrap-firmware-handoff-and-minimal-object-store.md) (minimal persistent object store for model extents and Cortex WAL).
+- **Governing ADRs:** [ADR 0003](adr/0003-bootstrap-firmware-handoff-and-minimal-object-store.md) (minimal persistent object store for model extents and Cortex WAL), [ADR 0007](adr/0007-continuous-existence-provisioning-once.md) (continuous existence; provisioning is not boot).
 - **Technical Specification:** [Phase 3 Technical Specification](PHASE_3_TO_5_SPECIFICATION.md#2-phase-3-the-persistent-agent-wakes-up) (Agent State ABI & Cortex Epistemic Store).
 - **Mission:** Initialize the AIEN Neural Runtime on the native kernel, load a local CPU inference model, wake the persistent resident AIEN agent, and verify that Cortex persists epistemic memory across reboots.
 - **Deliverables & Artifacts:**
@@ -158,14 +164,18 @@ Engineering agents operate autonomously within milestone boundaries (Blueprint �
   - `evidence/phase3_reboot_persistence_receipt.json`: Verifiable proof of state retention across soft reboot.
 - **Architectural Invariants:**
   - Identity vs Execution Separation (Blueprint §2): Restarting the model, clearing KV cache, or rebooting the machine must not create a new agent identity.
+  - Provisioning-Once (Continuous-Existence Amendment, ADR 0007): Only initial provisioning may mint a durable `LogicalAgentId`; every later start resumes that identity or stops in Recovery Core.
   - Self-Diagnostic Focus (Blueprint §17): The first agent's primary duty is observing, diagnosing, and repairing AIENOS itself; general conversational features are secondary.
   - Model Replaceability (Blueprint §14): Changing model weights or backend leaves agent identity and Cortex history intact.
 - **Acceptance Criteria:**
   - Machine boots natively -> Runtime starts -> Local model weights load into RAM -> Agent prompts operator on console within 10 seconds.
   - Operator issues diagnostic command via console; agent queries kernel tables and returns factual response.
   - System executes reboot; agent wakes, loads previous session context from Cortex, and acknowledges continuity.
+  - Full power cycle: same durable `LogicalAgentId`, committed Cortex/branch/task state restored, uncommitted tails handled by WAL rules, no silent replacement identity (Gate 6 continuous-existence proof).
+  - Model unload/reload (or model swap) under the same `LogicalAgentId` preserves conversation and durable state continuity (Gate 7).
 - **Escalation Triggers:**
   - Failure of agent identity continuity across system reboot.
+  - Any boot, wake, recovery, or migration path that silently creates a replacement `LogicalAgentId` instead of restoring or refusing (ADR 0007).
   - Model weights or runtime demanding network connection or cloud licensing servers to execute.
   - Memory corruption during CPU weight ingestion that forces fallback to Linux userspace.
 
@@ -202,17 +212,18 @@ Engineering agents operate autonomously within milestone boundaries (Blueprint �
 - **Blueprint Sections Mapped:** §7 (Hardware Sovereignty), §8 (Compatibility Islands), §19 (Phase 5 Native hardware acceleration), §31 ("Fastest Wins" Properly Defined).
 - **Secondary Sections:** §10 (CoW Prefix Sharing), §27 (Evidence Architecture).
 - **Governing ADR:** [ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md) (defines 3-way configuration competition Config A vs B vs C; Config B must never become prerequisite for Config C; defines 9-11 benchmark metrics and scoped 'fastest wins').
-- **Mission:** Progressively transition hot hardware paths (accelerator, NVLink-C2C, NVMe storage, network) to native AIENOS ownership. Execute the standardized A/B/C benchmark competition across Config A (Ubuntu baseline), Config B (Minimal Linux compatibility island), and Config C (Native AIENOS bare-metal substrate) measuring 11 empirical metrics.
+- **Mission:** Progressively transition hot hardware paths (accelerator, NVLink-C2C, NVMe storage, network) to native AIENOS ownership. Execute the standardized A/B/C benchmark competition across Config A (Ubuntu baseline), Config B (Minimal Linux compatibility island), and Config C (Native AIENOS bare-metal substrate) measuring the original performance metrics plus continuous-existence lifecycle metrics (wake-to-continuation and reconstruction latencies).
 - **Deliverables & Artifacts:**
   - `crates/aienos-accel/`: Native GPU/NPU memory management and execution driver for NVIDIA Blackwell GB10 over NVLink-C2C.
   - `crates/aienos-nvme/`: Direct high-performance NVMe driver bypassing general-purpose VFS layers.
   - `crates/aienos-net/`: Native network driver (Realtek RTL8127 2.5GbE).
   - `scripts/benchmark_abc.sh`: Non-interactive benchmark suite executing identical prompt/model envelopes across Configs A, B, and C.
-  - `evidence/benchmark_abc_receipt.json`: Standardized 11-metric evaluation receipt documenting comparative performance.
+  - `evidence/benchmark_abc_receipt.json`: Standardized evaluation receipt documenting comparative performance and lifecycle metrics.
 - **Architectural Invariants:**
   - Sovereignty Precedes Speed (Blueprint §31, ADR 0001): "Fastest wins" applies ONLY among implementations satisfying correctness, security, and sovereignty contracts.
   - Compatibility Island Isolation (Blueprint §8, ADR 0001): Config B is a temporary control experiment and Era II island; removing it must leave Config C fully operational.
   - Zero Closed Blobs in Trusted Base: Native accelerator interfaces must not introduce proprietary, uninspected userspace binaries into the core kernel address space.
+  - Accelerator State Is Class B (Continuous-Existence Amendment, ADR 0007): GPU/accelerator residency is reconstructible physical state; identity never depends on preserving it.
 - **Acceptance Criteria:**
   - Standardized benchmark executes across Config A, Config B, and Config C measuring:
     1. Cold boot to agent ready (ms)
@@ -226,6 +237,11 @@ Engineering agents operate autonomously within milestone boundaries (Blueprint �
     9. Branch creation latency (µs)
     10. Branch physical memory cost (KB)
     11. State restore time (ms)
+  12. Wake-to-continuation latency (ms; Continuous-Existence Amendment lifecycle metric)
+  13. Cold recovery → AIEN logical state restored (ms)
+  14. Model reconstruction latency (ms)
+  15. Branch reconstruction latency (ms)
+  16. Cortex recovery latency (ms)
   - Config C demonstrates measurable latency, jitter, or memory density improvements over Config A while maintaining 100% test pass rates.
 - **Escalation Triggers:**
   - Proposal to declare Config B (Linux island) as the permanent architecture.
@@ -332,7 +348,7 @@ Engineering agents operate autonomously within milestone boundaries (Blueprint �
 | **16** | Phase 2 — Native AIENOS boot | Phase 2 | `aienos-kernel`, UART driver | Boots bare metal without Linux host | Cargo build exits 0; emits banner |
 | **17** | Phase 3 — The agent wakes up | Phase 3 | Runtime, CPU model, console loop | Agent wakes natively; Cortex persists | Console dialogue; persists post-reboot |
 | **18** | Phase 4 — Native intelligence | Phase 4 | AEGIS, Broker, Capabilities, Worlds | Natural language operating control | Intent diagnostics pass in sandbox |
-| **19** | Phase 5 — Hardware acceleration | Phase 5 | Native GB10 driver, benchmark suite | Constrained "fastest wins" | 11-metric benchmark report emitted |
+| **19** | Phase 5 — Hardware acceleration | Phase 5 | Native GB10 driver, benchmark suite | Constrained "fastest wins"; accelerator state is Class B | Performance + lifecycle benchmark report emitted |
 | **20** | Phase 6 — Migration system | Phase 6 | `tools/aienos-installer/` | Host OS is scaffolding | Dual-boot installed from host OS |
 | **21** | Machine Capsule | Phase 1 | Machine Capsule schema & parser | 15-component hardware descriptor | Schema validation passes on bundle |
 | **22** | Reversible installation | Phase 6 | Dual-boot partitioner, watchdog | Host OS remains bootable | Watchdog resets to host on panic |

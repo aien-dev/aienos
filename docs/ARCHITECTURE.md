@@ -7,11 +7,16 @@ For complete architectural specifications, execution milestones, and decision re
 - [AIENOS Architectural Milestones Matrix](MILESTONES.md) (8-phase execution roadmap, invariants, and contracts)
 - [AIENOS Technical Specification & Contracts (Phases 3–5)](PHASE_3_TO_5_SPECIFICATION.md) (Agent State ABI, Cortex, AEGIS & Worlds, and C1 CoW Prefix Tree)
 - [AIENOS Systems Integration Sequence & Epistemic Calibration](SYSTEMS_INTEGRATION_SEQUENCE.md) (10-step empirical verification sequence and host vs. native qualification)
-- [Architectural Decision Records](adr/README.md) (Accepted architectural decisions: [ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md), [ADR 0002](adr/0002-incumbent-os-as-migration-environment.md), [ADR 0003](adr/0003-bootstrap-firmware-handoff-and-minimal-object-store.md), [ADR 0004](adr/0004-reversibility-definition-and-network-effect-boundary.md), [ADR 0005](adr/0005-unified-memory-c1-cow-and-reservation-accounting.md), [ADR 0006](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md))
+- [AIENOS Continuous-Existence Amendment](CONTINUOUS_EXISTENCE_AMENDMENT.md) (Governing lifecycle amendment: provisioning-once, power states, state classes, gate acceptance criteria)
+- [Architectural Decision Records](adr/README.md) (Accepted architectural decisions: [ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md), [ADR 0002](adr/0002-incumbent-os-as-migration-environment.md), [ADR 0003](adr/0003-bootstrap-firmware-handoff-and-minimal-object-store.md), [ADR 0004](adr/0004-reversibility-definition-and-network-effect-boundary.md), [ADR 0005](adr/0005-unified-memory-c1-cow-and-reservation-accounting.md), [ADR 0006](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md), [ADR 0007](adr/0007-continuous-existence-provisioning-once.md))
 
 ## 1. What AIENOS is
 
-AIENOS is the operating system. The resident AIEN agent is its primary user interface, coordinator, and policy-aware control plane. Graphical interfaces are projections of agent state that the agent can construct and change on request; there is no fixed desktop.
+**AIENOS is an agent-native operating system designed around continuous logical agent existence: the agent persists while models, kernels, inference state, power states, and physical machines change beneath it.**
+
+The resident AIEN agent is its primary user interface, coordinator, and policy-aware control plane. Graphical interfaces are projections of agent state that the agent can construct and change on request; there is no fixed desktop.
+
+AIEN is provisioned once. After that, boot, reboot, sleep, model reload, kernel restart, hardware failure, and migration are execution-state transitions—not agent creation events ([Continuous-Existence Amendment](CONTINUOUS_EXISTENCE_AMENDMENT.md), [ADR 0007](adr/0007-continuous-existence-provisioning-once.md)). Cold boot initializes hardware; it does not create AIEN.
 
 The model is never the kernel. The kernel is small, deterministic, auditable, and must function with no model loaded. It schedules CPU time, manages memory, services interrupts, mounts storage, enforces capability boundaries, restores a known World, authenticates the operator, recovers networking, kills processes, rolls back updates, and boots into recovery. The kernel operates deterministically without an AI model; recovery is governed by the deterministic Recovery Core ([ADR 0006](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md)).
 
@@ -97,7 +102,7 @@ Every stage boots and does something real.
 
 Steps 2 and 3 are the primary milestone (native AIENOS boot with CPU inference). A minimal-Linux image booting straight into `aien-init` exists only as Benchmark Config B and the temporary GPU compatibility island, and it is never a prerequisite for the native path.
 
-Configs A (Ubuntu reference), B (minimal-Linux island), and C (native AIENOS) run the same frozen workload and report boot-to-ready, ready-to-model, TTFT, throughput, idle and available memory, jitter, power, and branch cost separately ([ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md)).
+Configs A (Ubuntu reference), B (minimal-Linux island), and C (native AIENOS) run the same frozen workload and report boot-to-ready, ready-to-model, TTFT, throughput, idle and available memory, jitter, power, and branch cost separately, plus continuous-existence lifecycle metrics (wake-to-continuation and reconstruction latencies) per the [Continuous-Existence Amendment](CONTINUOUS_EXISTENCE_AMENDMENT.md) ([ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md), [ADR 0007](adr/0007-continuous-existence-provisioning-once.md)).
 
 Native capability migration order: Runtime, Cortex, AEGIS, World/J-Space, Capability Graph, local inference, storage, networking, operator interface, developer tools, mail, cockpit, others. Nothing is rebuilt merely because it exists today.
 
@@ -118,3 +123,5 @@ Milestone reports show what was built, what passed, what failed, what changed, t
 ## 10. The persistent thing
 
 The persistent thing is AIEN itself. Hardware is replaceable beneath it. Models, interfaces, tools, and Machines are replaceable around it. If a company disappears tomorrow, the long-term target is that AIENOS continues to boot and remains the operator's.
+
+**Strengthened ([Continuous-Existence Amendment §21](CONTINUOUS_EXISTENCE_AMENDMENT.md), [ADR 0007](adr/0007-continuous-existence-provisioning-once.md)):** AIEN is the persistent logical entity. Hardware, kernels, models, runtime processes, inference caches, interfaces, and Machines are replaceable execution substrates. Sleep changes residency. Reboot changes execution substrate. Failure triggers reconstruction. None of these events inherently terminates logical identity.
