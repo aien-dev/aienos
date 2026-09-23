@@ -3,8 +3,27 @@
 //! Provides the bare-metal entry path, early serial banner, and BootReceipt.
 
 use crate::arch::aarch64::{
-    current_el, disable_interrupts, dsb, halt, isb, EarlyUart, SPARK_16550_UART_BASE,
+    counter_ticks, current_el, disable_interrupts, dsb, halt, isb, EarlyUart, SPARK_16550_UART_BASE,
 };
+
+/// Counter samples taken by the Rust UEFI entry and passed to the kernel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BootTiming {
+    pub uefi_entry_ticks: u64,
+    pub kernel_handoff_ticks: u64,
+    pub counter_frequency_hz: u64,
+}
+
+impl BootTiming {
+    /// Convert elapsed architectural counter ticks to milliseconds.
+    pub fn elapsed_ms(start: u64, end: u64, frequency_hz: u64) -> Option<u64> {
+        if frequency_hz == 0 || end < start {
+            return None;
+        }
+        let elapsed = (u128::from(end - start) * 1000) / u128::from(frequency_hz);
+        u64::try_from(elapsed).ok()
+    }
+}
 
 /// Deterministic, immutable boot receipt emitted by the native boot spine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,6 +55,15 @@ impl BootReceipt {
 
 /// Early kernel boot initialization executed directly from UEFI or reset vector.
 pub fn early_kernel_init(conventional_memory_kb: u64) -> ! {
+    early_kernel_init_with_timing(conventional_memory_kb, None)
+}
+
+/// Early kernel entry with firmware-entry and handoff timing samples.
+pub fn early_kernel_init_with_timing(
+    conventional_memory_kb: u64,
+    boot_timing: Option<BootTiming>,
+) -> ! {
+    let kernel_entry_ticks = counter_ticks();
     // 1. Disable maskable interrupts
     disable_interrupts();
 
@@ -53,6 +81,27 @@ pub fn early_kernel_init(conventional_memory_kb: u64) -> ! {
     uart.write_u64(conventional_memory_kb);
     uart.write_str("\n");
 
+    if let Some(timing) = boot_timing {
+        if let Some(milliseconds) = BootTiming::elapsed_ms(
+            timing.uefi_entry_ticks,
+            timing.kernel_handoff_ticks,
+            timing.counter_frequency_hz,
+        ) {
+            uart.write_str("uefi_entry_to_handoff_ms: ");
+            uart.write_u64(milliseconds);
+            uart.write_str("\n");
+        }
+        if let Some(milliseconds) = BootTiming::elapsed_ms(
+            timing.kernel_handoff_ticks,
+            kernel_entry_ticks,
+            timing.counter_frequency_hz,
+        ) {
+            uart.write_str("handoff_to_kernel_entry_ms: ");
+            uart.write_u64(milliseconds);
+            uart.write_str("\n");
+        }
+    }
+
     let el = current_el();
     uart.write_str("exception_level: EL");
     uart.write_byte(b'0' + el);
@@ -63,6 +112,18 @@ pub fn early_kernel_init(conventional_memory_kb: u64) -> ! {
 
     // 4. Deterministic non-model halt loop
     halt();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BootTiming;
+
+    #[test]
+    fn boot_counter_conversion_rejects_invalid_samples() {
+        assert_eq!(BootTiming::elapsed_ms(100, 150, 1000), Some(50));
+        assert_eq!(BootTiming::elapsed_ms(150, 100, 1000), None);
+        assert_eq!(BootTiming::elapsed_ms(100, 150, 0), None);
+    }
 }
 
 /// Canonical bare-metal entry point when compiling for `#![no_std]` targets.

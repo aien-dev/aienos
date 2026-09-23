@@ -7,6 +7,8 @@ use uefi::prelude::*;
 /// Explicit native handoff image. Building it does not install or boot it.
 #[entry]
 fn main() -> Status {
+    let uefi_entry_ticks = aienos_kernel::arch::aarch64::counter_ticks();
+    let counter_frequency_hz = aienos_kernel::arch::aarch64::counter_frequency_hz();
     uefi::println!("AIENOS: exiting firmware boot services");
 
     // No UEFI protocol, allocator, console, or boot-service reference is used
@@ -20,5 +22,13 @@ fn main() -> Status {
             total.saturating_add(descriptor.page_count)
         });
 
-    aienos_kernel::boot::early_kernel_init(conventional_pages.saturating_mul(4))
+    let timing = aienos_kernel::boot::BootTiming {
+        uefi_entry_ticks,
+        kernel_handoff_ticks: aienos_kernel::arch::aarch64::counter_ticks(),
+        counter_frequency_hz,
+    };
+    aienos_kernel::boot::early_kernel_init_with_timing(
+        conventional_pages.saturating_mul(4),
+        Some(timing),
+    )
 }
