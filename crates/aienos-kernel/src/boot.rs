@@ -4,7 +4,7 @@
 //! the unadorned console banner, and the structured BootReceipt definition.
 
 use crate::arch::aarch64::{
-    current_el, disable_interrupts, dsb, halt, isb, EarlyUart, SPARK_PL011_UART_BASE,
+    current_el, disable_interrupts, dsb, halt, isb, EarlyUart, SPARK_16550_UART_BASE,
 };
 
 /// Deterministic, immutable boot receipt emitted by the native boot spine.
@@ -46,18 +46,18 @@ pub fn early_kernel_init() -> ! {
 
     // 3. Early console UART output on DGX Spark MMIO (0x16A00000)
     // Strictly unadorned console telemetry per Gate 2 specification
-    let uart = EarlyUart::new(SPARK_PL011_UART_BASE);
-    uart.write_str("\r\nAIENOS\r\n");
-    uart.write_str("arch: aarch64\r\n");
-    uart.write_str("boot: native\r\n");
+    let uart = EarlyUart::new(SPARK_16550_UART_BASE);
+    uart.write_str("\nAIENOS\n");
+    uart.write_str("arch: aarch64\n");
+    uart.write_str("boot: native\n");
 
     let el = current_el();
     uart.write_str("exception_level: EL");
     uart.write_byte(b'0' + el);
-    uart.write_str("\r\n");
+    uart.write_str("\n");
 
-    uart.write_str("kernel: alive\r\n");
-    uart.write_str("halt: clean\r\n");
+    uart.write_str("kernel: alive\n");
+    uart.write_str("halt: clean\n");
 
     // 4. Deterministic non-model halt loop
     halt();

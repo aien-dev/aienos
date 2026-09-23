@@ -153,28 +153,19 @@ pub fn halt() -> ! {
     }
 }
 
-/// Reference MMIO base address for PL011 UART on NVIDIA DGX Spark (Cortex-X925).
-pub const SPARK_PL011_UART_BASE: usize = 0x16A0_0000;
+/// Serial MMIO base observed in the DGX Spark host kernel command line.
+/// The host uses earlycon=uart,mmio32,0x16A00000, the 8250 register layout.
+pub const SPARK_16550_UART_BASE: usize = 0x16A0_0000;
 
-/// Reference MMIO base address for PL011 UART on QEMU AArch64 Virt machine.
-pub const QEMU_VIRT_PL011_UART_BASE: usize = 0x0900_0000;
-
-/// Standard PL011 UART register offsets.
-pub mod pl011_regs {
-    pub const UARTDR: usize = 0x00;
-    pub const UARTFR: usize = 0x18;
-    pub const UARTIBRD: usize = 0x24;
-    pub const UARTFBRD: usize = 0x28;
-    pub const UARTLCR_H: usize = 0x2C;
-    pub const UARTCR: usize = 0x30;
-    pub const UARTIMSC: usize = 0x38;
-
-    pub const FR_BUSY: u32 = 1 << 3;
-    pub const FR_TXFF: u32 = 1 << 5;
-    pub const FR_RXFE: u32 = 1 << 4;
+/// 8250 register indices with the observed 32-bit register stride.
+pub mod uart16550_regs {
+    pub const DATA: usize = 0;
+    pub const LINE_STATUS: usize = 5 * 4;
+    pub const DATA_READY: u32 = 1;
+    pub const TX_HOLDING_EMPTY: u32 = 1 << 5;
 }
 
-/// Early boot UART driver for AArch64 bare-metal console output.
+/// Early 8250-compatible UART with 32-bit MMIO registers.
 pub struct EarlyUart {
     base_addr: usize,
 }
@@ -192,15 +183,13 @@ impl EarlyUart {
 
     /// Send a single byte through UART transmit FIFO.
     pub fn write_byte(&self, b: u8) {
-        let fr = self.reg(pl011_regs::UARTFR);
-        let dr = self.reg(pl011_regs::UARTDR);
+        let status = self.reg(uart16550_regs::LINE_STATUS);
+        let data = self.reg(uart16550_regs::DATA);
 
-        // Wait until transmit FIFO has space (TXFF == 0)
-        while (fr.read() & pl011_regs::FR_TXFF) != 0 {
+        while (status.read() & uart16550_regs::TX_HOLDING_EMPTY) == 0 {
             core::hint::spin_loop();
         }
-
-        dr.write(b as u32);
+        data.write(b as u32);
     }
 
     /// Transmit a UTF-8 string through UART.
@@ -216,13 +205,11 @@ impl EarlyUart {
     /// Attempt to read a single byte from UART receive FIFO without blocking.
     /// Returns None if receive FIFO is empty (RXFE == 1).
     pub fn try_read_byte(&self) -> Option<u8> {
-        let fr = self.reg(pl011_regs::UARTFR);
-        if (fr.read() & pl011_regs::FR_RXFE) != 0 {
-            None
-        } else {
-            let dr = self.reg(pl011_regs::UARTDR);
-            Some((dr.read() & 0xFF) as u8)
+        let status = self.reg(uart16550_regs::LINE_STATUS);
+        if (status.read() & uart16550_regs::DATA_READY) == 0 {
+            return None;
         }
+        Some((self.reg(uart16550_regs::DATA).read() & 0xFF) as u8)
     }
 
     /// Read a single byte from UART, blocking until data arrives.
@@ -233,5 +220,23 @@ impl EarlyUart {
             }
             core::hint::spin_loop();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spark_uart_uses_32_bit_16550_register_stride() {
+        let mut registers = [0u32; 8];
+        registers[5] = uart16550_regs::TX_HOLDING_EMPTY;
+        let uart = EarlyUart::new(registers.as_mut_ptr() as usize);
+        uart.write_byte(b'A');
+        assert_eq!(registers[0], b'A' as u32);
+        assert_eq!(uart.try_read_byte(), None);
+        MmioReg::new(registers.as_mut_ptr() as usize + uart16550_regs::LINE_STATUS)
+            .write(uart16550_regs::TX_HOLDING_EMPTY | uart16550_regs::DATA_READY);
+        assert_eq!(uart.try_read_byte(), Some(b'A'));
     }
 }
