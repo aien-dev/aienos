@@ -183,13 +183,14 @@ fn test_full_agent_epistemic_capability_and_c1_lifecycle() {
         5000,
     );
 
-    // Case A: World metadata alone does not prove a broker handler is isolated.
+    // Case A: the broker owns a World delta and routes the write into it.
     let world_id = [0x99u8; 16];
-    let mut world = JSpaceWorld::new(world_id, None);
-    world.write_file("/kernel/data/scratch.log", b"temp_state".to_vec());
+    let world = JSpaceWorld::new(world_id, None);
+    broker.register_world(world).expect("Register World delta");
 
     let mut rev_params = BTreeMap::new();
     rev_params.insert("path".to_string(), "/kernel/data/scratch.log".to_string());
+    rev_params.insert("content".to_string(), "temp_state".to_string());
     let reversible_intent = EffectIntent::new(
         agent_id,
         "fs.write",
@@ -200,10 +201,14 @@ fn test_full_agent_epistemic_capability_and_c1_lifecycle() {
     );
 
     let rev_decision = broker.dispatch(&reversible_intent, &aegis_graph, None, 1006);
-    assert!(matches!(
-        rev_decision,
-        Err(AegisError::MissingOperatorGrant)
-    ));
+    assert!(rev_decision.is_ok());
+    assert_eq!(
+        broker
+            .world(&world_id)
+            .unwrap()
+            .read_file("/kernel/data/scratch.log", |_| None),
+        Some(b"temp_state".to_vec())
+    );
 
     // Case B: Boundary-crossing irreversible effect without Operator Grant -> REJECTED
     let mut irrev_params = BTreeMap::new();
