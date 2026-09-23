@@ -49,6 +49,10 @@ Opaque technology (for example a closed compiler) is allowed only in experiments
 
 Accepted exception: silicon that physically requires vendor-signed firmware (for example the GPU's GSP firmware) keeps that firmware.
 
+**Fastest wins, scoped:** for a capability AIENOS natively owns, the fastest correct implementation wins. A compatibility island may outperform the native path for a while, but it does not define the trusted base or the destination ([ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md)).
+
+**Host operating systems:** Windows, macOS, and Linux are bootstrap and migration environments, not the target runtime. **AIENOS may learn from the host, but it must not require the host to survive** ([ADR 0002](adr/0002-incumbent-os-as-migration-environment.md)).
+
 ## 4. Security
 
 - **Boot trust:** Secure Boot off during early development. Before daily use: firmware verifies the operator's key, the operator's key verifies AIENOS boot artifacts, AIENOS verifies kernel and runtime components. An offline recovery key and recovery media are designed before enforcement.
@@ -80,6 +84,8 @@ The first agent's job is running, understanding, diagnosing, repairing, and impr
 5. **As long as necessary:** full hardware sovereignty, including an independent accelerator path.
 
 Every stage boots and does something real.
+
+Steps 2 and 3 are the primary milestone (native AIENOS boot with CPU inference). A minimal-Linux image booting straight into `aien-init` exists only as Benchmark Config B and the temporary GPU compatibility island, and it is never a prerequisite for the native path. Configs A (Ubuntu reference), B (minimal-Linux island), and C (native AIENOS) run the same frozen workload and report boot-to-ready, ready-to-model, TTFT, throughput, idle and available memory, jitter, power, and branch cost separately ([ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md)).
 
 Native capability migration order: Runtime, Cortex, AEGIS, World/J-Space, Capability Graph, local inference, storage, networking, operator interface, developer tools, mail, cockpit, others. Nothing is rebuilt merely because it exists today.
 
