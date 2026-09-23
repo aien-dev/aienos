@@ -5,6 +5,56 @@
 use crate::arch::aarch64::{
     counter_ticks, current_el, disable_interrupts, dsb, halt, isb, EarlyUart, SPARK_16550_UART_BASE,
 };
+use crate::mem::{BitmapFrameAllocator, PhysAddr, PAGE_SIZE};
+use crate::sync::spinlock::SpinLock;
+
+const EARLY_BITMAP_WORDS: usize = 64;
+const MAX_EARLY_FRAMES: usize = EARLY_BITMAP_WORDS * 64;
+static EARLY_ALLOCATOR: SpinLock<Option<BitmapFrameAllocator<EARLY_BITMAP_WORDS>>> =
+    SpinLock::new(None);
+
+/// Allocate a frame from the first conventional-memory region after handoff.
+pub fn allocate_early_frame() -> Option<PhysAddr> {
+    EARLY_ALLOCATOR.lock().as_mut()?.allocate_frame()
+}
+
+fn initialize_early_allocator(region: BootMemoryRegion) -> Option<(usize, PhysAddr)> {
+    let mut allocator = EARLY_ALLOCATOR.lock();
+    if allocator.is_some() {
+        return None;
+    }
+    let managed_frames = region.page_count.min(MAX_EARLY_FRAMES);
+    *allocator = Some(BitmapFrameAllocator::new(region.start, managed_frames));
+    let first_frame = allocator.as_mut()?.allocate_frame()?;
+    Some((managed_frames, first_frame))
+}
+
+/// A page-aligned conventional-memory region supplied by the firmware map.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BootMemoryRegion {
+    start: PhysAddr,
+    page_count: usize,
+}
+
+impl BootMemoryRegion {
+    /// Validate descriptor arithmetic before the kernel constructs an allocator.
+    pub fn new(physical_start: u64, page_count: u64) -> Option<Self> {
+        let start = PhysAddr(usize::try_from(physical_start).ok()?);
+        let page_count = usize::try_from(page_count).ok()?;
+        if !start.is_page_aligned()
+            || page_count == 0
+            || page_count > (usize::MAX - start.0) / PAGE_SIZE
+        {
+            return None;
+        }
+        Some(Self { start, page_count })
+    }
+
+    /// Number of 4 KiB pages in this validated region.
+    pub const fn page_count(self) -> usize {
+        self.page_count
+    }
+}
 
 /// Counter samples taken by the Rust UEFI entry and passed to the kernel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,6 +113,15 @@ pub fn early_kernel_init_with_timing(
     conventional_memory_kb: u64,
     boot_timing: Option<BootTiming>,
 ) -> ! {
+    early_kernel_init_with_memory(conventional_memory_kb, None, boot_timing)
+}
+
+/// Early kernel entry with a validated conventional-memory region.
+pub fn early_kernel_init_with_memory(
+    conventional_memory_kb: u64,
+    memory_region: Option<BootMemoryRegion>,
+    boot_timing: Option<BootTiming>,
+) -> ! {
     let kernel_entry_ticks = counter_ticks();
     // 1. Disable maskable interrupts
     disable_interrupts();
@@ -80,6 +139,22 @@ pub fn early_kernel_init_with_timing(
     uart.write_str("conventional_memory_kb: ");
     uart.write_u64(conventional_memory_kb);
     uart.write_str("\n");
+
+    // Retain the initial bitmap in kernel state and manage at most 16 MiB.
+    // This reserves an address in bookkeeping only; it does not dereference RAM.
+    match memory_region.and_then(initialize_early_allocator) {
+        Some((managed_frames, first_frame)) => {
+            uart.write_str("allocator_managed_frames: ");
+            uart.write_u64(managed_frames as u64);
+            uart.write_str("\nallocator_reserved_frame_phys: ");
+            uart.write_u64(first_frame.0 as u64);
+            uart.write_str("\n");
+        }
+        None => {
+            uart.write_str("allocator: unavailable; boot halted\n");
+            halt();
+        }
+    }
 
     if let Some(timing) = boot_timing {
         if let Some(milliseconds) = BootTiming::elapsed_ms(
@@ -116,13 +191,34 @@ pub fn early_kernel_init_with_timing(
 
 #[cfg(test)]
 mod tests {
-    use super::BootTiming;
+    use super::{allocate_early_frame, initialize_early_allocator, BootMemoryRegion, BootTiming};
 
     #[test]
     fn boot_counter_conversion_rejects_invalid_samples() {
         assert_eq!(BootTiming::elapsed_ms(100, 150, 1000), Some(50));
         assert_eq!(BootTiming::elapsed_ms(150, 100, 1000), None);
         assert_eq!(BootTiming::elapsed_ms(100, 150, 0), None);
+    }
+
+    #[test]
+    fn firmware_region_requires_aligned_nonoverflowing_pages() {
+        assert_eq!(
+            BootMemoryRegion::new(0x1000_0000, 4096).unwrap().page_count,
+            4096
+        );
+        assert!(BootMemoryRegion::new(0x1000_0001, 1).is_none());
+        assert!(BootMemoryRegion::new(0x1000_0000, 0).is_none());
+        assert!(BootMemoryRegion::new(u64::MAX - 4095, 2).is_none());
+    }
+
+    #[test]
+    fn early_allocator_retains_region_after_initialization() {
+        let region = BootMemoryRegion::new(0x1000_0000, 128).unwrap();
+        let (managed, reserved) = initialize_early_allocator(region).unwrap();
+        assert_eq!(managed, 128);
+        assert_eq!(reserved.0, 0x1000_0000);
+        assert_eq!(allocate_early_frame().unwrap().0, 0x1000_1000);
+        assert!(initialize_early_allocator(region).is_none());
     }
 }
 
