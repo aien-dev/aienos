@@ -1,8 +1,5 @@
 # AIENOS — Final Architectural Blueprint
 
-> **Foundational Mandate to the Engineering Agent:**  
-> *“You own the route; this document owns the destination.”*
-
 ## 1. The final vision
 
 AIENOS is an agent-native operating system.
