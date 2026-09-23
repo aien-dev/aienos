@@ -153,7 +153,7 @@ mod tests {
         let evaluator = AegisEvaluator::new(operator_secret);
         let mut broker = EffectBroker::new(evaluator);
 
-        // 1. REVERSIBLE: inside J-Space World -> Auto-Approved
+        // 1. A claimed World does not prove the handler is isolated.
         let mut params = BTreeMap::new();
         params.insert("path".to_string(), "/workspace/test.txt".to_string());
         let world_id = Some([0xAAu8; 16]);
@@ -170,17 +170,14 @@ mod tests {
         let missing_handler = broker.dispatch(&reversible_intent, &graph, None, 99);
         assert!(matches!(
             missing_handler,
-            Err(AegisError::ExecutionFailed(_))
+            Err(AegisError::MissingOperatorGrant)
         ));
         assert!(!broker.audit_ledger()[0].executed);
         broker.register_handler("fs.write", |_| Ok("mock file write".to_string()));
         broker.register_handler("net.fetch", |_| Ok("mock network fetch".to_string()));
 
         let rev_result = broker.dispatch(&reversible_intent, &graph, None, 100);
-        assert!(
-            rev_result.is_ok(),
-            "Reversible intent inside world must succeed"
-        );
+        assert!(matches!(rev_result, Err(AegisError::MissingOperatorGrant)));
 
         // 2. IRREVERSIBLE: outside world without Operator Grant -> REJECTED
         let irreversible_intent = EffectIntent::new(
@@ -251,5 +248,60 @@ mod tests {
             fetch_res.is_ok(),
             "Standing capability autonomous fetch must be authorized"
         );
+    }
+
+    #[test]
+    fn claimed_world_cannot_authorize_network_or_escaped_filesystem_effects() {
+        let mut graph = CapabilityGraph::new([0x42; 32]);
+        let agent = LogicalAgentId::from_seed("boundary-test-agent");
+        let evaluator = AegisEvaluator::new([0x99; 32]);
+
+        let net_id = [1; 16];
+        graph.issue_root_token(
+            net_id,
+            agent,
+            CapabilityScope::Network {
+                host: "example.org".into(),
+                port: 443,
+            },
+            0,
+            2000,
+        );
+        let mut net_params = BTreeMap::new();
+        net_params.insert("host".into(), "example.org".into());
+        net_params.insert("port".into(), "443".into());
+        let net_intent = EffectIntent::new(
+            agent,
+            "net.connect",
+            net_params,
+            net_id,
+            true,
+            Some([9; 16]),
+        );
+        assert!(matches!(
+            evaluator.evaluate(&net_intent, &graph, None, 100),
+            AegisDecision::RequiresOperatorApproval { .. }
+        ));
+
+        let fs_id = [2; 16];
+        graph.issue_root_token(
+            fs_id,
+            agent,
+            CapabilityScope::Filesystem {
+                path_prefix: "/workspace".into(),
+                read_only: false,
+            },
+            0,
+            2000,
+        );
+        for path in ["/workspace-extra/file", "/workspace/../etc/passwd"] {
+            let mut params = BTreeMap::new();
+            params.insert("path".into(), path.into());
+            let intent = EffectIntent::new(agent, "fs.write", params, fs_id, true, Some([9; 16]));
+            assert!(matches!(
+                evaluator.evaluate(&intent, &graph, None, 100),
+                AegisDecision::Rejected { .. }
+            ));
+        }
     }
 }

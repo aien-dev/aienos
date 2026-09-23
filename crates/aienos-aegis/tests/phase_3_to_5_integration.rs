@@ -183,7 +183,7 @@ fn test_full_agent_epistemic_capability_and_c1_lifecycle() {
         5000,
     );
 
-    // Case A: Inside J-Space World (Reversible) -> Auto-Approved
+    // Case A: World metadata alone does not prove a broker handler is isolated.
     let world_id = [0x99u8; 16];
     let mut world = JSpaceWorld::new(world_id, None);
     world.write_file("/kernel/data/scratch.log", b"temp_state".to_vec());
@@ -200,10 +200,10 @@ fn test_full_agent_epistemic_capability_and_c1_lifecycle() {
     );
 
     let rev_decision = broker.dispatch(&reversible_intent, &aegis_graph, None, 1006);
-    assert!(
-        rev_decision.is_ok(),
-        "Reversible intent inside world must pass"
-    );
+    assert!(matches!(
+        rev_decision,
+        Err(AegisError::MissingOperatorGrant)
+    ));
 
     // Case B: Boundary-crossing irreversible effect without Operator Grant -> REJECTED
     let mut irrev_params = BTreeMap::new();

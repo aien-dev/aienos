@@ -5,6 +5,18 @@ use aienos_kernel::crypto::sha256;
 use core::fmt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::path::{Component, Path};
+
+/// Check a lexical absolute path boundary. Handlers must still resolve symlinks safely.
+pub(crate) fn path_within(path: &str, prefix: &str) -> bool {
+    let path = Path::new(path);
+    let prefix = Path::new(prefix);
+    path.is_absolute()
+        && prefix.is_absolute()
+        && !path.components().any(|part| part == Component::ParentDir)
+        && !prefix.components().any(|part| part == Component::ParentDir)
+        && path.starts_with(prefix)
+}
 
 /// Errors occurring in capability evaluation and graph operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,7 +112,7 @@ impl CapabilityScope {
                     path_prefix: p_child,
                     read_only: ro_child,
                 },
-            ) => p_child.starts_with(p_parent) && (*ro_parent == *ro_child || *ro_child),
+            ) => path_within(p_child, p_parent) && (*ro_parent == *ro_child || *ro_child),
             (
                 CapabilityScope::Network {
                     host: h_parent,
@@ -170,21 +182,28 @@ impl CapabilityToken {
         delegation_depth: u32,
         valid_until_utc: u64,
     ) -> [u8; 32] {
-        let mut hasher = sha256::Sha256::new();
-        hasher.update(secret);
-        hasher.update(id);
-        if let Some(pid) = parent_id {
-            hasher.update(pid);
-        } else {
-            hasher.update(&[0u8; 16]);
-        }
-        hasher.update(issuer.as_bytes());
-        hasher.update(holder.as_bytes());
+        let parent_marker = [u8::from(parent_id.is_some())];
+        let absent_parent = [0u8; 16];
+        let parent = parent_id.unwrap_or(&absent_parent);
+        let issuer_len = (issuer.len() as u64).to_be_bytes();
         let scope_bytes = serde_json::to_vec(scope).unwrap_or_default();
-        hasher.update(&scope_bytes);
-        hasher.update(&delegation_depth.to_be_bytes());
-        hasher.update(&valid_until_utc.to_be_bytes());
-        hasher.finalize()
+        let scope_len = (scope_bytes.len() as u64).to_be_bytes();
+        sha256::hmac_sha256(
+            secret,
+            &[
+                b"AIENOS_CAP_V1",
+                id,
+                &parent_marker,
+                parent,
+                &issuer_len,
+                issuer.as_bytes(),
+                holder.as_bytes(),
+                &scope_len,
+                &scope_bytes,
+                &delegation_depth.to_be_bytes(),
+                &valid_until_utc.to_be_bytes(),
+            ],
+        )
     }
 }
 
@@ -358,6 +377,26 @@ impl CapabilityGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filesystem_scope_rejects_sibling_and_traversal_paths() {
+        assert!(path_within("/workspace/src/main.rs", "/workspace"));
+        assert!(path_within("/workspace", "/workspace"));
+        assert!(!path_within("/workspace-extra/file", "/workspace"));
+        assert!(!path_within("/workspace/../etc/passwd", "/workspace"));
+        assert!(!path_within("workspace/file", "/workspace"));
+
+        let parent = CapabilityScope::Filesystem {
+            path_prefix: "/workspace".into(),
+            read_only: false,
+        };
+        for escaped in ["/workspace-extra", "/workspace/../etc"] {
+            assert!(!parent.contains(&CapabilityScope::Filesystem {
+                path_prefix: escaped.into(),
+                read_only: true,
+            }));
+        }
+    }
 
     #[test]
     fn test_capability_attenuation_and_cascading_revocation() {
