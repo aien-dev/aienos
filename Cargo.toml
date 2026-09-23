@@ -6,6 +6,7 @@ members = [
     "crates/aienos-cortex",
     "crates/aienos-aegis",
     "crates/aienos-c1-tree",
+    "crates/aienos-boot",
 ]
 
 [workspace.package]
