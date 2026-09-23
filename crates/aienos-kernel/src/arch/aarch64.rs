@@ -52,6 +52,49 @@ pub fn current_el() -> u8 {
     }
 }
 
+/// Read the architectural virtual counter. Its frequency is reported by `counter_frequency_hz`.
+#[inline(always)]
+pub fn counter_ticks() -> u64 {
+    #[cfg(target_arch = "aarch64")]
+    {
+        let ticks: u64;
+        unsafe {
+            core::arch::asm!(
+                "isb",
+                "mrs {ticks}, cntvct_el0",
+                ticks = out(reg) ticks,
+                options(nomem, nostack, preserves_flags)
+            );
+        }
+        ticks
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        0
+    }
+}
+
+/// Read the frequency of the architectural virtual counter.
+#[inline(always)]
+pub fn counter_frequency_hz() -> u64 {
+    #[cfg(target_arch = "aarch64")]
+    {
+        let frequency: u64;
+        unsafe {
+            core::arch::asm!(
+                "mrs {frequency}, cntfrq_el0",
+                frequency = out(reg) frequency,
+                options(nomem, nostack, preserves_flags)
+            );
+        }
+        frequency
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        0
+    }
+}
+
 /// Data Memory Barrier (DMB).
 #[inline(always)]
 pub fn dmb() {
