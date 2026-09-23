@@ -94,6 +94,18 @@ pub struct BitmapFrameAllocator<const WORDS: usize> {
 impl<const WORDS: usize> BitmapFrameAllocator<WORDS> {
     /// Initialize a new frame allocator for a physical memory region.
     pub const fn new(base_addr: PhysAddr, total_frames: usize) -> Self {
+        assert!(
+            base_addr.is_page_aligned(),
+            "frame region must be page aligned"
+        );
+        assert!(
+            total_frames / 64 + (!total_frames.is_multiple_of(64)) as usize <= WORDS,
+            "frame region exceeds bitmap capacity"
+        );
+        assert!(
+            total_frames <= (usize::MAX - base_addr.0) / PAGE_SIZE,
+            "frame region overflows physical address space"
+        );
         Self {
             base_addr,
             total_frames,
@@ -135,7 +147,7 @@ impl<const WORDS: usize> BitmapFrameAllocator<WORDS> {
 
     /// Free a previously allocated physical frame.
     pub fn deallocate_frame(&mut self, addr: PhysAddr) -> bool {
-        if addr.0 < self.base_addr.0 {
+        if !addr.is_page_aligned() || addr.0 < self.base_addr.0 {
             return false;
         }
         let offset = addr.0 - self.base_addr.0;
@@ -225,5 +237,20 @@ mod tests {
         let block = alloc.allocate_contiguous(4).expect("Contiguous 4 frames");
         assert_eq!(block, PhysAddr(0x2000_0000));
         assert_eq!(alloc.allocated_count(), 4);
+    }
+
+    #[test]
+    fn allocator_rejects_unaligned_deallocation() {
+        let mut alloc = BitmapFrameAllocator::<1>::new(PhysAddr(0x2000_0000), 64);
+        let frame = alloc.allocate_frame().unwrap();
+        assert!(!alloc.deallocate_frame(PhysAddr(frame.0 + 1)));
+        assert_eq!(alloc.allocated_count(), 1);
+        assert!(alloc.deallocate_frame(frame));
+    }
+
+    #[test]
+    #[should_panic(expected = "frame region exceeds bitmap capacity")]
+    fn allocator_rejects_capacity_overflow() {
+        let _ = BitmapFrameAllocator::<1>::new(PhysAddr(0x2000_0000), 65);
     }
 }
