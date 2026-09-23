@@ -2,6 +2,11 @@
 
 Status: confirmed by the operator on 2026-09-23. Changes to anything in this document that the operator listed as fundamental (see "Authority and escalation") require the operator's approval.
 
+For complete architectural specifications, execution milestones, and decision records, see:
+- [AIENOS Final Architectural Blueprint](BLUEPRINT.md) (Complete 37-section architectural foundation)
+- [AIENOS Architectural Milestones Matrix](MILESTONES.md) (8-phase execution roadmap, invariants, and contracts)
+- [Architectural Decision Records](adr/README.md) (Accepted architectural decisions: [ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md), [ADR 0002](adr/0002-incumbent-os-as-migration-environment.md))
+
 ## 1. What AIENOS is
 
 AIENOS is the operating system. The resident AIEN agent is its primary user interface, coordinator, and policy-aware control plane. Graphical interfaces are projections of agent state that the agent can construct and change on request; there is no fixed desktop.
