@@ -33,6 +33,19 @@ impl AegisEvaluator {
         grant: Option<&OperatorGrant>,
         now_utc: u64,
     ) -> AegisDecision {
+        self.evaluate_with_world_binding(intent, graph, grant, now_utc, false)
+    }
+
+    /// The broker sets `world_bound` only when it owns an active World delta
+    /// and will route the effect to that delta rather than a general handler.
+    pub(crate) fn evaluate_with_world_binding(
+        &self,
+        intent: &EffectIntent,
+        graph: &CapabilityGraph,
+        grant: Option<&OperatorGrant>,
+        now_utc: u64,
+        world_bound: bool,
+    ) -> AegisDecision {
         // 1. Retrieve and cryptographically validate the claimed capability token
         let token = match graph.get_token(&intent.claimed_capability_id) {
             Ok(t) => t,
@@ -69,9 +82,17 @@ impl AegisEvaluator {
             };
         }
 
-        // 4. A caller-provided World ID and reversibility flag are not proof of
-        // isolation. Until the broker can bind handlers to a real World delta,
-        // writes still require an operator grant (ADR 0004).
+        // 4. Only a broker-owned World delta can establish local reversibility.
+        if world_bound
+            && intent.is_reversible
+            && intent.world_id.is_some()
+            && matches!(intent.action.as_str(), "fs.write" | "fs.delete")
+        {
+            return AegisDecision::Approved {
+                reason: "Effect routed to an active J-Space World delta".to_string(),
+            };
+        }
+
         let is_standing_fetch = matches!(token.scope, CapabilityScope::StandingFetch { .. })
             || (intent.action == "fs.read" || intent.action == "hardware.inspect");
 

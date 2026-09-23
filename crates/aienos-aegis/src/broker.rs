@@ -3,6 +3,7 @@
 use crate::capability::{AegisError, CapabilityGraph};
 use crate::effect::{EffectIntent, OperatorGrant};
 use crate::evaluator::{AegisDecision, AegisEvaluator};
+use crate::world::{JSpaceWorld, WorldStatus};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -23,6 +24,7 @@ pub type EffectHandlerFn = Box<dyn Fn(&EffectIntent) -> Result<String, String> +
 pub struct EffectBroker {
     evaluator: AegisEvaluator,
     handlers: HashMap<String, EffectHandlerFn>,
+    worlds: HashMap<[u8; 16], JSpaceWorld>,
     audit_ledger: Vec<EffectAuditRecord>,
 }
 
@@ -32,6 +34,7 @@ impl EffectBroker {
         Self {
             evaluator,
             handlers: HashMap::new(),
+            worlds: HashMap::new(),
             audit_ledger: Vec::new(),
         }
     }
@@ -45,6 +48,66 @@ impl EffectBroker {
             .insert(action_prefix.to_string(), Box::new(handler));
     }
 
+    /// Give the broker ownership of a transactional World delta.
+    pub fn register_world(&mut self, world: JSpaceWorld) -> Result<(), AegisError> {
+        if world.status != WorldStatus::Active || self.worlds.contains_key(&world.world_id) {
+            return Err(AegisError::ExecutionFailed(
+                "World must be active with a unique ID".to_string(),
+            ));
+        }
+        self.worlds.insert(world.world_id, world);
+        Ok(())
+    }
+
+    /// Inspect a broker-owned World without mutating its delta.
+    pub fn world(&self, id: &[u8; 16]) -> Option<&JSpaceWorld> {
+        self.worlds.get(id)
+    }
+
+    /// Discard every pending change in a broker-owned World.
+    pub fn rollback_world(&mut self, id: &[u8; 16]) -> Result<(), AegisError> {
+        let world = self
+            .worlds
+            .get_mut(id)
+            .ok_or_else(|| AegisError::ExecutionFailed("World is not registered".to_string()))?;
+        world.rollback();
+        Ok(())
+    }
+
+    fn apply_world_effect(&mut self, intent: &EffectIntent) -> Result<String, AegisError> {
+        let world_id = intent
+            .world_id
+            .ok_or_else(|| AegisError::ExecutionFailed("World ID is required".to_string()))?;
+        let world = self
+            .worlds
+            .get_mut(&world_id)
+            .ok_or_else(|| AegisError::ExecutionFailed("World is not registered".to_string()))?;
+        if world.status != WorldStatus::Active {
+            return Err(AegisError::ExecutionFailed(
+                "World is not active".to_string(),
+            ));
+        }
+        let path = intent.parameters.get("path").ok_or_else(|| {
+            AegisError::ExecutionFailed("Filesystem path is required".to_string())
+        })?;
+        match intent.action.as_str() {
+            "fs.write" => {
+                let content = intent.parameters.get("content").ok_or_else(|| {
+                    AegisError::ExecutionFailed("World write content is required".to_string())
+                })?;
+                world.write_file(path, content.as_bytes().to_vec());
+                Ok("World delta write committed".to_string())
+            }
+            "fs.delete" => {
+                world.delete_file(path);
+                Ok("World delta deletion committed".to_string())
+            }
+            _ => Err(AegisError::ExecutionFailed(
+                "Action has no World delta handler".to_string(),
+            )),
+        }
+    }
+
     /// Dispatch an effect intent through AEGIS authorization.
     ///
     /// Rejects any irreversible effect originating from an unapproved intent.
@@ -55,7 +118,17 @@ impl EffectBroker {
         grant: Option<&OperatorGrant>,
         now_utc: u64,
     ) -> Result<String, AegisError> {
-        let decision = self.evaluator.evaluate(intent, graph, grant, now_utc);
+        let world_fs_effect =
+            intent.world_id.is_some() && matches!(intent.action.as_str(), "fs.write" | "fs.delete");
+        let world_bound = world_fs_effect
+            && intent.world_id.is_some_and(|id| {
+                self.worlds
+                    .get(&id)
+                    .is_some_and(|world| world.status == WorldStatus::Active)
+            });
+        let decision =
+            self.evaluator
+                .evaluate_with_world_binding(intent, graph, grant, now_utc, world_bound);
 
         match &decision {
             AegisDecision::Approved { .. } => {
@@ -67,7 +140,9 @@ impl EffectBroker {
                     .max_by_key(|(prefix, _)| prefix.len())
                     .map(|(_, h)| h);
 
-                let result = if let Some(h) = handler {
+                let result = if world_fs_effect {
+                    self.apply_world_effect(intent)
+                } else if let Some(h) = handler {
                     h(intent).map_err(AegisError::ExecutionFailed)
                 } else {
                     Err(AegisError::ExecutionFailed(format!(
@@ -129,6 +204,8 @@ mod tests {
     use crate::capability::CapabilityScope;
     use aienos_agent_state::LogicalAgentId;
     use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     #[test]
     fn test_aegis_reversible_vs_irreversible_enforcement() {
@@ -303,5 +380,77 @@ mod tests {
                 AegisDecision::Rejected { .. }
             ));
         }
+    }
+
+    #[test]
+    fn world_bound_write_uses_delta_and_rollback_discards_it() {
+        let mut graph = CapabilityGraph::new([0x42; 32]);
+        let agent = LogicalAgentId::from_seed("world-bound-agent");
+        let fs_id = [1; 16];
+        let world_id = [9; 16];
+        graph.issue_root_token(
+            fs_id,
+            agent,
+            CapabilityScope::Filesystem {
+                path_prefix: "/workspace".into(),
+                read_only: false,
+            },
+            0,
+            2000,
+        );
+        let mut broker = EffectBroker::new(AegisEvaluator::new([0x99; 32]));
+        broker
+            .register_world(JSpaceWorld::new(world_id, None))
+            .unwrap();
+        let host_handler_called = Arc::new(AtomicBool::new(false));
+        let called = Arc::clone(&host_handler_called);
+        broker.register_handler("fs.write", move |_| {
+            called.store(true, Ordering::SeqCst);
+            Ok("host write".into())
+        });
+
+        let mut params = BTreeMap::new();
+        params.insert("path".into(), "/workspace/note.txt".into());
+        params.insert("content".into(), "draft".into());
+        let intent = EffectIntent::new(agent, "fs.write", params, fs_id, true, Some(world_id));
+        assert!(broker.dispatch(&intent, &graph, None, 100).is_ok());
+        assert!(!host_handler_called.load(Ordering::SeqCst));
+        assert_eq!(
+            broker
+                .world(&world_id)
+                .unwrap()
+                .read_file("/workspace/note.txt", |_| None),
+            Some(b"draft".to_vec())
+        );
+        let mut delete_params = BTreeMap::new();
+        delete_params.insert("path".into(), "/workspace/note.txt".into());
+        let delete = EffectIntent::new(
+            agent,
+            "fs.delete",
+            delete_params,
+            fs_id,
+            true,
+            Some(world_id),
+        );
+        assert!(broker.dispatch(&delete, &graph, None, 100).is_ok());
+        assert_eq!(
+            broker
+                .world(&world_id)
+                .unwrap()
+                .read_file("/workspace/note.txt", |_| Some(b"base".to_vec())),
+            None
+        );
+        broker.rollback_world(&world_id).unwrap();
+        assert_eq!(
+            broker
+                .world(&world_id)
+                .unwrap()
+                .read_file("/workspace/note.txt", |_| None),
+            None
+        );
+        assert!(matches!(
+            broker.dispatch(&intent, &graph, None, 101),
+            Err(AegisError::MissingOperatorGrant)
+        ));
     }
 }
