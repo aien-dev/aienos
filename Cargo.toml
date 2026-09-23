@@ -12,8 +12,8 @@ members = [
 version = "0.1.0"
 edition = "2021"
 authors = ["AIENOS Sovereign Contributors"]
-license = "Apache-2.0"
-repository = "https://github.com/aienos/aienos"
+license = "Apache-2.0 WITH LLVM-exception"
+repository = "https://github.com/aien-dev/aienos"
 
 [workspace.dependencies]
 aienos-kernel = { path = "crates/aienos-kernel" }
