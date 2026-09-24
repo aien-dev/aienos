@@ -350,6 +350,11 @@ extern "C" fn timer_irq() {
         let mut timer = aienos_kernel::timer::Aarch64TimerRegisters;
         aienos_kernel::timer::TimerRegisters::set_compare(&mut timer, deadline);
         aienos_kernel::timer::TimerRegisters::enable_timer(&mut timer, true);
+    }
+    // End every acknowledged interrupt (not just the timer), or it stays
+    // active in the GIC and blocks its priority level. INTIDs 1020-1023 are
+    // special/spurious and must not be ended.
+    if id < 1020 {
         aienos_kernel::gic::GicCpuInterface::end_interrupt(&mut cpu, id);
     }
 }
