@@ -5,6 +5,7 @@
 //! access and controller bring-up follow in the next part of the series.
 
 pub mod context;
+pub mod controller;
 pub mod ring;
 pub mod trb;
 
