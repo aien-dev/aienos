@@ -20,6 +20,7 @@ pub mod recovery;
 pub mod report;
 pub mod store;
 pub mod sync;
+pub mod usb;
 
 #[cfg(all(target_os = "none", not(feature = "std"), not(test)))]
 #[panic_handler]

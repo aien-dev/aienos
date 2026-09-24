@@ -172,6 +172,65 @@ pub fn isb() {
     }
 }
 
+/// Data-cache line size in bytes. The architecturally permitted range is
+/// 16..=2048; using the maximum costs a few extra `dc` operations per
+/// maintenance call and is always safe regardless of CTR_EL0.
+#[cfg(target_arch = "aarch64")]
+const CACHE_LINE_SIZE: usize = 2048;
+
+/// Clean the data cache for `[addr, addr + size)` to the point of coherency,
+/// so a DMA master (for example an xHCI controller) sees the bytes the CPU
+/// wrote. No-op on hosts without AArch64 cache maintenance.
+pub fn clean_cache_range(addr: usize, size: usize) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        let start = addr & !(CACHE_LINE_SIZE - 1);
+        let mut cursor = start;
+        let end = addr.saturating_add(size);
+        while cursor < end {
+            unsafe {
+                core::arch::asm!(
+                    "dc cvac, {p}",
+                    p = in(reg) cursor,
+                    options(nostack, preserves_flags)
+                );
+            }
+            cursor += CACHE_LINE_SIZE;
+        }
+        dsb();
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        let _ = (addr, size);
+    }
+}
+
+/// Invalidate the data cache for `[addr, addr + size)` so subsequent CPU reads
+/// see the bytes a DMA master (for example an xHCI controller) wrote.
+pub fn invalidate_cache_range(addr: usize, size: usize) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        let start = addr & !(CACHE_LINE_SIZE - 1);
+        let mut cursor = start;
+        let end = addr.saturating_add(size);
+        while cursor < end {
+            unsafe {
+                core::arch::asm!(
+                    "dc ivac, {p}",
+                    p = in(reg) cursor,
+                    options(nostack, preserves_flags)
+                );
+            }
+            cursor += CACHE_LINE_SIZE;
+        }
+        dsb();
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        let _ = (addr, size);
+    }
+}
+
 /// Disable interrupts (set DAIF flags).
 #[inline(always)]
 pub fn disable_interrupts() {
