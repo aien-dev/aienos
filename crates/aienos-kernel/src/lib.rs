@@ -19,6 +19,7 @@ pub mod display;
 pub mod fatal;
 pub mod gic;
 pub mod mem;
+pub mod net;
 pub mod nvme;
 pub mod pe;
 pub mod recovery;
