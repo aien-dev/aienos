@@ -25,6 +25,7 @@ pub enum SchedulerError {
     Full,
     DuplicateTask,
     InvalidCpu,
+    UnknownTask,
 }
 
 /// Fixed-capacity scheduler. `CLASSES` maps CPU index to its MADT class.
@@ -110,6 +111,33 @@ impl<const CPUS: usize, const TASKS: usize> Scheduler<CPUS, TASKS> {
             ticks: 0,
         });
         Ok(cpu)
+    }
+
+    /// Remove a task (e.g. a thread that has finished) from its run queue and
+    /// free its slot so the ID and slot can be reused. Searches every CPU's
+    /// queue because work stealing may have moved it.
+    pub fn remove(&mut self, id: u32) -> Result<(), SchedulerError> {
+        let slot = self
+            .tasks
+            .iter()
+            .position(|task| task.is_some_and(|t| t.id == id))
+            .ok_or(SchedulerError::UnknownTask)?;
+        for cpu in 0..CPUS {
+            let len = self.queue_len[cpu];
+            if let Some(at) = self.queues[cpu][..len]
+                .iter()
+                .position(|q| *q == Some(slot))
+            {
+                for i in at..len - 1 {
+                    self.queues[cpu][i] = self.queues[cpu][i + 1];
+                }
+                self.queues[cpu][len - 1] = None;
+                self.queue_len[cpu] = len - 1;
+                break;
+            }
+        }
+        self.tasks[slot] = None;
+        Ok(())
     }
 
     /// Account one tick on a CPU, choosing highest priority then least-served
@@ -329,5 +357,24 @@ mod tests {
             s.enqueue(1, TaskPriority::Normal),
             Err(SchedulerError::DuplicateTask)
         );
+    }
+    #[test]
+    fn removed_tasks_free_their_slot_and_leave_the_queue() {
+        let mut s = Scheduler::<1, 2>::new([0]);
+        s.enqueue(1, TaskPriority::Normal).unwrap();
+        s.enqueue(2, TaskPriority::Normal).unwrap();
+        assert_eq!(
+            s.enqueue(3, TaskPriority::Normal),
+            Err(SchedulerError::Full)
+        );
+        s.remove(1).unwrap();
+        assert_eq!(s.queue_len(0), Some(1));
+        assert!(s.task(1).is_none());
+        // The freed slot is reusable, and only the remaining task is scheduled.
+        s.enqueue(3, TaskPriority::Normal).unwrap();
+        for _ in 0..4 {
+            assert_ne!(s.tick(0).unwrap(), Some(1));
+        }
+        assert_eq!(s.remove(1), Err(SchedulerError::UnknownTask));
     }
 }

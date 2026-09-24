@@ -32,6 +32,7 @@ pub mod shell;
 pub mod smmu;
 pub mod store;
 pub mod sync;
+pub mod thread;
 pub mod timer;
 pub mod uefi;
 pub mod usb;
