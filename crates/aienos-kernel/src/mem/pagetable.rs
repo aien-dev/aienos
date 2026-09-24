@@ -19,6 +19,54 @@ const PAGE_SIZE_U64: u64 = 1 << PAGE_SHIFT;
 pub trait FrameSource {
     fn allocate_frame(&mut self) -> Option<PhysAddr>;
     fn deallocate_frame(&mut self, frame: PhysAddr) -> bool;
+    fn frames_used(&self) -> Option<usize> {
+        None
+    }
+}
+
+/// Monotonic allocator over a firmware-reserved contiguous page pool.
+/// Frames are never returned to the pool after allocation.
+#[derive(Clone, Copy, Debug)]
+pub struct FixedFramePool {
+    base: PhysAddr,
+    capacity: usize,
+    used: usize,
+}
+
+impl FixedFramePool {
+    pub fn new(base: PhysAddr, capacity: usize) -> Option<Self> {
+        if !base.is_page_aligned() || capacity == 0 || capacity > (usize::MAX - base.0) / PAGE_SIZE
+        {
+            return None;
+        }
+        Some(Self {
+            base,
+            capacity,
+            used: 0,
+        })
+    }
+
+    pub const fn used(&self) -> usize {
+        self.used
+    }
+}
+
+impl FrameSource for FixedFramePool {
+    fn allocate_frame(&mut self) -> Option<PhysAddr> {
+        if self.used == self.capacity {
+            return None;
+        }
+        let frame = PhysAddr(self.base.0 + self.used * PAGE_SIZE);
+        self.used += 1;
+        Some(frame)
+    }
+
+    fn deallocate_frame(&mut self, _frame: PhysAddr) -> bool {
+        false
+    }
+    fn frames_used(&self) -> Option<usize> {
+        Some(self.used)
+    }
 }
 
 impl<const WORDS: usize> FrameSource for super::frame_allocator::BitmapFrameAllocator<WORDS> {
@@ -116,6 +164,10 @@ impl<F: FrameSource, M: TableMemory> PageTableBuilder<F, M> {
 
     pub const fn root(&self) -> PhysAddr {
         self.root
+    }
+
+    pub fn frames_used(&self) -> Option<usize> {
+        self.frames.frames_used()
     }
 
     /// Maps a page-aligned range, using 1 GiB or 2 MiB blocks where possible.
@@ -345,11 +397,7 @@ fn leaf_attributes(flags: MapFlags) -> u64 {
         MemoryAttribute::DeviceNgnre => MAIR_DEVICE_NGNRE,
     } as u64;
     let ap = if flags.user {
-        if flags.writable {
-            0b01
-        } else {
-            0b11
-        }
+        if flags.writable { 0b01 } else { 0b11 }
     } else if flags.writable {
         0b00
     } else {
@@ -427,6 +475,17 @@ mod tests {
     }
     fn builder() -> PageTableBuilder<Frames, Memory> {
         PageTableBuilder::new(Frames { next: 0x1000 }, Memory::default()).unwrap()
+    }
+
+    #[test]
+    fn fixed_pool_is_bounded_and_never_reuses_released_frames() {
+        let mut pool = FixedFramePool::new(PhysAddr(0x8000), 2).unwrap();
+        assert_eq!(pool.allocate_frame(), Some(PhysAddr(0x8000)));
+        assert_eq!(pool.allocate_frame(), Some(PhysAddr(0x9000)));
+        assert_eq!(pool.allocate_frame(), None);
+        assert!(!pool.deallocate_frame(PhysAddr(0x8000)));
+        assert_eq!(pool.used(), 2);
+        assert!(FixedFramePool::new(PhysAddr(0x8001), 2).is_none());
     }
 
     #[test]

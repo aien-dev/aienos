@@ -7,7 +7,7 @@
 //! and never admitted to Machine 1 before M3 can confine it.
 
 use aienos_kernel::acpi::{self, EcamWindow};
-use aienos_kernel::arch::aarch64::{counter_frequency_hz, counter_ticks, MmioReg};
+use aienos_kernel::arch::aarch64::{MmioReg, counter_frequency_hz, counter_ticks};
 use aienos_kernel::console::EarlyConsole;
 use aienos_kernel::display::Screen;
 use aienos_kernel::usb::hid::{BootKeyboardDecoder, KeyEvent, TextSink};
@@ -15,8 +15,8 @@ use aienos_kernel::usb::xhci::controller::{DmaMemory, Keyboard};
 use aienos_kernel::usb::xhci::{self, PCI_COMMAND_BUS_MASTER, PCI_COMMAND_MEMORY};
 use core::fmt::Write;
 use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
-use uefi::proto::pci::root_bridge::PciRootBridgeIo;
 use uefi::proto::pci::PciIoAddress;
+use uefi::proto::pci::root_bridge::PciRootBridgeIo;
 
 /// Seconds to wait for a line; `AIENOS_KEYBOARD_SECS` at build time.
 fn listen_secs() -> u64 {
@@ -36,6 +36,15 @@ pub struct XhciLocation {
     device: u8,
     function: u8,
     mmio: u64,
+}
+
+impl XhciLocation {
+    pub fn mmio_base(self) -> u64 {
+        self.mmio
+    }
+    pub fn ecam_location(self) -> (u16, u8) {
+        (self.segment, self.bus)
+    }
 }
 
 /// Walk every root bridge for the first xHCI controller (pre-exit only).
