@@ -64,12 +64,15 @@ NEXT HARD GATE:  recovery media -> QEMU regression boot -> M3 kernel isolation
 
 Public roadmap and contributor entry points: [ROADMAP.md](../ROADMAP.md).
 
-**Secure Boot (operator decision 2026-09-24, escalation trigger 1):** disabled
-for early development only, so unsigned experimental images can be tested. No
-other security mechanism is relaxed. Before daily use: operator-owned key,
-signed loader, signed kernel and system manifest, offline recovery key, and a
-known-good rollback image. Observed enabled on 2026-09-24; switching it off is
-a physical step in firmware setup.
+**Secure Boot (operator decisions 2026-09-24, escalation trigger 1):** it was
+disabled for the first native boot, which passed. Disabling it changed TPM
+PCR 7, so the TPM-sealed private-storage key and vault credential on Machine 1
+no longer unsealed and dependent services failed. **Secure Boot is back on**,
+and the secrets must not be re-sealed to ignore it. Next real-hardware boots
+wait for the owner-controlled boot chain: operator signing key, signed AIENOS
+loader and kernel, defined TPM PCR policy, independent recovery key, tested
+recovery, then secrets re-sealed to that policy. Development continues in QEMU
+(M1).
 
 **Accelerator lane:** device characterization (PCI identity, BAR layout,
 firmware interfaces, register discovery) is allowed now. Command submission,
