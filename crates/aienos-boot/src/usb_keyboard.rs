@@ -220,7 +220,8 @@ pub fn run(
                     input,
                     &aienos_kernel::shell::ShellContext {
                         conventional_memory_kb,
-                        exception_level,
+                        // Read live when the command runs, not cached at shell start.
+                        exception_level: aienos_kernel::arch::aarch64::current_el(),
                         report: boot_report,
                         uptime_ms,
                     },
