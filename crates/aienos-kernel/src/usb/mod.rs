@@ -7,6 +7,7 @@
 //! the xHCI data structures (TRBs, rings, contexts) a polled controller
 //! driver builds on (ADR 0012, SEED-0A experiment #1 `input.keyboard.usb`).
 
+pub mod audio;
 pub mod descriptor;
 pub mod hid;
 pub mod xhci;
