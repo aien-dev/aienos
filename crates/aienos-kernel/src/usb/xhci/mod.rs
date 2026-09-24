@@ -2,4 +2,6 @@
 //! driver, host-tested against the xHCI 1.2 specification. Register access
 //! and controller bring-up come later in the series and build on these.
 
+pub mod context;
+pub mod ring;
 pub mod trb;
