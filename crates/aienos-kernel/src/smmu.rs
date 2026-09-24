@@ -49,10 +49,13 @@ impl Ste {
     pub const fn bypass() -> Self {
         Self([1 | (0b100 << 1), 0, 0, 0, 0, 0, 0, 0])
     }
+    /// Stage-1 translate, stage-2 bypass. STE word 0 holds V (bit 0),
+    /// Config (bits 3:1, 0b101 = S1 translate / S2 bypass), S1Fmt (bits 5:4,
+    /// 0 = linear, one CD) and S1ContextPtr (bits 51:6, 64-byte aligned).
     pub const fn stage1(cd_address: u64) -> Self {
         Self([
-            1 | (0b001 << 1),
-            cd_address & 0x000f_ffff_ffff_ffc0,
+            1 | (0b101 << 1) | (cd_address & 0x000f_ffff_ffff_ffc0),
+            0,
             0,
             0,
             0,
@@ -78,6 +81,9 @@ impl ContextDescriptor {
             | (0b10 << 12)
             | (1 << 30)
             | (1 << 31)
+            // IPS (bits 34:32) = 0b101, a 48-bit output range: DMA windows
+            // above 4 GiB must translate (0 would limit it to 32 bits).
+            | (0b101 << 32)
             | (1 << 41)
             | (u64::from(asid) << 48);
         let word1 = ttb0 & 0x000f_ffff_ffff_fff0;
@@ -231,7 +237,21 @@ mod tests {
     fn descriptor_layouts() {
         assert_eq!(Ste::abort().0[0], 1);
         assert_eq!(Ste::bypass().0[0], 9);
-        assert_eq!(Ste::stage1(0x12340).0, [3, 0x12340, 0, 0, 0, 0, 0, 0]);
+        // Review fix: Config 0b101 (S1 translate) and S1ContextPtr in word 0.
+        let ste = Ste::stage1(0x1_2345_6780);
+        assert_eq!(ste.0[0] & 1, 1, "V");
+        assert_eq!(
+            (ste.0[0] >> 1) & 0b111,
+            0b101,
+            "Config = S1 translate, S2 bypass"
+        );
+        assert_eq!((ste.0[0] >> 4) & 0b11, 0, "S1Fmt linear");
+        assert_eq!(
+            ste.0[0] & 0x000f_ffff_ffff_ffc0,
+            0x1_2345_6780,
+            "S1ContextPtr"
+        );
+        assert_eq!(&ste.0[1..], &[0; 7]);
         let cd = ContextDescriptor::stage1(0x4000, 0x1234, 0xff00, 16).unwrap();
         assert_eq!(
             cd.0[0],
@@ -240,6 +260,7 @@ mod tests {
                 | (2 << 12)
                 | (1 << 30)
                 | (1 << 31)
+                | (0b101 << 32)
                 | (1 << 41)
                 | (0x1234_u64 << 48)
         );
