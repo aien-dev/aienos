@@ -38,12 +38,12 @@ only at M8. Status words: **done** = verified on this repository's evidence;
 | **M1** UEFI/QEMU substrate | Automated emulator boot proof | pending | No `qemu-system-aarch64` or AArch64 UEFI firmware on the host; UEFI images are format-checked only |
 | **M2A** Spark firmware handoff | Memory map into early allocator | built | PR #10 |
 | | GB10 PCI identity, BAR0, PMC_BOOT registers | built | PR #11 |
-| | CPU topology from the ACPI MADT (efficiency classes) and boot-core MIDR | built | This change |
+| | CPU topology from the ACPI MADT (efficiency classes) and boot-core MIDR | built | Parser tested on constructed tables; Linux shows boot cpu0 is a Cortex-A725 |
 | | Broader ACPI device discovery | pending | |
 | **M2B** Human bring-up console | GOP framebuffer text after firmware exit | built | PR #13 |
 | | UART at `0x16A00000` (bounded, Spark only) | built | PR #13; external reachability unknown |
 | | USB keyboard (xHCI + HID) | pending | |
-| **M2C** Hardware test automation | Exclusive Machine 1 key and ledger records in `aien-proof` | built | aien-sovereign-core |
+| **M2C** Hardware test automation | Exclusive Machine 1 key and ledger records in `aien-proof` | built | aien-sovereign-core PR #126: `aien-proof hold --resource machine-1 -- CMD` |
 | | Power/reset control, HDMI capture, USB input emulation | pending | Needs hardware chosen by the operator |
 | **M3** Kernel isolation | MMU, exceptions, interrupts, timer, scheduler, IPC/capabilities | pending | Scheduler consumes M2A CPU topology |
 | **M4** Storage and recovery | | pending | Host crates exist (`recovery`, `store`) |
