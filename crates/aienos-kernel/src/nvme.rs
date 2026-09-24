@@ -3,6 +3,8 @@
 
 use core::convert::TryInto;
 
+pub mod driver;
+
 pub const REG_CAP: u32 = 0x00;
 pub const REG_VS: u32 = 0x08;
 pub const REG_INTMS: u32 = 0x0c;
