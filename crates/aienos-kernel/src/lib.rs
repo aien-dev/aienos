@@ -26,6 +26,7 @@ pub mod pe;
 pub mod recovery;
 pub mod report;
 pub mod scheduler;
+pub mod shell;
 pub mod store;
 pub mod sync;
 pub mod timer;
