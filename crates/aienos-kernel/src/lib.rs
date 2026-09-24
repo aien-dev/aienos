@@ -15,6 +15,7 @@ pub mod arch;
 pub mod block;
 pub mod boot;
 pub mod budget;
+pub mod caps;
 pub mod console;
 pub mod crypto;
 pub mod display;
