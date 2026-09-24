@@ -14,6 +14,7 @@
 //!   /boot/efi/EFI/AIENOS/BOOTREPORT.TXT
 //!   /sys/firmware/efi/efivars/AienosBootReport-a1e05b0e-7c3d-4f51-9b6a-2d8e4c1f0a37
 
+use aienos_kernel::acpi;
 use aienos_kernel::arch::aarch64::{
     counter_frequency_hz, counter_ticks, EarlyUart, SPARK_16550_UART_BASE,
 };
@@ -28,6 +29,7 @@ use uefi::proto::media::file::{File, FileAttribute, FileMode};
 use uefi::proto::pci::root_bridge::PciRootBridgeIo;
 use uefi::proto::pci::PciIoAddress;
 use uefi::runtime::{ResetType, VariableAttributes, VariableVendor};
+use uefi::table::cfg::ConfigTableEntry;
 use uefi::{cstr16, guid};
 
 const REPORT_VENDOR: VariableVendor = VariableVendor(guid!("a1e05b0e-7c3d-4f51-9b6a-2d8e4c1f0a37"));
@@ -92,6 +94,50 @@ fn discover_gb10() -> Option<aienos_accel::Gb10Identity> {
             if let Some(identity) = probe_gb10(&mut root, address) {
                 return Some(identity);
             }
+        }
+    }
+    None
+}
+
+/// Reads a firmware ACPI table whose header is at `addr`.
+///
+/// # Safety
+/// `addr` must be zero or point to a mapped ACPI table left by firmware.
+unsafe fn table_at<'a>(addr: usize) -> Option<&'a [u8]> {
+    if addr == 0 {
+        return None;
+    }
+    let header = unsafe { core::slice::from_raw_parts(addr as *const u8, acpi::SDT_HEADER_LEN) };
+    let len = acpi::sdt_length(header)?;
+    if !(acpi::SDT_HEADER_LEN..=1 << 20).contains(&len) {
+        return None;
+    }
+    Some(unsafe { core::slice::from_raw_parts(addr as *const u8, len) })
+}
+
+/// Core inventory from the firmware MADT (RSDP, then XSDT, then "APIC").
+fn discover_cpu_topology() -> Option<acpi::CpuTopology> {
+    let rsdp = uefi::system::with_config_table(|entries| {
+        entries
+            .iter()
+            .find(|e| e.guid == ConfigTableEntry::ACPI2_GUID)
+            .map(|e| e.address as usize)
+    })?;
+    // SAFETY: firmware published this ACPI 2.0 RSDP, which is 36 bytes long.
+    let rsdp = unsafe { core::slice::from_raw_parts(rsdp as *const u8, 36) };
+    if &rsdp[..8] != b"RSD PTR " {
+        return None;
+    }
+    let xsdt_addr = u64::from_le_bytes(rsdp[24..32].try_into().ok()?) as usize;
+    // SAFETY: the RSDP points at the XSDT; its checksum is validated below.
+    let xsdt = acpi::checked_table(unsafe { table_at(xsdt_addr) }?, b"XSDT").ok()?;
+    for addr in acpi::xsdt_entries(xsdt) {
+        // SAFETY: XSDT entries point at firmware ACPI tables.
+        let Some(table) = (unsafe { table_at(addr as usize) }) else {
+            continue;
+        };
+        if &table[..4] == b"APIC" {
+            return acpi::madt_cpu_topology(table).ok();
         }
     }
     None
@@ -168,6 +214,8 @@ fn main() -> Status {
     let frequency_hz = counter_frequency_hz();
     let gb10 = discover_gb10();
     let framebuffer = discover_framebuffer();
+    let cpu = discover_cpu_topology();
+    let boot_midr = aienos_kernel::arch::aarch64::midr_el1();
 
     let mut pre = ReportBuf::<1024>::new();
     let _ = writeln!(pre, "AIENOS pre-exit report");
@@ -188,6 +236,26 @@ fn main() -> Status {
             let _ = writeln!(pre, "gb10: unavailable");
         }
     }
+    match cpu {
+        Some(t) => {
+            let _ = writeln!(pre, "cpu_cores: {}", t.cores);
+            for (class, count) in t.classes() {
+                let _ = writeln!(pre, "cpu_efficiency_class_{class}: {count}");
+            }
+            if t.unknown_class > 0 {
+                let _ = writeln!(pre, "cpu_efficiency_class_unknown: {}", t.unknown_class);
+            }
+        }
+        None => {
+            let _ = writeln!(pre, "cpu_topology: unavailable");
+        }
+    }
+    let _ = writeln!(
+        pre,
+        "boot_cpu_midr: {:#x} (part {:#05x})",
+        boot_midr,
+        aienos_kernel::arch::aarch64::midr_part(boot_midr)
+    );
     match framebuffer {
         Some(f) => {
             let _ = writeln!(
@@ -238,6 +306,7 @@ fn main() -> Status {
         largest_region,
         Some(timing),
         gb10,
+        cpu,
     );
 
     // 1. Screen: the display mode firmware set up, written directly.
