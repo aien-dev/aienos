@@ -11,6 +11,7 @@ pub mod kind {
     pub const SETUP_STAGE: u8 = 2;
     pub const DATA_STAGE: u8 = 3;
     pub const STATUS_STAGE: u8 = 4;
+    pub const ISOCH: u8 = 5;
     pub const LINK: u8 = 6;
     pub const ENABLE_SLOT: u8 = 9;
     pub const DISABLE_SLOT: u8 = 10;
@@ -36,6 +37,8 @@ pub const TOGGLE_CYCLE: u32 = 1 << 1;
 pub const ISP: u32 = 1 << 2;
 /// Interrupt on completion: post an event when this TRB completes.
 pub const IOC: u32 = 1 << 5;
+/// Continue a transfer descriptor on the next TRB.
+pub const CHAIN: u32 = 1 << 4;
 /// Immediate data: the parameter dwords hold the data (Setup Stage only).
 pub const IDT: u32 = 1 << 6;
 /// Data and Status Stage direction bit: set for device-to-host.
@@ -45,6 +48,8 @@ const SLOT_SHIFT: u32 = 24;
 /// Setup Stage transfer type (TRT) values, bits 17:16.
 const TRT_OUT: u32 = 2 << 16;
 const TRT_IN: u32 = 3 << 16;
+/// Isoch TRB Schedule Immediately, used when Frame ID is not selected.
+pub const SIA: u32 = 1 << 31;
 
 /// One 16-byte TRB as four little-endian dwords.
 #[repr(C, align(16))]
@@ -129,6 +134,22 @@ impl Trb {
     /// event on completion or on a short report.
     pub fn normal(buffer: u64, length: u32) -> Self {
         Self::new(buffer, length & 0x1_ffff, kind::NORMAL, IOC | ISP)
+    }
+
+    /// One isochronous OUT packet. SuperSpeed TBC/TLBPC are zero for an
+    /// endpoint without a companion descriptor; `last` terminates the batch.
+    pub fn isoch(buffer: u64, length: u32, frame_id: u16, sia: bool, last: bool) -> Self {
+        let mut flags =
+            (u32::from(frame_id & 0x7ff) << 20) | (u32::from(kind::ISOCH) << TYPE_SHIFT);
+        if sia {
+            flags |= SIA;
+        }
+        // One packet per TD: CHAIN would merge packets with different Frame
+        // IDs into a single TD. `last` only requests an interrupt on completion.
+        if last {
+            flags |= IOC;
+        }
+        Self::new(buffer, length & 0x1_ffff, kind::ISOCH, flags & !(0x7 << 7))
     }
 
     pub fn kind(&self) -> u8 {
@@ -349,5 +370,25 @@ mod tests {
         let link = Trb::link(0x4000);
         assert_eq!(link.kind(), kind::LINK);
         assert_ne!(link.0[3] & TOGGLE_CYCLE, 0);
+    }
+
+    #[test]
+    fn isoch_trb_encodes_frame_id_and_batch_flags() {
+        let first = Trb::isoch(0x1234_5678_9abc_def0, 176, 0x456, false, false);
+        assert_eq!(first.kind(), kind::ISOCH);
+        assert_eq!(first.pointer(), 0x1234_5678_9abc_def0);
+        assert_eq!(first.0[2], 176);
+        assert_eq!((first.0[3] >> 20) & 0x7ff, 0x456);
+        assert_eq!(
+            first.0[3] & CHAIN,
+            0,
+            "each isochronous packet is its own TD"
+        );
+        assert_eq!(first.0[3] & IOC, 0);
+        assert_eq!(first.0[3] & (7 << 7), 0, "SuperSpeed companion fields zero");
+        let last = Trb::isoch(0x2000, 180, 7, true, true);
+        assert_ne!(last.0[3] & SIA, 0);
+        assert_ne!(last.0[3] & IOC, 0);
+        assert_eq!(last.0[3] & CHAIN, 0);
     }
 }

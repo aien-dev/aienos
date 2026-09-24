@@ -1,7 +1,9 @@
 //! Host-testable USB Audio Class output descriptor and PCM helpers.
 //!
 //! This parses the common single-configuration UAC1/UAC2 layout. It does not
-//! submit transfers; an xHCI audio engine can use the selected stream later.
+//! touch controller registers; packet scheduling is host-testable.
+
+use crate::usb::xhci::trb::Trb;
 
 const CONFIG: u8 = 2;
 const INTERFACE: u8 = 4;
@@ -222,6 +224,13 @@ impl PcmFramer {
         self.remainder = numerator % 1_000_000;
         frames as usize * usize::from(self.channels) * usize::from(self.sample_bytes)
     }
+    /// Bytes the next packet will need, without advancing the framer.
+    pub fn peek_packet_bytes(&self) -> usize {
+        let numerator = u64::from(self.rate) * u64::from(self.interval_us) + self.remainder;
+        (numerator / 1_000_000) as usize
+            * usize::from(self.channels)
+            * usize::from(self.sample_bytes)
+    }
     /// Fill one packet from interleaved PCM, wrapping the caller's ring cursor.
     pub fn fill_i16(&mut self, ring: &[i16], cursor: &mut usize, out: &mut [i16]) -> usize {
         let bytes = self.next_packet_bytes();
@@ -236,6 +245,74 @@ impl PcmFramer {
         }
         samples
     }
+}
+
+/// Prepare `packets.len()` service intervals ahead of `controller_frame`.
+/// Each PCM output chunk has `packet_stride_samples` samples; its DMA address
+/// is supplied in the matching entry. Frame IDs wrap at the xHCI 11-bit field.
+pub struct AudioBatch<'a> {
+    pub controller_frame: u16,
+    pub lead_frames: u16,
+    pub packets: &'a [(u64, u16)],
+    pub pcm_ring: &'a [i16],
+    pub cursor: &'a mut usize,
+    pub pcm: &'a mut [i16],
+    pub packet_stride_samples: usize,
+    pub trbs: &'a mut [Trb],
+}
+
+pub fn schedule_isoch_ahead(framer: &mut PcmFramer, batch: &mut AudioBatch<'_>) -> usize {
+    let AudioBatch {
+        controller_frame,
+        lead_frames,
+        packets,
+        pcm_ring,
+        cursor,
+        pcm,
+        packet_stride_samples,
+        trbs,
+    } = batch;
+    let stride = *packet_stride_samples;
+    if stride == 0 {
+        return 0;
+    }
+    let slots = packets.len().min(trbs.len()).min(pcm.len() / stride);
+    let mut count = 0;
+    while count < slots {
+        // Check before consuming PCM: a packet that doesn't fit its buffer or
+        // its PCM chunk stops scheduling here, rather than being truncated
+        // while the cursor skips the samples that were cut.
+        let needed = framer.peek_packet_bytes();
+        if needed > usize::from(packets[count].1) || needed > stride * 2 {
+            break;
+        }
+        let start = count * stride;
+        let out = &mut pcm[start..start + stride];
+        let samples = framer.fill_i16(pcm_ring, cursor, out);
+        trbs[count] = Trb::isoch(
+            packets[count].0,
+            (samples * 2) as u32,
+            controller_frame
+                .wrapping_add(*lead_frames)
+                .wrapping_add(count as u16)
+                & 0x7ff,
+            false,
+            false,
+        );
+        count += 1;
+    }
+    if count > 0 {
+        // Interrupt on completion of the last packet actually scheduled.
+        let last = &trbs[count - 1];
+        trbs[count - 1] = Trb::isoch(
+            last.0[0] as u64 | (last.0[1] as u64) << 32,
+            last.0[2] & 0x1_ffff,
+            ((last.0[3] >> 20) & 0x7ff) as u16,
+            false,
+            true,
+        );
+    }
+    count
 }
 
 /// Deterministic 16-bit sine approximation using a parabolic fixed-point wave.
@@ -308,6 +385,45 @@ mod tests {
         assert_eq!(frames, 44100);
         assert!(saw44 && saw45);
     }
+
+    #[test]
+    fn stereo_44100_scheduler_emits_one_second_of_pcm_bytes() {
+        let mut framer = PcmFramer::new(44_100, 2, 2, 1000).unwrap();
+        let mut cursor = 0;
+        let source = [7i16; 256];
+        let mut output = [0i16; 90];
+        let mut total = 0;
+        for _ in 0..1000 {
+            let n = framer.fill_i16(&source, &mut cursor, &mut output);
+            total += n * 2;
+        }
+        assert_eq!(total, 176_400);
+    }
+
+    #[test]
+    fn isoch_schedule_stays_ahead_and_wraps_frame_id() {
+        let mut framer = PcmFramer::new(48_000, 2, 2, 1000).unwrap();
+        let packets = [(0x1000, 192), (0x2000, 192)];
+        let mut pcm = [0i16; 192];
+        let mut trbs = [Trb::default(); 2];
+        let mut cursor = 0;
+        let mut batch = AudioBatch {
+            controller_frame: 2046,
+            lead_frames: 2,
+            packets: &packets,
+            pcm_ring: &[],
+            cursor: &mut cursor,
+            pcm: &mut pcm,
+            packet_stride_samples: 96,
+            trbs: &mut trbs,
+        };
+        let n = schedule_isoch_ahead(&mut framer, &mut batch);
+        assert_eq!(n, 2);
+        assert_eq!((trbs[0].0[3] >> 20) & 0x7ff, 0);
+        assert_eq!((trbs[1].0[3] >> 20) & 0x7ff, 1);
+        assert_eq!(trbs[0].0[2], 192);
+        assert_eq!(trbs[1].0[2], 192);
+    }
     #[test]
     fn ring_wraps_and_tone_is_bounded() {
         let mut f = PcmFramer::new(48000, 2, 2, 1000).unwrap();
@@ -346,5 +462,39 @@ mod tests {
             .expect("FORMAT_TYPE_I present");
         v[at] = 7;
         let _ = select_output(&v);
+    }
+    #[test]
+    fn oversized_packet_is_not_truncated_and_zero_stride_schedules_nothing() {
+        // Review regression: 96 kHz stereo 16-bit needs 384 B per 1 ms packet.
+        let mut framer = PcmFramer::new(96_000, 2, 2, 1000).unwrap();
+        let packets = [(0x1000, 192)];
+        let ring = [7i16; 512];
+        let mut pcm = [0i16; 256];
+        let mut trbs = [Trb::default(); 1];
+        let mut cursor = 0;
+        let mut batch = AudioBatch {
+            controller_frame: 0,
+            lead_frames: 1,
+            packets: &packets,
+            pcm_ring: &ring,
+            cursor: &mut cursor,
+            pcm: &mut pcm,
+            packet_stride_samples: 256,
+            trbs: &mut trbs,
+        };
+        assert_eq!(schedule_isoch_ahead(&mut framer, &mut batch), 0);
+        assert_eq!(cursor, 0, "no samples consumed");
+        let mut cursor = 0;
+        let mut batch = AudioBatch {
+            controller_frame: 0,
+            lead_frames: 1,
+            packets: &[(0x1000, 1024)],
+            pcm_ring: &ring,
+            cursor: &mut cursor,
+            pcm: &mut pcm,
+            packet_stride_samples: 0,
+            trbs: &mut trbs,
+        };
+        assert_eq!(schedule_isoch_ahead(&mut framer, &mut batch), 0);
     }
 }
