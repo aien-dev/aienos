@@ -20,6 +20,7 @@ pub mod caps;
 pub mod console;
 pub mod crypto;
 pub mod display;
+pub mod dma_gate;
 pub mod fatal;
 pub mod gic;
 pub mod infer;

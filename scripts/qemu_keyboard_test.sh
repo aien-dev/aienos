@@ -25,24 +25,47 @@ expected="abc"
 attempts="${AIENOS_KEYBOARD_ATTEMPTS:-3}"
 boot_timeout="${AIENOS_QEMU_TIMEOUT:-180}"
 machine="virt,virtualization=on,gic-version=3"
-if [[ "${AIENOS_QEMU_SMMU:-0}" == "1" ]]; then
-    machine+=",iommu=smmuv3"
-fi
 
-# Without an SMMU the keyboard capability is fail-closed, so the identity-DMA
-# path is only reachable behind the debug bypass feature. The confined path is
-# covered by qemu_smmu_test.sh (AIENOS_QEMU_SMMU=1).
-default_features="usb-keyboard"
-if [[ "${AIENOS_QEMU_SMMU:-0}" != "1" ]]; then
-    default_features="usb-keyboard,debug-xhci-without-smmu"
+# DMA mode (M3 rule: no SMMU confinement means no DMA).
+#   default                    QEMU SMMUv3 (iommu=smmuv3); the xHCI gets DMA
+#                              only through a translated SMMU stream.
+#   AIENOS_QEMU_SMMU=0         no SMMU, normal build: the keyboard must stay
+#                              unavailable with bus mastering off (fail-closed).
+#   AIENOS_UNSAFE_DMA_BYPASS=1 no SMMU, UNSAFE debug build that lets the xHCI
+#                              DMA to physical memory unconfined. QEMU
+#                              debugging only; never part of verify_all.sh.
+bypass_feature="unsafe-debug-dma-without-smmu"
+if [[ "${AIENOS_UNSAFE_DMA_BYPASS:-0}" == "1" ]]; then
+    mode="unsafe-bypass"
+    default_features="usb-keyboard,${bypass_feature}"
+    target_dir="target/qemu-keyboard-unsafe-dma-bypass"
+    echo "################################################################"
+    echo "WARNING: AIENOS_UNSAFE_DMA_BYPASS=1: building ${bypass_feature}."
+    echo "WARNING: xHCI DMA runs WITHOUT SMMU confinement. QEMU debug only."
+    echo "WARNING: this run proves nothing about DMA isolation."
+    echo "################################################################"
+elif [[ "${AIENOS_QEMU_SMMU:-1}" == "1" ]]; then
+    mode="smmu"
+    machine+=",iommu=smmuv3"
+    default_features="usb-keyboard"
+    target_dir="target/qemu-keyboard"
+else
+    mode="fail-closed"
+    default_features="usb-keyboard"
+    target_dir="target/qemu-keyboard"
+fi
+features="${AIENOS_BUILD_FEATURES:-$default_features}"
+if [[ "${mode}" != "unsafe-bypass" && ",${features}," == *",${bypass_feature},"* ]]; then
+    echo "STOP: ${bypass_feature} requested without AIENOS_UNSAFE_DMA_BYPASS=1"
+    exit 2
 fi
 
 # Own target directory: a keyboard-enabled image never lands where hardware
 # staging or the other tests pick up the handoff image.
 commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 AIENOS_COMMIT="${commit}" AIENOS_RESTART_SECS=1 AIENOS_KEYBOARD_SECS=60 cargo build --quiet --release \
-    -p aienos-boot --target aarch64-unknown-uefi --features "${AIENOS_BUILD_FEATURES:-$default_features}" --bin aienos-handoff \
-    --target-dir target/qemu-keyboard
+    -p aienos-boot --target aarch64-unknown-uefi --features "${features}" --bin aienos-handoff \
+    --target-dir "${target_dir}"
 
 work="$(mktemp -d)"
 qemu_pid=""
@@ -54,7 +77,7 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "${work}/esp/EFI/BOOT" "${work}/esp/EFI/AIENOS"
 touch "${work}/esp/EFI/AIENOS/BOOTREPORT.TXT"
-cp target/qemu-keyboard/aarch64-unknown-uefi/release/aienos-handoff.efi "${work}/esp/EFI/BOOT/BOOTAA64.EFI"
+cp "${target_dir}/aarch64-unknown-uefi/release/aienos-handoff.efi" "${work}/esp/EFI/BOOT/BOOTAA64.EFI"
 
 serial_has() { tr -d '\r' 2>/dev/null <"${work}/serial.log" | grep -q -- "$1"; }
 qemu_running() { kill -0 "${qemu_pid}" 2>/dev/null; }
@@ -151,21 +174,48 @@ check() { # description, pattern
         failed=1
     fi
 }
-echo "attempts ${attempt}, ${elapsed} s (commit ${commit:0:12}), sent lines: abc, help, el, mem, exit"
+check_absent() { # description, pattern
+    if grep -q -- "$2" "${work}/serial.txt"; then
+        echo "FAIL  $1"
+        failed=1
+    else
+        echo "PASS  $1"
+    fi
+}
+echo "attempts ${attempt}, ${elapsed} s (commit ${commit:0:12}), dma mode ${mode}, sent lines: abc, help, el, mem, exit"
 check "left firmware and entered the kernel" "kernel: alive"
 check "xHCI controller found before exit" "keyboard: xhci "
-check "keyboard attached by the AIENOS driver" "keyboard: ready"
-if [[ "${AIENOS_QEMU_SMMU:-0}" == "1" ]]; then
-    check "IORT stream configured for xHCI DMA" "smmu: enabled"
-    check "xHCI DMA window translated" "smmu_dma_window: xhci only, translation active"
+check "PCI segment swept for bus masters after exit" "dma_sweep: seg "
+check_absent "no endpoint left with bus master stuck on" "dma_sweep: bme STUCK"
+check "xHCI bus master off before the DMA gate" "xhci_pci: command=0x[0-9a-f]* bus_master=off"
+if [[ "${mode}" == "fail-closed" ]]; then
+    check "xHCI DMA denied without an SMMU" "dma_gate: xhci denied (NoSmmu), bus master stays off"
+    check "keyboard fail-closed without an SMMU" "keyboard: unavailable (SMMU DMA isolation not active)"
+    check_absent "xHCI never granted DMA" "dma_gate: xhci granted"
+    check_absent "keyboard never attached" "keyboard: ready"
+else
+    check "keyboard attached by the AIENOS driver" "keyboard: ready"
+    if [[ "${mode}" == "smmu" ]]; then
+        check "IORT stream configured for xHCI DMA" "smmu: enabled"
+        check "xHCI DMA window translated" "smmu_dma_window: xhci only, translation active"
+        check "xHCI DMA granted only as confined" "dma_gate: xhci granted (Confined), bus master on"
+    else
+        check "unsafe bypass build announced on serial" "WARNING: UNSAFE DMA BYPASS BUILD"
+        check "unsafe bypass grant announced on serial" "WARNING: UNSAFE DMA BYPASS ACTIVE"
+        check "xHCI DMA granted through the unsafe bypass" "dma_gate: xhci granted (UnsafeBypass)"
+    fi
+    check "typed text echoed on the serial console" "keyboard_echo: ${expected}"
+    check "line ended by Enter and reported" "keyboard_line: ${expected}\$"
+    check "keyboard phase finished on Enter" "keyboard: done (enter)"
+    check "help command output" "commands: help mem el report uptime exit"
+    check "EL command output" "EL1"
+    check "memory command output" "conventional_memory_kb:"
+    check "keyboard phase finished on exit" "keyboard: done (exit)"
+    check "xHCI bus master revoked after the keyboard phase" "dma_gate: xhci bus master revoked"
 fi
-check "typed text echoed on the serial console" "keyboard_echo: ${expected}"
-check "line ended by Enter and reported" "keyboard_line: ${expected}\$"
-check "keyboard phase finished on Enter" "keyboard: done (enter)"
-check "help command output" "commands: help mem el report uptime exit"
-check "EL command output" "EL1"
-check "memory command output" "conventional_memory_kb:"
-check "keyboard phase finished on exit" "keyboard: done (exit)"
+if [[ "${mode}" != "unsafe-bypass" ]]; then
+    check_absent "no unsafe DMA bypass in this image" "UNSAFE DMA BYPASS"
+fi
 if grep -qE "report_kind: (panic|fault)" "${work}/serial.txt"; then
     echo "FAIL  panic or fault reported"
     failed=1
@@ -175,4 +225,7 @@ if [[ "${failed}" != 0 || -n "${AIENOS_QEMU_VERBOSE:-}" ]]; then
     echo "---- serial console ----"
     cat "${work}/serial.txt"
 fi
-[[ "${failed}" == 0 ]] && echo "QEMU_KEYBOARD: PASS" || { echo "QEMU_KEYBOARD: FAIL"; exit 1; }
+if [[ "${mode}" == "unsafe-bypass" ]]; then
+    echo "WARNING: this was an UNSAFE DMA BYPASS run (no SMMU confinement)."
+fi
+[[ "${failed}" == 0 ]] && echo "QEMU_KEYBOARD: PASS (${mode})" || { echo "QEMU_KEYBOARD: FAIL (${mode})"; exit 1; }

@@ -5,14 +5,20 @@
 //! Built only with the `usb-keyboard` feature, which the QEMU keyboard test
 //! enables and hardware staging does not: the candidate is proven in QEMU
 //! and never admitted to Machine 1 before M3 can confine it.
+//!
+//! DMA rule (M3): no SMMU confinement means no DMA. After firmware exit
+//! [`take_over_dma`] clears Bus Master Enable on every endpoint of the
+//! controller's PCI segment before any SMMU or driver setup, and [`run`] sets
+//! it on the xHCI again only when [`dma_gate::dma_grant`] allows it.
 
 use aienos_kernel::acpi::{self, EcamWindow};
 use aienos_kernel::arch::aarch64::{counter_frequency_hz, counter_ticks, MmioReg};
 use aienos_kernel::console::EarlyConsole;
 use aienos_kernel::display::Screen;
+use aienos_kernel::dma_gate::{self, BusMasterSweep, DmaGrant, PciConfig, PCI_COMMAND};
 use aienos_kernel::usb::hid::{BootKeyboardDecoder, KeyEvent};
+use aienos_kernel::usb::xhci;
 use aienos_kernel::usb::xhci::controller::{DmaMemory, Keyboard};
-use aienos_kernel::usb::xhci::{self, PCI_COMMAND_BUS_MASTER, PCI_COMMAND_MEMORY};
 use core::fmt::Write;
 use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
 use uefi::proto::pci::root_bridge::PciRootBridgeIo;
@@ -25,7 +31,10 @@ fn listen_secs() -> u64 {
         .unwrap_or(30)
 }
 
-const DEBUG_XHCI_WITHOUT_SMMU: bool = cfg!(feature = "debug-xhci-without-smmu");
+/// Printed on every boot of an image built with the unsafe DMA bypass.
+const UNSAFE_BYPASS_BANNER: &str =
+    "\nWARNING: UNSAFE DMA BYPASS BUILD (unsafe-debug-dma-without-smmu): \
+    xHCI DMA may run WITHOUT SMMU confinement. Debug only, QEMU only.\n";
 
 /// DMA memory for the driver, used only after firmware exit.
 static mut DMA: DmaMemory = DmaMemory::new();
@@ -133,21 +142,108 @@ fn say(screen: &mut Option<Screen>, text: &str) {
     }
 }
 
-/// Enable memory decode and bus mastering through ECAM: firmware may have
-/// turned them off when it stopped its own USB driver at exit.
-fn enable_controller(ecam: &EcamWindow, at: &XhciLocation) -> bool {
-    let Some(addr) = ecam.config_address(at.bus, at.device, at.function, 0x04) else {
-        return false;
-    };
-    let command = MmioReg::<u16>::new(addr as usize);
-    command.write(command.read() | PCI_COMMAND_MEMORY | PCI_COMMAND_BUS_MASTER);
-    true
+/// Config space of one ECAM window, reached through the kernel identity map.
+/// Only valid after `enter_kernel_mmu` mapped the window as device memory.
+struct Ecam(EcamWindow);
+
+impl PciConfig for Ecam {
+    fn read32(&mut self, bus: u8, device: u8, function: u8, offset: u16) -> Option<u32> {
+        let addr = self.0.config_address(bus, device, function, offset)?;
+        Some(MmioReg::<u32>::new(addr as usize).read())
+    }
+    fn write16(&mut self, bus: u8, device: u8, function: u8, offset: u16, value: u16) {
+        if let Some(addr) = self.0.config_address(bus, device, function, offset) {
+            MmioReg::<u16>::new(addr as usize).write(value);
+        }
+    }
+}
+
+impl Ecam {
+    fn command(&mut self, at: &XhciLocation) -> Option<u16> {
+        self.read32(at.bus, at.device, at.function, PCI_COMMAND)
+            .map(|v| v as u16)
+    }
+    fn set_command(&mut self, at: &XhciLocation, value: u16) {
+        self.write16(at.bus, at.device, at.function, PCI_COMMAND, value);
+    }
+}
+
+/// What [`take_over_dma`] did to the controller's PCI segment.
+#[derive(Clone, Copy)]
+pub struct DmaTakeover {
+    window: EcamWindow,
+    sweep: BusMasterSweep,
+}
+
+/// Post-exit, before any SMMU or driver setup: clear Bus Master Enable on
+/// every endpoint in the xHCI's ECAM window, so every device there starts
+/// with DMA off. `None` (DMA state unknown, keyboard stays unavailable) when
+/// there is no controller or no ECAM window for it.
+pub fn take_over_dma(xhci: Option<XhciLocation>, mcfg: Option<&[u8]>) -> Option<DmaTakeover> {
+    let at = xhci?;
+    let window = acpi::mcfg_window(mcfg?, at.segment, at.bus)
+        .ok()
+        .flatten()?;
+    let sweep = dma_gate::sweep_bus_master(&mut Ecam(window), window.start_bus, window.end_bus);
+    Some(DmaTakeover { window, sweep })
+}
+
+fn report_takeover(screen: &mut Option<Screen>, takeover: &DmaTakeover) {
+    let (w, s) = (&takeover.window, &takeover.sweep);
+    let mut line = aienos_kernel::report::ReportBuf::<256>::new();
+    let _ = writeln!(
+        line,
+        "dma_sweep: seg {:04x} bus {:02x}-{:02x} functions={} bridges={} bridges_bme={} \
+         endpoints_bme_found={} still_enabled={}",
+        w.segment,
+        w.start_bus,
+        w.end_bus,
+        s.functions,
+        s.bridges,
+        s.bridges_bus_master,
+        s.endpoints_bus_master,
+        s.still_enabled
+    );
+    say(screen, line.as_str());
+    for f in s.findings() {
+        let mut entry = aienos_kernel::report::ReportBuf::<128>::new();
+        let _ = writeln!(
+            entry,
+            "dma_sweep: bme {} {:04x}:{:02x}:{:02x}.{} command {:#06x} -> {:#06x}",
+            if f.cleared() { "cleared" } else { "STUCK" },
+            w.segment,
+            f.at.bus,
+            f.at.device,
+            f.at.function,
+            f.command_before,
+            f.command_after
+        );
+        say(screen, entry.as_str());
+    }
+}
+
+/// Clear Bus Master Enable on the controller again (revoke its DMA).
+fn revoke_dma(screen: &mut Option<Screen>, ecam: &mut Ecam, at: &XhciLocation) {
+    if let Some(command) = ecam.command(at) {
+        ecam.set_command(at, dma_gate::without_bus_master(command));
+    }
+    let off = ecam
+        .command(at)
+        .is_some_and(|c| !dma_gate::bus_master_enabled(c));
+    say(
+        screen,
+        if off {
+            "dma_gate: xhci bus master revoked\n"
+        } else {
+            "dma_gate: xhci bus master revoke FAILED\n"
+        },
+    );
 }
 
 /// Post-exit: bring up the keyboard and echo keys until Enter or timeout.
 pub fn run(
     xhci: Option<XhciLocation>,
-    mcfg: Option<&[u8]>,
+    takeover: Option<DmaTakeover>,
     screen: &mut Option<Screen>,
     conventional_memory_kb: u64,
     _exception_level: u8,
@@ -157,6 +253,9 @@ pub fn run(
     smmu_stream_id: Option<u32>,
     smmu_events: *const [[u64; 4]; 16],
 ) {
+    if aienos_boot::UNSAFE_DMA_BYPASS {
+        say(screen, UNSAFE_BYPASS_BANNER);
+    }
     let mut line = aienos_kernel::report::ReportBuf::<512>::new();
     let Some(at) = xhci else {
         say(screen, "\nkeyboard: unavailable (no xHCI controller)\n");
@@ -168,34 +267,78 @@ pub fn run(
         at.segment, at.bus, at.device, at.function, at.mmio
     );
     say(screen, line.as_str());
-    if !smmu_ready && !DEBUG_XHCI_WITHOUT_SMMU {
+    let Some(takeover) = takeover else {
         say(
             screen,
-            "keyboard: unavailable (SMMU DMA isolation not active)\n",
+            "keyboard: unavailable (no ECAM window for the controller; DMA not granted)\n",
+        );
+        return;
+    };
+    report_takeover(screen, &takeover);
+    let mut ecam = Ecam(takeover.window);
+    let Some(command) = ecam.command(&at) else {
+        say(
+            screen,
+            "keyboard: unavailable (xHCI config space unreadable)\n",
+        );
+        return;
+    };
+    let mut state = aienos_kernel::report::ReportBuf::<96>::new();
+    let _ = writeln!(
+        state,
+        "xhci_pci: command={command:#06x} bus_master={}",
+        if dma_gate::bus_master_enabled(command) {
+            "on"
+        } else {
+            "off"
+        }
+    );
+    say(screen, state.as_str());
+    if dma_gate::bus_master_enabled(command) {
+        say(
+            screen,
+            "keyboard: unavailable (xHCI bus master would not clear)\n",
         );
         return;
     }
-    let dma_mode = if smmu_ready {
-        "smmu-translated"
-    } else {
-        "debug-identity"
+    let grant = match dma_gate::dma_grant(
+        smmu_ready,
+        smmu_base.is_some(),
+        aienos_boot::UNSAFE_DMA_BYPASS,
+    ) {
+        Ok(grant) => grant,
+        Err(denied) => {
+            let mut msg = aienos_kernel::report::ReportBuf::<160>::new();
+            let _ = writeln!(
+                msg,
+                "dma_gate: xhci denied ({denied:?}), bus master stays off\n\
+                 keyboard: unavailable (SMMU DMA isolation not active)"
+            );
+            say(screen, msg.as_str());
+            return;
+        }
     };
-    let mut mode = aienos_kernel::report::ReportBuf::<128>::new();
+    let dma_mode = match grant {
+        DmaGrant::Confined => "smmu-translated",
+        DmaGrant::UnsafeBypass => {
+            say(
+                screen,
+                "WARNING: UNSAFE DMA BYPASS ACTIVE: no SMMU on this machine, xHCI DMA \
+                 reaches physical memory UNCONFINED (QEMU debug only)\n",
+            );
+            "UNSAFE-identity-no-smmu"
+        }
+    };
+    let mut mode = aienos_kernel::report::ReportBuf::<192>::new();
     let _ = writeln!(
         mode,
-        "xhci_debug: dma_mode={dma_mode} dma_base={:#x} bytes={}",
+        "dma_gate: xhci granted ({grant:?}), bus master on\n\
+         xhci_debug: dma_mode={dma_mode} dma_base={:#x} bytes={}",
         core::ptr::addr_of!(DMA) as usize,
         core::mem::size_of::<DmaMemory>()
     );
+    ecam.set_command(&at, dma_gate::with_bus_master(command));
     say(screen, mode.as_str());
-    let ecam = mcfg.and_then(|t| acpi::mcfg_window(t, at.segment, at.bus).ok().flatten());
-    if !ecam.is_some_and(|w| enable_controller(&w, &at)) {
-        say(
-            screen,
-            "keyboard: unavailable (no ECAM window for the controller)\n",
-        );
-        return;
-    }
     // SAFETY: firmware has exited and released the controller; DMA is used
     // by nothing else, is identity-mapped, and lives for the whole boot.
     let started = unsafe { Keyboard::start(at.mmio, core::ptr::addr_of_mut!(DMA)) };
@@ -205,6 +348,7 @@ pub fn run(
             let mut msg = aienos_kernel::report::ReportBuf::<512>::new();
             let _ = writeln!(msg, "keyboard: unavailable ({e:?})");
             say(screen, msg.as_str());
+            revoke_dma(screen, &mut ecam, &at);
             if let Some(base) = smmu_base {
                 let reg = |offset| MmioReg::<u32>::new(base as usize + offset).read();
                 aienos_kernel::arch::aarch64::clean_invalidate_dcache_range(
@@ -312,4 +456,5 @@ pub fn run(
     };
     let _ = writeln!(end, "\nkeyboard: done ({reason})",);
     say(screen, end.as_str());
+    revoke_dma(screen, &mut ecam, &at);
 }

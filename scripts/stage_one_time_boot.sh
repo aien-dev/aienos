@@ -29,7 +29,7 @@ fi
 commit="$(git rev-parse HEAD)"
 
 AIENOS_COMMIT="${commit}" cargo build --quiet --release -p aienos-boot \
-    --target aarch64-unknown-uefi --features handoff --bin aienos-handoff
+    --target aarch64-unknown-uefi --features handoff,hardware-staging --bin aienos-handoff
 cargo run --quiet --release -p aienos-evidence -- verify-efi "${image}"
 
 if [[ -r "${secure_boot_var}" ]] && [[ "$(od -An -t u1 -j 4 -N 1 "${secure_boot_var}" | tr -d ' ')" == "1" ]]; then

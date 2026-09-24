@@ -18,7 +18,19 @@ handoff = ["uefi-base", "dep:aienos-kernel", "dep:aienos-accel", "uefi/alloc"]
 # SEED-0A candidate: polled USB keyboard after firmware exit (ADR 0012).
 # Only the QEMU keyboard test enables it; hardware staging never does.
 usb-keyboard = ["handoff"]
-debug-xhci-without-smmu = ["usb-keyboard"]
+# Marks an image built for Machine 1 (native hardware) staging.
+# scripts/stage_one_time_boot.sh builds with it. It adds no code; it exists so
+# unsafe debug features refuse to compile into a hardware image.
+hardware-staging = ["handoff"]
+# UNSAFE. DEBUG ONLY. QEMU ONLY. Lets the xHCI keyboard run DMA straight to
+# physical memory, with NO SMMU confinement, when the platform has no SMMU
+# at all. It breaks the M3 rule "no SMMU confinement means no DMA" and exists
+# only to debug the xHCI driver in a QEMU machine without iommu=smmuv3. It
+# never applies when an SMMU exists but failed to initialise, it prints a
+# warning on every boot, and it is a compile error together with
+# `hardware-staging`. Reach it only through AIENOS_UNSAFE_DMA_BYPASS=1 in
+# scripts/qemu_keyboard_test.sh.
+unsafe-debug-dma-without-smmu = ["usb-keyboard"]
 
 [dependencies]
 uefi = { version = "0.41", default-features = false, optional = true }

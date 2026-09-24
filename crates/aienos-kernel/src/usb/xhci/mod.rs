@@ -13,8 +13,7 @@ pub mod trb;
 /// programming interface xHCI (0x30).
 pub const XHCI_CLASS_CODE: u32 = 0x0c_03_30;
 /// PCI command register bits the driver needs: memory decode and DMA.
-pub const PCI_COMMAND_MEMORY: u16 = 1 << 1;
-pub const PCI_COMMAND_BUS_MASTER: u16 = 1 << 2;
+pub use crate::dma_gate::{PCI_COMMAND_BUS_MASTER, PCI_COMMAND_MEMORY};
 
 /// Base of an xHCI controller's register block from its PCI header: the
 /// class/revision dword (offset 0x08) and BAR0/BAR1 (offsets 0x10, 0x14).
