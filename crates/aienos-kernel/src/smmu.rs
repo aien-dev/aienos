@@ -225,6 +225,7 @@ fn submit_raw<R: Registers>(
 /// # Safety
 /// All descriptor and queue pointers must address live, aligned, physically
 /// contiguous RAM visible to the SMMU. `base` must be mapped device memory.
+#[allow(clippy::too_many_arguments)]
 pub unsafe fn configure_linear_stream(
     regs: &mut MmioRegisters,
     stream_id: u32,
