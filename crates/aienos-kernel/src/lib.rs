@@ -19,6 +19,7 @@ pub mod gic;
 pub mod mem;
 pub mod recovery;
 pub mod report;
+pub mod scheduler;
 pub mod store;
 pub mod sync;
 pub mod timer;
