@@ -143,8 +143,18 @@ impl<D: BlockDevice> BlockStore<D> {
         if self.generation == 0 {
             return Ok(None);
         }
-        let mut b = alloc::vec![0; self.device.block_size() as usize];
+        let size = self.device.block_size() as usize;
+        if self.length > size.saturating_sub(84)
+            || self.wal_lba < 2
+            || self.wal_lba >= self.device.block_count()
+        {
+            return Err(BlockError::InvalidInput);
+        }
+        let mut b = alloc::vec![0; size];
         self.device.read_blocks(self.wal_lba, &mut b)?;
+        if &b[..8] != WAL_MAGIC || get_u32(&b, 16) as usize != self.length {
+            return Err(BlockError::InvalidInput);
+        }
         let data = &b[52..52 + self.length];
         if sha256::hash(data) != self.hash {
             return Err(BlockError::DeviceError);
@@ -356,14 +366,25 @@ mod tests {
         let mut formatted = BlockStore::format(RamDisk::new(256, 12).unwrap()).unwrap();
         formatted.write_extent(b"old state").unwrap();
         let base = formatted.into_device();
-        for blocks in 0..=2 {
-            let mut store = BlockStore::open(base.clone()).unwrap();
-            store.device.fail_after_blocks(Some(blocks));
-            let _ = store.write_extent(b"new state");
-            let mut reopened = BlockStore::open(store.into_device()).unwrap();
-            let value = reopened.read_extent().unwrap().unwrap();
-            assert!(value == b"old state" || value == b"new state");
+        let block_size = base.block_size() as usize;
+        for write_number in 1..=2 {
+            for offset in [0, 1, block_size / 2, block_size - 1, block_size] {
+                let mut store = BlockStore::open(base.clone()).unwrap();
+                store.device.tear_write(write_number, offset);
+                assert!(store.write_extent(b"new state").is_err());
+                let mut reopened = BlockStore::open(store.into_device()).unwrap();
+                let value = reopened.read_extent().unwrap().unwrap();
+                assert!(value == b"old state" || value == b"new state");
+            }
         }
+    }
+
+    #[test]
+    fn block_store_rejects_corrupt_in_memory_length_without_panicking() {
+        let mut store = BlockStore::format(RamDisk::new(256, 8).unwrap()).unwrap();
+        store.write_extent(b"committed").unwrap();
+        store.length = usize::MAX;
+        assert_eq!(store.read_extent(), Err(BlockError::InvalidInput));
     }
 
     #[test]
