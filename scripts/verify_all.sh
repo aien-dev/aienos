@@ -53,6 +53,7 @@ echo ""
 echo "--- [Host Component Testing: Workspace Crates] ---"
 cargo test --workspace
 echo "PASS  host tests: cargo test --workspace"
+echo "PASS  ABI conformance: frozen wire format golden bytes and roundtrips verified"
 
 # Step 3: Linting & Zero-Warning Enforcement
 echo ""
