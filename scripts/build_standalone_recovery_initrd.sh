@@ -23,7 +23,7 @@ BINARIES=(
     /bin/sh
     /bin/bash
     /bin/lsblk
-    /bin/blkid
+    /sbin/blkid
     /bin/mount
     /bin/umount
     /bin/mkdir
@@ -49,6 +49,9 @@ for bin in "${BINARIES[@]}"; do
                 fi
             done
         fi
+    else
+        echo "Error: required recovery binary $bin not found on the build host" >&2
+        exit 1
     fi
 done
 
@@ -159,11 +162,49 @@ sleep 3
     echo "Kernel modules loaded: $loaded/$total"
     [ -n "$failed" ] && echo "Kernel modules failed:$failed"
     echo "Input devices: $(ls /sys/class/input 2>/dev/null | grep -c '^input')"
+    cat /sys/class/input/input*/name 2>/dev/null | sed 's/^/  /'
+    echo "Kernel: $(uname -r)  Clock (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    for pcr in 0 7; do
+        echo "TPM PCR $pcr (sha256): $(cat /sys/class/tpm/tpm0/pcr-sha256/$pcr 2>/dev/null || echo unavailable)"
+    done
     echo ""
     echo "Block device topology:"
-    lsblk -f 2>/dev/null || blkid 2>/dev/null || true
+    lsblk 2>/dev/null || true
+    for part in /dev/sd*[0-9] /dev/nvme*n*p*; do
+        [ -b "$part" ] && echo "  $part: $(blkid -p -o export -s LABEL -s TYPE -s UUID "$part" 2>/dev/null | tr "\n" " ")"
+    done
+    echo ""
+    echo "Firmware boot entries:"
+    efibootmgr 2>/dev/null | sed 's/^/  /' || echo "  unavailable"
     echo ""
 } > /tmp/recovery-report 2>&1
+
+# One-shot unattended self-test: Linux leaves aienos-selftest-once on the
+# stick. Only then is the stick mounted read-write, the flag removed and the
+# report saved; an ordinary recovery boot never writes anywhere.
+selftest=0
+# Probe partitions directly: without udev, blkid -L and lsblk see no labels.
+stick=""
+for part in /dev/sd*[0-9] /dev/nvme*n*p*; do
+    [ -b "$part" ] || continue
+    if [ "$(blkid -p -o value -s LABEL "$part" 2>/dev/null)" = AIENOSRECOV ]; then
+        stick="$part"
+        break
+    fi
+done
+if [ -n "$stick" ]; then
+    mkdir -p /mnt/stick
+    if mount -t vfat -o ro "$stick" /mnt/stick 2>/dev/null; then
+        if [ -f /mnt/stick/aienos-selftest-once ] && mount -o remount,rw /mnt/stick 2>/dev/null; then
+            selftest=1
+            rm -f /mnt/stick/aienos-selftest-once
+            mkdir -p /mnt/stick/aienos-evidence
+            cp /tmp/recovery-report "/mnt/stick/aienos-evidence/selftest-$(date -u +%Y%m%dT%H%M%SZ).txt"
+            sync
+        fi
+        umount /mnt/stick
+    fi
+fi
 
 clear
 cat /tmp/recovery-report
@@ -177,6 +218,16 @@ fi
 if grep -q "aienos.test=1" /proc/cmdline 2>/dev/null; then
     echo "TEST MODE DETECTED: automated recovery verification complete."
     poweroff -f 2>/dev/null || reboot -f 2>/dev/null || exit 0
+fi
+
+if [ "$selftest" = 1 ]; then
+    echo "SELF-TEST: report saved to the recovery stick (aienos-evidence/)."
+    echo "Press Enter within 60 s to stay in the recovery shell; otherwise the machine restarts."
+    if ! read -t 60 _; then
+        echo "SELF-TEST: restarting."
+        sync
+        reboot -f
+    fi
 fi
 
 echo "Dropping into standalone maintenance shell."
