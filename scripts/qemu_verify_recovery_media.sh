@@ -11,6 +11,11 @@ cd "${REPO_ROOT}"
 
 command -v qemu-system-aarch64 >/dev/null || { echo "qemu-system-aarch64 not installed"; exit 2; }
 
+if [[ "$(uname -m)" != "aarch64" ]]; then
+    echo "SKIPPED: Host architecture is $(uname -m). AArch64 kernel recovery boot requires an AArch64 host or cross-built AArch64 kernel."
+    exit 0
+fi
+
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "${WORK_DIR}"' EXIT
 LOG="${WORK_DIR}/recovery_qemu.log"
