@@ -50,7 +50,7 @@ cargo run --quiet --release -p aienos-evidence -- verify-efi target/aarch64-unkn
 echo ""
 echo "============================================================"
 echo "HOST VERIFICATIONS PASSED."
-echo "Config A: observed capture and three local inference samples verified."
+echo "Config A: observed capture verified. M0 stays open until native-boot rollback is tested."
 echo "Kernel: aarch64-unknown-none library compiles. Native boot remains untested."
 echo "UEFI: diagnostic and GB10-discovering handoff images build; hardware boot remains untested."
 echo "============================================================"
