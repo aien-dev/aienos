@@ -367,8 +367,10 @@ mod tests {
         formatted.write_extent(b"old state").unwrap();
         let base = formatted.into_device();
         let block_size = base.block_size() as usize;
+        // write_extent issues exactly two single-block writes (WAL record, then the
+        // superblock commit). Tear each one at every byte offset, 0..=block_size.
         for write_number in 1..=2 {
-            for offset in [0, 1, block_size / 2, block_size - 1, block_size] {
+            for offset in 0..=block_size {
                 let mut store = BlockStore::open(base.clone()).unwrap();
                 store.device.tear_write(write_number, offset);
                 assert!(store.write_extent(b"new state").is_err());
