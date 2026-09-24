@@ -64,7 +64,8 @@ local agent, power off, power on, and it remembers.
 Separate lanes that never block the critical path:
 [#36](https://github.com/aien-dev/aienos/issues/36) GB10 characterization (no GPU
 execution yet) and [#37](https://github.com/aien-dev/aienos/issues/37) Fabric
-(after native networking).
+(after native networking; early design in
+[ADR 0010](docs/adr/0010-fabric-machine-identity-and-capability-advertisement.md)).
 
 Related repositories: [aien-sovereign-core](https://github.com/aien-dev/aien-sovereign-core)
 holds the AIEN runtime, Cortex, AEGIS and `aien-proof`, the shared test board
