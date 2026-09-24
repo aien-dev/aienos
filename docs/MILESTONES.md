@@ -32,11 +32,11 @@ only at M8. Status words: **done** = verified on this repository's evidence;
 
 | Gate | Scope | Status | Evidence / blocker |
 |---|---|---|---|
-| **M0** Close Config A | Clean reference snapshot | done | PR #12: schema 3.0.0 bundle, all repositories clean |
+| **M0** Close Config A (**partial**) | Clean reference snapshot | done | PR #12: schema 3.0.0 bundle, all repositories clean |
 | | Benchmark evidence | done | CPU baseline: Llama-3.2-1B Q4_K_M on 20 Arm cores, 256-token samples, mean decode 54.2 tokens/s |
 | | Native-boot rollback | done | First native boot returned to Linux on its own; BootNext consumed, Linux entry and kernel unchanged ([M2 evidence](../evidence/m2_first_boot_2026-09-24.md)) |
 | | Bootable recovery media | pending | The only USB stick holds a key backup, not a recovery system |
-| **M1** UEFI/QEMU substrate | Automated emulator boot proof | pending | No `qemu-system-aarch64` or AArch64 UEFI firmware on the host; UEFI images are format-checked only |
+| **M1** UEFI/QEMU substrate | Automated emulator boot proof | in progress | QEMU 8.2 and AAVMF installed; [#18](https://github.com/aien-dev/aienos/issues/18), CI in [#19](https://github.com/aien-dev/aienos/issues/19) |
 | **M2A** Spark firmware handoff | Memory map into early allocator | done on hardware | PR #10; 184 descriptors, 36 conventional regions, 0 rejected ([M2 evidence](../evidence/m2_first_boot_2026-09-24.md)) |
 | | GB10 PCI identity, BAR0, PMC_BOOT registers | built, not found on hardware | PR #11; pre-exit discovery reported `gb10: unavailable` although Linux sees it at `000f:01:00.0` |
 | | CPU topology from the ACPI MADT (efficiency classes) and boot-core MIDR | done on hardware | 10 cores in class 0, 10 in class 1; boot core class 0, MIDR part `0xd87` (Cortex-A725) ([M2 evidence](../evidence/m2_first_boot_2026-09-24.md)) |
@@ -52,6 +52,17 @@ only at M8. Status words: **done** = verified on this repository's evidence;
 | **M6** Minimal wired networking | DHCP/static IP, ARP/NDP, IP, UDP/TCP, secure control transport | pending | Before the self-maintaining agent; Wi-Fi and Bluetooth later |
 | **M7** AIEN runtime and native CPU inference | | pending | Compare against the M0 CPU baseline |
 | **M8** Cortex and persistent agent | | pending | Host crates exist (`cortex`, `agent-state`) |
+
+**Overall gate status (2026-09-24):**
+
+```text
+M0  PARTIAL      snapshot PASS, benchmark PASS, rollback PASS, recovery media PENDING
+M1  IN PROGRESS  automated QEMU boot
+M2  PASS         first native Spark boot
+NEXT HARD GATE:  recovery media -> QEMU regression boot -> M3 kernel isolation
+```
+
+Public roadmap and contributor entry points: [ROADMAP.md](../ROADMAP.md).
 
 **Secure Boot (operator decision 2026-09-24, escalation trigger 1):** disabled
 for early development only, so unsigned experimental images can be tested. No

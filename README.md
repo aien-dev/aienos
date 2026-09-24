@@ -1,6 +1,25 @@
 # AIENOS
 
-> **Status: experimental / pre-alpha.** Nothing here boots yet. No support, stability, or compatibility promises. Expect breaking changes.
+> **Status: experimental / pre-alpha.** The first native boot on the NVIDIA DGX Spark passed on 2026-09-24 ([evidence](evidence/m2_first_boot_2026-09-24.md)); the operating system itself is far from usable. No support, stability, or compatibility promises. Expect breaking changes.
+
+## Help build AIENOS
+
+We are building a sovereign, agent-native operating system in Rust, from the
+first instruction after firmware upward, and we want help. Kernel isolation,
+memory management, interrupts, scheduling, storage, networking and native
+inference are all open, and most of it can be developed and tested in QEMU on
+any machine: no special hardware needed.
+
+- **[ROADMAP.md](ROADMAP.md)**: where the project is, the gates ahead, and live
+  progress for each milestone.
+- **[Open issues](https://github.com/aien-dev/aienos/issues)**: start with
+  [`good first issue`](https://github.com/aien-dev/aienos/labels/good%20first%20issue)
+  or anything labelled
+  [`emulator-ok`](https://github.com/aien-dev/aienos/labels/emulator-ok).
+- **[CONTRIBUTING.md](CONTRIBUTING.md)**: build, verify, and the rules for the
+  trusted base.
+- **[Discussions](https://github.com/aien-dev/aienos/discussions)**: questions,
+  design ideas, and introductions.
 
 AIENOS is an agent-native operating system designed around continuous logical agent existence: the agent persists while models, kernels, inference state, power states, and physical machines change beneath it. You turn the machine on, the agent wakes up, knows the machine and your history, operates nearly everything inside it, and asks you only before crossing a boundary you have told it not to cross alone.
 
@@ -23,7 +42,7 @@ An optional compatibility island (for example, Linux with vendor drivers) may si
 
 Power on, AIENOS boots directly on the NVIDIA DGX Spark (no Linux host), the AIEN agent starts on a local console, a local model loads, you talk to it, and its state persists across reboot. CPU inference is acceptable for this milestone.
 
-Two UEFI images are available. The default diagnostic prints a banner and returns to firmware. The separate handoff image exits UEFI boot services, counts conventional-memory pages, selects a validated region, initializes early frame allocator bookkeeping, enters the kernel UART path, and halts. Neither image has been booted on the DGX Spark. The allocator does not yet dereference physical memory; storage, agent-state recovery, and model loading are also missing, so this milestone remains open. Host verification checks the AArch64 EFI image format without changing the boot configuration.
+Two UEFI images are available. The default diagnostic prints a banner and returns to firmware. The handoff image discovers the CPU topology, memory map, display and GB10 identity, exits UEFI boot services, enters the AIENOS kernel, reports what it found on screen, in a bounded firmware variable and on the serial port, then resets. It booted natively on the DGX Spark on 2026-09-24 (`kernel: alive` at EL2, 20 cores in two efficiency classes, 184 memory-map descriptors with none rejected) and returned to Linux without damage. Kernel isolation, storage, agent-state recovery and model loading are still missing, so this milestone remains open; see [ROADMAP.md](ROADMAP.md).
 
 The AIENOS boot path is a native Rust UEFI entry followed by the AIENOS kernel. It does not use systemd or a Linux init system. The handoff image emits counter-based timings for UEFI entry to kernel handoff and handoff to kernel entry once it runs on hardware. These timings do not include platform firmware time before UEFI starts the image.
 
