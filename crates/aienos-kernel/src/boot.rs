@@ -122,6 +122,16 @@ pub fn early_kernel_init_with_memory(
     memory_region: Option<BootMemoryRegion>,
     boot_timing: Option<BootTiming>,
 ) -> ! {
+    early_kernel_init_with_gpu(conventional_memory_kb, memory_region, boot_timing, None)
+}
+
+/// Native entry carrying read-only GB10 BAR0 identity sampled before firmware exit.
+pub fn early_kernel_init_with_gpu(
+    conventional_memory_kb: u64,
+    memory_region: Option<BootMemoryRegion>,
+    boot_timing: Option<BootTiming>,
+    gb10: Option<aienos_accel::Gb10Identity>,
+) -> ! {
     let kernel_entry_ticks = counter_ticks();
     // 1. Disable maskable interrupts
     disable_interrupts();
@@ -139,6 +149,19 @@ pub fn early_kernel_init_with_memory(
     uart.write_str("conventional_memory_kb: ");
     uart.write_u64(conventional_memory_kb);
     uart.write_str("\n");
+    if let Some(identity) = gb10 {
+        uart.write_str("gb10_segment: ");
+        uart.write_u64(u64::from(identity.bar.location.segment));
+        uart.write_str("\ngb10_bar0_phys: ");
+        uart.write_u64(identity.bar.physical_base);
+        uart.write_str("\ngb10_pmc_boot_0: ");
+        uart.write_u64(u64::from(identity.pmc_boot_0));
+        uart.write_str("\ngb10_pmc_boot_42: ");
+        uart.write_u64(u64::from(identity.pmc_boot_42));
+        uart.write_str("\n");
+    } else {
+        uart.write_str("gb10: unavailable\n");
+    }
 
     // Retain the initial bitmap in kernel state and manage at most 16 MiB.
     // This reserves an address in bookkeeping only; it does not dereference RAM.

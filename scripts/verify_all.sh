@@ -24,7 +24,7 @@ fi
 
 # Step 2: Host component test suite
 echo ""
-echo "--- [Host Component Testing: 5 Workspace Crates] ---"
+echo "--- [Host Component Testing: Workspace Crates] ---"
 cargo test --workspace
 
 # Step 3: Linting & Zero-Warning Enforcement
@@ -52,5 +52,5 @@ echo "============================================================"
 echo "HOST VERIFICATIONS PASSED."
 echo "Config A: observed capture and three local inference samples verified."
 echo "Kernel: aarch64-unknown-none library compiles. Native boot remains untested."
-echo "UEFI: diagnostic and ExitBootServices handoff images build; hardware boot remains untested."
+echo "UEFI: diagnostic and GB10-discovering handoff images build; hardware boot remains untested."
 echo "============================================================"
