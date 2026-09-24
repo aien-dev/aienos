@@ -57,6 +57,14 @@ check "image is this commit" "aienos_commit: ${commit}"
 check "left firmware and entered the kernel" "kernel: alive"
 check "kernel entered EL1h" "kernel_el: EL1h"
 check "EL1 page tables and caches enabled" "mmu: enabled"
+check "GICv3 enabled" "gic: v3"
+if grep -qE 'timer_irq: ([0-9]+) ticks' "${work}/serial.txt"; then
+    ticks=$(grep -oE 'timer_irq: ([0-9]+) ticks' "${work}/serial.txt" | tail -1 | grep -oE '[0-9]+')
+    [[ "${ticks}" -ge 5 ]] && echo "PASS  timer IRQ delivered at least five ticks" || { echo "FAIL  timer IRQ delivered fewer than five ticks"; failed=1; }
+else
+    echo "FAIL  timer IRQ count reported"
+    failed=1
+fi
 check "final report on the SPCR console" "report_kind: final"
 check "no panic or fault" "report_kind: final"
 if grep -qE "report_kind: (panic|fault)" "${work}/serial.txt"; then
