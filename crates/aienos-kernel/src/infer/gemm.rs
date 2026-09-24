@@ -6,7 +6,7 @@ pub enum KernelError {
     InvalidParameter,
 }
 
-fn sqrt_approx(x: f32) -> f32 {
+pub(crate) fn sqrt_approx(x: f32) -> f32 {
     if x == 0.0 {
         return 0.0;
     }
@@ -17,7 +17,7 @@ fn sqrt_approx(x: f32) -> f32 {
     y
 }
 
-fn exp_approx(x: f32) -> f32 {
+pub(crate) fn exp_approx(x: f32) -> f32 {
     let x = x.clamp(-87.0, 88.0);
     let scaled = x * core::f32::consts::LOG2_E;
     let n = if scaled >= 0.0 {
