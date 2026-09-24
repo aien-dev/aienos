@@ -76,19 +76,28 @@ impl ContextDescriptor {
         if t0sz > 39 || ttb0 & 0xfff != 0 {
             return Err(Error::InvalidWindow);
         }
+        // CD word 0 carries the TTBR0/TTBR1 configuration and every control
+        // bit: T0SZ, TG0, IRGN0, ORGN0, SH0, EPD0, EPD1, V, IPS, AA64, R, A
+        // and ASID. EPD0 stays clear so the TTBR0 stage-1 walk runs; EPD1
+        // disables the unused TTBR1 walk.
         let word0 = u64::from(t0sz)
-            | (0b01 << 8)
-            | (0b01 << 10)
-            | (0b11 << 12)
-            | (1 << 30)
-            | (1 << 31)
-            | (1 << 14); // Access flag enabled
-                         // CD word 1 carries IPS, ASID, AARCH64 and access-control bits.
-        let word1 = 0b101 | (1 << 9) | (1 << 13) | (1 << 14) | (u64::from(asid) << 16);
-        // TTB0 is the aligned 48-bit address in words 2/3; MAIR is word 4.
-        let word2 = ttb0 & 0x0000_ffff_ffff_fff0;
-        let word3 = 0;
-        Ok(Self([word0, word1, word2, word3, mair, 0, 0, 0]))
+            | (0b01 << 8) // IRGN0: write-back
+            | (0b01 << 10) // ORGN0: write-back
+            | (0b11 << 12) // SH0: inner shareable
+            | (1 << 30) // EPD1: TTBR1 walk disabled
+            | (1 << 31) // V: descriptor valid
+            | (0b101 << 32) // IPS: 5 (48-bit)
+            | (1 << 41) // AA64
+            | (1 << 45) // R: record faults
+            | (1 << 46) // A: access flag
+            | (u64::from(asid) << 48);
+        // CD word 1 is the 4 KiB-aligned TTBR0 (48-bit physical address).
+        let word1 = ttb0 & 0x0000_ffff_ffff_fff0;
+        // CD word 2 is TTBR1, unused because EPD1 is set.
+        let word2 = 0;
+        // CD word 3 is MAIR.
+        let word3 = mair & 0x0000_0000_0000_ffff;
+        Ok(Self([word0, word1, word2, word3, 0, 0, 0, 0]))
     }
 }
 
@@ -423,14 +432,20 @@ mod tests {
         let cd = ContextDescriptor::stage1(0x4000, 0x1234, 0xff00, 16).unwrap();
         assert_eq!(
             cd.0[0],
-            16 | (1 << 8) | (1 << 10) | (3 << 12) | (1 << 14) | (1 << 30) | (1 << 31)
+            16 | (1 << 8)
+                | (1 << 10)
+                | (3 << 12)
+                | (1 << 30)
+                | (1 << 31)
+                | (0b101_u64 << 32)
+                | (1 << 41)
+                | (1 << 45)
+                | (1 << 46)
+                | (0x1234_u64 << 48)
         );
-        assert_eq!(
-            cd.0[1],
-            (0x1234_u64 << 16) | (1 << 14) | (1 << 13) | (1 << 9) | 0b101
-        );
-        assert_eq!(cd.0[2], 0x4000);
-        assert_eq!(cd.0[4], 0xff00);
+        assert_eq!(cd.0[1], 0x4000, "TTBR0");
+        assert_eq!(cd.0[2], 0, "TTBR1 unused (EPD1 set)");
+        assert_eq!(cd.0[3], 0xff00, "MAIR");
     }
     #[test]
     fn command_words_and_queue_wrap() {
@@ -501,7 +516,7 @@ mod tests {
         .unwrap();
         assert_eq!(policy.stream_id, 9);
         assert_eq!(policy.ste, Ste::stage1(0x8000));
-        assert_eq!(policy.cd.0[2], 0x100000);
+        assert_eq!(policy.cd.0[1], 0x100000);
         assert_eq!(
             policy
                 .page_table
