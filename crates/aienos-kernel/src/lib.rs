@@ -19,6 +19,7 @@ pub mod crypto;
 pub mod display;
 pub mod fatal;
 pub mod gic;
+pub mod infer;
 pub mod mem;
 pub mod net;
 pub mod nvme;
