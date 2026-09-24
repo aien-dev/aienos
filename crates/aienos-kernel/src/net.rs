@@ -231,7 +231,13 @@ impl Ipv4Header {
         if total < h || total > b.len() {
             return Err(Error::Truncated);
         };
-        if be16(b, 6)? & 0x3fff != 0 {
+        let flags_fragment = be16(b, 6)?;
+        // RFC 791: the reserved flag bit (0x8000) must be zero.
+        if flags_fragment & 0x8000 != 0 {
+            return Err(Error::Invalid);
+        };
+        // More-fragments or a non-zero offset: reassembly is not supported.
+        if flags_fragment & 0x3fff != 0 {
             return Err(Error::Unsupported);
         };
         if b[8] == 0 {
@@ -476,5 +482,20 @@ mod tests {
         c.learn(p, true, false, 0, 5).unwrap();
         assert_eq!(c.lookup(p.sender_ip, 4), Some(p.sender_mac));
         assert_eq!(c.lookup(p.sender_ip, 5), None);
+    }
+    #[test]
+    fn ipv4_reserved_flag_is_rejected() {
+        let mut h = [
+            0x45u8, 0, 0, 20, 0x12, 0x34, 0x80, 0x00, 64, 17, 0, 0, 10, 0, 0, 1, 10, 0, 0, 2,
+        ];
+        let c = checksum(&h);
+        h[10..12].copy_from_slice(&c.to_be_bytes());
+        assert_eq!(Ipv4Header::parse(&h).map(|_| ()), Err(Error::Invalid));
+        // Don't-fragment (0x4000) alone stays valid.
+        h[6] = 0x40;
+        h[10..12].copy_from_slice(&[0, 0]);
+        let c = checksum(&h);
+        h[10..12].copy_from_slice(&c.to_be_bytes());
+        assert!(Ipv4Header::parse(&h).is_ok());
     }
 }
