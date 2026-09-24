@@ -141,28 +141,12 @@ fn save_report_var(bytes: &[u8]) -> Result<u8, &'static str> {
     .map_err(|_| "firmware refused the write")
 }
 
-/// Per-root-bridge record kept for the pre-exit and final reports.
-struct BridgeScan {
-    segment: u32,
-    devices: u16,
-    bridges: u16,
-    /// Bridge functions (header type 1) with a valid secondary..subordinate
-    /// bus window; each is one level of bus hierarchy below this root.
-    windows: u16,
-    /// GB10 vendor/device found but rejected: command/status and BAR0.
-    rejected_candidate: Option<(u32, u32, u32)>,
-}
-
-/// Outcome for one root bridge; carried into the report.
-enum RootOutcome {
-    /// The firmware refused a shared (`GetProtocol`) open of the protocol.
-    OpenRefused(Status),
-    Scanned(BridgeScan),
-}
+type BridgeScan = aienos_accel::RootBridgeScan;
+type RootOutcome = aienos_accel::RootBridgeOutcome;
 
 /// Outcome of pre-exit GB10 discovery: the identity when found, plus a
 /// bounded record of why it was not (bridges seen, opens refused, segments,
-/// BAR state) so the first-boot report can say what happened.
+/// BAR state) so the pre-exit and final reports can say what happened.
 struct Gb10Discovery {
     identity: Option<aienos_accel::Gb10Identity>,
     /// Number of handles carrying the `PciRootBridgeIo` protocol, when the
@@ -174,6 +158,18 @@ struct Gb10Discovery {
 /// At most this many root bridges are recorded; extras are still searched.
 const MAX_ROOT_BRIDGES: usize = 4;
 
+/// Compact status names for the report (no `Debug` tables in the image).
+fn status_name(status: Status) -> &'static str {
+    match status {
+        Status::ACCESS_DENIED => "ACCESS_DENIED",
+        Status::NOT_FOUND => "NOT_FOUND",
+        Status::INVALID_PARAMETER => "INVALID_PARAMETER",
+        Status::OUT_OF_RESOURCES => "OUT_OF_RESOURCES",
+        Status::UNSUPPORTED => "UNSUPPORTED",
+        _ => "OTHER",
+    }
+}
+
 impl Gb10Discovery {
     /// Record the outcome of one root bridge, bounded by `MAX_ROOT_BRIDGES`.
     fn record(&mut self, outcome: RootOutcome) {
@@ -184,35 +180,7 @@ impl Gb10Discovery {
 
     /// Report lines explaining why no GB10 identity was produced.
     fn write_diagnostics(&self, out: &mut Report) {
-        match self.handles {
-            Some(n) => {
-                let _ = writeln!(out, "gb10_pci_root_bridges: {n}");
-            }
-            None => {
-                let _ = writeln!(out, "gb10_pci_root_bridges: lookup failed");
-                return;
-            }
-        }
-        for (index, outcome) in self.roots.iter().flatten().enumerate() {
-            match outcome {
-                RootOutcome::OpenRefused(status) => {
-                    let _ = writeln!(out, "gb10_pci_root_open[{index}]: refused ({status:?})");
-                }
-                RootOutcome::Scanned(scan) => {
-                    let _ = writeln!(
-                        out,
-                        "gb10_pci_root[{index}]: segment {} devices {} bridges {} windows {}",
-                        scan.segment, scan.devices, scan.bridges, scan.windows
-                    );
-                    if let Some((command_status, bar0_low, bar0_high)) = scan.rejected_candidate {
-                        let _ = writeln!(
-                            out,
-                            "gb10_pci_candidate[{index}]: command_status {command_status:#010x} bar0 {bar0_high:#010x}:{bar0_low:#010x}"
-                        );
-                    }
-                }
-            }
-        }
+        aienos_accel::write_discovery_diagnostics(out, self.handles, &self.roots);
     }
 }
 
@@ -392,7 +360,7 @@ fn discover_gb10() -> Gb10Discovery {
         } {
             Ok(root) => root,
             Err(e) => {
-                discovery.record(RootOutcome::OpenRefused(e.status()));
+                discovery.record(RootOutcome::OpenRefused(status_name(e.status())));
                 continue;
             }
         };

@@ -33,7 +33,13 @@ left a report in firmware variable storage that Linux read after the reset
 - `gb10: unavailable`: pre-exit GB10 discovery found no match through the UEFI
   PCI root bridge protocol, although Linux sees `10de:2e12` at
   `000f:01:00.0`. Because the UART path runs only when the GB10 was found, no
-  UART output was attempted.
+  UART output was attempted. Root cause: discovery opened
+  `PciRootBridgeIo` exclusively, and the firmware PCI bus driver already holds
+  it `ByDriver`, so every open was refused with `ACCESS_DENIED`. Fixed by
+  opening the protocol shared (`GetProtocol`); discovery also walks each root
+  bridge's firmware-declared bus range itself and records why discovery failed
+  (root bridges seen, opens refused, segments, bridge windows, BAR state of a
+  rejected `10de:2e12` candidate) in the pre-exit and final reports.
 - The pre-exit report file `\EFI\AIENOS\BOOTREPORT.TXT` was not saved. The
   reason printed on the firmware console is recorded only in the operator's
   photograph, if taken.
