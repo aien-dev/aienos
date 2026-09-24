@@ -14,7 +14,7 @@ uefi-base = ["dep:uefi"]
 # defines its own, which reports through the screen, firmware variable and
 # UART after boot services exit, so the two features must not be combined.
 firmware = ["uefi-base", "uefi/panic_handler"]
-handoff = ["uefi-base", "dep:aienos-kernel", "dep:aienos-accel", "uefi/alloc", "uefi/global_allocator"]
+handoff = ["uefi-base", "dep:aienos-kernel", "dep:aienos-accel", "uefi/alloc"]
 # SEED-0A candidate: polled USB keyboard after firmware exit (ADR 0012).
 # Only the QEMU keyboard test enables it; hardware staging never does.
 usb-keyboard = ["handoff"]
