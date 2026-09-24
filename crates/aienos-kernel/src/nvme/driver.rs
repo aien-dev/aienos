@@ -50,6 +50,7 @@ pub enum NvmeError {
     Timeout,
     CompletionStatus { sct: u8, sc: u8 },
     InvalidIdentify,
+    InvalidQueueDepth,
 }
 
 /// A zeroed, physically contiguous DMA allocation and its CPU byte view.
@@ -70,6 +71,16 @@ pub struct NamespaceInfo {
     pub block_size: u32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IoQueueState {
+    pub depth: u16,
+    pub submission_tail: usize,
+    pub completion_head: usize,
+    pub phase: bool,
+    pub submission_doorbell: u32,
+    pub completion_doorbell: u32,
+}
+
 pub struct NvmeController<R: Registers, D: DmaMemory, T: Delay> {
     pub registers: R,
     pub dma: D,
@@ -82,6 +93,9 @@ pub struct NvmeController<R: Registers, D: DmaMemory, T: Delay> {
     cq_head: usize,
     phase: bool,
     next_cid: u16,
+    io_cq: Option<DmaRegion>,
+    io_sq: Option<DmaRegion>,
+    io_queue: Option<IoQueueState>,
 }
 
 impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
@@ -118,6 +132,9 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
             cq_head: 0,
             phase: true,
             next_cid: 1,
+            io_cq: None,
+            io_sq: None,
+            io_queue: None,
         };
         controller.identify_controller()?;
         Ok(controller)
@@ -144,20 +161,47 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
         })
     }
 
-    fn submit_identify(&mut self, nsid: u32, cns: u32) -> Result<Vec<u8>, NvmeError> {
-        self.identify.bytes.fill(0);
-        self.dma
-            .write(self.identify.physical, &self.identify.bytes)?;
+    /// Create polled I/O completion and submission queues, both with QID 1.
+    pub fn create_io_queues(&mut self, depth: u16) -> Result<(), NvmeError> {
+        if depth < 2 {
+            return Err(NvmeError::InvalidQueueDepth);
+        }
+        let size = usize::from(depth).checked_mul(16).ok_or(NvmeError::Dma)?;
+        let cq = self.dma.allocate(size, PAGE_SIZE)?;
+        let sq = self.dma.allocate(
+            usize::from(depth).checked_mul(64).ok_or(NvmeError::Dma)?,
+            PAGE_SIZE,
+        )?;
+        self.submit_admin(Submission::create_io_cq(1, depth, cq.physical))?;
+        self.submit_admin(Submission::create_io_sq(1, depth, sq.physical, 1))?;
+        self.io_cq = Some(cq);
+        self.io_sq = Some(sq);
+        let stride = self.cap.doorbell_stride();
+        self.io_queue = Some(IoQueueState {
+            depth,
+            submission_tail: 0,
+            completion_head: 0,
+            phase: true,
+            submission_doorbell: doorbell_offset(1, false, stride),
+            completion_doorbell: doorbell_offset(1, true, stride),
+        });
+        Ok(())
+    }
+
+    pub fn io_queue(&self) -> Option<IoQueueState> {
+        self.io_queue
+    }
+
+    fn submit_admin(&mut self, command: Submission) -> Result<(), NvmeError> {
+        self.submit_admin_inner(command)?;
+        Ok(())
+    }
+
+    fn submit_admin_inner(&mut self, mut command: Submission) -> Result<Vec<u8>, NvmeError> {
         let cid = self.next_cid;
         self.next_cid = self.next_cid.wrapping_add(1);
-        let mut command = if cns == 1 {
-            Submission::identify_controller(self.identify.physical)
-        } else {
-            Submission::identify_namespace(nsid, self.identify.physical)
-        };
         command.set_u32(0, (command.u32_at(0) & 0xffff) | ((cid as u32) << 16));
-        let slot = self.sq_tail;
-        let offset = slot * 64;
+        let offset = self.sq_tail * 64;
         self.sq.bytes[offset..offset + 64].copy_from_slice(&command.0);
         self.dma
             .write(self.sq.physical + offset as u64, &command.0)?;
@@ -166,7 +210,6 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
             doorbell_offset(0, false, self.cap.doorbell_stride()),
             self.sq_tail as u32,
         );
-
         for _ in 0..=ADMIN_TIMEOUT_MS {
             let mut raw = [0u8; 16];
             self.dma
@@ -200,6 +243,18 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
             return Ok(data);
         }
         Err(NvmeError::Timeout)
+    }
+
+    fn submit_identify(&mut self, nsid: u32, cns: u32) -> Result<Vec<u8>, NvmeError> {
+        self.identify.bytes.fill(0);
+        self.dma
+            .write(self.identify.physical, &self.identify.bytes)?;
+        let command = if cns == 1 {
+            Submission::identify_controller(self.identify.physical)
+        } else {
+            Submission::identify_namespace(nsid, self.identify.physical)
+        };
+        self.submit_admin_inner(command)
     }
 }
 
@@ -269,6 +324,8 @@ mod tests {
         fatal: bool,
         cq_tail: usize,
         sq_tail: usize,
+        cq_ids: Vec<u16>,
+        command_error: u16,
     }
     impl Registers for FakeRegs {
         fn read32(&mut self, offset: u32) -> u32 {
@@ -339,12 +396,33 @@ mod tests {
                     memory.get(&sq).unwrap()[command_offset..command_offset + 64].to_vec();
                 let cid = u16::from_le_bytes([command[2], command[3]]);
                 let prp = u64::from_le_bytes(command[24..32].try_into().unwrap());
-                let cns = u32::from_le_bytes(command[40..44].try_into().unwrap());
-                let data = memory.get_mut(&prp).unwrap();
-                if cns == 0 {
-                    data[0..8].copy_from_slice(&self.namespace_size.to_le_bytes());
-                    data[26] = 0;
-                    data[130] = 9;
+                let opcode = u32::from_le_bytes(command[0..4].try_into().unwrap()) as u8;
+                let cdw10 = u32::from_le_bytes(command[40..44].try_into().unwrap());
+                let cdw11 = u32::from_le_bytes(command[44..48].try_into().unwrap());
+                self.command_error = 0;
+                match opcode {
+                    0x06 => {
+                        let cns = cdw10;
+                        let data = memory.get_mut(&prp).unwrap();
+                        if cns == 0 {
+                            data[0..8].copy_from_slice(&self.namespace_size.to_le_bytes());
+                            data[26] = 0;
+                            data[130] = 9;
+                        }
+                    }
+                    0x05 => {
+                        assert_eq!(cdw10, 1 | (3 << 16)); // QID 1, depth 4 minus one
+                        assert_eq!(cdw11, 1); // PC=1, IEN=0
+                        self.cq_ids.push(1);
+                    }
+                    0x01 if cdw10 & 0xffff == 1 && cdw11 & 0xffff == 1 => {
+                        assert_eq!(cdw10, 1 | (3 << 16));
+                        assert_eq!(cdw11, 1 | (1 << 16));
+                        if !self.cq_ids.contains(&1) {
+                            self.command_error = 1 << 1;
+                        }
+                    }
+                    _ => panic!("unexpected admin opcode {opcode:#x}"),
                 }
                 let cq = u64::from_le_bytes([
                     self.writes.iter().find(|(r, _)| *r == REG_ACQ).unwrap().1 as u8,
@@ -382,8 +460,9 @@ mod tests {
                 let completion_offset = self.cq_tail * 16;
                 cqe[completion_offset + 12..completion_offset + 14]
                     .copy_from_slice(&cid.to_le_bytes());
-                cqe[completion_offset + 14..completion_offset + 16]
-                    .copy_from_slice(&(1 | self.completion_status).to_le_bytes());
+                cqe[completion_offset + 14..completion_offset + 16].copy_from_slice(
+                    &(1 | self.completion_status | self.command_error).to_le_bytes(),
+                );
                 self.cq_tail = (self.cq_tail + 1) % ADMIN_DEPTH;
                 self.sq_tail = (self.sq_tail + 1) % ADMIN_DEPTH;
             }
@@ -405,6 +484,8 @@ mod tests {
                 fatal: false,
                 cq_tail: 0,
                 sq_tail: 0,
+                cq_ids: Vec::new(),
+                command_error: 0,
             },
             FakeDma {
                 shared,
@@ -488,6 +569,60 @@ mod tests {
                 block_count: 12345,
                 block_size: 512
             }
+        );
+    }
+
+    #[test]
+    fn creates_polled_io_queues() {
+        let (regs, dma) = fixture();
+        let mut controller = NvmeController::init(regs, dma, CountingDelay::default()).unwrap();
+        controller.create_io_queues(4).unwrap();
+        assert_eq!(
+            controller.io_queue(),
+            Some(IoQueueState {
+                depth: 4,
+                submission_tail: 0,
+                completion_head: 0,
+                phase: true,
+                submission_doorbell: doorbell_offset(1, false, 4),
+                completion_doorbell: doorbell_offset(1, true, 4),
+            })
+        );
+        assert_eq!(controller.registers.command_error, 0);
+    }
+
+    #[test]
+    fn simulator_rejects_submission_queue_without_completion_queue() {
+        let (regs, dma) = fixture();
+        let mut controller = NvmeController::init(regs, dma, CountingDelay::default()).unwrap();
+        assert_eq!(
+            controller.submit_admin(Submission::create_io_sq(1, 4, 0x5000, 1)),
+            Err(NvmeError::CompletionStatus { sct: 0, sc: 1 })
+        );
+    }
+
+    #[test]
+    fn shallow_io_queue_is_rejected_before_submission() {
+        let (regs, dma) = fixture();
+        let mut controller = NvmeController::init(regs, dma, CountingDelay::default()).unwrap();
+        let submissions = controller
+            .registers
+            .writes
+            .iter()
+            .filter(|(offset, _)| *offset == doorbell_offset(0, false, 4))
+            .count();
+        assert_eq!(
+            controller.create_io_queues(1),
+            Err(NvmeError::InvalidQueueDepth)
+        );
+        assert_eq!(
+            controller
+                .registers
+                .writes
+                .iter()
+                .filter(|(offset, _)| *offset == doorbell_offset(0, false, 4))
+                .count(),
+            submissions
         );
     }
 
