@@ -19,13 +19,13 @@ trap cleanup EXIT
 echo "Building standalone recovery root in $WORK_DIR..."
 mkdir -p "$WORK_DIR"/{bin,sbin,usr/bin,usr/sbin,proc,sys,dev,etc,mnt/root,mnt/cipher,mnt/plain,tmp,lib,lib64}
 
-# Ensure base binaries are present
+# Required binaries for the rescue environment (mount NVMe root, repair
+# /boot/efi, restore boot entries). Each must exist on the build host.
 BINARIES=(
     /bin/busybox
-    /bin/sh
     /bin/bash
     /bin/lsblk
-    /bin/blkid
+    blkid
     /bin/mount
     /bin/umount
     /bin/mkdir
@@ -41,67 +41,69 @@ BINARIES=(
     /bin/dmesg
     /bin/sha256sum
     /bin/tar
-    /sbin/chroot
-    /usr/bin/age
-    /usr/bin/tpm2_pcrread
-    /usr/bin/efibootmgr
-    /sbin/cryptsetup
-    /sbin/mkfs.vfat
+    chroot
+    efibootmgr
+    cryptsetup
+    mkfs.vfat
 )
 
-# Optional binaries: warn but continue when the host cannot provide them
+# Optional binaries: warn but continue when the host cannot provide them.
 OPTIONAL_BINARIES=(
-    /usr/sbin/efivar
-    /sbin/fsck.vfat
-    /sbin/fsck.ext4
-    /sbin/lvm
+    efivar
+    fsck.vfat
+    fsck.ext4
+    lvm
+    age
+    tpm2_pcrread
 )
 
-for bin in "${BINARIES[@]}"; do
-    if [[ ! -f "$bin" ]]; then
-        echo "MISSING: required binary $bin is not present on this host" >&2
-        exit 1
+# Resolve a binary to an absolute path, following usrmerge /sbin -> /usr/sbin.
+resolve_bin() {
+    local name="$1"
+    if [[ "$name" == */* && -f "$name" ]]; then
+        echo "$name"; return 0
     fi
-    cp -p "$bin" "$WORK_DIR/bin/"
-    # Copy dynamically linked libraries if binary is dynamic
-    if ldd "$bin" >/dev/null 2>&1; then
-        ldd "$bin" 2>/dev/null | grep -o '/lib[^ ]*' | while read -r lib; do
+    local base; base=$(basename "$name")
+    local d
+    for d in /bin /sbin /usr/bin /usr/sbin; do
+        if [[ -f "$d/$base" ]]; then
+            echo "$d/$base"; return 0
+        fi
+    done
+    return 1
+}
+
+copy_with_libs() {
+    local src="$1" dest_name="$2" lib
+    cp -p "$src" "$WORK_DIR/bin/$dest_name"
+    if ldd "$src" >/dev/null 2>&1; then
+        ldd "$src" 2>/dev/null | grep -o '/lib[^ ]*' | while read -r lib; do
             if [[ -f "$lib" ]]; then
                 mkdir -p "$WORK_DIR/$(dirname "$lib")"
                 cp -p -u "$lib" "$WORK_DIR/$lib" 2>/dev/null || true
             fi
         done
     fi
+}
+
+for bin in "${BINARIES[@]}"; do
+    src=$(resolve_bin "$bin") || { echo "MISSING: required binary $bin is not present on this host" >&2; exit 1; }
+    copy_with_libs "$src" "$(basename "$bin")"
 done
 
 for bin in "${OPTIONAL_BINARIES[@]}"; do
-    if [[ -f "$bin" ]]; then
-        cp -p "$bin" "$WORK_DIR/bin/"
-        if ldd "$bin" >/dev/null 2>&1; then
-            ldd "$bin" 2>/dev/null | grep -o '/lib[^ ]*' | while read -r lib; do
-                if [[ -f "$lib" ]]; then
-                    mkdir -p "$WORK_DIR/$(dirname "$lib")"
-                    cp -p -u "$lib" "$WORK_DIR/$lib" 2>/dev/null || true
-                fi
-            done
-        fi
+    if src=$(resolve_bin "$bin"); then
+        copy_with_libs "$src" "$(basename "$bin")"
     else
         echo "OPTIONAL MISSING: $bin not packaged (host lacks it)" >&2
     fi
 done
 
-# Copy gocryptfs if available
-GOCRYPTFS_BIN=$(which gocryptfs 2>/dev/null || echo "/home/atlas/atlas-forgejo-setup-20260904/runtime/usr/bin/gocryptfs")
-if [[ -f "$GOCRYPTFS_BIN" ]]; then
-    cp -p "$GOCRYPTFS_BIN" "$WORK_DIR/bin/gocryptfs"
-    if ldd "$GOCRYPTFS_BIN" >/dev/null 2>&1; then
-        ldd "$GOCRYPTFS_BIN" 2>/dev/null | grep -o '/lib[^ ]*' | while read -r lib; do
-            if [[ -f "$lib" ]]; then
-                mkdir -p "$WORK_DIR/$(dirname "$lib")"
-                cp -p -u "$lib" "$WORK_DIR/$lib" 2>/dev/null || true
-            fi
-        done
-    fi
+# Copy gocryptfs if available (optional; unlock of gocryptfs volumes)
+if src=$(resolve_bin gocryptfs); then
+    copy_with_libs "$src" "gocryptfs"
+else
+    echo "OPTIONAL MISSING: gocryptfs not packaged (host lacks it)" >&2
 fi
 
 # Create EFI repair helper
@@ -186,7 +188,7 @@ else
         fi
         efibootmgr 2>/dev/null | sed -n '1,8p'
     else
-        fail "could not derive disk/partition from $ESP_DEV"
+        say "WARN: could not derive disk/partition from $ESP_DEV; skipping entry restore"
     fi
 fi
 

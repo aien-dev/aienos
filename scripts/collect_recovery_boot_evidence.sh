@@ -42,11 +42,10 @@ check "booted_from_removable_media" \
 
 echo "== secure boot state"
 sb="unknown"
-for var in /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c; do
-    if [[ -r "${var}" ]]; then
-        sb="$(od -An -t u1 -j 4 -N 1 "${var}" 2>/dev/null | tr -d ' ')"
-    fi
-done
+sb_var="/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
+if [[ -r "${sb_var}" ]]; then
+    sb="$(od -An -t u1 -j 4 -N 1 "${sb_var}" 2>/dev/null | tr -d ' ')"
+fi
 echo "secure_boot_byte: ${sb}"
 check "secure_boot_state_recorded" "$([[ "${sb}" == "0" || "${sb}" == "1" ]] && echo 1 || echo 0)" \
     "byte=${sb} (1=enabled)"
