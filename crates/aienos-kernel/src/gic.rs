@@ -131,7 +131,7 @@ pub struct Aarch64GicCpuInterface;
 impl GicCpuInterface for Aarch64GicCpuInterface {
     fn enable_group1(&mut self) {
         unsafe {
-            core::arch::asm!("msr ICC_IGRPEN1_EL1, {0}", "isb", in(reg) 1u64, options(nostack));
+            core::arch::asm!("mov x9, #1", "msr ICC_SRE_EL1, x9", "isb", "msr ICC_IGRPEN1_EL1, x9", "isb", out("x9") _, options(nostack));
         }
     }
     fn set_priority_mask(&mut self, mask: u8) {
