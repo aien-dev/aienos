@@ -91,7 +91,8 @@ struct WorldBudget {
     cpu_used: u64,
     frames_used: u64,
     dma_used: u64,
-    deadline: u64,
+    /// Counter value when the watchdog was last armed (admit, pet, restore).
+    armed_at: u64,
     state: WorldState,
 }
 
@@ -132,7 +133,7 @@ impl<const WORLDS: usize> BudgetManager<WORLDS> {
             cpu_used: 0,
             frames_used: 0,
             dma_used: 0,
-            deadline: now.saturating_add(envelope.max_runtime_ticks),
+            armed_at: now,
             state: WorldState::Active,
         });
         Ok(())
@@ -226,7 +227,7 @@ impl<const WORLDS: usize> BudgetManager<WORLDS> {
     /// Pet an active World, extending its watchdog deadline from `now`.
     pub fn pet(&mut self, id: u32, now: u64) -> Result<(), BudgetError> {
         let world = self.world_mut(id)?;
-        world.deadline = now.saturating_add(world.envelope.max_runtime_ticks);
+        world.armed_at = now;
         Ok(())
     }
 
@@ -235,7 +236,11 @@ impl<const WORLDS: usize> BudgetManager<WORLDS> {
         let mut expired = [None; WORLDS];
         for (index, entry) in self.worlds.iter_mut().enumerate() {
             if let Some(world) = entry {
-                if world.state == WorldState::Active && now >= world.deadline {
+                // Elapsed time with wrapping arithmetic stays correct across a
+                // counter wrap (a saturating deadline expired early near u64::MAX).
+                if world.state == WorldState::Active
+                    && now.wrapping_sub(world.armed_at) >= world.envelope.max_runtime_ticks
+                {
                     world.state = WorldState::Quarantined;
                     expired[index] = Some(world.id);
                 }
@@ -251,7 +256,7 @@ impl<const WORLDS: usize> BudgetManager<WORLDS> {
         world.cpu_used = 0;
         world.frames_used = 0;
         world.dma_used = 0;
-        world.deadline = now.saturating_add(world.envelope.max_runtime_ticks);
+        world.armed_at = now;
         world.state = WorldState::Active;
         Ok(())
     }
@@ -380,8 +385,33 @@ mod tests {
             m.charge_dma(1, 1),
             Err(BudgetError::Exceeded(ResourceLimit::DmaBytes))
         );
-        assert_eq!(m.check(u64::MAX), [Some(1)]);
-        assert_eq!(m.restore(1, u64::MAX), Ok(()));
+        // One tick of a u64::MAX runtime budget has elapsed: not expired. (The
+        // saturating-deadline draft reported expiry here; that was the wrap bug.)
+        assert_eq!(m.check(u64::MAX), [None]);
         assert_eq!(m.cpu_allowance(1), Ok(u64::MAX));
+    }
+    #[test]
+    fn watchdog_is_correct_across_counter_wrap() {
+        // Review regression: admitted at u64::MAX - 4 with a 10-tick runtime must
+        // survive until 10 ticks have elapsed, even though the counter wraps.
+        let start = u64::MAX - 4;
+        let mut manager = BudgetManager::<4>::new();
+        let envelope = ResourceEnvelope {
+            max_runtime_ticks: 10,
+            ..envelope()
+        };
+        manager.admit(1, envelope, false, start).unwrap();
+        let expired = |r: [Option<u32>; 4]| r.iter().flatten().count();
+        assert_eq!(expired(manager.check(u64::MAX)), 0, "4 ticks elapsed");
+        assert_eq!(
+            expired(manager.check(start.wrapping_add(9))),
+            0,
+            "9 ticks elapsed"
+        );
+        assert_eq!(
+            expired(manager.check(start.wrapping_add(10))),
+            1,
+            "10 ticks: expired"
+        );
     }
 }
