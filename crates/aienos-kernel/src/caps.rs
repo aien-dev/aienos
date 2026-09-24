@@ -101,9 +101,12 @@ impl<const N: usize> CapTable<N> {
         let index = self
             .slots
             .iter()
-            .position(Option::is_none)
+            .enumerate()
+            .find_map(|(index, slot)| {
+                (slot.is_none() && self.generations[index] != u32::MAX).then_some(index)
+            })
             .ok_or(CapError::Full)?;
-        let generation = self.generations[index].wrapping_add(1).max(1);
+        let generation = self.generations[index] + 1;
         self.generations[index] = generation;
         self.slots[index] = Some(Slot {
             generation,
@@ -215,43 +218,83 @@ impl<const N: usize> CapTable<N> {
         {
             return Err(CapError::MissingRights);
         }
-        let mut revoked = [None; M];
-        revoked[0] = Some(Location {
+        let root = Location {
             table: table_id,
             handle,
-        });
-        let mut count = 1;
-        let mut cursor = 0;
-        while cursor < count {
-            let parent = revoked[cursor].unwrap();
-            for table in tables.iter_mut() {
+        };
+        let capacity = M.saturating_mul(tables.len());
+
+        // Validate every parent chain before changing any slot. The table set
+        // bounds each walk, including malformed cyclic derivation metadata.
+        for table in tables.iter() {
+            for (index, slot) in table.slots.iter().enumerate() {
+                if slot.is_some() {
+                    let start = Location {
+                        table: table.id,
+                        handle: Handle {
+                            index: index as u32,
+                            generation: slot.unwrap().generation,
+                        },
+                    };
+                    let _ = Self::revocation_depth(start, root, tables, capacity)?;
+                }
+            }
+        }
+
+        // Remove deepest descendants first so their parent chains remain
+        // available while calculating the shallower depths.
+        for _ in 0..capacity {
+            let mut deepest: Option<(Location, usize)> = None;
+            for table in tables.iter() {
                 for (index, slot) in table.slots.iter().enumerate() {
-                    if slot.and_then(|s| s.parent) == Some(parent) {
+                    if let Some(slot) = slot {
                         let loc = Location {
                             table: table.id,
                             handle: Handle {
                                 index: index as u32,
-                                generation: slot.unwrap().generation,
+                                generation: slot.generation,
                             },
                         };
-                        if count == M {
-                            return Err(CapError::Full);
+                        if let Some(depth) = Self::revocation_depth(loc, root, tables, capacity)? {
+                            if deepest.is_none_or(|(_, deepest_depth)| depth > deepest_depth) {
+                                deepest = Some((loc, depth));
+                            }
                         }
-                        revoked[count] = Some(loc);
-                        count += 1;
                     }
                 }
             }
-            cursor += 1;
-        }
-        for loc in revoked[..count].iter().flatten() {
-            if let Some(table) = tables.iter_mut().find(|table| table.id == loc.table) {
-                if table.slot(loc.handle).is_ok() {
-                    table.slots[loc.handle.index as usize] = None;
-                }
-            }
+            let Some((loc, _)) = deepest else { break };
+            let table = tables
+                .iter_mut()
+                .find(|table| table.id == loc.table)
+                .unwrap();
+            table.slots[loc.handle.index as usize] = None;
         }
         Ok(())
+    }
+
+    fn revocation_depth<const M: usize>(
+        mut current: Location,
+        root: Location,
+        tables: &[&mut CapTable<M>],
+        capacity: usize,
+    ) -> Result<Option<usize>, CapError> {
+        for depth in 0..=capacity {
+            if current == root {
+                return Ok(Some(depth));
+            }
+            let Some(table) = tables.iter().find(|table| table.id == current.table) else {
+                return Ok(None);
+            };
+            let Ok(slot) = table.slot(current.handle) else {
+                return Ok(None);
+            };
+            let Some(parent) = slot.parent else {
+                return Ok(None);
+            };
+            current = parent;
+        }
+        Err(CapError::Full)
     }
 }
 
@@ -268,6 +311,30 @@ mod tests {
         assert_ne!(old.generation, new.generation);
         assert_eq!(
             table.lookup(old, Rights::READ),
+            Err(CapError::InvalidHandle)
+        );
+    }
+
+    #[test]
+    fn generation_exhaustion_retires_slot_without_reviving_old_handle() {
+        let mut table = CapTable::<2>::new(1);
+        let old = table.insert(7, Rights::READ).unwrap();
+        table.generations[old.index as usize] = u32::MAX - 1;
+        table.remove(old).unwrap();
+
+        let final_handle = table.insert(8, Rights::READ).unwrap();
+        assert_eq!(final_handle.index, old.index);
+        assert_eq!(final_handle.generation, u32::MAX);
+        table.remove(final_handle).unwrap();
+
+        let replacement = table.insert(9, Rights::READ).unwrap();
+        assert_ne!(replacement.index, old.index);
+        assert_eq!(
+            table.lookup(old, Rights::READ),
+            Err(CapError::InvalidHandle)
+        );
+        assert_eq!(
+            table.lookup(final_handle, Rights::READ),
             Err(CapError::InvalidHandle)
         );
     }
@@ -301,6 +368,21 @@ mod tests {
             b.lookup(grandchild, Rights::READ),
             Err(CapError::InvalidHandle)
         );
+    }
+
+    #[test]
+    fn revoke_with_single_slot_tables_removes_cross_table_child() {
+        let mut a = CapTable::<1>::new(1);
+        let mut b = CapTable::<1>::new(2);
+        let root = a
+            .insert(7, Rights::READ | Rights::DERIVE | Rights::REVOKE)
+            .unwrap();
+        let child = CapTable::derive_into(&mut a, root, &mut b, Rights::READ).unwrap();
+
+        CapTable::<1>::revoke(1, root, &mut [&mut a, &mut b]).unwrap();
+
+        assert_eq!(a.lookup(root, Rights::READ), Err(CapError::InvalidHandle));
+        assert_eq!(b.lookup(child, Rights::READ), Err(CapError::InvalidHandle));
     }
 
     #[test]
