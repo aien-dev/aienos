@@ -172,6 +172,59 @@ pub fn isb() {
     }
 }
 
+/// Smallest data cache line in bytes, from CTR_EL0.DminLine (log2 of the
+/// line size in 4-byte words). Maintenance loops must step by this, never by
+/// a guess: `dc` acts on the one line holding the address it is given.
+pub fn dcache_line_bytes() -> usize {
+    #[cfg(target_arch = "aarch64")]
+    {
+        let ctr: u64;
+        unsafe {
+            core::arch::asm!("mrs {0}, ctr_el0", out(reg) ctr, options(nomem, nostack, preserves_flags));
+        }
+        4 << ((ctr >> 16) & 0xf)
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        64
+    }
+}
+
+/// Clean `[addr, addr + size)` to the point of coherency so a DMA master
+/// sees what the CPU wrote. No-op on hosts.
+pub fn clean_dcache_range(addr: usize, size: usize) {
+    #[cfg(target_arch = "aarch64")]
+    dcache_range(addr, size, |line| unsafe {
+        core::arch::asm!("dc cvac, {0}", in(reg) line, options(nostack, preserves_flags));
+    });
+    #[cfg(not(target_arch = "aarch64"))]
+    let _ = (addr, size);
+}
+
+/// Clean and invalidate `[addr, addr + size)` so the next CPU read sees what
+/// a DMA master wrote. Cleaning first means no CPU write in a shared line is
+/// lost. No-op on hosts.
+pub fn clean_invalidate_dcache_range(addr: usize, size: usize) {
+    #[cfg(target_arch = "aarch64")]
+    dcache_range(addr, size, |line| unsafe {
+        core::arch::asm!("dc civac, {0}", in(reg) line, options(nostack, preserves_flags));
+    });
+    #[cfg(not(target_arch = "aarch64"))]
+    let _ = (addr, size);
+}
+
+#[cfg(target_arch = "aarch64")]
+fn dcache_range(addr: usize, size: usize, op: impl Fn(usize)) {
+    let line = dcache_line_bytes();
+    let end = addr.saturating_add(size);
+    let mut cursor = addr & !(line - 1);
+    while cursor < end {
+        op(cursor);
+        cursor += line;
+    }
+    dsb();
+}
+
 /// Disable interrupts (set DAIF flags).
 #[inline(always)]
 pub fn disable_interrupts() {
