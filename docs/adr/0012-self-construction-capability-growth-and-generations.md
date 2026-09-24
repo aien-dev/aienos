@@ -1,6 +1,6 @@
 # ADR 0012: Self-Construction, Capability Growth, and Reversible System Generations
 
-Status: Accepted by the operator, 2026-09-24.
+Status: Accepted by the operator, 2026-09-24. Amended 2026-09-24 (operator): voice-first interaction; audio output, voice synthesis and a text interface join the survival kit (rules 2 and 15).
 Governing: [ADR 0002](0002-incumbent-os-as-migration-environment.md), [ADR 0006](0006-deterministic-recovery-core-and-offline-operator-authority.md), [ADR 0007](0007-continuous-existence-provisioning-once.md), [ADR 0009](0009-el2-bootstrap-to-el1h-kernel-transition.md).
 Roadmap: inserts SEED-0A before M3 and SEED-0B after the M3 isolation work ([`ROADMAP.md`](../../ROADMAP.md)).
 
@@ -55,9 +55,11 @@ Generations.
 1. **Prove locally, design generally.** Machine 1 (the Spark) is the proving
    ground. Nothing fundamental is Spark-specific unless it sits behind a
    machine/BSP boundary.
-2. **Survival kit, then growth.** Every AIEN has what it needs to exist and
-   recover: console/display, input, storage, networking, time, recovery,
-   identity, and the Forge machinery. Everything else is grown when required.
+2. **Survival kit, then growth.** Every AIEN has what it needs to exist,
+   recover, and talk with its person: Seed/recovery, identity,
+   console/display, keyboard/input, storage, networking, time, the Forge
+   build/test machinery, audio output, voice synthesis, and a text interface.
+   Everything else is grown when required.
 3. **The agent is an untrusted proposer.** The model may write, adapt,
    diagnose, and optimize. Candidate code never authorizes itself; every
    candidate passes deterministic admission gates.
@@ -144,6 +146,22 @@ Generations.
     Storage is content-addressed: shared objects are stored once and collected
     only when nothing retained references them. Security rollback history and
     identity continuity records are never collected for age.
+
+15. **Voice-first interaction.** AIEN is conversational by default, visual
+    when useful, and textual when precise. Voice output is part of the
+    survival kit (rule 2). Microphone input is a permission-controlled
+    capability (rule 4): push-to-talk, a wake phrase, temporary listening
+    windows, room/device policy, a visible listening state, and barge-in
+    (interrupting AIEN mid-sentence). Voice identity is durable logical state
+    (ADR 0007 Class A); the TTS model, audio driver and buffers are replaceable
+    physical state. Voice is local-first and sovereign where practical: no
+    cloud speech service is required to speak, listen, or recover. Recovery
+    and the Seed never depend on voice or on a model; the text console
+    remains the fallback.
+
+    Capability order: `audio.output`, `speech.synthesis`, `voice.expression`;
+    then `audio.input`, `speech.recognition`, barge-in, speaker
+    identification, ambient interaction.
 
 ### Roadmap
 
