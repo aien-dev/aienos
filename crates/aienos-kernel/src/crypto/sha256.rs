@@ -25,6 +25,22 @@ pub struct Sha256 {
     total_len_bytes: u64,
 }
 
+impl Drop for Sha256 {
+    fn drop(&mut self) {
+        for word in &mut self.state {
+            // Volatile writes prevent intermediate hash state from being elided.
+            unsafe { core::ptr::write_volatile(word, 0) };
+        }
+        for byte in &mut self.buffer {
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        unsafe {
+            core::ptr::write_volatile(&mut self.buf_len, 0);
+            core::ptr::write_volatile(&mut self.total_len_bytes, 0);
+        }
+    }
+}
+
 impl Default for Sha256 {
     fn default() -> Self {
         Self::new()
