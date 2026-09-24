@@ -397,7 +397,11 @@ fn leaf_attributes(flags: MapFlags) -> u64 {
         MemoryAttribute::DeviceNgnre => MAIR_DEVICE_NGNRE,
     } as u64;
     let ap = if flags.user {
-        if flags.writable { 0b01 } else { 0b11 }
+        if flags.writable {
+            0b01
+        } else {
+            0b11
+        }
     } else if flags.writable {
         0b00
     } else {

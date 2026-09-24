@@ -29,7 +29,7 @@ use aienos_kernel::arch::aarch64::{
 };
 use aienos_kernel::boot::{BootTiming, MemoryMapSummary};
 use aienos_kernel::console::EarlyConsole;
-use aienos_kernel::display::{ACCENT, FOREGROUND, FramebufferInfo, PixelOrder, Screen};
+use aienos_kernel::display::{FramebufferInfo, PixelOrder, Screen, ACCENT, FOREGROUND};
 use aienos_kernel::fatal::{self, FaultInfo};
 use aienos_kernel::mem::frame_allocator::PhysAddr;
 use aienos_kernel::mem::map_plan::{self, AddressRange, EfiMemoryDescriptor};
@@ -38,19 +38,19 @@ use aienos_kernel::report::ReportBuf;
 use aienos_kernel::sync::spinlock::SpinLock;
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
 use uefi::prelude::*;
 use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
 use uefi::proto::loaded_image::LoadedImage;
 use uefi::proto::media::file::{File, FileAttribute, FileMode};
-use uefi::proto::pci::PciIoAddress;
 use uefi::proto::pci::configuration::ResourceRangeType;
 use uefi::proto::pci::root_bridge::PciRootBridgeIo;
+use uefi::proto::pci::PciIoAddress;
 use uefi::runtime::{ResetType, VariableAttributes, VariableVendor};
 use uefi::table::cfg::ConfigTableEntry;
-use uefi::{CStr16, cstr16, guid};
+use uefi::{cstr16, guid, CStr16};
 
 const PT_POOL_PAGES: usize = 256;
 const POST_EXIT_HEAP_PAGES: usize = 1024;
@@ -1075,8 +1075,19 @@ fn main() -> Status {
     let mut report = Report::new();
     header(&mut report, "final");
     write_index_line(&mut report);
-    let _ = writeln!(report, "kernel_el: EL1h");
-    let _ = writeln!(report, "mmu: enabled");
+    // Measured, not asserted: read the live exception level and SCTLR_EL1.M.
+    let el = aienos_kernel::arch::aarch64::current_el();
+    if el == 1 {
+        let _ = writeln!(report, "kernel_el: EL1h");
+    } else {
+        let _ = writeln!(report, "kernel_el: unexpected EL{el}");
+    }
+    let mmu_on = aienos_kernel::arch::aarch64::el1_mmu_enabled();
+    let _ = writeln!(
+        report,
+        "mmu: {}",
+        if mmu_on { "enabled" } else { "disabled" }
+    );
     let _ = writeln!(report, "pt_frames_used: {pt_frames_used}");
     let _ = writeln!(
         report,

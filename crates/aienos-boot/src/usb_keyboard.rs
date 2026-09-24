@@ -7,7 +7,7 @@
 //! and never admitted to Machine 1 before M3 can confine it.
 
 use aienos_kernel::acpi::{self, EcamWindow};
-use aienos_kernel::arch::aarch64::{MmioReg, counter_frequency_hz, counter_ticks};
+use aienos_kernel::arch::aarch64::{counter_frequency_hz, counter_ticks, MmioReg};
 use aienos_kernel::console::EarlyConsole;
 use aienos_kernel::display::Screen;
 use aienos_kernel::usb::hid::{BootKeyboardDecoder, KeyEvent, TextSink};
@@ -15,8 +15,8 @@ use aienos_kernel::usb::xhci::controller::{DmaMemory, Keyboard};
 use aienos_kernel::usb::xhci::{self, PCI_COMMAND_BUS_MASTER, PCI_COMMAND_MEMORY};
 use core::fmt::Write;
 use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
-use uefi::proto::pci::PciIoAddress;
 use uefi::proto::pci::root_bridge::PciRootBridgeIo;
+use uefi::proto::pci::PciIoAddress;
 
 /// Seconds to wait for a line; `AIENOS_KEYBOARD_SECS` at build time.
 fn listen_secs() -> u64 {

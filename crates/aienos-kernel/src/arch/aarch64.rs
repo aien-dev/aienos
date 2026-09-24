@@ -52,6 +52,25 @@ pub fn current_el() -> u8 {
     }
 }
 
+/// True when running at EL1 with stage-1 translation on (SCTLR_EL1.M set).
+pub fn el1_mmu_enabled() -> bool {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if current_el() != 1 {
+            return false;
+        }
+        let sctlr: u64;
+        unsafe {
+            core::arch::asm!("mrs {0}, sctlr_el1", out(reg) sctlr, options(nomem, nostack));
+        }
+        sctlr & 1 != 0
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        false
+    }
+}
+
 /// Configure stage-1 translation and enter EL1h using an identity-mapped root.
 /// The caller must ensure the current PC, stack, code, and data are mapped.
 ///
