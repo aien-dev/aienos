@@ -61,6 +61,8 @@ check "left firmware and entered the kernel" "kernel: alive"
 check "kernel entered EL1h" "kernel_el: EL1h"
 check "cooperative threads interleaved" "threads: ok"
 check "EL0 capability and fault isolation" "el0: ok write=granted forged=denied fault=contained exit=0"
+check "timer-driven preemption across runnable tasks" "preempt: ok"
+check "deterministic MADT placement of preempt workers" "placement: worker0=class0/core0 worker1=class0/core1"
 check "EL1 page tables and caches enabled" "mmu: enabled"
 check "GICv3 enabled" "gic: v3"
 if grep -qE 'timer_irq: ([0-9]+) ticks' "${work}/serial.txt"; then
