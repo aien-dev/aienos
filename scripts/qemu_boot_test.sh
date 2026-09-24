@@ -59,6 +59,7 @@ check "pre-exit report printed" "report_kind: pre_exit"
 check "image is this commit" "aienos_commit: ${commit}"
 check "left firmware and entered the kernel" "kernel: alive"
 check "kernel entered EL1h" "kernel_el: EL1h"
+check "cooperative threads interleaved" "threads: ok"
 check "EL1 page tables and caches enabled" "mmu: enabled"
 check "GICv3 enabled" "gic: v3"
 if grep -qE 'timer_irq: ([0-9]+) ticks' "${work}/serial.txt"; then
