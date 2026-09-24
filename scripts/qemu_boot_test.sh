@@ -27,10 +27,13 @@ cp target/aarch64-unknown-uefi/release/aienos-handoff.efi "${work}/esp/EFI/BOOT/
 cp "${vars_fd}" "${work}/vars.fd"
 log="${work}/serial.log"
 
+# Issue #61: single-threaded TCG completed 120/120 soak boots; MTTCG hung in 1/40.
+qemu_accel=(-accel tcg,thread=single)
+
 started=$(date +%s)
 set +e
 timeout "${AIENOS_QEMU_TIMEOUT:-180}" qemu-system-aarch64 \
-    -M virt,virtualization=on -cpu max -smp 4 -m 2048 \
+    -M virt,virtualization=on,gic-version=3 "${qemu_accel[@]}" -cpu max -smp 4 -m 2048 \
     -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
     -drive if=pflash,format=raw,file="${work}/vars.fd" \
     -drive if=none,id=esp,format=raw,file=fat:rw:"${work}/esp" \

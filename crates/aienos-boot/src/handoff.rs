@@ -242,7 +242,7 @@ fn enter_kernel_mmu(
     {
         parange = 5;
     }
-    let _ = unsafe {
+    let entered = unsafe {
         aienos_kernel::arch::aarch64::enter_el1h_mmu(
             root,
             map_plan::mair_el1(),
@@ -250,6 +250,22 @@ fn enter_kernel_mmu(
             map_plan::sctlr_el1(),
         )
     };
+    if !entered {
+        // Fail closed with evidence: the kernel must not continue on
+        // firmware's translation, and the reason must survive the halt.
+        let mut halt_report = Report::new();
+        header(&mut halt_report, "halt");
+        write_index_line(&mut halt_report);
+        let el = aienos_kernel::arch::aarch64::current_el();
+        let _ = writeln!(
+            halt_report,
+            "el1_switch: refused (current EL{el}, expected EL2)"
+        );
+        let _ = writeln!(halt_report, "boot: halted before kernel entry");
+        let _ = send_to_console(halt_report.as_str());
+        let _ = save_report_var(halt_report.as_bytes());
+        aienos_kernel::arch::aarch64::halt();
+    }
     fatal::install_exception_vectors();
     (
         used,
@@ -1256,6 +1272,13 @@ fn main() -> Status {
         }
     }
     #[cfg(feature = "usb-keyboard")]
-    usb_keyboard::run(xhci, acpi_facts.mcfg, &mut screen);
+    usb_keyboard::run(
+        xhci,
+        acpi_facts.mcfg,
+        &mut screen,
+        summary.conventional_kb(),
+        el,
+        report.as_str(),
+    );
     finish(screen)
 }
