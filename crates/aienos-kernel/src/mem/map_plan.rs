@@ -189,8 +189,17 @@ pub const fn mair_el1() -> u64 {
     0x04ff
 }
 /// PARange is ID_AA64MMFR0_EL1[3:0], encoded as the IPS field.
+/// TTBR0: T0SZ=16 (48-bit), WB-WA walks, inner shareable, 4 KiB granule.
+/// TTBR1 walks are disabled (EPD1) but T1SZ/TG1 still get valid values, since
+/// TG1 = 0b00 is a reserved encoding.
 pub const fn tcr_el1(parange: u8) -> u64 {
-    16 | (1 << 8) | (1 << 10) | (3 << 12) | (1 << 23) | (((parange as u64) & 7) << 32)
+    16 | (1 << 8)
+        | (1 << 10)
+        | (3 << 12)
+        | (16 << 16)
+        | (1 << 23)
+        | (0b10 << 30)
+        | (((parange as u64) & 7) << 32)
 }
 /// Architectural RES1 bits plus M, C and I. Alignment and access checks stay disabled.
 pub const fn sctlr_el1() -> u64 {
@@ -210,6 +219,34 @@ mod tests {
     }
     const RX: u32 = 0x4000_0000 | IMAGE_SCN_MEM_EXECUTE;
     const RW: u32 = 0x4000_0000 | IMAGE_SCN_MEM_WRITE;
+    #[test]
+    fn translation_register_values_match_the_architecture() {
+        assert_eq!(mair_el1() & 0xff, 0xff, "idx0 Normal WB RA/WA");
+        assert_eq!((mair_el1() >> 8) & 0xff, 0x04, "idx1 Device-nGnRE");
+        let tcr = tcr_el1(0b0101); // 48-bit PA
+        assert_eq!(tcr & 0x3f, 16, "T0SZ");
+        assert_eq!((tcr >> 8) & 0b11, 0b01, "IRGN0 WB-WA");
+        assert_eq!((tcr >> 10) & 0b11, 0b01, "ORGN0 WB-WA");
+        assert_eq!((tcr >> 12) & 0b11, 0b11, "SH0 inner");
+        assert_eq!((tcr >> 14) & 0b11, 0b00, "TG0 4 KiB");
+        assert_eq!((tcr >> 16) & 0x3f, 16, "T1SZ");
+        assert_ne!(tcr & (1 << 23), 0, "EPD1");
+        assert_eq!((tcr >> 30) & 0b11, 0b10, "TG1 4 KiB, not reserved 0b00");
+        assert_eq!((tcr >> 32) & 0b111, 0b101, "IPS from PARange");
+        let sctlr = sctlr_el1();
+        assert_eq!(sctlr & 0x30d0_0800, 0x30d0_0800, "RES1 bits");
+        assert_eq!(
+            sctlr & ((1 << 0) | (1 << 2) | (1 << 12)),
+            0b1_0000_0000_0101,
+            "M, C, I"
+        );
+        assert_eq!(
+            sctlr & ((1 << 1) | (1 << 19) | (1 << 25)),
+            0,
+            "A, WXN, EE clear"
+        );
+    }
+
     #[test]
     fn section_permissions_are_wx_safe() {
         let mem = [d(EFI_LOADER_CODE, 0x100000, 4, 0)];
