@@ -193,10 +193,7 @@ mod tests {
         r
     }
 
-    fn decode(
-        decoder: &mut BootKeyboardDecoder,
-        report: &[u8; BOOT_REPORT_LEN],
-    ) -> TextSink<16> {
+    fn decode(decoder: &mut BootKeyboardDecoder, report: &[u8; BOOT_REPORT_LEN]) -> TextSink<16> {
         let mut sink = TextSink::new();
         decoder.handle_report(report, |e| sink.record(e));
         sink
@@ -205,11 +202,20 @@ mod tests {
     #[test]
     fn letter_make_and_release_produces_one_character() {
         let mut d = BootKeyboardDecoder::new();
-        assert_eq!(decode(&mut d, &report(0, [0x04, 0, 0, 0, 0, 0])).as_str(), "a");
+        assert_eq!(
+            decode(&mut d, &report(0, [0x04, 0, 0, 0, 0, 0])).as_str(),
+            "a"
+        );
         assert_eq!(decode(&mut d, &report(0, [0; 6])).as_str(), "");
         // Held keys do not repeat: same usage in consecutive reports is quiet.
-        assert_eq!(decode(&mut d, &report(0, [0x04, 0, 0, 0, 0, 0])).as_str(), "a");
-        assert_eq!(decode(&mut d, &report(0, [0x04, 0, 0, 0, 0, 0])).as_str(), "");
+        assert_eq!(
+            decode(&mut d, &report(0, [0x04, 0, 0, 0, 0, 0])).as_str(),
+            "a"
+        );
+        assert_eq!(
+            decode(&mut d, &report(0, [0x04, 0, 0, 0, 0, 0])).as_str(),
+            ""
+        );
     }
 
     #[test]
@@ -236,14 +242,20 @@ mod tests {
         );
         let mut d = BootKeyboardDecoder::new();
         assert_eq!(
-            decode(&mut d, &report(LEFT_SHIFT, [0x2f, 0x30, 0x31, 0x33, 0x34, 0x35]))
-                .as_str(),
+            decode(
+                &mut d,
+                &report(LEFT_SHIFT, [0x2f, 0x30, 0x31, 0x33, 0x34, 0x35])
+            )
+            .as_str(),
             "{}|:\"~"
         );
         let mut d = BootKeyboardDecoder::new();
         assert_eq!(
-            decode(&mut d, &report(LEFT_SHIFT, [0x2d, 0x2e, 0x32, 0x36, 0x37, 0x38]))
-                .as_str(),
+            decode(
+                &mut d,
+                &report(LEFT_SHIFT, [0x2d, 0x2e, 0x32, 0x36, 0x37, 0x38])
+            )
+            .as_str(),
             "_+~<>?"
         );
     }
