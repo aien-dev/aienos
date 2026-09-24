@@ -130,14 +130,7 @@ pub fn set_write_hook(hook: WriteHook) {
 }
 
 const fn pack_handle(handle: Handle) -> u64 {
-    ((handle.generation as u64) << 32) | handle.index as u64
-}
-
-const fn unpack_handle(raw: u64) -> Handle {
-    Handle {
-        index: raw as u32,
-        generation: (raw >> 32) as u32,
-    }
+    handle.to_raw()
 }
 
 fn user_bytes(address: u64, length: usize) -> Option<&'static [u8]> {
@@ -158,8 +151,15 @@ fn user_bytes(address: u64, length: usize) -> Option<&'static [u8]> {
 
 fn dispatch_write(frame: &mut TrapFrame) {
     let raw = frame.x[0];
-    let allowed =
-        unsafe { USER_CAPS.lookup(unpack_handle(raw), Rights::WRITE) == Ok(CONSOLE_RESOURCE) };
+    let handle = match Handle::from_raw(raw) {
+        Ok(h) => h,
+        Err(_) => {
+            FORGED_DENIED.store(true, Ordering::Release);
+            frame.x[0] = SYSCALL_DENIED;
+            return;
+        }
+    };
+    let allowed = unsafe { USER_CAPS.lookup(handle, Rights::WRITE) == Ok(CONSOLE_RESOURCE) };
     let bytes = usize::try_from(frame.x[2])
         .ok()
         .and_then(|length| user_bytes(frame.x[1], length));
@@ -234,19 +234,20 @@ pub unsafe extern "C" fn aienos_lower_el_sync_dispatcher(frame: *mut TrapFrame) 
 fn dispatch_ipc(frame: &mut TrapFrame) {
     match frame.x[8] {
         SYS_CHANNEL_SEND => {
-            let message = crate::ipc::Message {
-                kind: frame.x[1] as u32,
-                _pad: 0,
-                payload: [frame.x[2], frame.x[3], frame.x[4]],
-                region: crate::ipc::MemoryRegion {
-                    base: frame.x[5],
-                    pages: frame.x[6] as u32,
-                    _pad: 0,
-                },
-                object: crate::ipc::ObjectId(frame.x[7]),
+            let handle = match Handle::from_raw(frame.x[0]) {
+                Ok(h) => h,
+                Err(_) => {
+                    frame.x[0] = SYSCALL_DENIED;
+                    return;
+                }
             };
-            let result =
-                unsafe { crate::ipc::channel_send_active(unpack_handle(frame.x[0]), message) };
+            let message = crate::abi::Message::new(
+                frame.x[1] as u32,
+                [frame.x[2], frame.x[3], frame.x[4]],
+                crate::abi::MemoryRegion::new(frame.x[5], frame.x[6] as u32),
+                crate::abi::ObjectId(frame.x[7]),
+            );
+            let result = unsafe { crate::ipc::channel_send_active(handle, message) };
             match result {
                 Ok(()) => {
                     IPC_SENT_KIND.store(frame.x[1], Ordering::Release);
@@ -259,7 +260,14 @@ fn dispatch_ipc(frame: &mut TrapFrame) {
             }
         }
         SYS_CHANNEL_RECV => {
-            match unsafe { crate::ipc::channel_receive_active(unpack_handle(frame.x[0])) } {
+            let handle = match Handle::from_raw(frame.x[0]) {
+                Ok(h) => h,
+                Err(_) => {
+                    frame.x[0] = SYSCALL_DENIED;
+                    return;
+                }
+            };
+            match unsafe { crate::ipc::channel_receive_active(handle) } {
                 Ok(message) => {
                     let delivered = message.kind as u64 == IPC_SENT_KIND.load(Ordering::Acquire)
                         && message.payload[0] == IPC_SENT_P0.load(Ordering::Acquire)
@@ -278,37 +286,58 @@ fn dispatch_ipc(frame: &mut TrapFrame) {
                 Err(_) => frame.x[0] = SYSCALL_DENIED,
             }
         }
-        SYS_CAP_DELEGATE => match Rights::from_bits(frame.x[2] as u8) {
-            Some(rights) => {
-                match unsafe {
-                    crate::ipc::delegate_from_active(
-                        unpack_handle(frame.x[0]),
-                        frame.x[1] as u32,
-                        rights,
-                    )
-                } {
-                    Ok(child) => {
-                        IPC_CAP_DELEGATED.store(true, Ordering::Release);
-                        IPC_CHILD_HANDLE.store(pack_handle(child), Ordering::Release);
-                        frame.x[0] = 0;
-                    }
-                    Err(_) => frame.x[0] = SYSCALL_DENIED,
+        SYS_CAP_DELEGATE => {
+            let handle = match Handle::from_raw(frame.x[0]) {
+                Ok(h) => h,
+                Err(_) => {
+                    frame.x[0] = SYSCALL_DENIED;
+                    return;
                 }
-            }
-            None => frame.x[0] = SYSCALL_DENIED,
-        },
-        SYS_OBJECT_READ => {
+            };
+            let wire_rights = match crate::abi::Rights::from_bits(frame.x[2] as u32) {
+                Ok(r) => r,
+                Err(_) => {
+                    frame.x[0] = SYSCALL_DENIED;
+                    return;
+                }
+            };
+            let caps_rights: Rights = match wire_rights.try_into() {
+                Ok(r) => r,
+                Err(_) => {
+                    frame.x[0] = SYSCALL_DENIED;
+                    return;
+                }
+            };
             match unsafe {
-                crate::ipc::object_read_active(unpack_handle(frame.x[0]), frame.x[1] as usize)
+                crate::ipc::delegate_from_active(handle, frame.x[1] as u32, caps_rights)
             } {
+                Ok(child) => {
+                    IPC_CAP_DELEGATED.store(true, Ordering::Release);
+                    IPC_CHILD_HANDLE.store(child.to_raw(), Ordering::Release);
+                    frame.x[0] = 0;
+                }
+                Err(_) => frame.x[0] = SYSCALL_DENIED,
+            }
+        }
+        SYS_OBJECT_READ => {
+            let handle = match Handle::from_raw(frame.x[0]) {
+                Ok(h) => h,
+                Err(_) => {
+                    if IPC_PHASE.load(Ordering::Acquire) & 0xff != 0 {
+                        IPC_REVOKED_DENIED.store(true, Ordering::Release);
+                    } else {
+                        IPC_FORGED_DENIED.store(true, Ordering::Release);
+                    }
+                    frame.x[0] = SYSCALL_DENIED;
+                    return;
+                }
+            };
+            match unsafe { crate::ipc::object_read_active(handle, frame.x[1] as usize) } {
                 Ok(value) => frame.x[0] = value,
                 Err(crate::ipc::IpcError::InvalidHandle) => {
                     if IPC_PHASE.load(Ordering::Acquire) & 0xff != 0 {
-                        // Post-revocation retry: the ancestor revocation reached
-                        // this derived handle.
                         IPC_REVOKED_DENIED.store(true, Ordering::Release);
                     } else {
-                        // Deliberately corrupted handle.
                         IPC_FORGED_DENIED.store(true, Ordering::Release);
                     }
                     frame.x[0] = SYSCALL_DENIED;
@@ -317,12 +346,15 @@ fn dispatch_ipc(frame: &mut TrapFrame) {
             }
         }
         SYS_OBJECT_WRITE => {
+            let handle = match Handle::from_raw(frame.x[0]) {
+                Ok(h) => h,
+                Err(_) => {
+                    frame.x[0] = SYSCALL_DENIED;
+                    return;
+                }
+            };
             match unsafe {
-                crate::ipc::object_write_active(
-                    unpack_handle(frame.x[0]),
-                    frame.x[1] as usize,
-                    frame.x[2],
-                )
+                crate::ipc::object_write_active(handle, frame.x[1] as usize, frame.x[2])
             } {
                 Ok(()) => frame.x[0] = 0,
                 Err(crate::ipc::IpcError::MissingRights) => {
@@ -971,11 +1003,8 @@ mod tests {
 
     #[test]
     fn capability_handle_round_trips() {
-        let handle = Handle {
-            index: 7,
-            generation: 19,
-        };
-        assert_eq!(unpack_handle(pack_handle(handle)), handle);
+        let handle = Handle::new(7, 19).unwrap();
+        assert_eq!(Handle::from_raw(handle.to_raw()), Ok(handle));
     }
 
     #[test]
