@@ -22,6 +22,70 @@ pub struct FaultInfo {
     pub spsr: u64,
 }
 
+/// Purely decoded ESR_EL1/ESR_EL2 fields used by reports and host tests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EsrInfo {
+    pub exception_class: u8,
+    pub iss: u32,
+    pub abort: Option<AbortSyndrome>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AbortSyndrome {
+    pub instruction: bool,
+    pub fault_status: u8,
+    pub stage1_page_table_walk: bool,
+    pub cache_maintenance: bool,
+    pub external_abort: bool,
+    pub not_valid: bool,
+    pub write: bool,
+    /// Load/store detail, present only for data aborts with ISV (ISS bit 24) set.
+    pub access: Option<AccessSyndrome>,
+}
+
+/// SRT/SAS/SSE from a data-abort ISS; architecturally valid only when ISV = 1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AccessSyndrome {
+    pub register: u8,
+    pub access_size: u8,
+    pub sign_extend: bool,
+}
+
+/// Decode the common ESR layout without reading any system registers.
+pub const fn decode_esr(esr: u64) -> EsrInfo {
+    let ec = ((esr >> 26) & 0x3f) as u8;
+    let iss = (esr & 0x1ff_ffff) as u32;
+    let instruction = ec == 0x20 || ec == 0x21;
+    let data = ec == 0x24 || ec == 0x25;
+    let abort = if instruction || data {
+        Some(AbortSyndrome {
+            instruction,
+            fault_status: (iss & 0x3f) as u8,
+            stage1_page_table_walk: iss & (1 << 7) != 0,
+            cache_maintenance: iss & (1 << 8) != 0,
+            external_abort: iss & (1 << 9) != 0,
+            not_valid: iss & (1 << 10) != 0,
+            write: !instruction && iss & (1 << 6) != 0,
+            access: if data && iss & (1 << 24) != 0 {
+                Some(AccessSyndrome {
+                    register: ((iss >> 16) & 0x1f) as u8,
+                    access_size: ((iss >> 22) & 0x3) as u8,
+                    sign_extend: iss & (1 << 21) != 0,
+                })
+            } else {
+                None
+            },
+        })
+    } else {
+        None
+    };
+    EsrInfo {
+        exception_class: ec,
+        iss,
+        abort,
+    }
+}
+
 impl FaultInfo {
     pub fn kind(&self) -> &'static str {
         ["sync", "irq", "fiq", "serror"][(self.vector % 4) as usize]
@@ -75,6 +139,23 @@ impl fmt::Display for FaultInfo {
             describe_exception_class(self.exception_class())
         )?;
         writeln!(f, "fault_esr: {:#x}", self.esr)?;
+        let decoded = decode_esr(self.esr);
+        writeln!(f, "fault_iss: {:#x}", decoded.iss)?;
+        if let Some(abort) = decoded.abort {
+            writeln!(
+                f,
+                "fault_type: {}",
+                if abort.instruction {
+                    "instruction_abort"
+                } else {
+                    "data_abort"
+                }
+            )?;
+            writeln!(f, "fault_status: {:#x}", abort.fault_status)?;
+            if !abort.instruction {
+                writeln!(f, "fault_write: {}", if abort.write { "yes" } else { "no" })?;
+            }
+        }
         writeln!(f, "fault_elr: {:#x}", self.elr)?;
         writeln!(f, "fault_far: {:#x}", self.far)?;
         writeln!(f, "fault_spsr: {:#x}", self.spsr)
@@ -233,5 +314,40 @@ mod tests {
         };
         assert_eq!(serror.kind(), "serror");
         assert_eq!(describe_exception_class(serror.exception_class()), "SError");
+    }
+
+    #[test]
+    fn decodes_abort_iss_fields_without_register_access() {
+        let decoded = decode_esr(0x9600_0045);
+        assert_eq!(decoded.exception_class, 0x25);
+        assert_eq!(decoded.iss, 0x45);
+        assert_eq!(decoded.abort.unwrap().fault_status, 5);
+        assert!(decoded.abort.unwrap().write);
+
+        let instruction = decode_esr((0x21u64 << 26) | 0x15);
+        assert!(instruction.abort.unwrap().instruction);
+        assert!(!instruction.abort.unwrap().write);
+        assert_eq!(decode_esr(0).abort, None);
+    }
+
+    #[test]
+    fn access_syndrome_only_when_isv_set() {
+        // Data abort, same EL, ISV=0: SRT/SAS/SSE bits are not meaningful.
+        let no_isv = decode_esr((0x25u64 << 26) | (7 << 16) | 0x04);
+        assert_eq!(no_isv.abort.unwrap().access, None);
+        // ISV=1, SAS=0b11 (64-bit), SSE=1, SRT=x7, WnR=0, DFSC=0x07.
+        let isv =
+            decode_esr((0x25u64 << 26) | (1 << 24) | (0b11 << 22) | (1 << 21) | (7 << 16) | 0x07);
+        let access = isv.abort.unwrap().access.unwrap();
+        assert_eq!(
+            (access.register, access.access_size, access.sign_extend),
+            (7, 3, true)
+        );
+        assert!(!isv.abort.unwrap().write);
+        // Instruction aborts never carry an access syndrome, even with bit 24 set.
+        let inst = decode_esr((0x21u64 << 26) | (1 << 24) | 0x0f);
+        assert_eq!(inst.abort.unwrap().access, None);
+        // Non-abort classes (e.g. SVC, EC 0x15) decode no abort detail.
+        assert_eq!(decode_esr(0x15u64 << 26).abort, None);
     }
 }
