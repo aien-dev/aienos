@@ -84,12 +84,14 @@ impl fmt::Display for FaultInfo {
 /// Called for a fault once vectors are installed. Must not return.
 pub type FaultHook = fn(&FaultInfo) -> !;
 
+#[cfg_attr(not(target_arch = "aarch64"), allow(dead_code))]
 static HOOK: AtomicUsize = AtomicUsize::new(0);
 
 pub fn set_fault_hook(hook: FaultHook) {
     HOOK.store(hook as usize, Ordering::SeqCst);
 }
 
+#[cfg_attr(not(target_arch = "aarch64"), allow(dead_code))]
 fn call_hook(info: &FaultInfo) -> ! {
     let raw = HOOK.load(Ordering::SeqCst);
     if raw != 0 {

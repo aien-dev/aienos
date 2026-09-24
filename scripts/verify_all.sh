@@ -47,6 +47,15 @@ cargo run --quiet --release -p aienos-evidence -- verify-efi target/aarch64-unkn
 cargo build --release -p aienos-boot --target aarch64-unknown-uefi --features handoff --bin aienos-handoff
 cargo run --quiet --release -p aienos-evidence -- verify-efi target/aarch64-unknown-uefi/release/aienos-handoff.efi
 
+# Step 6: QEMU AArch64 UEFI Boot Verification (Emulator Boot Test)
+echo ""
+echo "--- [QEMU AArch64 UEFI Boot Verification] ---"
+if command -v qemu-system-aarch64 >/dev/null && [[ -r "${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}" ]]; then
+    ./scripts/qemu_boot_test.sh
+else
+    echo "SKIPPED: qemu-system-aarch64 or AAVMF firmware not present on host."
+fi
+
 echo ""
 echo "============================================================"
 echo "HOST VERIFICATIONS PASSED."
