@@ -35,7 +35,7 @@ only at M8. Status words: **done** = verified on this repository's evidence;
 | **M0** Close Config A (**partial**) | Clean reference snapshot | done | PR #12: schema 3.0.0 bundle, all repositories clean |
 | | Benchmark evidence | done | CPU baseline: Llama-3.2-1B Q4_K_M on 20 Arm cores, 256-token samples, mean decode 54.2 tokens/s |
 | | Native-boot rollback | done | First native boot returned to Linux on its own; BootNext consumed, Linux entry and kernel unchanged ([M2 evidence](../evidence/m2_first_boot_2026-09-24.md)) |
-| | Bootable recovery media | pending | The only USB stick holds a key backup, not a recovery system |
+| | Bootable recovery media | done on hardware | AIENOSRECOV boots with Secure Boot on and returns unattended (#53, [Gate 1 evidence](../evidence/gate1_machine1_selftest_2026-09-24.md)) |
 | **M1** UEFI/QEMU substrate | Automated emulator boot proof | done | PR #42 (SPCR/boot harness) and PR #44 (CI automation). Reaches EL2, discovers MADT/SPCR, reports kernel alive. (Note: distinct from TRUST-1 Gate 4 security test suite) |
 | **M2A** Spark firmware handoff | Memory map into early allocator | done on hardware | PR #10; 184 descriptors, 36 conventional regions, 0 rejected ([M2 evidence](../evidence/m2_first_boot_2026-09-24.md)) |
 | | GB10 PCI identity, BAR0, PMC_BOOT registers | built, not found on hardware | PR #11; pre-exit discovery reported `gb10: unavailable` although Linux sees it at `000f:01:00.0` |
@@ -56,14 +56,14 @@ only at M8. Status words: **done** = verified on this repository's evidence;
 **Overall gate status (2026-09-24):**
 
 ```text
-M0                     PARTIAL      snapshot PASS, benchmark PASS, rollback PASS, recovery media PENDING
+M0                     PARTIAL      snapshot PASS, benchmark PASS, rollback PASS, recovery media boots on Machine 1; Config A recovery_procedure stays documented_only until restore (Gate 1 items 12-14) is exercised
 M1 (QEMU substrate)    PASS         automated QEMU boot in CI (PR #42, #44)
 M2                     PASS         first native Spark boot
 Machine 1 core         PASS         core operational baseline recorded (PR #41)
 TRUST-1 Gate 0         DECLARED     baseline recorded (PR #46); independent key access pending attended proof
-TRUST-1 Gate 1         TOOLING PASS RAM-only recovery builder + QEMU zero-disk proof; physical USB boot pending
+TRUST-1 Gate 1         PARTIAL      stick boots on Machine 1 with Secure Boot on, inspects SB/PCRs/disks, returns (items 1-5, 7, 8, 15, 16 PASS; 6 partial); items 9-14 + artifact round trip pending
 TRUST-1 Gate 4         TOOLING PASS swTPM + soak + fault injection (PR #48); 100-boot campaign pending
-NEXT HARD GATE:        Physical Gate 1 USB boot on Spark -> Gate 2 TPM campaign -> Gate 3 owner keys -> M3
+NEXT HARD GATE:        Gate 0 key proof (decrypt on MacBook) + Gate 1 items 9-14 -> Gate 2 TPM campaign -> Gate 3 owner keys -> M3
 ```
 
 Public roadmap and contributor entry points: [ROADMAP.md](../ROADMAP.md).

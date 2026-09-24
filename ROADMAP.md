@@ -37,13 +37,21 @@ and returned to Linux undamaged. Full record:
 M0 Reference freeze
  -> M1 Emulator boot
  -> M2 Spark bring-up
- -> M3 Kernel isolation
+ -> SEED-0A Self-construction lab    agent-built candidates proven in QEMU, never admitted
+ -> M3 Kernel isolation             the enforcement substrate
+ -> SEED-0B Native capability admission
  -> M4 Storage and recovery
  -> M5 Encryption and identity
  -> M6 Minimal networking
  -> M7 Native CPU inference
  -> M8 Persistent agent        first vision proven
 ```
+
+SEED-0A and SEED-0B come from [ADR 0012](docs/adr/0012-self-construction-capability-growth-and-generations.md):
+each machine grows the capabilities it needs as reversible, numbered
+Generations admitted by deterministic gates. Generated native code reaches the
+physical machine only after M3 can confine it. SEED-0A experiment #1 is
+`input.keyboard.usb` ([#58](https://github.com/aien-dev/aienos/pull/58)).
 
 The first public demonstration is M8: power on, AIENOS boots, you talk to the
 local agent, power off, power on, and it remembers.

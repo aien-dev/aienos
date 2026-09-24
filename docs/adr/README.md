@@ -16,6 +16,7 @@ This directory documents the key architectural decisions and formal technical sp
 | [ADR 0008](0008-temporary-bring-up-firmware-report-exception.md) | Temporary bring-up exception: post-handoff firmware report (trigger 11) | Accepted (temporary) | 2026-09-24 | [ADR 0003](0003-bootstrap-firmware-handoff-and-minimal-object-store.md); [`MILESTONES.md` section 0](../MILESTONES.md); [`NATIVE_BOOT_ONE_TIME.md`](../NATIVE_BOOT_ONE_TIME.md) |
 | [ADR 0009](0009-el2-bootstrap-to-el1h-kernel-transition.md) | Two-Stage Exception Level Architecture (EL2 Bootstrap to EL1h Kernel) | Accepted | 2026-09-24 | [`ARCHITECTURE.md` §3, §6](../ARCHITECTURE.md); [`BLUEPRINT.md` §8, §15](../BLUEPRINT.md); [`MILESTONES.md` Phase 2, 3](../MILESTONES.md) |
 | [ADR 0011](0011-machine-1-hardware-test-rig.md) | Machine 1 Hardware Test Rig (Power, Capture, Input) | Proposed | 2026-09-24 | [`MILESTONES.md` section 0, gate M2C](../MILESTONES.md); [`HARDWARE_TEST_RIG.md`](../HARDWARE_TEST_RIG.md); [`NATIVE_BOOT_ONE_TIME.md`](../NATIVE_BOOT_ONE_TIME.md) |
+| [ADR 0012](0012-self-construction-capability-growth-and-generations.md) | Self-Construction, Capability Growth, and Reversible System Generations | Accepted | 2026-09-24 | [ADR 0002](0002-incumbent-os-as-migration-environment.md); [ADR 0006](0006-deterministic-recovery-core-and-offline-operator-authority.md); [ADR 0007](0007-continuous-existence-provisioning-once.md); [`ROADMAP.md`](../../ROADMAP.md) (SEED-0A, SEED-0B) |
 
 ---
 

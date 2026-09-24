@@ -93,14 +93,16 @@ echo "Copying standalone recovery initrd to media..."
 sudo cp "${INITRD_TMP}" "${MOUNT_POINT}/aienos-recovery/initrd.img"
 rm -f "${INITRD_TMP}"
 
-# Create standalone recovery GRUB config that boots directly to RAM maintenance shell
+# Create standalone recovery GRUB config that boots directly to RAM maintenance shell.
+# The last console= is /dev/console, where the shell runs: tty0 (the screen),
+# because Machine 1 has no reachable serial console.
 cat << "GRUB_EOF" | sudo tee "${MOUNT_POINT}/EFI/BOOT/grub.cfg" > /dev/null
 set timeout=5
 set default=0
 
 menuentry "AIENOS Standalone Recovery System (RAM Maintenance Core)" {
     search --no-floppy --file --set=root /aienos-recovery/vmlinuz
-    linux /aienos-recovery/vmlinuz rdinit=/init console=tty0 console=ttyAMA0,115200n8 quiet
+    linux /aienos-recovery/vmlinuz rdinit=/init console=ttyAMA0,115200n8 console=tty0 quiet
     initrd /aienos-recovery/initrd.img
 }
 
@@ -108,6 +110,10 @@ menuentry "Reboot to Incumbent Linux" {
     exit
 }
 GRUB_EOF
+# Ubuntu's signed GRUB reads $prefix/grub.cfg (/EFI/ubuntu) before the copy
+# next to itself, so both must carry the same menu.
+sudo mkdir -p "${MOUNT_POINT}/EFI/ubuntu"
+sudo cp "${MOUNT_POINT}/EFI/BOOT/grub.cfg" "${MOUNT_POINT}/EFI/ubuntu/grub.cfg"
 
 sync
 echo "AIENOS standalone recovery media build complete on ${TARGET_DEV}."
