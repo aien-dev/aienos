@@ -47,6 +47,13 @@ Stop condition: If Spark does not unlock tomorrow we must know what protects dat
 
 Objective: Dedicated recovery USB proven on the real Spark before any trust change.
 
+Runbook: [docs/RECOVERY_MEDIA_MACHINE1.md](RECOVERY_MEDIA_MACHINE1.md). The rescue
+environment (`scripts/build_recovery_media.sh` +
+`scripts/build_standalone_recovery_initrd.sh`) mounts the NVMe root on request,
+repairs `/boot/efi`, and restores boot entries; `scripts/verify_recovery_tools.sh`
+and `scripts/qemu_verify_recovery_media.sh` are the pre-boot host proofs;
+`scripts/collect_recovery_boot_evidence.sh` records the attended boot.
+
 Preconditions: Gate 0 PASS.
 
 Permitted mutations: Create recovery image on build host; write to separate physical USB (not ATLAS_RECOV); boot it once via operator-attended boot with Secure Boot enabled. No internal trust, TPM, or slot mutation.

@@ -22,10 +22,19 @@
   "invariants": {
     "zero_internal_storage_dependency": true,
     "internal_nvme_unmounted": true,
+    "nvme_mount_operator_initiated": true,
     "init_entrypoint": "rdinit=/init",
     "atlas_recov_protected": true,
     "qemu_zero_disk_verified": true,
     "secrets_policy": "NO PLAINTEXT SECRETS IN REPOSITORY OR BUILD ARTIFACTS"
+  },
+  "capabilities": {
+    "mount_nvme_root": true,
+    "repair_boot_efi": true,
+    "restore_boot_entries": true,
+    "evidence_collector": "scripts/collect_recovery_boot_evidence.sh",
+    "operator_procedure": "docs/RECOVERY_MEDIA_MACHINE1.md",
+    "physical_boot_record": "evidence/recovery_boot_machine1.md"
   },
   "utilities_packaged": [
     "/bin/busybox",
@@ -40,10 +49,14 @@
     "/bin/grep",
     "/bin/sed",
     "/bin/sha256sum",
+    "/bin/tar",
+    "/bin/chroot",
+    "/bin/aienos-efi-repair",
     "/bin/cryptsetup",
     "/bin/age",
     "/bin/tpm2_pcrread",
     "/bin/efibootmgr",
+    "/bin/mkfs.vfat",
     "/bin/gocryptfs"
   ]
 }

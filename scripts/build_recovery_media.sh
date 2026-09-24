@@ -31,7 +31,7 @@ KNOWN_ATLAS_RECOV_UUID="669D-4D0E"
 KNOWN_ATLAS_RECOV_PARTUUID="335d7260-01"
 
 if [[ "${TARGET_LABEL}" == "ATLAS_RECOV" || "${TARGET_UUID}" == "${KNOWN_ATLAS_RECOV_UUID}" || "${TARGET_PARTUUID}" == "${KNOWN_ATLAS_RECOV_PARTUUID}" ]]; then
-    echo "FATAL: Target matches ATLAS_RECOV identity (Label: , UUID: , PARTUUID: )." >&2
+    echo "FATAL: Target matches ATLAS_RECOV identity (Label: ${TARGET_LABEL}, UUID: ${TARGET_UUID}, PARTUUID: ${TARGET_PARTUUID})." >&2
     echo "ATLAS_RECOV contains encrypted offline recovery keys and must NEVER be overwritten." >&2
     exit 1
 fi
@@ -101,6 +101,12 @@ set default=0
 menuentry "AIENOS Standalone Recovery System (RAM Maintenance Core)" {
     search --no-floppy --file --set=root /aienos-recovery/vmlinuz
     linux /aienos-recovery/vmlinuz rdinit=/init console=tty0 console=ttyAMA0,115200n8 quiet
+    initrd /aienos-recovery/initrd.img
+}
+
+menuentry "AIENOS Standalone Recovery System (Automated EFI Repair)" {
+    search --no-floppy --file --set=root /aienos-recovery/vmlinuz
+    linux /aienos-recovery/vmlinuz rdinit=/init aienos.repair=1 console=tty0 console=ttyAMA0,115200n8
     initrd /aienos-recovery/initrd.img
 }
 

@@ -81,3 +81,12 @@ if command -v qemu-system-aarch64 >/dev/null; then
 else
     echo "SKIPPED: qemu-system-aarch64 not present on host."
 fi
+
+# Step 9: Recovery media tooling manifest (host-side, any architecture)
+echo ""
+echo "--- [Recovery Media Tooling Manifest] ---"
+if command -v gzip >/dev/null && command -v cpio >/dev/null; then
+    ./scripts/verify_recovery_tools.sh
+else
+    echo "SKIPPED: gzip or cpio not present on host."
+fi
