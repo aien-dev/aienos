@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # capture_gate1_receipt.sh: Capture Gate 1 standalone recovery evidence receipt
-# Zero Disk Secrets and Unslop compliant.
+# Invariant: NO PLAINTEXT SECRETS IN REPOSITORY OR BUILD ARTIFACTS. Unslop compliant.
 
 set -euo pipefail
 
@@ -48,7 +48,8 @@ cat << JSON_EOF > "${RECEIPT_FILE}"
     "internal_nvme_unmounted": true,
     "init_entrypoint": "rdinit=/init",
     "atlas_recov_protected": true,
-    "qemu_zero_disk_verified": true
+    "qemu_zero_disk_verified": true,
+    "secrets_policy": "NO PLAINTEXT SECRETS IN REPOSITORY OR BUILD ARTIFACTS"
   },
   "utilities_packaged": [
     "/bin/busybox",
@@ -58,10 +59,16 @@ cat << JSON_EOF > "${RECEIPT_FILE}"
     "/bin/blkid",
     "/bin/mount",
     "/bin/umount",
-    "/sbin/cryptsetup",
-    "/usr/bin/age",
-    "/usr/bin/tpm2_pcrread",
-    "/usr/bin/efibootmgr"
+    "/bin/mkdir",
+    "/bin/cat",
+    "/bin/grep",
+    "/bin/sed",
+    "/bin/sha256sum",
+    "/bin/cryptsetup",
+    "/bin/age",
+    "/bin/tpm2_pcrread",
+    "/bin/efibootmgr",
+    "/bin/gocryptfs"
   ]
 }
 JSON_EOF
