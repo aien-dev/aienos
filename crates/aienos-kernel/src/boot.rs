@@ -287,6 +287,15 @@ pub fn write_boot_report(out: &mut impl Write, facts: &BootFacts) -> bool {
         }
     }
     let _ = writeln!(out, "exception_level: EL{}", facts.exception_level);
+    let _ = writeln!(
+        out,
+        "kernel_el: {}",
+        if facts.exception_level == 1 {
+            "EL1h"
+        } else {
+            "unexpected"
+        }
+    );
     let _ = writeln!(out, "kernel: alive");
     true
 }
@@ -422,7 +431,7 @@ mod tests {
                 boot_class: Some(0),
             }),
             boot_midr: 0x410f_d870,
-            exception_level: 2,
+            exception_level: 1,
         };
         let mut report = BootReport::new();
         assert!(write_boot_report(&mut report, &facts));
@@ -444,7 +453,8 @@ mod tests {
             "allocator_reserved_frame_phys: 0x10000000",
             "uefi_entry_to_handoff_ms: 1",
             "handoff_to_kernel_entry_ms: 2",
-            "exception_level: EL2",
+            "exception_level: EL1",
+            "kernel_el: EL1h",
             "kernel: alive",
         ] {
             assert!(

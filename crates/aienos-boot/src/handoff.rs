@@ -768,6 +768,10 @@ fn main() -> Status {
     let memory_map = unsafe { uefi::boot::exit_boot_services(None) };
     EXITED.store(true, Ordering::SeqCst);
 
+    if !aienos_kernel::arch::aarch64::enter_el1h() {
+        aienos_kernel::arch::aarch64::halt();
+    }
+
     fatal::set_fault_hook(on_fault);
     fatal::install_exception_vectors();
     stage(VECTORS_INSTALLED);

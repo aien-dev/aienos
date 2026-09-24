@@ -55,6 +55,7 @@ echo "qemu exit ${qemu_status} after ${elapsed} s (commit ${commit:0:12})"
 check "pre-exit report printed" "report_kind: pre_exit"
 check "image is this commit" "aienos_commit: ${commit}"
 check "left firmware and entered the kernel" "kernel: alive"
+check "kernel runs at EL1h" "kernel_el: EL1h"
 check "final report on the SPCR console" "report_kind: final"
 check "no panic or fault" "report_kind: final"
 if grep -qE "report_kind: (panic|fault)" "${work}/serial.txt"; then

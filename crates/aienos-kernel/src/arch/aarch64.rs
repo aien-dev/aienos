@@ -52,6 +52,51 @@ pub fn current_el() -> u8 {
     }
 }
 
+/// Move the current boot stack and execution from EL2 to EL1h.
+/// Returns false when called outside EL2 or on a non-AArch64 host.
+pub fn enter_el1h() -> bool {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if current_el() != 2 {
+            return false;
+        }
+        // EL1h uses SP_EL1, so carry the already-live firmware stack across
+        // the transition. All asynchronous exceptions remain masked.
+        unsafe {
+            core::arch::asm!(
+                "mov x9, x30",
+                "mov x10, sp",
+                "msr daifset, #0xf",
+                "msr sp_el1, x10",
+                "mov x10, #0x80000000",
+                "msr hcr_el2, x10",
+                "msr cptr_el2, xzr",
+                "mov x10, #3",
+                "msr cnthctl_el2, x10",
+                "msr cntvoff_el2, xzr",
+                "mov x10, #0x300000",
+                "msr cpacr_el1, x10",
+                "mov x10, #0x3c5",
+                "msr spsr_el2, x10",
+                "adr x10, 2f",
+                "msr elr_el2, x10",
+                "isb",
+                "eret",
+                "2:",
+                "mov x30, x9",
+                lateout("x9") _,
+                lateout("x10") _,
+                options(nostack)
+            );
+        }
+        true
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        false
+    }
+}
+
 /// Read the architectural virtual counter. Its frequency is reported by `counter_frequency_hz`.
 #[inline(always)]
 pub fn counter_ticks() -> u64 {
