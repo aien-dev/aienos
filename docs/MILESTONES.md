@@ -52,23 +52,32 @@ only at M8. Status words: **done** = verified on this repository's evidence;
 | **M7** AIEN runtime and native CPU inference | | pending | Compare against the M0 CPU baseline |
 | **M8** Cortex and persistent agent | | pending | Host crates exist (`cortex`, `agent-state`) |
 
-**Current blocker for M2 on hardware:** Secure Boot is enabled on Machine 1
-(observed 2026-09-24), so firmware refuses the unsigned handoff image. Changing
-it is escalation trigger 1 and is the operator's decision.
+**Secure Boot (operator decision 2026-09-24, escalation trigger 1):** disabled
+for early development only, so unsigned experimental images can be tested. No
+other security mechanism is relaxed. Before daily use: operator-owned key,
+signed loader, signed kernel and system manifest, offline recovery key, and a
+known-good rollback image. Observed enabled on 2026-09-24; switching it off is
+a physical step in firmware setup.
 
 **Accelerator lane:** device characterization (PCI identity, BAR layout,
 firmware interfaces, register discovery) is allowed now. Command submission,
 GSP interaction, GPU memory management and GPU inference stay a separate,
 non-blocking program (see [GB10_NATIVE_STATUS.md](GB10_NATIVE_STATUS.md)).
 
-**Open operator decisions on the M2 bring-up path:**
-- The handoff image writes its report to the `AienosBootReport` firmware
-  variable after `ExitBootServices`, as a one-time bring-up diagnostic.
-  AIENOS does not depend on it, but it uses a firmware runtime storage service
-  after handoff (escalation trigger 11) and needs operator sign-off.
+**Operator decisions on the M2 bring-up path (2026-09-24):**
+- The post-handoff `AienosBootReportV1` firmware report is a temporary
+  bootstrap exception to escalation trigger 11 under the conditions in
+  [ADR 0008](adr/0008-temporary-bring-up-firmware-report-exception.md). It is
+  removed once a native evidence path exists.
 - `scripts/stage_one_time_boot.sh --apply` sets `BootNext` and adds a boot
-  entry outside BootOrder. It runs only when the operator invokes it
-  (Phase 2 escalation trigger on NVRAM boot variables).
+  entry outside BootOrder. It runs only when the operator invokes it, under
+  `aien-proof hold --resource machine-1`.
+
+**M2 gate (first native boot):** Machine 1 leaves firmware, enters native
+AIENOS code with no Linux underneath, produces independently recoverable
+evidence that it did so, and returns to the existing system without damaging
+it. `scripts/collect_boot_report.sh` prints `M2_GATE: PASS` only when all of
+those checks hold.
 
 ---
 

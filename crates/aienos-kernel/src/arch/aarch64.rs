@@ -92,6 +92,33 @@ pub fn midr_el1() -> u64 {
     }
 }
 
+/// Multiprocessor affinity of the executing core (matches MADT GICC MPIDR).
+#[inline(always)]
+pub fn mpidr_el1() -> u64 {
+    #[cfg(target_arch = "aarch64")]
+    {
+        let mpidr: u64;
+        unsafe {
+            core::arch::asm!("mrs {0}, mpidr_el1", out(reg) mpidr, options(nomem, nostack, preserves_flags));
+        }
+        mpidr
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        0
+    }
+}
+
+/// PSCI SYSTEM_RESET (function 0x8400_0009) through the secure monitor: the
+/// architected Arm reset path, not a UEFI runtime service. Does not return if
+/// the platform implements it; returns if the monitor refused the call.
+pub fn psci_system_reset() {
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        core::arch::asm!("smc #0", inout("x0") 0x8400_0009u64 => _, options(nostack));
+    }
+}
+
 /// Part number field of a MIDR value.
 pub const fn midr_part(midr: u64) -> u16 {
     ((midr >> 4) & 0xfff) as u16

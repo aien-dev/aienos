@@ -9,11 +9,15 @@ description = "AArch64 UEFI entry diagnostic for AIENOS native boot bring-up"
 
 [features]
 default = []
-firmware = ["dep:uefi"]
-handoff = ["firmware", "dep:aienos-kernel", "dep:aienos-accel", "uefi/alloc", "uefi/global_allocator"]
+uefi-base = ["dep:uefi"]
+# The diagnostic image uses the uefi crate's panic handler. The handoff image
+# defines its own, which reports through the screen, firmware variable and
+# UART after boot services exit, so the two features must not be combined.
+firmware = ["uefi-base", "uefi/panic_handler"]
+handoff = ["uefi-base", "dep:aienos-kernel", "dep:aienos-accel", "uefi/alloc", "uefi/global_allocator"]
 
 [dependencies]
-uefi = { version = "0.41", default-features = false, features = ["panic_handler"], optional = true }
+uefi = { version = "0.41", default-features = false, optional = true }
 aienos-kernel = { path = "../aienos-kernel", default-features = false, optional = true }
 aienos-accel = { path = "../aienos-accel", optional = true }
 

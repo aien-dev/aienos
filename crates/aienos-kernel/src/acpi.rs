@@ -81,6 +81,10 @@ pub struct CpuTopology {
     pub unknown_class: u32,
     /// Affinity (MPIDR) of the first listed core, for cross-checking the boot core.
     pub first_mpidr: Option<u64>,
+    /// The boot core (matched by MPIDR affinity) appears in the MADT.
+    pub boot_core_listed: bool,
+    /// Efficiency class of the boot core, if its entry carries one.
+    pub boot_class: Option<u8>,
 }
 
 impl CpuTopology {
@@ -104,8 +108,19 @@ impl CpuTopology {
     }
 }
 
+/// MPIDR affinity fields (Aff3, Aff2, Aff1, Aff0); other bits are flags.
+pub const MPIDR_AFFINITY_MASK: u64 = 0xff_00ff_ffff;
+
 /// Summarises the cores in a validated MADT ("APIC") table.
 pub fn madt_cpu_topology(madt: &[u8]) -> Result<CpuTopology, AcpiError> {
+    madt_cpu_topology_for(madt, None)
+}
+
+/// Like `madt_cpu_topology`, also locating the core whose MPIDR is `boot_mpidr`.
+pub fn madt_cpu_topology_for(
+    madt: &[u8],
+    boot_mpidr: Option<u64>,
+) -> Result<CpuTopology, AcpiError> {
     let madt = checked_table(madt, b"APIC")?;
     let mut topo = CpuTopology::default();
     let mut at = MADT_ENTRIES_OFFSET;
@@ -122,6 +137,14 @@ pub fn madt_cpu_topology(madt: &[u8]) -> Result<CpuTopology, AcpiError> {
                 topo.cores += 1;
                 if topo.first_mpidr.is_none() {
                     topo.first_mpidr = u64_at(entry, GICC_MPIDR);
+                }
+                let mpidr = u64_at(entry, GICC_MPIDR).unwrap_or(u64::MAX);
+                if boot_mpidr
+                    .is_some_and(|b| b & MPIDR_AFFINITY_MASK == mpidr & MPIDR_AFFINITY_MASK)
+                {
+                    topo.boot_core_listed = true;
+                    topo.boot_class =
+                        (len >= GICC_LEN_WITH_CLASS).then(|| entry[GICC_EFFICIENCY_CLASS]);
                 }
                 if len >= GICC_LEN_WITH_CLASS {
                     topo.add(entry[GICC_EFFICIENCY_CLASS]);
@@ -181,6 +204,23 @@ mod tests {
         assert_eq!(topo.classes(), &[(0, 10), (1, 10)]);
         assert_eq!(topo.unknown_class, 0);
         assert_eq!(topo.first_mpidr, Some(0x8100_0000));
+    }
+
+    #[test]
+    fn finds_the_boot_core_class_ignoring_mpidr_flag_bits() {
+        let entries: Vec<Vec<u8>> = (0..20u64)
+            .map(|i| gicc(0x8100_0000 + (i << 8), GICC_ENABLED, u8::from(i >= 10), 82))
+            .collect();
+        let table = madt(&entries);
+        // MPIDR_EL1 bit 31 is RES1 and absent from the MADT copy.
+        let boot = (1 << 31) | 0x8100_0000 | (15 << 8);
+        let topo = madt_cpu_topology_for(&table, Some(boot)).unwrap();
+        assert!(topo.boot_core_listed);
+        assert_eq!(topo.boot_class, Some(1));
+
+        let missing = madt_cpu_topology_for(&table, Some(0x42)).unwrap();
+        assert!(!missing.boot_core_listed);
+        assert_eq!(missing.boot_class, None);
     }
 
     #[test]

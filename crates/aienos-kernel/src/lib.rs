@@ -13,6 +13,7 @@ pub mod arch;
 pub mod boot;
 pub mod crypto;
 pub mod display;
+pub mod fatal;
 pub mod mem;
 pub mod recovery;
 pub mod report;
