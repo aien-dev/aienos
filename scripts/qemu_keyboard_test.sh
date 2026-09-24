@@ -95,10 +95,17 @@ boot_once() {
     fi
     if wait_for "${boot_timeout}" "keyboard: ready" "keyboard: unavailable" "report_kind: panic" "report_kind: fault" \
         && serial_has "keyboard: ready"; then
-        for key in "${keys[@]}" ret; do
-            echo "sendkey ${key}" >&3
-            sleep 0.3
-        done
+        send_line() {
+            local key
+            for key in "$@"; do echo "sendkey ${key}" >&3; sleep 0.12; done
+            echo "sendkey ret" >&3
+            sleep 0.5
+        }
+        send_line "${keys[@]}"
+        send_line h e l p
+        send_line e l
+        send_line m e m
+        send_line e x i t
     fi
     local deadline=$(( $(date +%s) + 90 ))
     while qemu_running && (( $(date +%s) < deadline )); do sleep 0.5; done
@@ -127,13 +134,17 @@ check() { # description, pattern
         failed=1
     fi
 }
-echo "attempts ${attempt}, ${elapsed} s (commit ${commit:0:12}), sent keys: ${keys[*]} ret"
+echo "attempts ${attempt}, ${elapsed} s (commit ${commit:0:12}), sent lines: abc, help, el, mem, exit"
 check "left firmware and entered the kernel" "kernel: alive"
 check "xHCI controller found before exit" "keyboard: xhci "
 check "keyboard attached by the AIENOS driver" "keyboard: ready"
 check "typed text echoed on the serial console" "keyboard_echo: ${expected}"
 check "line ended by Enter and reported" "keyboard_line: ${expected}\$"
 check "keyboard phase finished on Enter" "keyboard: done (enter)"
+check "help command output" "commands: help mem el report uptime exit"
+check "EL command output" "EL1"
+check "memory command output" "conventional_memory_kb:"
+check "keyboard phase finished on exit" "keyboard: done (exit)"
 if grep -qE "report_kind: (panic|fault)" "${work}/serial.txt"; then
     echo "FAIL  panic or fault reported"
     failed=1
