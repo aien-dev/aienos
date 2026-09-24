@@ -1186,6 +1186,13 @@ fn main() -> Status {
         }
     }
     #[cfg(feature = "usb-keyboard")]
-    usb_keyboard::run(xhci, acpi_facts.mcfg, &mut screen);
+    usb_keyboard::run(
+        xhci,
+        acpi_facts.mcfg,
+        &mut screen,
+        summary.conventional_kb(),
+        el,
+        report.as_str(),
+    );
     finish(screen)
 }

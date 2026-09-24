@@ -10,7 +10,7 @@ use aienos_kernel::acpi::{self, EcamWindow};
 use aienos_kernel::arch::aarch64::{counter_frequency_hz, counter_ticks, MmioReg};
 use aienos_kernel::console::EarlyConsole;
 use aienos_kernel::display::Screen;
-use aienos_kernel::usb::hid::{BootKeyboardDecoder, KeyEvent, TextSink};
+use aienos_kernel::usb::hid::{BootKeyboardDecoder, KeyEvent};
 use aienos_kernel::usb::xhci::controller::{DmaMemory, Keyboard};
 use aienos_kernel::usb::xhci::{self, PCI_COMMAND_BUS_MASTER, PCI_COMMAND_MEMORY};
 use core::fmt::Write;
@@ -133,7 +133,14 @@ fn enable_controller(ecam: &EcamWindow, at: &XhciLocation) -> bool {
 }
 
 /// Post-exit: bring up the keyboard and echo keys until Enter or timeout.
-pub fn run(xhci: Option<XhciLocation>, mcfg: Option<&[u8]>, screen: &mut Option<Screen>) {
+pub fn run(
+    xhci: Option<XhciLocation>,
+    mcfg: Option<&[u8]>,
+    screen: &mut Option<Screen>,
+    conventional_memory_kb: u64,
+    exception_level: u8,
+    boot_report: &str,
+) {
     let mut line = aienos_kernel::report::ReportBuf::<160>::new();
     let Some(at) = xhci else {
         say(screen, "\nkeyboard: unavailable (no xHCI controller)\n");
@@ -171,43 +178,81 @@ pub fn run(xhci: Option<XhciLocation>, mcfg: Option<&[u8]>, screen: &mut Option<
         msg,
         "keyboard: ready (port {port}, slot {slot}, endpoint {endpoint:#04x})"
     );
-    let _ = write!(
-        msg,
-        "keyboard: type a line, Enter ends it ({} s)\nkeyboard_echo: ",
-        listen_secs()
-    );
+    let _ = writeln!(msg, "keyboard: shell ready ({} s)", listen_secs());
     say(screen, msg.as_str());
 
     let mut decoder = BootKeyboardDecoder::new();
-    let mut text = TextSink::<64>::new();
-    let mut entered = false;
+    let mut line = [0u8; aienos_kernel::shell::LINE_CAPACITY];
+    let mut length = 0usize;
+    let mut exit = false;
     let deadline = listen_secs().saturating_mul(counter_frequency_hz());
     let start = counter_ticks();
-    while !entered && counter_ticks().wrapping_sub(start) < deadline && !keyboard.is_halted() {
+    say(screen, "aienos> ");
+    while !exit && counter_ticks().wrapping_sub(start) < deadline && !keyboard.is_halted() {
         let Some(report) = keyboard.poll() else {
             core::hint::spin_loop();
             continue;
         };
         decoder.handle_report(&report, |event| {
             if event == KeyEvent::Enter {
-                entered = true;
+                say(screen, "\n");
+                say(screen, "keyboard_echo: ");
+                say(screen, core::str::from_utf8(&line[..length]).unwrap_or(""));
+                say(screen, "\n");
+                let mut entered = aienos_kernel::report::ReportBuf::<96>::new();
+                let _ = writeln!(
+                    entered,
+                    "keyboard_line: {}",
+                    core::str::from_utf8(&line[..length]).unwrap_or("")
+                );
+                say(screen, entered.as_str());
+                say(screen, "keyboard: done (enter)\n");
+                let elapsed = counter_ticks().wrapping_sub(start);
+                let hz = counter_frequency_hz();
+                let uptime_ms = if hz == 0 {
+                    0
+                } else {
+                    elapsed.saturating_mul(1000) / hz
+                };
+                let input = core::str::from_utf8(&line[..length]).unwrap_or("");
+                let parsed = aienos_kernel::shell::parse_line(input);
+                let output = aienos_kernel::shell::dispatch(
+                    input,
+                    &aienos_kernel::shell::ShellContext {
+                        conventional_memory_kb,
+                        // Read live when the command runs, not cached at shell start.
+                        exception_level: aienos_kernel::arch::aarch64::current_el(),
+                        report: boot_report,
+                        uptime_ms,
+                    },
+                );
+                say(screen, output.as_str());
+                exit = parsed.is_some_and(|p| p.command == aienos_kernel::shell::Command::Exit);
+                length = 0;
+                if !exit {
+                    say(screen, "aienos> ");
+                }
+            } else if event == KeyEvent::Backspace {
+                if length > 0 {
+                    length -= 1;
+                    say(screen, "\x08 \x08");
+                }
             } else if let KeyEvent::Char(c) = event {
-                let mut buf = [0u8; 4];
-                say(screen, c.encode_utf8(&mut buf));
-                text.record(event);
+                if c.is_ascii() && length < line.len() {
+                    line[length] = c as u8;
+                    length += 1;
+                    let mut buf = [0u8; 4];
+                    say(screen, c.encode_utf8(&mut buf));
+                }
             }
         });
     }
     let mut end = aienos_kernel::report::ReportBuf::<200>::new();
-    let reason = match (entered, keyboard.is_halted()) {
-        (true, _) => "enter",
+    let reason = match (exit, keyboard.is_halted()) {
+        (true, _) => "exit",
         (false, true) => "endpoint halted",
         (false, false) => "timeout",
     };
-    let _ = writeln!(
-        end,
-        "\nkeyboard_line: {}\nkeyboard: done ({reason})",
-        text.as_str()
-    );
+    let _ = writeln!(end, "\nkeyboard: done ({reason})",);
     say(screen, end.as_str());
 }
