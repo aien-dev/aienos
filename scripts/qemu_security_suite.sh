@@ -16,6 +16,10 @@ code_fd="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}"
 vars_fd="${AAVMF_VARS:-/usr/share/AAVMF/AAVMF_VARS.fd}"
 ITERATIONS="${GATE4_SOAK_RUNS:-5}"
 
+# Issue #61: MTTCG hung in 1/40 boots with -smp 1 and 1/40 with cortex-a76;
+# single-threaded TCG completed 120/120 boots (40 initial plus 80 confirmation).
+qemu_accel=(-accel tcg,thread=single)
+
 command -v qemu-system-aarch64 >/dev/null || { echo "Error: qemu-system-aarch64 not installed" >&2; exit 2; }
 command -v swtpm >/dev/null || { echo "Error: swtpm not installed" >&2; exit 2; }
 [[ -r "${code_fd}" && -r "${vars_fd}" ]] || { echo "Error: AAVMF firmware not found" >&2; exit 2; }
@@ -53,7 +57,7 @@ log="${work}/subtest1/serial_tpm.log"
 
 set +e
 timeout ${AIENOS_QEMU_TIMEOUT:-120} qemu-system-aarch64 \
-    -M virt,virtualization=on -cpu max -smp 4 -m 2048 \
+    -M virt,virtualization=on "${qemu_accel[@]}" -cpu max -smp 4 -m 2048 \
     -chardev socket,id=chrtpm,path="${tpm_dir}/swtpm-sock" \
     -tpmdev emulator,id=tpm0,chardev=chrtpm \
     -device tpm-tis-device,tpmdev=tpm0 \
@@ -85,7 +89,7 @@ for i in $(seq 1 "${ITERATIONS}"); do
     soak_log="${soak_work}/serial_soak.log"
     set +e
     timeout ${AIENOS_QEMU_TIMEOUT:-120} qemu-system-aarch64 \
-        -M virt,virtualization=on -cpu max -smp 4 -m 2048 \
+        -M virt,virtualization=on "${qemu_accel[@]}" -cpu max -smp 4 -m 2048 \
         -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
         -drive if=pflash,format=raw,file="${soak_work}/vars.fd" \
         -drive if=none,id=esp,format=raw,file=fat:rw:"${soak_work}/esp" \
@@ -113,7 +117,7 @@ corrupt_log="${corrupt_work}/serial_corrupt.log"
 
 set +e
 timeout 30 qemu-system-aarch64 \
-    -M virt,virtualization=on -cpu max -smp 4 -m 2048 \
+    -M virt,virtualization=on "${qemu_accel[@]}" -cpu max -smp 4 -m 2048 \
     -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
     -drive if=pflash,format=raw,file="${corrupt_work}/vars.fd" \
     -drive if=none,id=esp,format=raw,file=fat:rw:"${corrupt_work}/esp" \
