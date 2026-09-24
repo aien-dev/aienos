@@ -4,7 +4,7 @@
 operator chooses and approves the parts; maintainers wire it up. Until then,
 M2C power, capture and input stay pending and boots stay attended.**
 
-Governing: [ADR 0010](adr/0010-machine-1-hardware-test-rig.md),
+Governing: [ADR 0011](adr/0011-machine-1-hardware-test-rig.md),
 [MILESTONES.md gate M2C](MILESTONES.md), [NATIVE_BOOT_ONE_TIME.md](NATIVE_BOOT_ONE_TIME.md),
 issue [#25](https://github.com/aien-dev/aienos/issues/25).
 

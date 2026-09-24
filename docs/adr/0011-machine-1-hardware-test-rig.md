@@ -1,4 +1,4 @@
-# ADR 0010: Machine 1 Hardware Test Rig (Power, Capture, Input)
+# ADR 0011: Machine 1 Hardware Test Rig (Power, Capture, Input)
 
 Status: proposed, 2026-09-24. Requires operator approval of the parts list
 before maintainers wire anything. It does not change the boot architecture.
