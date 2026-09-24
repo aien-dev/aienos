@@ -236,7 +236,19 @@ fn enter_kernel_mmu(
         )
     };
     if !entered {
-        // Not at EL2: the kernel must not continue on firmware's translation.
+        // Fail closed with evidence: the kernel must not continue on
+        // firmware's translation, and the reason must survive the halt.
+        let mut halt_report = Report::new();
+        header(&mut halt_report, "halt");
+        write_index_line(&mut halt_report);
+        let el = aienos_kernel::arch::aarch64::current_el();
+        let _ = writeln!(
+            halt_report,
+            "el1_switch: refused (current EL{el}, expected EL2)"
+        );
+        let _ = writeln!(halt_report, "boot: halted before kernel entry");
+        let _ = send_to_console(halt_report.as_str());
+        let _ = save_report_var(halt_report.as_bytes());
         aienos_kernel::arch::aarch64::halt();
     }
     fatal::install_exception_vectors();
