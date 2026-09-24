@@ -1,11 +1,12 @@
 //! Polled NVMe admin controller initialization and Identify commands.
 
+use crate::block::BlockError;
 use alloc::vec;
 use alloc::vec::Vec;
 
 use super::{
-    doorbell_offset, Cap, Completion, ControllerError, Registers, Submission, CC_EN, CSTS_CFS,
-    CSTS_RDY, REG_ACQ, REG_AQA, REG_ASQ, REG_CC, REG_CSTS,
+    build_prps, doorbell_offset, Cap, Completion, ControllerError, Registers, Submission, CC_EN,
+    CSTS_CFS, CSTS_RDY, REG_ACQ, REG_AQA, REG_ASQ, REG_CC, REG_CSTS,
 };
 
 pub const PAGE_SIZE: usize = 4096;
@@ -96,6 +97,8 @@ pub struct NvmeController<R: Registers, D: DmaMemory, T: Delay> {
     io_cq: Option<DmaRegion>,
     io_sq: Option<DmaRegion>,
     io_queue: Option<IoQueueState>,
+    mdts: u8,
+    namespace: Option<NamespaceInfo>,
 }
 
 impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
@@ -135,13 +138,17 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
             io_cq: None,
             io_sq: None,
             io_queue: None,
+            mdts: 0,
+            namespace: None,
         };
         controller.identify_controller()?;
+        controller.identify_namespace(1)?;
         Ok(controller)
     }
 
     pub fn identify_controller(&mut self) -> Result<(), NvmeError> {
-        self.submit_identify(0, 1).map(|_| ())
+        self.mdts = self.submit_identify(0, 1)?[77];
+        Ok(())
     }
 
     pub fn identify_namespace(&mut self, nsid: u32) -> Result<NamespaceInfo, NvmeError> {
@@ -155,10 +162,12 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
         if block_count == 0 || lbads >= 32 {
             return Err(NvmeError::InvalidIdentify);
         }
-        Ok(NamespaceInfo {
+        let info = NamespaceInfo {
             block_count,
             block_size: 1u32 << lbads,
-        })
+        };
+        self.namespace = Some(info);
+        Ok(info)
     }
 
     /// Create polled I/O completion and submission queues, both with QID 1.
@@ -256,6 +265,161 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
         };
         self.submit_admin_inner(command)
     }
+
+    fn ensure_namespace(&mut self) -> Result<NamespaceInfo, BlockError> {
+        match self.namespace {
+            Some(info) => Ok(info),
+            None => self.identify_namespace(1).map_err(map_error),
+        }
+    }
+
+    fn transfer(&mut self, write: bool, lba: u64, data: &mut [u8]) -> Result<(), BlockError> {
+        let info = self.ensure_namespace()?;
+        let block_size = info.block_size as usize;
+        if data.is_empty() || !data.len().is_multiple_of(block_size) {
+            return Err(BlockError::InvalidInput);
+        }
+        let blocks =
+            u64::try_from(data.len() / block_size).map_err(|_| BlockError::InvalidInput)?;
+        if lba
+            .checked_add(blocks)
+            .filter(|end| *end <= info.block_count)
+            .is_none()
+        {
+            return Err(BlockError::OutOfRange);
+        }
+        let mdts_limit = if self.mdts == 0 {
+            128 * 1024
+        } else {
+            (PAGE_SIZE
+                .checked_shl(u32::from(self.mdts))
+                .unwrap_or(usize::MAX))
+            .min(128 * 1024)
+        };
+        let chunk_limit = mdts_limit / block_size * block_size;
+        if chunk_limit == 0 {
+            return Err(BlockError::InvalidInput);
+        }
+        let mut offset = 0usize;
+        while offset < data.len() {
+            let len = (data.len() - offset).min(chunk_limit);
+            let count = len / block_size;
+            let mut region = self.dma.allocate(len, PAGE_SIZE).map_err(map_error)?;
+            if write {
+                region.bytes[..len].copy_from_slice(&data[offset..offset + len]);
+                self.dma
+                    .write(region.physical, &region.bytes[..len])
+                    .map_err(map_error)?;
+            }
+            let list_pages = len.div_ceil(PAGE_SIZE);
+            let list_region = if list_pages > 2 {
+                Some(self.dma.allocate(PAGE_SIZE, PAGE_SIZE).map_err(map_error)?)
+            } else {
+                None
+            };
+            let mut list = alloc::vec![0u64; PAGE_SIZE / 8];
+            let list_address = list_region.as_ref().map_or(0, |r| r.physical);
+            let (p1, p2, used) =
+                build_prps(region.physical, len, PAGE_SIZE, list_address, &mut list)
+                    .map_err(|_| BlockError::InvalidInput)?;
+            if let Some(ref list_mem) = list_region {
+                let bytes =
+                    unsafe { core::slice::from_raw_parts(list.as_ptr() as *const u8, used * 8) };
+                self.dma
+                    .write(list_mem.physical, bytes)
+                    .map_err(map_error)?;
+            }
+            self.submit_io(if write {
+                Submission::write(1, lba + (offset / block_size) as u64, count as u16, p1, p2)
+            } else {
+                Submission::read(1, lba + (offset / block_size) as u64, count as u16, p1, p2)
+            })?;
+            if !write {
+                self.dma
+                    .read(region.physical, &mut data[offset..offset + len])
+                    .map_err(map_error)?;
+            }
+            offset += len;
+        }
+        Ok(())
+    }
+
+    fn submit_io(&mut self, mut command: Submission) -> Result<(), BlockError> {
+        let q = self.io_queue.as_mut().ok_or(BlockError::DeviceError)?;
+        let sq = self.io_sq.as_mut().ok_or(BlockError::DeviceError)?;
+        let cq = self.io_cq.as_ref().ok_or(BlockError::DeviceError)?;
+        let cid = self.next_cid;
+        self.next_cid = self.next_cid.wrapping_add(1);
+        command.set_u32(0, (command.u32_at(0) & 0xffff) | (u32::from(cid) << 16));
+        let offset = q.submission_tail * 64;
+        sq.bytes[offset..offset + 64].copy_from_slice(&command.0);
+        self.dma
+            .write(sq.physical + offset as u64, &command.0)
+            .map_err(map_error)?;
+        q.submission_tail = (q.submission_tail + 1) % usize::from(q.depth);
+        self.registers
+            .write32(q.submission_doorbell, q.submission_tail as u32);
+        for _ in 0..=1000 {
+            let mut raw = [0u8; 16];
+            self.dma
+                .read(cq.physical + (q.completion_head * 16) as u64, &mut raw)
+                .map_err(map_error)?;
+            let c = Completion(raw);
+            if c.phase() != q.phase {
+                self.delay.delay_us(1000);
+                continue;
+            }
+            if c.command_id() != cid {
+                return Err(BlockError::DeviceError);
+            }
+            let status = c.status() >> 1;
+            q.completion_head = (q.completion_head + 1) % usize::from(q.depth);
+            if q.completion_head == 0 {
+                q.phase = !q.phase;
+            }
+            self.registers
+                .write32(q.completion_doorbell, q.completion_head as u32);
+            return if status == 0 {
+                Ok(())
+            } else {
+                Err(BlockError::DeviceError)
+            };
+        }
+        Err(BlockError::Timeout)
+    }
+}
+
+fn map_error(error: NvmeError) -> BlockError {
+    match error {
+        NvmeError::Timeout => BlockError::Timeout,
+        NvmeError::Dma => BlockError::DeviceError,
+        NvmeError::CompletionStatus { .. } => BlockError::DeviceError,
+        _ => BlockError::DeviceError,
+    }
+}
+
+impl<R: Registers, D: DmaMemory, T: Delay> crate::block::BlockDevice for NvmeController<R, D, T> {
+    fn block_size(&self) -> u32 {
+        self.namespace.map_or(0, |n| n.block_size)
+    }
+    fn block_count(&self) -> u64 {
+        self.namespace.map_or(0, |n| n.block_count)
+    }
+    fn read_blocks(&mut self, lba: u64, buffer: &mut [u8]) -> Result<(), BlockError> {
+        self.transfer(false, lba, buffer)
+    }
+    fn write_blocks(&mut self, lba: u64, buffer: &[u8]) -> Result<(), BlockError> {
+        let mut owned = buffer.to_vec();
+        self.transfer(true, lba, &mut owned)
+    }
+    fn flush(&mut self) -> Result<(), BlockError> {
+        self.submit_io({
+            let mut c = Submission::zeroed();
+            c.set_u32(0, 0);
+            c.set_u32(1, 1);
+            c
+        })
+    }
 }
 
 #[cfg(test)]
@@ -276,7 +440,7 @@ mod tests {
         fn allocate(&mut self, size: usize, alignment: usize) -> Result<DmaRegion, NvmeError> {
             assert_eq!(alignment, PAGE_SIZE);
             let physical = self.next;
-            self.next += size as u64;
+            self.next = (self.next + size as u64 + PAGE_SIZE as u64 - 1) & !(PAGE_SIZE as u64 - 1);
             self.shared.borrow_mut().insert(physical, vec![0; size]);
             Ok(DmaRegion {
                 physical,
@@ -326,6 +490,12 @@ mod tests {
         sq_tail: usize,
         cq_ids: Vec<u16>,
         command_error: u16,
+        disk: Vec<u8>,
+        io_sq: Option<u64>,
+        io_cq: Option<u64>,
+        io_cq_tail: usize,
+        io_sq_tail: usize,
+        io_phase: bool,
     }
     impl Registers for FakeRegs {
         fn read32(&mut self, offset: u32) -> u32 {
@@ -414,6 +584,7 @@ mod tests {
                         assert_eq!(cdw10, 1 | (3 << 16)); // QID 1, depth 4 minus one
                         assert_eq!(cdw11, 1); // PC=1, IEN=0
                         self.cq_ids.push(1);
+                        self.io_cq = Some(prp);
                     }
                     0x01 if cdw10 & 0xffff == 1 && cdw11 & 0xffff == 1 => {
                         assert_eq!(cdw10, 1 | (3 << 16));
@@ -421,6 +592,7 @@ mod tests {
                         if !self.cq_ids.contains(&1) {
                             self.command_error = 1 << 1;
                         }
+                        self.io_sq = Some(prp);
                     }
                     _ => panic!("unexpected admin opcode {opcode:#x}"),
                 }
@@ -466,6 +638,92 @@ mod tests {
                 self.cq_tail = (self.cq_tail + 1) % ADMIN_DEPTH;
                 self.sq_tail = (self.sq_tail + 1) % ADMIN_DEPTH;
             }
+            if offset == doorbell_offset(1, false, 4) {
+                let mut memory = self.shared.borrow_mut();
+                let sq = self.io_sq.expect("I/O SQ created");
+                let cq = self.io_cq.expect("I/O CQ created");
+                let command_offset = self.io_sq_tail * 64;
+                let command =
+                    memory.get(&sq).unwrap()[command_offset..command_offset + 64].to_vec();
+                let opcode = command[0];
+                let cid = u16::from_le_bytes(command[2..4].try_into().unwrap());
+                let nsid = u32::from_le_bytes(command[4..8].try_into().unwrap());
+                let p1 = u64::from_le_bytes(command[24..32].try_into().unwrap());
+                let p2 = u64::from_le_bytes(command[32..40].try_into().unwrap());
+                let lba = u64::from(u32::from_le_bytes(command[40..44].try_into().unwrap()))
+                    | (u64::from(u32::from_le_bytes(command[44..48].try_into().unwrap())) << 32);
+                let len =
+                    (u32::from_le_bytes(command[48..52].try_into().unwrap()) as usize + 1) * 512;
+                self.command_error = 0;
+                if nsid != 1 {
+                    self.command_error = 1 << 1;
+                }
+                if opcode == 0x01 || opcode == 0x02 {
+                    let mut addresses = vec![p1];
+                    let first = (PAGE_SIZE - (p1 as usize & (PAGE_SIZE - 1))).min(len);
+                    let remaining = len.saturating_sub(first);
+                    if remaining > 0 {
+                        if p2 != 0 && remaining <= PAGE_SIZE {
+                            addresses.push(p2);
+                        } else {
+                            let mut list_page = p2;
+                            let mut left = remaining;
+                            while left > 0 {
+                                let entries = memory.get(&list_page).unwrap();
+                                for i in 0..PAGE_SIZE / 8 {
+                                    let address = u64::from_le_bytes(
+                                        entries[i * 8..i * 8 + 8].try_into().unwrap(),
+                                    );
+                                    if address == 0 {
+                                        break;
+                                    }
+                                    if i == PAGE_SIZE / 8 - 1 && left > PAGE_SIZE {
+                                        list_page = address;
+                                        break;
+                                    }
+                                    addresses.push(address);
+                                    left = left.saturating_sub(PAGE_SIZE);
+                                    if left == 0 {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let disk_start = lba as usize * 512;
+                    let mut done = 0;
+                    for address in addresses {
+                        if done == len {
+                            break;
+                        }
+                        let n = (len - done).min(PAGE_SIZE - (address as usize & (PAGE_SIZE - 1)));
+                        let disk = &mut self.disk[disk_start + done..disk_start + done + n];
+                        let data = memory.range_mut(..=address).next_back().unwrap();
+                        let off = (address - *data.0) as usize;
+                        let dma = &mut data.1[off..off + n];
+                        if opcode == 0x01 {
+                            disk.copy_from_slice(dma);
+                        } else {
+                            dma.copy_from_slice(disk);
+                        }
+                        done += n;
+                    }
+                } else if opcode != 0x00 {
+                    self.command_error = 1 << 1;
+                }
+                let cqe = memory.get_mut(&cq).unwrap();
+                let at = self.io_cq_tail * 16;
+                cqe[at + 12..at + 14].copy_from_slice(&cid.to_le_bytes());
+                cqe[at + 14..at + 16].copy_from_slice(
+                    &((self.io_phase as u16) | self.completion_status | self.command_error)
+                        .to_le_bytes(),
+                );
+                self.io_cq_tail = (self.io_cq_tail + 1) % 4;
+                if self.io_cq_tail == 0 {
+                    self.io_phase = !self.io_phase;
+                }
+                self.io_sq_tail = (self.io_sq_tail + 1) % 4;
+            }
         }
     }
 
@@ -486,6 +744,12 @@ mod tests {
                 sq_tail: 0,
                 cq_ids: Vec::new(),
                 command_error: 0,
+                disk: vec![0; 12345 * 512],
+                io_sq: None,
+                io_cq: None,
+                io_cq_tail: 0,
+                io_sq_tail: 0,
+                io_phase: true,
             },
             FakeDma {
                 shared,
@@ -623,6 +887,69 @@ mod tests {
                 .filter(|(offset, _)| *offset == doorbell_offset(0, false, 4))
                 .count(),
             submissions
+        );
+    }
+
+    #[test]
+    fn block_io_roundtrips_small_and_prp_list_transfers_with_mdts_chunks() {
+        use crate::block::BlockDevice;
+        let (regs, dma) = fixture();
+        let mut controller = NvmeController::init(regs, dma, CountingDelay::default()).unwrap();
+        controller.create_io_queues(4).unwrap();
+        for blocks in [1usize, 8, 300] {
+            let input: Vec<u8> = (0..blocks * 512).map(|i| (i * 17) as u8).collect();
+            controller.write_blocks(10, &input).unwrap_or_else(|e| {
+                panic!(
+                    "write {blocks}: {e:?}, queue {:?}, io {:?}/{:?}, tail {}",
+                    controller.io_queue,
+                    controller.registers.io_cq,
+                    controller.registers.io_sq,
+                    controller.registers.io_cq_tail
+                )
+            });
+            let mut output = vec![0; input.len()];
+            controller.read_blocks(10, &mut output).unwrap();
+            assert_eq!(output, input);
+        }
+        // The final transfer exceeds the 128 KiB cap and is split into two commands.
+        let io_doorbells = controller
+            .registers
+            .writes
+            .iter()
+            .filter(|(r, _)| *r == doorbell_offset(1, false, 4))
+            .count();
+        assert!(io_doorbells >= 8);
+    }
+
+    #[test]
+    fn invalid_range_has_no_io_command_and_write_completion_error_propagates() {
+        use crate::block::{BlockDevice, BlockError};
+        let (regs, dma) = fixture();
+        let mut controller = NvmeController::init(regs, dma, CountingDelay::default()).unwrap();
+        controller.create_io_queues(4).unwrap();
+        let before = controller
+            .registers
+            .writes
+            .iter()
+            .filter(|(r, _)| *r == doorbell_offset(1, false, 4))
+            .count();
+        assert_eq!(
+            controller.write_blocks(12345, &[0; 512]),
+            Err(BlockError::OutOfRange)
+        );
+        assert_eq!(
+            controller
+                .registers
+                .writes
+                .iter()
+                .filter(|(r, _)| *r == doorbell_offset(1, false, 4))
+                .count(),
+            before
+        );
+        controller.registers.completion_status = 2;
+        assert_eq!(
+            controller.write_blocks(0, &[7; 512]),
+            Err(BlockError::DeviceError)
         );
     }
 
