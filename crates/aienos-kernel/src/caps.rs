@@ -65,6 +65,11 @@ struct Slot {
     resource: u32,
     rights: Rights,
     parent: Option<Location>,
+    /// Something was derived from this capability (possibly into another table).
+    derived: bool,
+    /// Removed by its holder but kept so descendants' parent chains stay
+    /// intact for revocation. Invisible to every operation except revocation.
+    tombstone: bool,
 }
 
 /// A task's capability table. `id` must be unique among tables passed to
@@ -113,6 +118,8 @@ impl<const N: usize> CapTable<N> {
             resource,
             rights,
             parent,
+            derived: false,
+            tombstone: false,
         });
         Ok(Handle {
             index: index as u32,
@@ -120,12 +127,19 @@ impl<const N: usize> CapTable<N> {
         })
     }
 
+    /// A live capability (tombstones are invisible).
     fn slot(&self, handle: Handle) -> Result<&Slot, CapError> {
+        self.slot_any(handle)
+            .filter(|slot| !slot.tombstone)
+            .ok_or(CapError::InvalidHandle)
+    }
+
+    /// Any occupied slot, including tombstones (for ancestry walks only).
+    fn slot_any(&self, handle: Handle) -> Option<&Slot> {
         self.slots
             .get(handle.index as usize)
             .and_then(Option::as_ref)
             .filter(|slot| slot.generation == handle.generation)
-            .ok_or(CapError::InvalidHandle)
     }
 
     pub fn lookup(&self, handle: Handle, required_rights: Rights) -> Result<u32, CapError> {
@@ -140,9 +154,21 @@ impl<const N: usize> CapTable<N> {
         Ok(self.slot(handle)?.rights)
     }
 
+    /// Drop this handle. Descendants are not revoked (use `revoke` for that),
+    /// but a capability that has been derived from becomes a tombstone rather
+    /// than a free slot, so its descendants stay reachable from any ancestor's
+    /// `revoke`. Freeing it would break their parent chains and leave the
+    /// subtree unrevocable from above.
     pub fn remove(&mut self, handle: Handle) -> Result<(), CapError> {
-        self.slot(handle)?;
-        self.slots[handle.index as usize] = None;
+        let derived = self.slot(handle)?.derived;
+        let index = handle.index as usize;
+        if derived {
+            if let Some(slot) = self.slots[index].as_mut() {
+                slot.tombstone = true;
+            }
+        } else {
+            self.slots[index] = None;
+        }
         Ok(())
     }
 
@@ -154,14 +180,18 @@ impl<const N: usize> CapTable<N> {
         if !rights.is_subset_of(source.rights) {
             return Err(CapError::RightsEscalation);
         }
-        self.allocate(
+        let child = self.allocate(
             source.resource,
             rights,
             Some(Location {
                 table: self.id,
                 handle,
             }),
-        )
+        )?;
+        if let Some(slot) = self.slots[handle.index as usize].as_mut() {
+            slot.derived = true;
+        }
+        Ok(child)
     }
 
     /// Derive into another table, retaining a parent link for tree revocation.
@@ -182,7 +212,11 @@ impl<const N: usize> CapTable<N> {
             table: from.id,
             handle,
         };
-        to.allocate(source.resource, rights, Some(parent))
+        let child = to.allocate(source.resource, rights, Some(parent))?;
+        if let Some(slot) = from.slots[handle.index as usize].as_mut() {
+            slot.derived = true;
+        }
+        Ok(child)
     }
 
     pub fn transfer<const M: usize>(
@@ -286,7 +320,8 @@ impl<const N: usize> CapTable<N> {
             let Some(table) = tables.iter().find(|table| table.id == current.table) else {
                 return Ok(None);
             };
-            let Ok(slot) = table.slot(current.handle) else {
+            // Walk through tombstones: they keep removed ancestors' links.
+            let Some(slot) = table.slot_any(current.handle) else {
                 return Ok(None);
             };
             let Some(parent) = slot.parent else {
@@ -398,5 +433,33 @@ mod tests {
         let received = CapTable::transfer(&mut source, granted, &mut target).unwrap();
         assert_eq!(target.lookup(received, Rights::READ), Ok(2));
         assert_eq!(target.insert(3, Rights::READ), Err(CapError::Full));
+    }
+    #[test]
+    fn removing_a_derived_parent_keeps_the_subtree_revocable() {
+        // Review regression: removing an intermediate capability used to free
+        // its slot, breaking the child's parent chain so revoking the
+        // grandparent no longer reached the child.
+        let mut a = CapTable::<4>::new(1);
+        let mut b = CapTable::<4>::new(2);
+        let all = Rights::READ | Rights::DERIVE | Rights::REVOKE;
+        let root = a.insert(9, all).unwrap();
+        let mid = a.derive(root, all).unwrap();
+        let leaf = CapTable::derive_into(&mut a, mid, &mut b, Rights::READ).unwrap();
+        a.remove(mid).unwrap();
+        // The removed handle is dead; the leaf is still usable (remove != revoke).
+        assert_eq!(a.lookup(mid, Rights::READ), Err(CapError::InvalidHandle));
+        assert_eq!(b.lookup(leaf, Rights::READ), Ok(9));
+        // Revoking the grandparent still reaches the leaf through the tombstone.
+        CapTable::<4>::revoke(1, root, &mut [&mut a, &mut b]).unwrap();
+        assert_eq!(b.lookup(leaf, Rights::READ), Err(CapError::InvalidHandle));
+        assert_eq!(a.lookup(root, Rights::READ), Err(CapError::InvalidHandle));
+    }
+
+    #[test]
+    fn removing_a_never_derived_capability_frees_its_slot() {
+        let mut t = CapTable::<1>::new(1);
+        let h = t.insert(3, Rights::READ).unwrap();
+        t.remove(h).unwrap();
+        assert!(t.insert(4, Rights::READ).is_ok(), "slot reusable");
     }
 }
