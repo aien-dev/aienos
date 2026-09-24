@@ -13,6 +13,7 @@ command -v qemu-system-aarch64 >/dev/null || { echo "qemu-system-aarch64 not ins
 
 if [[ "$(uname -m)" != "aarch64" ]]; then
     echo "SKIPPED: Host architecture is $(uname -m). AArch64 kernel recovery boot requires an AArch64 host or cross-built AArch64 kernel."
+    [[ "${AIENOS_STRICT:-0}" != "1" ]] || { echo "STRICT FAIL: recovery boot skipped under AIENOS_STRICT=1" >&2; exit 1; }
     exit 0
 fi
 
@@ -53,6 +54,7 @@ set -e
 elapsed=$(( $(date +%s) - started ))
 
 tr -d '\r' <"${LOG}" >"${WORK_DIR}/recovery_qemu.txt"
+[[ -z "${AIENOS_LOG_DIR:-}" ]] || cp "${WORK_DIR}/recovery_qemu.txt" "${AIENOS_LOG_DIR}/recovery_zero_disk_serial.log"
 
 failed=0
 check() {
@@ -106,6 +108,7 @@ DEV_STATUS=$?
 set -e
 
 tr -d '\r' <"${DEV_LOG}" >"${WORK_DIR}/recovery_devices.txt"
+[[ -z "${AIENOS_LOG_DIR:-}" ]] || cp "${WORK_DIR}/recovery_devices.txt" "${AIENOS_LOG_DIR}/recovery_devices_serial.log"
 echo "qemu exit ${DEV_STATUS}"
 
 failed=0

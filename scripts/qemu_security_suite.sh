@@ -71,6 +71,7 @@ tpm_status=$?
 set -e
 
 tr -d "\r" <"${log}" >"${work}/subtest1/serial_tpm.txt"
+[[ -z "${AIENOS_LOG_DIR:-}" ]] || cp "${work}/subtest1/serial_tpm.txt" "${AIENOS_LOG_DIR}/gate4_tpm_serial.log"
 if grep -q "kernel: alive" "${work}/subtest1/serial_tpm.txt" && grep -q "report_kind: final" "${work}/subtest1/serial_tpm.txt"; then
     echo "PASS  swTPM live boot reached kernel alive and final report"
 else
@@ -99,6 +100,7 @@ for i in $(seq 1 "${ITERATIONS}"); do
     soak_status=$?
     set -e
     tr -d "\r" <"${soak_log}" >"${soak_work}/serial_soak.txt"
+    [[ -z "${AIENOS_LOG_DIR:-}" ]] || cp "${soak_work}/serial_soak.txt" "${AIENOS_LOG_DIR}/gate4_soak_${i}_serial.log"
     if grep -q "kernel: alive" "${soak_work}/serial_soak.txt" && grep -q "report_kind: final" "${soak_work}/serial_soak.txt"; then
         echo "PASS  Soak run ${i}/${ITERATIONS}: clean boot & reset"
     else
@@ -129,6 +131,7 @@ set -e
 
 if [[ -f "${corrupt_log}" ]]; then
     tr -d "\r" <"${corrupt_log}" >"${corrupt_work}/serial_corrupt.txt"
+    [[ -z "${AIENOS_LOG_DIR:-}" ]] || cp "${corrupt_work}/serial_corrupt.txt" "${AIENOS_LOG_DIR}/gate4_corrupt_serial.log"
     if grep -q "kernel: alive" "${corrupt_work}/serial_corrupt.txt"; then
         echo "FAIL  Corrupted binary unexpectedly reached kernel alive"
         exit 1
