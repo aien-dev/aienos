@@ -907,6 +907,16 @@ fn send_to_console(text: &str) -> &'static str {
     }
 }
 
+fn el0_console_write(bytes: &[u8]) {
+    let Some(text) = core::str::from_utf8(bytes).ok() else {
+        return;
+    };
+    let kind = CONSOLE.try_lock().and_then(|k| *k);
+    if let Some(console) = kind.and_then(EarlyConsole::from_kind) {
+        console.write_str(text);
+    }
+}
+
 /// Geometry of the display mode the firmware already configured.
 fn discover_framebuffer() -> Option<FramebufferInfo> {
     let handle = uefi::boot::get_handle_for_protocol::<GraphicsOutput>().ok()?;
@@ -1222,7 +1232,7 @@ fn main() -> Status {
     BOOT_SERVICES_LIVE.store(false, Ordering::Release);
     EXITED.store(true, Ordering::SeqCst);
 
-    let (pt_frames_used, _, runtime_rx_unsplit) = enter_kernel_mmu(
+    let (pt_frames_used, kernel_root, runtime_rx_unsplit) = enter_kernel_mmu(
         &memory_map,
         pt_pool,
         AddressRange {
@@ -1343,6 +1353,31 @@ fn main() -> Status {
         } else {
             "unexpected"
         }
+    );
+    aienos_kernel::user::set_write_hook(el0_console_write);
+    let el0 = unsafe { aienos_kernel::user::run_demo(kernel_root) };
+    let el0_ok =
+        el0.write_granted && el0.forged_denied && el0.fault_contained && el0.exit_code == 0;
+    let _ = writeln!(
+        report,
+        "el0: {} write={} forged={} fault={} exit={}",
+        if el0_ok { "ok" } else { "failed" },
+        if el0.write_granted {
+            "granted"
+        } else {
+            "denied"
+        },
+        if el0.forged_denied {
+            "denied"
+        } else {
+            "accepted"
+        },
+        if el0.fault_contained {
+            "contained"
+        } else {
+            "uncontained"
+        },
+        el0.exit_code,
     );
     let _ = writeln!(
         report,
