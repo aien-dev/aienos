@@ -8,6 +8,8 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 pub mod acpi;
 pub mod arch;
 pub mod boot;
@@ -17,12 +19,16 @@ pub mod display;
 pub mod fatal;
 pub mod gic;
 pub mod mem;
+pub mod net;
+pub mod nvme;
+pub mod pe;
 pub mod recovery;
 pub mod report;
 pub mod scheduler;
 pub mod store;
 pub mod sync;
 pub mod timer;
+pub mod uefi;
 pub mod usb;
 
 #[cfg(all(target_os = "none", not(feature = "std"), not(test)))]

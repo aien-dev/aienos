@@ -259,6 +259,52 @@ pub fn madt_cpu_topology_for(
     Ok(topo)
 }
 
+/// MCFG allocations start after the header and 8 reserved bytes.
+const MCFG_ENTRIES_OFFSET: usize = 44;
+const MCFG_ENTRY_LEN: usize = 16;
+
+/// One PCI Express enhanced configuration (ECAM) window from the MCFG table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EcamWindow {
+    pub base: u64,
+    pub segment: u16,
+    pub start_bus: u8,
+    pub end_bus: u8,
+}
+
+impl EcamWindow {
+    /// Address of config register `offset` of `bus:device.function`, or
+    /// `None` outside this window or the 4 KiB function space.
+    pub fn config_address(&self, bus: u8, device: u8, function: u8, offset: u16) -> Option<u64> {
+        let in_window = (self.start_bus..=self.end_bus).contains(&bus);
+        if !in_window || device > 31 || function > 7 || offset > 0xfff {
+            return None;
+        }
+        let bus = u64::from(bus - self.start_bus);
+        let function_offset = u64::from(device) << 15 | u64::from(function) << 12;
+        Some(self.base + (bus << 20 | function_offset | u64::from(offset)))
+    }
+}
+
+/// The ECAM window of a validated MCFG table covering `segment` and `bus`.
+pub fn mcfg_window(mcfg: &[u8], segment: u16, bus: u8) -> Result<Option<EcamWindow>, AcpiError> {
+    let mcfg = checked_table(mcfg, b"MCFG")?;
+    let entries = mcfg
+        .get(MCFG_ENTRIES_OFFSET..)
+        .ok_or(AcpiError::Truncated)?;
+    Ok(entries
+        .as_chunks::<MCFG_ENTRY_LEN>()
+        .0
+        .iter()
+        .map(|e| EcamWindow {
+            base: u64_at(e, 0).unwrap_or(0),
+            segment: u16::from_le_bytes([e[8], e[9]]),
+            start_bus: e[10],
+            end_bus: e[11],
+        })
+        .find(|w| w.segment == segment && (w.start_bus..=w.end_bus).contains(&bus)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,6 +466,42 @@ mod tests {
         let mut bad = spcr(0x03, 0, 32, 3, 0x0900_0000);
         bad[50] ^= 1;
         assert_eq!(spcr_console(&bad), Err(AcpiError::BadChecksum));
+    }
+
+    fn mcfg(windows: &[(u64, u16, u8, u8)]) -> Vec<u8> {
+        let mut t = std::vec![0u8; MCFG_ENTRIES_OFFSET];
+        t[..4].copy_from_slice(b"MCFG");
+        for (base, segment, start, end) in windows {
+            t.extend_from_slice(&base.to_le_bytes());
+            t.extend_from_slice(&segment.to_le_bytes());
+            t.extend_from_slice(&[*start, *end, 0, 0, 0, 0]);
+        }
+        let len = t.len() as u32;
+        t[4..8].copy_from_slice(&len.to_le_bytes());
+        let sum = t.iter().fold(0u8, |s, b| s.wrapping_add(*b));
+        t[9] = 0u8.wrapping_sub(sum);
+        t
+    }
+
+    #[test]
+    fn mcfg_finds_the_ecam_window_for_a_segment_and_bus() {
+        // QEMU virt high ECAM, plus a second segment starting at bus 0x80.
+        let table = mcfg(&[(0x40_1000_0000, 0, 0, 0xff), (0x6000_0000, 1, 0x80, 0x8f)]);
+        let qemu = mcfg_window(&table, 0, 0).unwrap().unwrap();
+        assert_eq!(qemu.base, 0x40_1000_0000);
+        assert_eq!(qemu.config_address(0, 2, 0, 0x04), Some(0x40_1001_0004));
+        let second = mcfg_window(&table, 1, 0x81).unwrap().unwrap();
+        // Bus numbers count from the window's start bus.
+        assert_eq!(second.config_address(0x81, 1, 3, 0x10), Some(0x6010_b010));
+        assert_eq!(second.config_address(0x90, 0, 0, 0), None, "past end bus");
+        assert_eq!(second.config_address(0x80, 32, 0, 0), None);
+        assert_eq!(second.config_address(0x80, 0, 8, 0), None);
+        assert_eq!(second.config_address(0x80, 0, 0, 0x1000), None);
+        assert_eq!(mcfg_window(&table, 1, 0x7f).unwrap(), None);
+        assert_eq!(mcfg_window(&table, 2, 0).unwrap(), None);
+        let mut bad = table.clone();
+        bad[50] ^= 1;
+        assert_eq!(mcfg_window(&bad, 0, 0), Err(AcpiError::BadChecksum));
     }
 
     #[test]
