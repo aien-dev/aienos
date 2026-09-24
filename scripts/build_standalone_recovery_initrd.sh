@@ -35,6 +35,13 @@ BINARIES=(
     /usr/bin/tpm2_pcrread
     /usr/bin/efibootmgr
     /sbin/cryptsetup
+    # Repair tools for issue #17: repair /boot/efi (fsck.vfat, mkfs.vfat),
+    # check the NVMe root filesystem (fsck.ext4), and chroot into it to
+    # restore boot entries from the installed bootloader.
+    /usr/sbin/fsck.vfat
+    /usr/sbin/mkfs.vfat
+    /usr/sbin/fsck.ext4
+    /usr/sbin/chroot
 )
 
 for bin in "${BINARIES[@]}"; do
