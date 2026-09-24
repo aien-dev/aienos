@@ -20,12 +20,14 @@ pub mod fatal;
 pub mod gic;
 pub mod mem;
 pub mod nvme;
+pub mod pe;
 pub mod recovery;
 pub mod report;
 pub mod scheduler;
 pub mod store;
 pub mod sync;
 pub mod timer;
+pub mod uefi;
 pub mod usb;
 
 #[cfg(all(target_os = "none", not(feature = "std"), not(test)))]

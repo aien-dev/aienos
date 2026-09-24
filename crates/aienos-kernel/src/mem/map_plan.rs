@@ -19,10 +19,9 @@ pub struct EfiMemoryDescriptor {
     pub attribute: u64,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PeSection<'a> {
-    pub name: &'a str,
-    pub virtual_address: u32,
-    pub virtual_size: u32,
+pub struct PeSection {
+    pub va: u64,
+    pub size: u64,
     pub characteristics: u32,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,9 +76,9 @@ fn overlap(a: AddressRange, b: AddressRange) -> Result<bool, PlanError> {
 /// the explicit decision is to finish runtime calls before entering EL1h.
 pub fn build_map_plan(
     memory: &[EfiMemoryDescriptor],
-    image_base: u64,
+    _image_base: u64,
     image_allocation: AddressRange,
-    sections: &[PeSection<'_>],
+    sections: &[PeSection],
     runtime_attributes: Option<&[RuntimeAttributes]>,
     mmio: &[AddressRange],
 ) -> Result<(Vec<PlannedMapping>, Option<RuntimeDecision>), PlanError> {
@@ -96,16 +95,22 @@ pub fn build_map_plan(
         if d.memory_type == EFI_LOADER_CODE {
             let mut covered = 0;
             for section in sections {
-                let size = u64::from(section.virtual_size);
+                let size = section.size;
                 if size == 0 {
                     continue;
                 }
-                let start = image_base
-                    .checked_add(u64::from(section.virtual_address))
-                    .ok_or(PlanError::Overflow)?;
+                let start = section.va;
+                let aligned_start = start & !4095;
+                let aligned_end = start
+                    .checked_add(size)
+                    .and_then(|value| value.checked_add(4095))
+                    .ok_or(PlanError::Overflow)?
+                    & !4095;
                 let r = AddressRange {
-                    start: start & !4095,
-                    length: ((start + size + 4095) & !4095) - (start & !4095),
+                    start: aligned_start,
+                    length: aligned_end
+                        .checked_sub(aligned_start)
+                        .ok_or(PlanError::Overflow)?,
                 };
                 if !overlap(r, image_allocation)? {
                     return Err(PlanError::ImageSectionOutsideAllocation);
@@ -252,15 +257,13 @@ mod tests {
         let mem = [d(EFI_LOADER_CODE, 0x100000, 4, 0)];
         let sec = [
             PeSection {
-                name: ".text",
-                virtual_address: 0,
-                virtual_size: 4096,
+                va: 0x100000,
+                size: 4096,
                 characteristics: RX,
             },
             PeSection {
-                name: ".data",
-                virtual_address: 4096,
-                virtual_size: 4096,
+                va: 0x101000,
+                size: 4096,
                 characteristics: RW,
             },
         ];
