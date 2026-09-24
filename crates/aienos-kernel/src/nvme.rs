@@ -99,22 +99,28 @@ impl Submission {
         c.set_u32(1, nsid);
         c
     }
-    pub fn create_io_cq(qid: u16, depth: u16, prp1: u64, vector: u16) -> Self {
+    /// Create I/O Completion Queue (opcode 0x05). Polled: PC=1, IEN=0 (ADR 0009).
+    /// `depth` is the entry count; NVMe requires at least 2.
+    pub fn create_io_cq(qid: u16, depth: u16, prp1: u64) -> Self {
+        assert!(depth >= 2, "NVMe queues need at least 2 entries");
         let mut c = Self::zeroed();
         c.set_u32(0, 0x05);
         c.set_u32(6, prp1 as u32);
         c.set_u32(7, (prp1 >> 32) as u32);
         c.set_u32(10, qid as u32 | ((depth as u32 - 1) << 16));
-        c.set_u32(11, 1 | (1 << 1) | ((vector as u32) << 16));
+        c.set_u32(11, 1);
         c
     }
+    /// Create I/O Submission Queue (opcode 0x01). CDW11: PC (bit 0), QPRIO
+    /// (bits 2:1, 0 = urgent/unused), CQID (bits 31:16).
     pub fn create_io_sq(qid: u16, depth: u16, prp1: u64, cqid: u16) -> Self {
+        assert!(depth >= 2, "NVMe queues need at least 2 entries");
         let mut c = Self::zeroed();
         c.set_u32(0, 0x01);
         c.set_u32(6, prp1 as u32);
         c.set_u32(7, (prp1 >> 32) as u32);
         c.set_u32(10, qid as u32 | ((depth as u32 - 1) << 16));
-        c.set_u32(11, (cqid as u32) | (1 << 16));
+        c.set_u32(11, 1 | ((cqid as u32) << 16));
         c
     }
     pub fn read(nsid: u32, lba: u64, blocks: u16, prp1: u64, prp2: u64) -> Self {
@@ -337,12 +343,18 @@ mod tests {
         assert_eq!(r.u32_at(12), 1);
         assert_eq!(Submission::write(1, 0, 1, 0, 0).u32_at(0), 1);
         assert_eq!(
-            Submission::create_io_cq(3, 8, 0x4000, 2).u32_at(10),
+            Submission::create_io_cq(3, 8, 0x4000).u32_at(10),
             3 | (7 << 16)
         );
+        // Polled completion queue: physically contiguous, interrupts disabled.
+        assert_eq!(Submission::create_io_cq(3, 8, 0x4000).u32_at(11), 1);
+        // SQ CDW11: PC=1 in bit 0, the target CQID in bits 31:16.
+        let sq = Submission::create_io_sq(4, 16, 0x5000, 3);
+        assert_eq!(sq.u32_at(10), 4 | (15 << 16));
+        assert_eq!(sq.u32_at(11), 1 | (3 << 16));
         assert_eq!(
-            Submission::create_io_sq(4, 16, 0x5000, 3).u32_at(11),
-            3 | (1 << 16)
+            Submission::create_io_sq(1, 2, 0, 0x1234).u32_at(11) >> 16,
+            0x1234
         );
     }
     #[test]
