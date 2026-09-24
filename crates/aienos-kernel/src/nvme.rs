@@ -276,17 +276,28 @@ pub fn build_prps(
     if pages == 2 {
         return Ok((address, second, 0));
     }
-    let count = pages - 1;
-    if list.len() < count {
-        return Err(PrpError::ListTooSmall);
-    }
     if list_address == 0 || list_address & (page_size as u64 - 1) != 0 {
         return Err(PrpError::Invalid);
     }
-    for (i, slot) in list[..count].iter_mut().enumerate() {
-        *slot = second + (i as u64) * page_size as u64;
+    // `list` is contiguous, page-aligned list pages starting at `list_address`.
+    // Each list page holds page_size / 8 entries; when more data pages remain
+    // than fit, the last entry of a full list page points to the next list page.
+    let per_page = page_size / 8;
+    let count = pages - 1;
+    let mut data = 0;
+    let mut slot = 0;
+    while data < count {
+        let entry = list.get_mut(slot).ok_or(PrpError::ListTooSmall)?;
+        let last_in_page = slot % per_page == per_page - 1;
+        if last_in_page && count - data > 1 {
+            *entry = list_address + ((slot / per_page + 1) * page_size) as u64;
+        } else {
+            *entry = second + (data * page_size) as u64;
+            data += 1;
+        }
+        slot += 1;
     }
-    Ok((address, list_address, count))
+    Ok((address, list_address, slot))
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PrpError {
@@ -422,6 +433,39 @@ mod tests {
         assert_eq!(
             set_enabled(&mut timeout, true, 2),
             Err(ControllerError::Timeout)
+        );
+    }
+    #[test]
+    fn prp_list_chains_across_list_pages() {
+        const PAGE: usize = 4096;
+        let per = PAGE / 8; // 512 entries per list page
+        let list_at = 0x80_0000u64;
+        let mut list = std::vec![0u64; 2 * per];
+        // 1 + 512 data pages after PRP1: 512 list entries fit in one page exactly.
+        let (p1, p2, used) =
+            build_prps(0x1000, (1 + per) * PAGE, PAGE, list_at, &mut list).unwrap();
+        assert_eq!((p1, p2, used), (0x1000, list_at, per));
+        assert_eq!(
+            list[per - 1],
+            0x2000 + ((per - 1) * PAGE) as u64,
+            "last slot is data, no chain"
+        );
+        // One more page: the last slot of page 0 must point at list page 1.
+        let (_, _, used) = build_prps(0x1000, (2 + per) * PAGE, PAGE, list_at, &mut list).unwrap();
+        assert_eq!(used, per + 2);
+        assert_eq!(list[per - 1], list_at + PAGE as u64, "chain pointer");
+        assert_eq!(list[per - 2], 0x2000 + ((per - 2) * PAGE) as u64);
+        assert_eq!(
+            list[per],
+            0x2000 + ((per - 1) * PAGE) as u64,
+            "data resumes in page 1"
+        );
+        assert_eq!(list[per + 1], 0x2000 + (per * PAGE) as u64);
+        // A list buffer too small for the chain is rejected, not overrun.
+        let mut short = std::vec![0u64; per];
+        assert_eq!(
+            build_prps(0x1000, (2 + per) * PAGE, PAGE, list_at, &mut short),
+            Err(PrpError::ListTooSmall)
         );
     }
 }
