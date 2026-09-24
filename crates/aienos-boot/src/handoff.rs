@@ -275,7 +275,7 @@ fn enter_kernel_mmu(
     ecam: Option<AddressRange>,
     gic: Option<acpi::GicBases>,
     smmu_mmio: Option<u64>,
-) -> (usize, usize, bool) {
+) -> KernelMmu {
     let descriptors: alloc::vec::Vec<_> = memory_map
         .entries()
         .map(|d| EfiMemoryDescriptor {
@@ -356,6 +356,10 @@ fn enter_kernel_mmu(
     {
         parange = 5;
     }
+    // Record the translation firmware left us on, so the report can show the
+    // switch (issue #27). Firmware runs at EL2 here; the switch refuses
+    // anything else and halts below.
+    let firmware = firmware_translation();
     let entered = unsafe {
         aienos_kernel::arch::aarch64::enter_el1h_mmu(
             root,
@@ -381,11 +385,66 @@ fn enter_kernel_mmu(
         aienos_kernel::arch::aarch64::halt();
     }
     fatal::install_exception_vectors();
-    (
-        used,
+    KernelMmu {
+        pt_frames_used: used,
         root,
-        decision == Some(map_plan::RuntimeDecision::RuntimeCodeRxUnsplit),
-    )
+        runtime_rx_unsplit: decision == Some(map_plan::RuntimeDecision::RuntimeCodeRxUnsplit),
+        firmware,
+    }
+}
+
+/// Result of `enter_kernel_mmu`: the AIENOS table root and what firmware
+/// was using before the switch.
+struct KernelMmu {
+    pt_frames_used: usize,
+    root: usize,
+    runtime_rx_unsplit: bool,
+    firmware: FirmwareTranslation,
+}
+
+/// Translation state firmware handed over, read before the EL1 switch.
+#[derive(Clone, Copy)]
+struct FirmwareTranslation {
+    el: u8,
+    /// TTBR0 of the firmware's regime (TTBR0_EL2 when `el` is 2).
+    ttbr0: u64,
+    /// SCTLR.M of the firmware's regime.
+    mmu_on: bool,
+}
+
+/// Translation table base address bits of a TTBR value (ASID and CnP removed).
+const TTBR_BADDR_MASK: u64 = 0x0000_ffff_ffff_fffe;
+
+fn firmware_translation() -> FirmwareTranslation {
+    let el = aienos_kernel::arch::aarch64::current_el();
+    #[cfg_attr(not(target_arch = "aarch64"), allow(unused_mut))]
+    let (mut ttbr0, mut sctlr) = (0u64, 0u64);
+    #[cfg(target_arch = "aarch64")]
+    if el == 2 {
+        unsafe {
+            core::arch::asm!("mrs {0}, ttbr0_el2", out(reg) ttbr0, options(nomem, nostack));
+            core::arch::asm!("mrs {0}, sctlr_el2", out(reg) sctlr, options(nomem, nostack));
+        }
+    }
+    FirmwareTranslation {
+        el,
+        ttbr0,
+        mmu_on: sctlr & 1 != 0,
+    }
+}
+
+/// Live TTBR0_EL1, read at EL1 after the switch.
+fn current_ttbr0_el1() -> u64 {
+    let value: u64;
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        core::arch::asm!("mrs {0}, ttbr0_el1", out(reg) value, options(nomem, nostack));
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        value = 0;
+    }
+    value
 }
 
 #[cfg(feature = "usb-keyboard")]
@@ -449,11 +508,52 @@ static FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
 static FRAMEBUFFER: SpinLock<Option<FramebufferInfo>> = SpinLock::new(None);
 static IRQ_TICKS: AtomicU64 = AtomicU64::new(0);
 
+/// Counter value at the previous tick (or when the window armed the timer).
+static TICK_LAST: AtomicU64 = AtomicU64::new(0);
+/// Smallest and largest counter distance between consecutive ticks.
+static TICK_MIN: AtomicU64 = AtomicU64::new(u64::MAX);
+static TICK_MAX: AtomicU64 = AtomicU64::new(0);
+
+/// Called by the IRQ dispatcher only after it acknowledged INTID 30 and
+/// re-armed the timer, and before it ends the interrupt.
 extern "C" fn timer_irq() {
     IRQ_TICKS.fetch_add(1, Ordering::Relaxed);
+    let now =
+        aienos_kernel::timer::TimerRegisters::counter(&aienos_kernel::timer::Aarch64TimerRegisters);
+    let interval = now.wrapping_sub(TICK_LAST.swap(now, Ordering::Relaxed));
+    TICK_MIN.fetch_min(interval, Ordering::Relaxed);
+    TICK_MAX.fetch_max(interval, Ordering::Relaxed);
 }
 
-fn run_timer_window(gic: Option<acpi::GicBases>) -> Option<(u64, u64)> {
+/// What the timer window measured, snapshotted when the window closed.
+#[derive(Clone, Copy)]
+struct TimerWindow {
+    ticks: u64,
+    ms: u64,
+    frequency_hz: u64,
+    /// Counter distance between ticks: smallest, largest, and from arming
+    /// the timer to the last tick (`span / ticks` is the average interval).
+    min_interval: u64,
+    max_interval: u64,
+    span: u64,
+    distributor: u64,
+    redistributor: u64,
+    /// GICD_PIDR2.ArchRev, 3 for GICv3.
+    arch_rev: u32,
+    /// ICC_SRE_EL1.SRE read back: 1 when the system register interface is live.
+    icc_sre: u64,
+}
+
+impl TimerWindow {
+    fn us(&self, counter: u64) -> u64 {
+        if self.frequency_hz == 0 {
+            return 0;
+        }
+        (u128::from(counter) * 1_000_000 / u128::from(self.frequency_hz)) as u64
+    }
+}
+
+fn run_timer_window(gic: Option<acpi::GicBases>) -> Option<TimerWindow> {
     let bases = gic?;
     let distributor = bases.distributor? as usize;
     let (redistributor, _) = bases.redistributor?;
@@ -471,10 +571,25 @@ fn run_timer_window(gic: Option<acpi::GicBases>) -> Option<(u64, u64)> {
     let mut cpu = aienos_kernel::gic::Aarch64GicCpuInterface;
     aienos_kernel::gic::GicCpuInterface::set_priority_mask(&mut cpu, 0xff);
     aienos_kernel::gic::GicCpuInterface::enable_group1(&mut cpu);
-    let _ = distributor;
+    let arch_rev = {
+        let mut regs = aienos_kernel::gic::MmioGicRegisters { base: distributor };
+        (aienos_kernel::gic::GicRegisters::read32(&mut regs, GICD_PIDR2) >> 4) & 0xf
+    };
+    let icc_sre: u64;
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        core::arch::asm!("mrs {0}, ICC_SRE_EL1", out(reg) icc_sre, options(nomem, nostack));
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        icc_sre = 0;
+    }
     let mut timer = aienos_kernel::timer::Aarch64TimerRegisters;
     let hz = aienos_kernel::timer::TimerRegisters::frequency(&timer);
     let start = aienos_kernel::timer::TimerRegisters::counter(&timer);
+    TICK_LAST.store(start, Ordering::Relaxed);
+    TICK_MIN.store(u64::MAX, Ordering::Relaxed);
+    TICK_MAX.store(0, Ordering::Relaxed);
     let deadline = start.wrapping_add(hz / 100);
     aienos_kernel::timer::TimerRegisters::set_compare(&mut timer, deadline);
     aienos_kernel::timer::TimerRegisters::enable_timer(&mut timer, true);
@@ -489,8 +604,28 @@ fn run_timer_window(gic: Option<acpi::GicBases>) -> Option<(u64, u64)> {
         core::arch::asm!("msr daifset, #2", "isb", options(nostack));
     }
     aienos_kernel::timer::TimerRegisters::enable_timer(&mut timer, false);
-    Some((IRQ_TICKS.load(Ordering::Relaxed), 200))
+    let ticks = IRQ_TICKS.load(Ordering::Relaxed);
+    let min_interval = TICK_MIN.load(Ordering::Relaxed);
+    Some(TimerWindow {
+        ticks,
+        ms: 200,
+        frequency_hz: hz,
+        min_interval: if ticks == 0 { 0 } else { min_interval },
+        max_interval: TICK_MAX.load(Ordering::Relaxed),
+        span: if ticks == 0 {
+            0
+        } else {
+            TICK_LAST.load(Ordering::Relaxed).wrapping_sub(start)
+        },
+        distributor: distributor as u64,
+        redistributor,
+        arch_rev,
+        icc_sre: icc_sre & 1,
+    })
 }
+
+/// Peripheral ID2 register of the distributor; bits [7:4] are ArchRev.
+const GICD_PIDR2: usize = 0xffe8;
 
 fn stage(s: u8) {
     STAGE.store(s, Ordering::SeqCst);
@@ -1211,7 +1346,7 @@ fn main() -> Status {
     BOOT_SERVICES_LIVE.store(false, Ordering::Release);
     EXITED.store(true, Ordering::SeqCst);
 
-    let (pt_frames_used, kernel_root, runtime_rx_unsplit) = enter_kernel_mmu(
+    let kernel_mmu = enter_kernel_mmu(
         &memory_map,
         pt_pool,
         AddressRange {
@@ -1247,6 +1382,9 @@ fn main() -> Status {
         #[cfg(not(feature = "usb-keyboard"))]
         None,
     );
+    let pt_frames_used = kernel_mmu.pt_frames_used;
+    let kernel_root = kernel_mmu.root;
+    let runtime_rx_unsplit = kernel_mmu.runtime_rx_unsplit;
 
     #[cfg(feature = "usb-keyboard")]
     let smmu_result =
@@ -1306,6 +1444,21 @@ fn main() -> Status {
         if mmu_on { "enabled" } else { "disabled" }
     );
     let _ = writeln!(report, "pt_frames_used: {pt_frames_used}");
+    // Issue #27: prove the kernel runs on AIENOS tables, not firmware's. Every
+    // field is read from live registers; switched=yes needs EL1 with SCTLR_EL1.M
+    // set, TTBR0_EL1 pointing at the root AIENOS built, and that root differing
+    // from the table firmware was translating with.
+    let firmware = kernel_mmu.firmware;
+    let el1_base = current_ttbr0_el1() & TTBR_BADDR_MASK;
+    let firmware_base = firmware.ttbr0 & TTBR_BADDR_MASK;
+    let switched = el == 1 && mmu_on && el1_base == kernel_root as u64 && el1_base != firmware_base;
+    let _ = writeln!(
+        report,
+        "mmu_switch: firmware=EL{} firmware_mmu={} firmware_ttbr0={firmware_base:#x} aienos_root={kernel_root:#x} ttbr0_el1={el1_base:#x} switched={}",
+        firmware.el,
+        if firmware.mmu_on { "on" } else { "off" },
+        if switched { "yes" } else { "no" }
+    );
     #[cfg(feature = "usb-keyboard")]
     match smmu_result {
         Ok(stream_id) => {
@@ -1396,8 +1549,30 @@ fn main() -> Status {
         }
     );
     let _ = write!(report, "{}", kernel_report.as_str());
-    if let Some((ticks, ms)) = irq_result {
-        let _ = writeln!(report, "gic: v3\ntimer_irq: {ticks} ticks in {ms} ms");
+    if let Some(w) = irq_result {
+        let _ = writeln!(
+            report,
+            "gic: v3\ntimer_irq: {} ticks in {} ms",
+            w.ticks, w.ms
+        );
+        // Issue #28: where the GIC came from and tick statistics. Intervals
+        // are counter distances between consecutive acknowledged INTID 30
+        // ticks, the first measured from the moment the timer was armed.
+        let _ = writeln!(
+            report,
+            "gic_madt: gicd={:#x} gicr={:#x} arch_rev={} icc_sre={}",
+            w.distributor, w.redistributor, w.arch_rev, w.icc_sre
+        );
+        let avg = if w.ticks == 0 { 0 } else { w.span / w.ticks };
+        let _ = writeln!(
+            report,
+            "timer_stats: intid=30 freq_hz={} period_us={} min_us={} avg_us={} max_us={}",
+            w.frequency_hz,
+            w.us(w.frequency_hz / 100),
+            w.us(w.min_interval),
+            w.us(avg),
+            w.us(w.max_interval)
+        );
     } else {
         let _ = writeln!(report, "gic: unavailable\ntimer_irq: unavailable");
     }
