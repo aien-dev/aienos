@@ -63,3 +63,12 @@ echo "Config A: observed capture verified. M0 stays open until native-boot rollb
 echo "Kernel: aarch64-unknown-none library compiles. Native boot remains untested."
 echo "UEFI: diagnostic and GB10-discovering handoff images build; hardware boot remains untested."
 echo "============================================================"
+
+# Step 7: TRUST-1 Gate 4 Security Suite (swTPM, Soak, Fault Injection)
+echo ""
+echo "--- [TRUST-1 Gate 4 Security Suite Verification] ---"
+if command -v qemu-system-aarch64 >/dev/null && command -v swtpm >/dev/null && [[ -r "${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}" ]]; then
+    GATE4_SOAK_RUNS=3 ./scripts/qemu_security_suite.sh
+else
+    echo "SKIPPED: qemu-system-aarch64, swtpm, or AAVMF firmware not present on host."
+fi
