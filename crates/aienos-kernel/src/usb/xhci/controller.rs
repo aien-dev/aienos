@@ -374,6 +374,7 @@ impl Keyboard {
             dci,
             &EndpointConfig {
                 ep_type: EP_TYPE_INTERRUPT_IN,
+                max_burst: 0,
                 max_packet: keyboard.max_packet,
                 interval: interrupt_interval(speed, keyboard.interval),
                 dequeue,
@@ -404,6 +405,7 @@ impl Keyboard {
                 CONTROL_DCI,
                 &EndpointConfig {
                     ep_type: EP_TYPE_CONTROL,
+                    max_burst: 0,
                     max_packet,
                     interval: 0,
                     dequeue,

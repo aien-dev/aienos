@@ -144,10 +144,10 @@ impl Trb {
         if sia {
             flags |= SIA;
         }
+        // One packet per TD: CHAIN would merge packets with different Frame
+        // IDs into a single TD. `last` only requests an interrupt on completion.
         if last {
             flags |= IOC;
-        } else {
-            flags |= CHAIN;
         }
         Self::new(buffer, length & 0x1_ffff, kind::ISOCH, flags & !(0x7 << 7))
     }
@@ -379,7 +379,11 @@ mod tests {
         assert_eq!(first.pointer(), 0x1234_5678_9abc_def0);
         assert_eq!(first.0[2], 176);
         assert_eq!((first.0[3] >> 20) & 0x7ff, 0x456);
-        assert_ne!(first.0[3] & CHAIN, 0);
+        assert_eq!(
+            first.0[3] & CHAIN,
+            0,
+            "each isochronous packet is its own TD"
+        );
         assert_eq!(first.0[3] & IOC, 0);
         assert_eq!(first.0[3] & (7 << 7), 0, "SuperSpeed companion fields zero");
         let last = Trb::isoch(0x2000, 180, 7, true, true);

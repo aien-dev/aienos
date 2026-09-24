@@ -47,19 +47,39 @@ pub fn interrupt_interval(port_speed: u8, b_interval: u8) -> u8 {
     }
 }
 
-/// Configure an isochronous OUT endpoint. `max_esit_payload` is the maximum
-/// bytes sent in one service interval (including high-bandwidth multipliers).
+/// xHCI Interval for an isochronous endpoint (xHCI 1.2 section 6.2.3.6):
+/// full speed counts 1 ms frames as 2^(bInterval-1), i.e. bInterval + 2 in
+/// 125 us exponent units; high/super speed use bInterval - 1 directly.
+/// (Interrupt endpoints follow a different full-speed rule.)
+pub fn isoch_interval(port_speed: u8, b_interval: u8) -> u8 {
+    let b = b_interval.clamp(1, 16);
+    match port_speed {
+        speed::FULL | speed::LOW => b + 2,
+        _ => b - 1,
+    }
+}
+
+/// Configure an isochronous OUT endpoint from the raw `wMaxPacketSize`.
+/// Bits 10:0 are the packet size; for high speed, bits 12:11 are the extra
+/// transactions per microframe, which go in Max Burst Size (Mult is
+/// SuperSpeed-only). `max_esit_payload` is the bytes per service interval.
 pub fn isoch_out_endpoint(
     port_speed: u8,
     b_interval: u8,
-    max_packet: u16,
+    w_max_packet_size: u16,
     max_esit_payload: u16,
     dequeue: u64,
 ) -> EndpointConfig {
+    let high_bandwidth = if port_speed == speed::HIGH {
+        ((w_max_packet_size >> 11) & 0x3) as u8
+    } else {
+        0
+    };
     EndpointConfig {
         ep_type: EP_TYPE_ISOCH_OUT,
-        max_packet,
-        interval: interrupt_interval(port_speed, b_interval),
+        max_packet: w_max_packet_size & 0x7ff,
+        max_burst: high_bandwidth,
+        interval: isoch_interval(port_speed, b_interval),
         dequeue,
         average_trb_length: max_esit_payload,
         max_esit_payload,
@@ -80,6 +100,8 @@ pub fn endpoint_dci(endpoint_address: u8) -> Option<u8> {
 pub struct EndpointConfig {
     pub ep_type: u8,
     pub max_packet: u16,
+    /// Max Burst Size (Endpoint Context dword 1 bits 15:8).
+    pub max_burst: u8,
     pub interval: u8,
     /// TR Dequeue Pointer with the Dequeue Cycle State in bit 0.
     pub dequeue: u64,
@@ -135,8 +157,10 @@ impl<'a> InputContext<'a> {
         }
         let ep = self.entry(usize::from(dci) + 1);
         ep[0] = u32::from(config.interval) << 16;
-        ep[1] =
-            CERR << 1 | u32::from(config.ep_type & 0x7) << 3 | u32::from(config.max_packet) << 16;
+        ep[1] = CERR << 1
+            | u32::from(config.ep_type & 0x7) << 3
+            | u32::from(config.max_burst) << 8
+            | u32::from(config.max_packet) << 16;
         ep[2] = config.dequeue as u32;
         ep[3] = (config.dequeue >> 32) as u32;
         ep[4] = u32::from(config.average_trb_length) | u32::from(config.max_esit_payload) << 16;
@@ -182,6 +206,7 @@ mod tests {
             CONTROL_DCI,
             &EndpointConfig {
                 ep_type: EP_TYPE_CONTROL,
+                max_burst: 0,
                 max_packet: 8,
                 interval: 0,
                 dequeue: 0x4000_1000 | 1,
@@ -210,6 +235,7 @@ mod tests {
             3,
             &EndpointConfig {
                 ep_type: EP_TYPE_INTERRUPT_IN,
+                max_burst: 0,
                 max_packet: 8,
                 interval: 6,
                 dequeue: 0x2_0000_0001,
@@ -221,6 +247,7 @@ mod tests {
             0,
             &EndpointConfig {
                 ep_type: 0,
+                max_burst: 0,
                 max_packet: 0,
                 interval: 0,
                 dequeue: u64::MAX,
@@ -260,5 +287,18 @@ mod tests {
         );
         assert_eq!([words[ep + 2], words[ep + 3]], [0x1234_5001, 0]);
         assert_eq!(words[ep + 4], 192 | 192 << 16);
+    }
+    #[test]
+    fn isoch_interval_and_high_bandwidth_burst() {
+        // Review regressions: FS isochronous bInterval 2 = 2 ms = 2^4 x 125 us.
+        assert_eq!(isoch_interval(speed::FULL, 1), 3);
+        assert_eq!(isoch_interval(speed::FULL, 2), 4);
+        assert_eq!(isoch_interval(speed::HIGH, 4), 3);
+        // HS wMaxPacketSize 0x1400: 1024 bytes, 2 extra transactions.
+        let ep = isoch_out_endpoint(speed::HIGH, 1, 0x1400, 3072, 0x1000);
+        assert_eq!((ep.max_packet, ep.max_burst), (1024, 2));
+        // Full speed: bits 12:11 are reserved, never a burst.
+        let ep = isoch_out_endpoint(speed::FULL, 1, 0x1400, 1023, 0x1000);
+        assert_eq!((ep.max_packet, ep.max_burst), (1024 & 0x7ff, 0));
     }
 }
