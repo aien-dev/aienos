@@ -257,4 +257,14 @@ Raw logs are not committed. They were kept on the run host in /tmp/aienos-m3-rec
 
 ## Operator sign-off
 
-Operator sign-off: pending
+Operator sign-off: accepted (Drake Stapleton, 2026-09-24)
+
+AIENOS M3 - Finish the Trusted Machine - is accepted.
+
+The canonical M3 implementation tested under strict verification is commit `871c4c831ad9ae793151a5e89563c311d44cb2eb`. The canonical evidence receipt was subsequently committed to `main` at `00e5916824cf4a6cc6b63696dbac8d9b44922d9a`.
+
+All required M3 verification gates recorded in the receipt passed with no required skips on the NVIDIA DGX Spark development host. Kernel isolation, AIENOS-owned EL1 translation, GICv3 timer delivery, preemptive scheduling, EL0 fault containment, capability enforcement, typed IPC with attenuated and revocable delegation, fail-closed xHCI DMA policy, SMMUv3-confined positive DMA, bus-master revocation, ABI v1 conformance, recovery, soak, TPM, and fault-injection verification passed.
+
+The M3 execution evidence is emulator-qualified: the kernel security proofs were executed using QEMU AArch64 on the DGX Spark host and do not constitute bare-metal GB10 SMMUv3 qualification. Stronger protected-page/out-of-window DMA-fault testing and direct capability-to-device-DMA authority binding remain explicit post-M3 hardening work and must not be represented as proven by this receipt.
+
+M3 Trusted Machine accepted.
