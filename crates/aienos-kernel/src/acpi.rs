@@ -281,6 +281,18 @@ pub struct IortSmmu {
     pub pci_streams: alloc::vec::Vec<IortStreamMapping>,
 }
 
+impl IortSmmu {
+    /// Resolve a PCI requester ID through the first matching root-complex map.
+    pub fn stream_id_for(&self, requester_id: u32) -> Option<u32> {
+        self.pci_streams.iter().find_map(|mapping| {
+            let relative = requester_id.checked_sub(mapping.input_base)?;
+            (relative <= mapping.id_count)
+                .then(|| mapping.output_base.checked_add(relative))
+                .flatten()
+        })
+    }
+}
+
 /// Reads the first SMMUv3 node and PCI root-complex mappings to it from IORT.
 pub fn iort_smmuv3(iort: &[u8]) -> Result<Option<IortSmmu>, AcpiError> {
     let iort = checked_table(iort, b"IORT")?;
@@ -447,6 +459,10 @@ mod tests {
                 }],
             })
         );
+        let smmu = iort_smmuv3(&table).unwrap().unwrap();
+        assert_eq!(smmu.stream_id_for(0x400), Some(0x800));
+        assert_eq!(smmu.stream_id_for(0x4ff), Some(0x8ff));
+        assert_eq!(smmu.stream_id_for(0x500), None);
     }
 
     #[test]

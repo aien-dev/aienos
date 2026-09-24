@@ -33,7 +33,7 @@ use aienos_kernel::display::{FramebufferInfo, PixelOrder, Screen, ACCENT, FOREGR
 use aienos_kernel::fatal::{self, FaultInfo};
 use aienos_kernel::mem::frame_allocator::PhysAddr;
 use aienos_kernel::mem::map_plan::{self, AddressRange, EfiMemoryDescriptor};
-use aienos_kernel::mem::pagetable::{FixedFramePool, PageTableBuilder, TableMemory};
+use aienos_kernel::mem::pagetable::{FixedFramePool, MapFlags, PageTableBuilder, TableMemory};
 use aienos_kernel::report::ReportBuf;
 use aienos_kernel::sync::spinlock::SpinLock;
 use core::alloc::{GlobalAlloc, Layout};
@@ -57,6 +57,23 @@ const POST_EXIT_HEAP_PAGES: usize = 1024;
 static POST_EXIT_HEAP: AtomicU64 = AtomicU64::new(0);
 static POST_EXIT_HEAP_USED: AtomicU64 = AtomicU64::new(0);
 static BOOT_SERVICES_LIVE: AtomicBool = AtomicBool::new(true);
+
+#[cfg(feature = "usb-keyboard")]
+#[repr(C, align(4096))]
+struct SmmuTables {
+    stream_table: [[u64; 8]; 4096],
+    command_queue: [[u64; 2]; 16],
+    event_queue: [[u64; 4]; 16],
+    context: [u64; 8],
+}
+
+#[cfg(feature = "usb-keyboard")]
+static mut SMMU_TABLES: SmmuTables = SmmuTables {
+    stream_table: [[0; 8]; 4096],
+    command_queue: [[0; 2]; 16],
+    event_queue: [[0; 4]; 16],
+    context: [0; 8],
+};
 
 struct BootHeap;
 unsafe impl GlobalAlloc for BootHeap {
@@ -156,6 +173,63 @@ fn clean_table_pool(base: usize, bytes: usize) {
     let _ = (base, bytes);
 }
 
+#[cfg(feature = "usb-keyboard")]
+fn configure_smmu_for_xhci(
+    iort: Option<&acpi::IortSmmu>,
+    xhci: Option<usb_keyboard::XhciLocation>,
+    pool_base: usize,
+    frames_used: usize,
+) -> Result<u32, aienos_kernel::smmu::Error> {
+    let iort = iort.ok_or(aienos_kernel::smmu::Error::InvalidWindow)?;
+    let xhci = xhci.ok_or(aienos_kernel::smmu::Error::InvalidWindow)?;
+    let stream_id = xhci
+        .stream_id(iort)
+        .ok_or(aienos_kernel::smmu::Error::InvalidWindow)?;
+    let (dma_base, dma_length) = xhci.dma_window();
+    let remaining = PT_POOL_PAGES.saturating_sub(frames_used);
+    let next = pool_base
+        .checked_add(
+            frames_used
+                .checked_mul(4096)
+                .ok_or(aienos_kernel::smmu::Error::InvalidWindow)?,
+        )
+        .ok_or(aienos_kernel::smmu::Error::InvalidWindow)?;
+    let frames = FixedFramePool::new(PhysAddr(next), remaining)
+        .ok_or(aienos_kernel::smmu::Error::InvalidWindow)?;
+    let mut page_table = PageTableBuilder::new(frames, PhysicalTableMemory)
+        .map_err(aienos_kernel::smmu::Error::PageTable)?;
+    page_table
+        .map(
+            dma_base as usize,
+            PhysAddr(dma_base as usize),
+            dma_length,
+            MapFlags::KERNEL_DATA,
+        )
+        .map_err(aienos_kernel::smmu::Error::PageTable)?;
+    let dma_root = page_table.root().0;
+    let table_frames = page_table.frames_used().unwrap_or(0);
+    clean_table_pool(next, table_frames * 4096);
+
+    let tables = core::ptr::addr_of_mut!(SMMU_TABLES);
+    clean_table_pool(tables as usize, core::mem::size_of::<SmmuTables>());
+    let mut regs = unsafe { aienos_kernel::smmu::MmioRegisters::new(iort.base as usize) };
+    unsafe {
+        aienos_kernel::smmu::configure_linear_stream(
+            &mut regs,
+            stream_id,
+            4096,
+            core::ptr::addr_of_mut!((*tables).stream_table).cast(),
+            16,
+            core::ptr::addr_of_mut!((*tables).command_queue).cast(),
+            16,
+            core::ptr::addr_of_mut!((*tables).event_queue).cast(),
+            core::ptr::addr_of_mut!((*tables).context),
+            dma_root as u64,
+        )?;
+    }
+    Ok(stream_id)
+}
+
 fn enter_kernel_mmu(
     memory_map: &impl MemoryMap,
     pool_base: usize,
@@ -167,6 +241,7 @@ fn enter_kernel_mmu(
     xhci_mmio: Option<u64>,
     ecam: Option<AddressRange>,
     gic: Option<acpi::GicBases>,
+    smmu_mmio: Option<u64>,
 ) -> (usize, usize, bool) {
     let descriptors: alloc::vec::Vec<_> = memory_map
         .entries()
@@ -212,6 +287,12 @@ fn enter_kernel_mmu(
                 length: u64::from(size).max(0x20000),
             });
         }
+    }
+    if let Some(base) = smmu_mmio {
+        mmio.push(AddressRange {
+            start: base & !4095,
+            length: 0x20000,
+        });
     }
     let (plan, decision) =
         map_plan::build_map_plan(&descriptors, image.start, image, sections, attrs, &mmio)
@@ -700,6 +781,8 @@ struct AcpiFacts {
     gic: Option<acpi::GicBases>,
     #[cfg(feature = "usb-keyboard")]
     mcfg: Option<&'static [u8]>,
+    #[cfg(feature = "usb-keyboard")]
+    iort: Option<acpi::IortSmmu>,
 }
 
 fn discover_acpi(boot_mpidr: u64) -> AcpiFacts {
@@ -739,6 +822,8 @@ fn discover_acpi(boot_mpidr: u64) -> AcpiFacts {
             b"SPCR" => facts.spcr = acpi::spcr_console(table).ok(),
             #[cfg(feature = "usb-keyboard")]
             b"MCFG" => facts.mcfg = Some(table),
+            #[cfg(feature = "usb-keyboard")]
+            b"IORT" => facts.iort = acpi::iort_smmuv3(table).ok().flatten(),
             _ => {}
         }
     }
@@ -1135,7 +1220,15 @@ fn main() -> Status {
         #[cfg(not(feature = "usb-keyboard"))]
         None,
         acpi_facts.gic,
+        #[cfg(feature = "usb-keyboard")]
+        acpi_facts.iort.as_ref().map(|i| i.base),
+        #[cfg(not(feature = "usb-keyboard"))]
+        None,
     );
+
+    #[cfg(feature = "usb-keyboard")]
+    let smmu_result =
+        configure_smmu_for_xhci(acpi_facts.iort.as_ref(), xhci, pt_pool, pt_frames_used);
 
     fatal::set_fault_hook(on_fault);
     fatal::install_exception_vectors();
@@ -1191,6 +1284,20 @@ fn main() -> Status {
         if mmu_on { "enabled" } else { "disabled" }
     );
     let _ = writeln!(report, "pt_frames_used: {pt_frames_used}");
+    #[cfg(feature = "usb-keyboard")]
+    match smmu_result {
+        Ok(stream_id) => {
+            let _ = writeln!(
+                report,
+                "smmu: enabled base={:#x} stream_id={stream_id:#x}",
+                acpi_facts.iort.as_ref().map_or(0, |i| i.base)
+            );
+            let _ = writeln!(report, "smmu_dma_window: xhci only, translation active");
+        }
+        Err(error) => {
+            let _ = writeln!(report, "smmu: unavailable ({error:?})");
+        }
+    }
     // Cooperative threads at EL1 (issue #29): two workers each record a tag and
     // yield five times; the line reports the order actually observed.
     let (trace, trace_len) = unsafe { aienos_kernel::thread::run_demo() };
@@ -1297,6 +1404,10 @@ fn main() -> Status {
         summary.conventional_kb(),
         el,
         report.as_str(),
+        smmu_result.is_ok(),
+        acpi_facts.iort.as_ref().map(|s| s.base),
+        smmu_result.ok(),
+        unsafe { core::ptr::addr_of_mut!(SMMU_TABLES.event_queue).cast_const() },
     );
     finish(screen)
 }
