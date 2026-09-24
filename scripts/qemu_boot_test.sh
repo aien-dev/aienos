@@ -60,6 +60,19 @@ check "image is this commit" "aienos_commit: ${commit}"
 check "left firmware and entered the kernel" "kernel: alive"
 check "kernel entered EL1h" "kernel_el: EL1h"
 check "cooperative threads interleaved" "threads: ok"
+check "preemption threads switched via timer" "preempt: ok"
+if grep -qE 'preempt: ok a=([0-9]+) b=([0-9]+) switches=([0-9]+)' "${work}/serial.txt"; then
+    preempt_line=$(grep -oE 'preempt: ok a=([0-9]+) b=([0-9]+) switches=([0-9]+)' "${work}/serial.txt" | tail -1)
+    a=$(echo "${preempt_line}" | sed -E 's/.*a=([0-9]+).*/\1/')
+    b=$(echo "${preempt_line}" | sed -E 's/.*b=([0-9]+).*/\1/')
+    sw=$(echo "${preempt_line}" | sed -E 's/.*switches=([0-9]+).*/\1/')
+    if [[ "${a}" -gt 0 && "${b}" -gt 0 && "${sw}" -ge 4 ]]; then
+        echo "PASS  preemptive timer IRQ multi-threading verified (a=${a} b=${b} switches=${sw})"
+    else
+        echo "FAIL  preemptive counters out of range (a=${a} b=${b} switches=${sw})"
+        failed=1
+    fi
+fi
 check "EL1 page tables and caches enabled" "mmu: enabled"
 check "GICv3 enabled" "gic: v3"
 if grep -qE 'timer_irq: ([0-9]+) ticks' "${work}/serial.txt"; then

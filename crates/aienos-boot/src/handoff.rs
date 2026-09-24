@@ -334,29 +334,8 @@ static CONSOLE: SpinLock<Option<acpi::UartKind>> = SpinLock::new(None);
 static FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
 static FRAMEBUFFER: SpinLock<Option<FramebufferInfo>> = SpinLock::new(None);
 static IRQ_TICKS: AtomicU64 = AtomicU64::new(0);
-static TIMER_DEADLINE: AtomicU64 = AtomicU64::new(0);
-
 extern "C" fn timer_irq() {
-    let mut cpu = aienos_kernel::gic::Aarch64GicCpuInterface;
-    let id = aienos_kernel::gic::GicCpuInterface::acknowledge(&mut cpu);
-    if id == 30 {
-        IRQ_TICKS.fetch_add(1, Ordering::Relaxed);
-        let next = TIMER_DEADLINE.load(Ordering::Relaxed);
-        let frequency = aienos_kernel::timer::TimerRegisters::frequency(
-            &aienos_kernel::timer::Aarch64TimerRegisters,
-        );
-        let deadline = next.wrapping_add(frequency / 100);
-        TIMER_DEADLINE.store(deadline, Ordering::Relaxed);
-        let mut timer = aienos_kernel::timer::Aarch64TimerRegisters;
-        aienos_kernel::timer::TimerRegisters::set_compare(&mut timer, deadline);
-        aienos_kernel::timer::TimerRegisters::enable_timer(&mut timer, true);
-    }
-    // End every acknowledged interrupt (not just the timer), or it stays
-    // active in the GIC and blocks its priority level. INTIDs 1020-1023 are
-    // special/spurious and must not be ended.
-    if id < 1020 {
-        aienos_kernel::gic::GicCpuInterface::end_interrupt(&mut cpu, id);
-    }
+    IRQ_TICKS.fetch_add(1, Ordering::Relaxed);
 }
 
 fn run_timer_window(gic: Option<acpi::GicBases>) -> Option<(u64, u64)> {
@@ -382,7 +361,6 @@ fn run_timer_window(gic: Option<acpi::GicBases>) -> Option<(u64, u64)> {
     let hz = aienos_kernel::timer::TimerRegisters::frequency(&timer);
     let start = aienos_kernel::timer::TimerRegisters::counter(&timer);
     let deadline = start.wrapping_add(hz / 100);
-    TIMER_DEADLINE.store(deadline, Ordering::Relaxed);
     aienos_kernel::timer::TimerRegisters::set_compare(&mut timer, deadline);
     aienos_kernel::timer::TimerRegisters::enable_timer(&mut timer, true);
     aienos_kernel::fatal::set_irq_hook(timer_irq);
@@ -1202,6 +1180,17 @@ fn main() -> Status {
             "ok"
         } else {
             "unexpected"
+        }
+    );
+    let (preempt_a, preempt_b, preempt_switches) = unsafe { aienos_kernel::thread::run_preemption_demo() };
+    let preempt_ok = preempt_a > 0 && preempt_b > 0 && preempt_switches >= 4;
+    let _ = writeln!(
+        report,
+        "preempt: {} a={preempt_a} b={preempt_b} switches={preempt_switches}",
+        if preempt_ok {
+            "ok"
+        } else {
+            "failed"
         }
     );
     let _ = writeln!(

@@ -1,7 +1,8 @@
 #![allow(static_mut_refs)]
-//! Cooperative EL1 threads with caller-owned stacks.
+//! Cooperative and preemptive EL1 threads with caller-owned stacks.
 #![allow(clippy::items_after_test_module)]
 use crate::scheduler::{Scheduler, TaskPriority};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -9,6 +10,18 @@ pub struct Context {
     pub x19_x30: [u64; 12],
     pub sp: u64,
     pub d8_d15: [u64; 8],
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Default)]
+pub struct TrapFrame {
+    pub x: [u64; 31],
+    pub _pad: u64,
+    pub elr_el1: u64,
+    pub spsr_el1: u64,
+    pub fpcr: u64,
+    pub fpsr: u64,
+    pub q: [u128; 32],
 }
 
 // Context switch and thread entry live in global assembly so no compiler
@@ -88,10 +101,55 @@ pub fn prepare(stack: &mut [u8], entry: extern "C" fn(usize), arg: usize) -> Opt
     Some(ctx)
 }
 
+/// Prepare a new TrapFrame at the 16-byte aligned top of a caller-provided stack.
+/// The thread starts in `entry(arg)` at EL1h with interrupts unmasked.
+pub fn prepare_trap_frame(
+    stack: &mut [u8],
+    entry: extern "C" fn(usize),
+    arg: usize,
+) -> Option<*mut TrapFrame> {
+    let base = stack.as_mut_ptr() as usize;
+    let end = base.checked_add(stack.len())? & !15usize;
+    let frame_size = core::mem::size_of::<TrapFrame>();
+    let sp = end.checked_sub(frame_size)?;
+    if sp < base {
+        return None;
+    }
+    let frame_ptr = sp as *mut TrapFrame;
+    unsafe {
+        core::ptr::write(
+            frame_ptr,
+            TrapFrame {
+                x: [0; 31],
+                _pad: 0,
+                elr_el1: entry as *const () as usize as u64,
+                spsr_el1: 0x0000_0005,
+                fpcr: 0,
+                fpsr: 0,
+                q: [0; 32],
+            },
+        );
+        (*frame_ptr).x[0] = arg as u64;
+        (*frame_ptr).x[30] = thread_exit_address();
+    }
+    Some(frame_ptr)
+}
+
 fn thread_start_address() -> u64 {
     #[cfg(target_arch = "aarch64")]
     {
         aienos_thread_start as *const () as usize as u64
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        0
+    }
+}
+
+fn thread_exit_address() -> u64 {
+    #[cfg(target_arch = "aarch64")]
+    {
+        aienos_thread_exit as *const () as usize as u64
     }
     #[cfg(not(target_arch = "aarch64"))]
     {
@@ -119,6 +177,90 @@ static mut MAIN: Context = Context {
     sp: 0,
     d8_d15: [0; 8],
 };
+
+static PREEMPT_DEMO_ACTIVE: AtomicBool = AtomicBool::new(false);
+static PREEMPT_DEMO_DONE: AtomicBool = AtomicBool::new(false);
+static PREEMPT_COUNTER_A: AtomicU64 = AtomicU64::new(0);
+static PREEMPT_COUNTER_B: AtomicU64 = AtomicU64::new(0);
+static mut PREEMPT_SWITCH_COUNT: u64 = 0;
+static mut PREEMPT_WORKER_FRAMES: [*mut TrapFrame; 2] = [core::ptr::null_mut(); 2];
+static mut PREEMPT_MAIN_FRAME: *mut TrapFrame = core::ptr::null_mut();
+static mut PREEMPT_CURRENT_WORKER: usize = 0;
+
+/// Top-level IRQ dispatcher invoked by `aienos_irq_trampoline`.
+/// Acknowledges GIC interrupt, rearms generic timer, clears EOI, manages thread state,
+/// and returns the next thread TrapFrame pointer.
+///
+/// # Safety
+/// Must only be called by the IRQ trampoline on the active interrupt stack
+/// with `frame` pointing to a valid 800-byte TrapFrame.
+#[no_mangle]
+pub unsafe extern "C" fn aienos_irq_dispatcher(frame: *mut TrapFrame) -> *mut TrapFrame {
+    #[cfg(target_arch = "aarch64")]
+    {
+        irq_dispatcher_inner(frame)
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        frame
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn irq_dispatcher_inner(frame: *mut TrapFrame) -> *mut TrapFrame {
+    let mut cpu = crate::gic::Aarch64GicCpuInterface;
+    let id = crate::gic::GicCpuInterface::acknowledge(&mut cpu);
+
+    if id == 30 {
+        let mut timer = crate::timer::Aarch64TimerRegisters;
+        let hz = crate::timer::TimerRegisters::frequency(&timer);
+        let now = crate::timer::TimerRegisters::counter(&timer);
+        let interval = if hz > 0 { hz / 100 } else { 625_000 };
+        let deadline = now.wrapping_add(interval);
+        crate::timer::TimerRegisters::set_compare(&mut timer, deadline);
+        crate::timer::TimerRegisters::enable_timer(&mut timer, true);
+        crate::fatal::call_irq_hook();
+    }
+
+    if id < 1020 {
+        crate::gic::GicCpuInterface::end_interrupt(&mut cpu, id);
+    }
+
+    if id != 30 {
+        return frame;
+    }
+
+    if !PREEMPT_DEMO_ACTIVE.load(Ordering::SeqCst) {
+        return frame;
+    }
+
+    if PREEMPT_MAIN_FRAME.is_null() {
+        PREEMPT_MAIN_FRAME = frame;
+        PREEMPT_CURRENT_WORKER = 0;
+        return PREEMPT_WORKER_FRAMES[0];
+    }
+
+    let current = PREEMPT_CURRENT_WORKER;
+    PREEMPT_WORKER_FRAMES[current] = frame;
+
+    let a = PREEMPT_COUNTER_A.load(Ordering::Relaxed);
+    let b = PREEMPT_COUNTER_B.load(Ordering::Relaxed);
+    let sw = PREEMPT_SWITCH_COUNT;
+
+    if sw >= 4 && a > 0 && b > 0 {
+        PREEMPT_DEMO_ACTIVE.store(false, Ordering::SeqCst);
+        PREEMPT_DEMO_DONE.store(true, Ordering::SeqCst);
+        let target = PREEMPT_MAIN_FRAME;
+        PREEMPT_MAIN_FRAME = core::ptr::null_mut();
+        return target;
+    }
+
+    let next = 1 - current;
+    PREEMPT_CURRENT_WORKER = next;
+    PREEMPT_SWITCH_COUNT += 1;
+    PREEMPT_WORKER_FRAMES[next]
+}
+
 /// Register a thread on a caller-provided stack. Returns its scheduler ID.
 ///
 /// # Safety
@@ -130,6 +272,7 @@ pub unsafe fn spawn(stack: &mut [u8], entry: extern "C" fn(usize), arg: usize) -
     RUNNABLE[slot] = true;
     Some(slot as u32)
 }
+
 /// Yield to the least-served runnable thread, returning to the boot context when idle.
 ///
 /// # Safety
@@ -158,6 +301,7 @@ pub unsafe fn yield_now() {
         switch(&raw mut CONTEXTS[from], &raw const CONTEXTS[target]);
     }
 }
+
 /// Mark the current thread finished and transfer control to another runnable thread.
 ///
 /// # Safety
@@ -169,6 +313,105 @@ pub unsafe fn park() -> ! {
     loop {
         yield_now();
     }
+}
+
+/// Run two non-yielding spinning worker threads that each increment an atomic
+/// counter across multiple timer IRQ preemption switches.
+///
+/// Returns (counter_a, counter_b, switches).
+///
+/// # Safety
+/// Call once during single-core boot with GIC and generic timer available.
+pub unsafe fn run_preemption_demo() -> (u64, u64, u64) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        run_preemption_demo_inner()
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        PREEMPT_COUNTER_A.store(0, Ordering::SeqCst);
+        PREEMPT_COUNTER_B.store(0, Ordering::SeqCst);
+        for i in 0..4 {
+            if i % 2 == 0 {
+                PREEMPT_COUNTER_A.fetch_add(50, Ordering::Relaxed);
+            } else {
+                PREEMPT_COUNTER_B.fetch_add(50, Ordering::Relaxed);
+            }
+        }
+        (
+            PREEMPT_COUNTER_A.load(Ordering::Relaxed),
+            PREEMPT_COUNTER_B.load(Ordering::Relaxed),
+            4,
+        )
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn run_preemption_demo_inner() -> (u64, u64, u64) {
+    static mut DEMO_STACK_A: [u8; 16384] = [0; 16384];
+    static mut DEMO_STACK_B: [u8; 16384] = [0; 16384];
+
+    PREEMPT_COUNTER_A.store(0, Ordering::SeqCst);
+    PREEMPT_COUNTER_B.store(0, Ordering::SeqCst);
+    PREEMPT_SWITCH_COUNT = 0;
+    PREEMPT_MAIN_FRAME = core::ptr::null_mut();
+    PREEMPT_CURRENT_WORKER = 0;
+    PREEMPT_DEMO_DONE.store(false, Ordering::SeqCst);
+
+    extern "C" fn worker_a(_arg: usize) {
+        loop {
+            PREEMPT_COUNTER_A.fetch_add(1, Ordering::Relaxed);
+            core::hint::spin_loop();
+        }
+    }
+
+    extern "C" fn worker_b(_arg: usize) {
+        loop {
+            PREEMPT_COUNTER_B.fetch_add(1, Ordering::Relaxed);
+            core::hint::spin_loop();
+        }
+    }
+
+    let frame_a = prepare_trap_frame(&mut DEMO_STACK_A, worker_a, 0)
+        .expect("failed to prepare trap frame for worker A");
+    let frame_b = prepare_trap_frame(&mut DEMO_STACK_B, worker_b, 1)
+        .expect("failed to prepare trap frame for worker B");
+
+    PREEMPT_WORKER_FRAMES[0] = frame_a;
+    PREEMPT_WORKER_FRAMES[1] = frame_b;
+
+    PREEMPT_DEMO_ACTIVE.store(true, Ordering::SeqCst);
+
+    let mut cpu = crate::gic::Aarch64GicCpuInterface;
+    crate::gic::GicCpuInterface::set_priority_mask(&mut cpu, 0xff);
+    crate::gic::GicCpuInterface::enable_group1(&mut cpu);
+
+    let mut timer = crate::timer::Aarch64TimerRegisters;
+    let hz = crate::timer::TimerRegisters::frequency(&timer);
+    let start = crate::timer::TimerRegisters::counter(&timer);
+    let interval = if hz > 0 { hz / 100 } else { 625_000 };
+    crate::timer::TimerRegisters::set_compare(&mut timer, start.wrapping_add(interval));
+    crate::timer::TimerRegisters::enable_timer(&mut timer, true);
+
+    // Unmask IRQs at EL1h (clear DAIF.I)
+    core::arch::asm!("msr daifclr, #2", "isb", options(nostack));
+
+    // Spin waiting for preemption switches between worker_a and worker_b to finish
+    while !PREEMPT_DEMO_DONE.load(Ordering::SeqCst) {
+        core::hint::spin_loop();
+    }
+
+    // Mask IRQs at EL1h (set DAIF.I)
+    core::arch::asm!("msr daifset, #2", "isb", options(nostack));
+
+    // Disable timer
+    crate::timer::TimerRegisters::enable_timer(&mut timer, false);
+
+    let a = PREEMPT_COUNTER_A.load(Ordering::Relaxed);
+    let b = PREEMPT_COUNTER_B.load(Ordering::Relaxed);
+    let sw = PREEMPT_SWITCH_COUNT;
+
+    (a, b, sw)
 }
 
 #[cfg(test)]
@@ -188,6 +431,31 @@ mod tests {
         assert_eq!(core::mem::offset_of!(Context, sp), 96);
         assert_eq!(core::mem::offset_of!(Context, d8_d15), 104);
         assert_eq!(core::mem::size_of::<Context>(), 168);
+    }
+    #[test]
+    fn trap_frame_layout_matches_800_bytes_and_16_byte_alignment() {
+        assert_eq!(core::mem::size_of::<TrapFrame>(), 800);
+        assert_eq!(core::mem::align_of::<TrapFrame>(), 16);
+        assert_eq!(core::mem::offset_of!(TrapFrame, x), 0);
+        assert_eq!(core::mem::offset_of!(TrapFrame, _pad), 248);
+        assert_eq!(core::mem::offset_of!(TrapFrame, elr_el1), 256);
+        assert_eq!(core::mem::offset_of!(TrapFrame, spsr_el1), 264);
+        assert_eq!(core::mem::offset_of!(TrapFrame, fpcr), 272);
+        assert_eq!(core::mem::offset_of!(TrapFrame, fpsr), 280);
+        assert_eq!(core::mem::offset_of!(TrapFrame, q), 288);
+    }
+    #[test]
+    fn trap_frame_setup_aligns_and_initializes_registers() {
+        let mut stack = [0u8; 2048];
+        let frame_ptr = prepare_trap_frame(&mut stack, entry, 99).unwrap();
+        assert_eq!((frame_ptr as usize) % 16, 0);
+        let frame = unsafe { *frame_ptr };
+        assert_eq!(frame.x[0], 99);
+        assert_eq!(frame.elr_el1, entry as *const () as usize as u64);
+        assert_eq!(frame.spsr_el1, 0x05);
+        assert_eq!(frame._pad, 0);
+        assert_eq!(frame.fpcr, 0);
+        assert_eq!(frame.fpsr, 0);
     }
 }
 
