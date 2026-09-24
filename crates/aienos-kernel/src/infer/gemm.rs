@@ -86,21 +86,25 @@ pub fn matvec(
     {
         return Err(KernelError::Shape);
     }
+    // The NEON path loads 4 contiguous vector elements at a time, so it is only
+    // valid for a contiguous vector; strided vectors take the scalar path.
     #[cfg(target_arch = "aarch64")]
-    // SAFETY: caller-facing shape checks prove every accessed element is in bounds.
-    unsafe {
-        matvec_neon(
-            matrix,
-            vector,
-            out,
-            rows,
-            cols,
-            matrix_stride,
-            vector_stride,
-            out_stride,
-        );
+    if vector_stride == 1 {
+        // SAFETY: caller-facing shape checks prove every accessed element is in bounds.
+        unsafe {
+            matvec_neon(
+                matrix,
+                vector,
+                out,
+                rows,
+                cols,
+                matrix_stride,
+                vector_stride,
+                out_stride,
+            );
+        }
+        return Ok(());
     }
-    #[cfg(not(target_arch = "aarch64"))]
     matvec_ref(
         matrix,
         vector,
@@ -372,5 +376,18 @@ mod tests {
         matvec(&a, &x, &mut y, 4096, 4096, 4096, 1, 1).unwrap();
         let s = t.elapsed().as_secs_f64();
         println!("matvec GFLOP/s: {}", 2. * 4096f64 * 4096. / s / 1e9);
+    }
+    #[test]
+    fn strided_vector_matches_reference() {
+        // Review regression: NEON loads assumed a contiguous vector.
+        let matrix = [1.0f32; 16];
+        let vector = [1.0f32, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0];
+        let mut out = [0.0f32; 1];
+        matvec(&matrix, &vector, &mut out, 1, 4, 16, 2, 1).unwrap();
+        assert_eq!(out[0], 4.0);
+        let long = [1.0f32; 32];
+        let mut out = [0.0f32; 1];
+        matvec(&[1.0; 16], &long, &mut out, 1, 16, 16, 2, 1).unwrap();
+        assert_eq!(out[0], 16.0);
     }
 }
