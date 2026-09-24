@@ -74,6 +74,29 @@ pub fn counter_ticks() -> u64 {
     }
 }
 
+/// Main ID register of the executing core. Bits 15:4 are the part number
+/// (0xd87 Cortex-A725, 0xd85 Cortex-X925 on the GB10).
+#[inline(always)]
+pub fn midr_el1() -> u64 {
+    #[cfg(target_arch = "aarch64")]
+    {
+        let midr: u64;
+        unsafe {
+            core::arch::asm!("mrs {0}, midr_el1", out(reg) midr, options(nomem, nostack, preserves_flags));
+        }
+        midr
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        0
+    }
+}
+
+/// Part number field of a MIDR value.
+pub const fn midr_part(midr: u64) -> u16 {
+    ((midr >> 4) & 0xfff) as u16
+}
+
 /// Read the frequency of the architectural virtual counter.
 #[inline(always)]
 pub fn counter_frequency_hz() -> u64 {

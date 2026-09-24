@@ -22,6 +22,56 @@
 
 ---
 
+## 0. Current Critical Path (revised 2026-09-24)
+
+The phases in section 1 remain the destination. This is the gate order being
+executed now, adopted from the reviewed roadmap. The first vision is proven
+only at M8. Status words: **done** = verified on this repository's evidence;
+**built** = code merged and host-verified, never run on hardware; **pending**
+= not started or blocked.
+
+| Gate | Scope | Status | Evidence / blocker |
+|---|---|---|---|
+| **M0** Close Config A | Clean reference snapshot | done | PR #12: schema 3.0.0 bundle, all repositories clean |
+| | Benchmark evidence | done | CPU baseline: Llama-3.2-1B Q4_K_M on 20 Arm cores, 256-token samples, mean decode 54.2 tokens/s |
+| | Verified recovery and rollback | pending | Needs the attended one-time boot ([procedure](NATIVE_BOOT_ONE_TIME.md)) |
+| **M1** UEFI/QEMU substrate | Automated emulator boot proof | pending | No `qemu-system-aarch64` or AArch64 UEFI firmware on the host; UEFI images are format-checked only |
+| **M2A** Spark firmware handoff | Memory map into early allocator | built | PR #10 |
+| | GB10 PCI identity, BAR0, PMC_BOOT registers | built | PR #11 |
+| | CPU topology from the ACPI MADT (efficiency classes) and boot-core MIDR | built | Parser tested on constructed tables; Linux shows boot cpu0 is a Cortex-A725 |
+| | Broader ACPI device discovery | pending | |
+| **M2B** Human bring-up console | GOP framebuffer text after firmware exit | built | PR #13 |
+| | UART at `0x16A00000` (bounded, Spark only) | built | PR #13; external reachability unknown |
+| | USB keyboard (xHCI + HID) | pending | |
+| **M2C** Hardware test automation | Exclusive Machine 1 key and ledger records in `aien-proof` | built | aien-sovereign-core PR #126: `aien-proof hold --resource machine-1 -- CMD` |
+| | Power/reset control, HDMI capture, USB input emulation | pending | Needs hardware chosen by the operator |
+| **M3** Kernel isolation | MMU, exceptions, interrupts, timer, scheduler, IPC/capabilities | pending | Scheduler consumes M2A CPU topology |
+| **M4** Storage and recovery | | pending | Host crates exist (`recovery`, `store`) |
+| **M5** Encryption and identity | | pending | |
+| **M6** Minimal wired networking | DHCP/static IP, ARP/NDP, IP, UDP/TCP, secure control transport | pending | Before the self-maintaining agent; Wi-Fi and Bluetooth later |
+| **M7** AIEN runtime and native CPU inference | | pending | Compare against the M0 CPU baseline |
+| **M8** Cortex and persistent agent | | pending | Host crates exist (`cortex`, `agent-state`) |
+
+**Current blocker for M2 on hardware:** Secure Boot is enabled on Machine 1
+(observed 2026-09-24), so firmware refuses the unsigned handoff image. Changing
+it is escalation trigger 1 and is the operator's decision.
+
+**Accelerator lane:** device characterization (PCI identity, BAR layout,
+firmware interfaces, register discovery) is allowed now. Command submission,
+GSP interaction, GPU memory management and GPU inference stay a separate,
+non-blocking program (see [GB10_NATIVE_STATUS.md](GB10_NATIVE_STATUS.md)).
+
+**Open operator decisions on the M2 bring-up path:**
+- The handoff image writes its report to the `AienosBootReport` firmware
+  variable after `ExitBootServices`, as a one-time bring-up diagnostic.
+  AIENOS does not depend on it, but it uses a firmware runtime storage service
+  after handoff (escalation trigger 11) and needs operator sign-off.
+- `scripts/stage_one_time_boot.sh --apply` sets `BootNext` and adds a boot
+  entry outside BootOrder. It runs only when the operator invokes it
+  (Phase 2 escalation trigger on NVRAM boot variables).
+
+---
+
 ## 1. Master Phased Execution Framework
 
 The AIENOS master execution sequence progresses across eight distinct phases. The order expresses architectural dependency, not administrative bureaucracy. Each phase establishes sovereign deliverables, enforceable invariants, objective acceptance tests, and explicit escalation triggers.

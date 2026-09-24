@@ -6,6 +6,14 @@ set -euo pipefail
 
 report_file="/boot/efi/EFI/AIENOS/BOOTREPORT.TXT"
 report_var="/sys/firmware/efi/efivars/AienosBootReport-a1e05b0e-7c3d-4f51-9b6a-2d8e4c1f0a37"
+image="/boot/efi/EFI/AIENOS/aienos-handoff.efi"
+
+echo "== staged image"
+if [[ -r "${image}" ]]; then
+    echo "sha256: $(sha256sum "${image}" | cut -d" " -f1)"
+else
+    echo "missing: ${image}"
+fi
 
 echo "== pre-exit report (${report_file})"
 if [[ -r "${report_file}" ]]; then

@@ -34,17 +34,26 @@ The image does not touch the Linux installation, its partitions, or BootOrder.
 
 ```bash
 bash scripts/stage_one_time_boot.sh            # dry run: prints the plan
-bash scripts/stage_one_time_boot.sh --apply    # needs sudo; sets BootNext only
+sudo -v                                        # cache sudo; hold gives the command no stdin
+aien-proof hold --resource machine-1 --job stage-native-boot -- \
+    bash scripts/stage_one_time_boot.sh --apply # sets BootNext only
 sudo reboot
 ```
+
+`aien-proof hold` (aien-sovereign-core) lets only one agent own Machine 1 at a
+time and records each attempt, with its full output, as an `audit` event in the
+shared ledger.
 
 Expect: the firmware logo, the AIENOS pre-exit report, then a dark screen with
 `AIENOS NATIVE BOOT REPORT` and a countdown. After the reset, Linux boots
 normally. Then:
 
 ```bash
-bash scripts/collect_boot_report.sh
+aien-proof hold --resource machine-1 --job collect-native-boot -- \
+    bash scripts/collect_boot_report.sh
 ```
+
+The ledger entry then carries the booted image digest and both reports.
 
 `NATIVE_BOOT_OK` means the kernel ran and its report survived the reset.
 

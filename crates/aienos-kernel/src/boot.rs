@@ -2,8 +2,10 @@
 //!
 //! Provides the bare-metal entry path, early serial banner, and BootReceipt.
 
+use crate::acpi::CpuTopology;
 use crate::arch::aarch64::{
-    counter_ticks, current_el, disable_interrupts, dsb, halt, isb, EarlyUart, SPARK_16550_UART_BASE,
+    counter_ticks, current_el, disable_interrupts, dsb, halt, isb, midr_el1, midr_part, EarlyUart,
+    SPARK_16550_UART_BASE,
 };
 use crate::mem::{BitmapFrameAllocator, PhysAddr, PAGE_SIZE};
 use crate::report::ReportBuf;
@@ -139,6 +141,10 @@ pub struct BootFacts {
     pub timing: Option<BootTiming>,
     pub kernel_entry_ticks: u64,
     pub gb10: Option<aienos_accel::Gb10Identity>,
+    /// Core inventory from the firmware MADT, if it was found and valid.
+    pub cpu: Option<CpuTopology>,
+    /// MIDR of the core running the boot path.
+    pub boot_midr: u64,
     pub exception_level: u8,
 }
 
@@ -163,6 +169,26 @@ pub fn write_boot_report(out: &mut impl Write, facts: &BootFacts) -> bool {
             let _ = writeln!(out, "gb10: unavailable");
         }
     }
+    match facts.cpu {
+        Some(t) => {
+            let _ = writeln!(out, "cpu_cores: {}", t.cores);
+            for (class, count) in t.classes() {
+                let _ = writeln!(out, "cpu_efficiency_class_{class}: {count}");
+            }
+            if t.unknown_class > 0 {
+                let _ = writeln!(out, "cpu_efficiency_class_unknown: {}", t.unknown_class);
+            }
+        }
+        None => {
+            let _ = writeln!(out, "cpu_topology: unavailable");
+        }
+    }
+    let _ = writeln!(
+        out,
+        "boot_cpu_midr: {:#x} (part {:#05x})",
+        facts.boot_midr,
+        midr_part(facts.boot_midr)
+    );
     let Some((managed_frames, first_frame)) = facts.allocator else {
         let _ = writeln!(out, "allocator: unavailable; boot halted");
         return false;
@@ -193,6 +219,7 @@ pub fn early_kernel_enter(
     memory_region: Option<BootMemoryRegion>,
     boot_timing: Option<BootTiming>,
     gb10: Option<aienos_accel::Gb10Identity>,
+    cpu: Option<CpuTopology>,
 ) -> (BootReport, bool) {
     let kernel_entry_ticks = counter_ticks();
     disable_interrupts();
@@ -206,6 +233,8 @@ pub fn early_kernel_enter(
         timing: boot_timing,
         kernel_entry_ticks,
         gb10,
+        cpu,
+        boot_midr: midr_el1(),
         exception_level: current_el(),
     };
     let mut report = BootReport::new();
@@ -221,7 +250,13 @@ pub fn early_kernel_init_with_gpu(
     boot_timing: Option<BootTiming>,
     gb10: Option<aienos_accel::Gb10Identity>,
 ) -> ! {
-    let (report, ok) = early_kernel_enter(conventional_memory_kb, memory_region, boot_timing, gb10);
+    let (report, ok) = early_kernel_enter(
+        conventional_memory_kb,
+        memory_region,
+        boot_timing,
+        gb10,
+        None,
+    );
     let uart = EarlyUart::new(SPARK_16550_UART_BASE);
     uart.write_str("\n");
     uart.write_str(report.as_str());
@@ -280,6 +315,23 @@ mod tests {
             }),
             kernel_entry_ticks: 3_000,
             gb10: Some(gb10),
+            cpu: Some(crate::acpi::CpuTopology {
+                cores: 20,
+                classes: [
+                    (0, 10),
+                    (1, 10),
+                    (0, 0),
+                    (0, 0),
+                    (0, 0),
+                    (0, 0),
+                    (0, 0),
+                    (0, 0),
+                ],
+                distinct_classes: 2,
+                unknown_class: 0,
+                first_mpidr: Some(0x8100_0000),
+            }),
+            boot_midr: 0x410f_d870,
             exception_level: 2,
         };
         let mut report = BootReport::new();
@@ -289,6 +341,10 @@ mod tests {
             "gb10_segment: 15",
             "gb10_bar0_phys: 0x650000000",
             "gb10_pmc_boot_0: 0x1b0000a1",
+            "cpu_cores: 20",
+            "cpu_efficiency_class_0: 10",
+            "cpu_efficiency_class_1: 10",
+            "boot_cpu_midr: 0x410fd870 (part 0xd87)",
             "allocator_reserved_frame_phys: 0x10000000",
             "uefi_entry_to_handoff_ms: 1",
             "handoff_to_kernel_entry_ms: 2",

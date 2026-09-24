@@ -8,6 +8,7 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod acpi;
 pub mod arch;
 pub mod boot;
 pub mod crypto;
