@@ -36,7 +36,17 @@ The image does not touch the Linux installation, its partitions, or BootOrder.
 3. **Everything on this Linux install stops** for each reboot: agents, model
    servers, the aienos.com waitlist API, and remote access.
 
-## Step 1: turn Secure Boot off (operator decision 2026-09-24)
+> **Paused (operator decision 2026-09-24).** Do not run this procedure again
+> yet. Turning Secure Boot off changes TPM PCR 7, and Machine 1 seals its
+> private-storage key and vault credential to that state: on the first boot,
+> those secrets would not unseal, the encrypted storage stayed locked, and
+> dependent services failed. Secure Boot is back on. Real-hardware AIENOS
+> boots resume only after the owner-controlled boot chain exists: operator
+> signing key, signed AIENOS loader and kernel, a defined TPM PCR policy, an
+> independent recovery key, a tested recovery path, and secrets re-sealed to
+> that policy. Until then, develop and test in QEMU.
+
+## Step 1: turn Secure Boot off (operator decision 2026-09-24, since reversed)
 
 ```bash
 sudo systemctl reboot --firmware-setup   # reboots straight into firmware setup
