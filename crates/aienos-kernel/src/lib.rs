@@ -37,6 +37,7 @@ pub mod thread;
 pub mod timer;
 pub mod uefi;
 pub mod usb;
+pub mod virtio_net;
 
 #[cfg(all(target_os = "none", not(feature = "std"), not(test)))]
 #[panic_handler]
