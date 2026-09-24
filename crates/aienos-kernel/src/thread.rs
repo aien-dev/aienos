@@ -164,6 +164,8 @@ pub unsafe fn yield_now() {
 /// Call only from a scheduled thread on the single scheduling core.
 pub unsafe fn park() -> ! {
     RUNNABLE[CURRENT] = false;
+    // Free the scheduler slot so finished threads don't exhaust capacity.
+    let _ = SCHED.remove(CURRENT as u32);
     loop {
         yield_now();
     }
