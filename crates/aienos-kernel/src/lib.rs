@@ -11,6 +11,7 @@
 pub mod acpi;
 pub mod arch;
 pub mod boot;
+pub mod console;
 pub mod crypto;
 pub mod display;
 pub mod fatal;

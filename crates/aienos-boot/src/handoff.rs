@@ -24,9 +24,9 @@
 use aienos_kernel::acpi;
 use aienos_kernel::arch::aarch64::{
     counter_frequency_hz, counter_ticks, midr_el1, midr_part, mpidr_el1, psci_system_reset,
-    EarlyUart, SPARK_16550_UART_BASE,
 };
 use aienos_kernel::boot::{BootTiming, MemoryMapSummary};
+use aienos_kernel::console::EarlyConsole;
 use aienos_kernel::display::{FramebufferInfo, PixelOrder, Screen, ACCENT, FOREGROUND};
 use aienos_kernel::fatal::{self, FaultInfo};
 use aienos_kernel::report::ReportBuf;
@@ -55,7 +55,12 @@ const REPORT_VENDOR: VariableVendor = VariableVendor(guid!("a1e05b0e-7c3d-4f51-9
 /// ADR 0008 bounds on the post-handoff firmware variable.
 const MAX_VAR_WRITES: u8 = 3;
 const MAX_VAR_BYTES: usize = 3072;
-const RESTART_AFTER_SECS: u64 = 30;
+/// Countdown before reset; `AIENOS_RESTART_SECS` at build time shortens it for emulator tests.
+fn restart_after_secs() -> u64 {
+    option_env!("AIENOS_RESTART_SECS")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(30)
+}
 const ERROR: (u8, u8, u8) = (0xff, 0x6b, 0x6b);
 
 type Report = ReportBuf<MAX_VAR_BYTES>;
@@ -91,7 +96,8 @@ static STAGE: AtomicU8 = AtomicU8::new(FIRMWARE_ENTRY);
 static EXITED: AtomicBool = AtomicBool::new(false);
 static IN_FATAL: AtomicBool = AtomicBool::new(false);
 static VAR_WRITES: AtomicU8 = AtomicU8::new(0);
-static ON_SPARK: AtomicBool = AtomicBool::new(false);
+/// Serial console from the firmware SPCR table (independent of GB10 discovery).
+static CONSOLE: SpinLock<Option<acpi::UartKind>> = SpinLock::new(None);
 static FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
 static FRAMEBUFFER: SpinLock<Option<FramebufferInfo>> = SpinLock::new(None);
 
@@ -214,32 +220,94 @@ unsafe fn table_at<'a>(addr: usize) -> Option<&'a [u8]> {
     Some(unsafe { core::slice::from_raw_parts(addr as *const u8, len) })
 }
 
-/// Core inventory from the firmware MADT (RSDP, then XSDT, then "APIC").
-fn discover_cpu_topology(boot_mpidr: u64) -> Option<acpi::CpuTopology> {
-    let rsdp = uefi::system::with_config_table(|entries| {
+/// Firmware ACPI facts read before exit: core inventory (MADT) and the serial
+/// console (SPCR), found by walking RSDP, then XSDT.
+#[derive(Default)]
+struct AcpiFacts {
+    cpu: Option<acpi::CpuTopology>,
+    spcr: Option<acpi::SpcrConsole>,
+}
+
+fn discover_acpi(boot_mpidr: u64) -> AcpiFacts {
+    let mut facts = AcpiFacts::default();
+    let Some(rsdp) = uefi::system::with_config_table(|entries| {
         entries
             .iter()
             .find(|e| e.guid == ConfigTableEntry::ACPI2_GUID)
             .map(|e| e.address as usize)
-    })?;
+    }) else {
+        return facts;
+    };
     // SAFETY: firmware published this ACPI 2.0 RSDP, which is 36 bytes long.
     let rsdp = unsafe { core::slice::from_raw_parts(rsdp as *const u8, 36) };
     if &rsdp[..8] != b"RSD PTR " {
-        return None;
+        return facts;
     }
-    let xsdt_addr = u64::from_le_bytes(rsdp[24..32].try_into().ok()?) as usize;
+    let Some(xsdt_addr) = rsdp[24..32].try_into().ok().map(u64::from_le_bytes) else {
+        return facts;
+    };
     // SAFETY: the RSDP points at the XSDT; its checksum is validated below.
-    let xsdt = acpi::checked_table(unsafe { table_at(xsdt_addr) }?, b"XSDT").ok()?;
+    let Some(xsdt) = (unsafe { table_at(xsdt_addr as usize) })
+        .and_then(|t| acpi::checked_table(t, b"XSDT").ok())
+    else {
+        return facts;
+    };
     for addr in acpi::xsdt_entries(xsdt) {
         // SAFETY: XSDT entries point at firmware ACPI tables.
         let Some(table) = (unsafe { table_at(addr as usize) }) else {
             continue;
         };
-        if &table[..4] == b"APIC" {
-            return acpi::madt_cpu_topology_for(table, Some(boot_mpidr)).ok();
+        match &table[..4] {
+            b"APIC" => facts.cpu = acpi::madt_cpu_topology_for(table, Some(boot_mpidr)).ok(),
+            b"SPCR" => facts.spcr = acpi::spcr_console(table).ok(),
+            _ => {}
         }
     }
-    None
+    facts
+}
+
+fn write_uart_line(out: &mut impl Write, spcr: Option<acpi::SpcrConsole>) {
+    let _ = match spcr {
+        None => writeln!(out, "uart: none (no SPCR)"),
+        Some(s) => match s.kind() {
+            acpi::UartKind::Ns16550Mmio32(base) => {
+                writeln!(
+                    out,
+                    "uart: 16550 mmio32 at {base:#x} (spcr type {:#04x})",
+                    s.interface_type
+                )
+            }
+            acpi::UartKind::Pl011(base) => {
+                writeln!(
+                    out,
+                    "uart: pl011 at {base:#x} (spcr type {:#04x})",
+                    s.interface_type
+                )
+            }
+            acpi::UartKind::Unsupported => writeln!(
+                out,
+                "uart: unsupported (spcr type {:#04x}, space {}, width {})",
+                s.interface_type, s.address_space, s.register_bit_width
+            ),
+        },
+    };
+}
+
+/// Send text to the SPCR console, bounded. Returns the outcome for the report.
+fn send_to_console(text: &str) -> &'static str {
+    let kind = CONSOLE.try_lock().and_then(|k| *k);
+    match kind.and_then(EarlyConsole::from_kind) {
+        Some(console) => {
+            console.write_str("\n");
+            console.write_str(text);
+            if console.is_dead() {
+                "no response"
+            } else {
+                "sent"
+            }
+        }
+        None => "no drivable console",
+    }
 }
 
 /// Geometry of the display mode the firmware already configured.
@@ -280,14 +348,9 @@ fn discover_framebuffer() -> Option<FramebufferInfo> {
 fn save_report_file(text: &str) -> uefi::Result {
     let mut fs = uefi::boot::get_image_file_system(uefi::boot::image_handle())?;
     let mut root = fs.open_volume()?;
-    root.open(
-        cstr16!("\\EFI\\AIENOS"),
-        FileMode::CreateReadWrite,
-        FileAttribute::DIRECTORY,
-    )?;
     let path = cstr16!("\\EFI\\AIENOS\\BOOTREPORT.TXT");
     if let Ok(old) = root.open(path, FileMode::ReadWrite, FileAttribute::empty()) {
-        old.delete()?;
+        let _ = old.delete();
     }
     let mut file = root
         .open(path, FileMode::CreateReadWrite, FileAttribute::empty())?
@@ -378,13 +441,13 @@ fn finish(mut screen: Option<Screen>) -> ! {
         Some(s) => {
             let _ = writeln!(s);
             s.set_color(ACCENT);
-            for remaining in (1..=RESTART_AFTER_SECS).rev() {
+            for remaining in (1..=restart_after_secs()).rev() {
                 s.clear_row();
                 let _ = write!(s, "restarting in {remaining} s");
                 wait_seconds(1);
             }
         }
-        None => wait_seconds(RESTART_AFTER_SECS),
+        None => wait_seconds(restart_after_secs()),
     }
     reset_after_exit(Status::SUCCESS)
 }
@@ -407,7 +470,7 @@ fn fatal_report(kind: &str, detail: &dyn Fn(&mut Report)) -> ! {
     if !EXITED.load(Ordering::SeqCst) {
         uefi::println!("{}", report.as_str());
         let _ = save_report_file(report.as_str());
-        wait_seconds(RESTART_AFTER_SECS);
+        wait_seconds(restart_after_secs());
         uefi::runtime::reset(ResetType::COLD, Status::ABORTED, None)
     }
 
@@ -419,13 +482,11 @@ fn fatal_report(kind: &str, detail: &dyn Fn(&mut Report)) -> ! {
         s.set_color(FOREGROUND);
         let _ = write!(s, "{}", report.as_str());
     }
+    let uart = send_to_console(report.as_str());
+    let _ = writeln!(report, "uart_report: {uart}");
     let saved = save_report_var(report.as_bytes());
-    if ON_SPARK.load(Ordering::SeqCst) {
-        let uart = EarlyUart::new(SPARK_16550_UART_BASE);
-        uart.write_str("\n");
-        uart.write_str(report.as_str());
-    }
     if let Some(s) = screen.as_mut() {
+        let _ = writeln!(s, "uart_report: {uart}");
         match saved {
             Ok(n) => {
                 let _ = writeln!(s, "nvram_report: saved (write {n} of {MAX_VAR_WRITES})");
@@ -463,12 +524,13 @@ fn main() -> Status {
 
     stage(GB10_DISCOVERY);
     let gb10 = discover_gb10();
-    ON_SPARK.store(gb10.is_some(), Ordering::SeqCst);
 
     stage(ACPI_TOPOLOGY);
     let boot_midr = midr_el1();
     let boot_mpidr = mpidr_el1();
-    let cpu = discover_cpu_topology(boot_mpidr);
+    let acpi_facts = discover_acpi(boot_mpidr);
+    let cpu = acpi_facts.cpu;
+    *CONSOLE.lock() = acpi_facts.spcr.map(|s| s.kind());
 
     stage(FRAMEBUFFER_DISCOVERY);
     let framebuffer = discover_framebuffer();
@@ -506,6 +568,7 @@ fn main() -> Status {
         }
     }
     write_cpu(&mut pre, cpu, boot_midr, boot_mpidr);
+    write_uart_line(&mut pre, acpi_facts.spcr);
     match framebuffer {
         Some(f) => {
             let _ = writeln!(
@@ -520,9 +583,10 @@ fn main() -> Status {
     }
     let _ = writeln!(pre, "exiting firmware boot services");
     uefi::println!("{}", pre.as_str());
-    match save_report_file(pre.as_str()) {
+    let pre_file = save_report_file(pre.as_str()).map_err(|e| e.status());
+    match pre_file {
         Ok(()) => uefi::println!("report file: \\EFI\\AIENOS\\BOOTREPORT.TXT saved"),
-        Err(e) => uefi::println!("report file: not saved ({:?})", e.status()),
+        Err(status) => uefi::println!("report file: not saved ({status:?})"),
     }
     stage(PRE_EXIT_SAVED);
 
@@ -580,10 +644,16 @@ fn main() -> Status {
             let _ = writeln!(report, "progress_record: not saved ({e})");
         }
     }
-    if report.truncated() {
-        let _ = writeln!(report, "truncated: yes");
+    match pre_file {
+        Ok(()) => {
+            let _ = writeln!(report, "pre_exit_file: saved");
+        }
+        Err(status) => {
+            let _ = writeln!(report, "pre_exit_file: not saved ({status:?})");
+        }
     }
 
+    // Draw and send first, then record both outcomes in the saved report.
     let mut screen = screen();
     if let Some(s) = screen.as_mut() {
         s.clear();
@@ -592,6 +662,26 @@ fn main() -> Status {
         s.set_color(FOREGROUND);
         let _ = write!(s, "{}", report.as_str());
         stage(SCREEN_DRAWN);
+    }
+    let uart = send_to_console(report.as_str());
+    stage(UART_SENT);
+
+    let mut outcomes = ReportBuf::<256>::new();
+    match framebuffer.filter(|_| screen.is_some()) {
+        Some(f) => {
+            let _ = writeln!(outcomes, "screen_report: drawn {}x{}", f.width, f.height);
+        }
+        None => {
+            let _ = writeln!(outcomes, "screen_report: unavailable");
+        }
+    }
+    let _ = writeln!(outcomes, "uart_report: {uart}");
+    let _ = write!(report, "{}", outcomes.as_str());
+    if report.truncated() {
+        let _ = writeln!(report, "truncated: yes");
+    }
+    if let Some(s) = screen.as_mut() {
+        let _ = write!(s, "{}", outcomes.as_str());
     }
 
     let saved = save_report_var(report.as_bytes());
@@ -604,24 +694,6 @@ fn main() -> Status {
             Err(e) => {
                 let _ = writeln!(s, "nvram_report: not saved ({e})");
             }
-        }
-    }
-
-    if gb10.is_some() {
-        let uart = EarlyUart::new(SPARK_16550_UART_BASE);
-        uart.write_str("\n");
-        uart.write_str(report.as_str());
-        stage(UART_SENT);
-        if let Some(s) = screen.as_mut() {
-            let _ = writeln!(
-                s,
-                "uart_report: {}",
-                if uart.is_dead() {
-                    "no response"
-                } else {
-                    "sent"
-                }
-            );
         }
     }
 

@@ -108,6 +108,63 @@ impl CpuTopology {
     }
 }
 
+/// Serial console described by the ACPI SPCR table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SpcrConsole {
+    /// SPCR interface type (0x00 16550, 0x03 PL011, 0x0e SBSA, 0x12 16550 with GAS).
+    pub interface_type: u8,
+    /// Generic Address Structure: 0 = system memory.
+    pub address_space: u8,
+    pub register_bit_width: u8,
+    /// GAS access size: 1 byte, 2 word, 3 dword, 4 qword.
+    pub access_size: u8,
+    pub base: u64,
+}
+
+/// Which early UART driver fits an SPCR console.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UartKind {
+    /// 16550-compatible with 32-bit registers (4-byte stride), as on the DGX Spark.
+    Ns16550Mmio32(u64),
+    /// ARM PL011 or SBSA generic UART (PL011 register subset).
+    Pl011(u64),
+    /// Present but not drivable by the early console.
+    Unsupported,
+}
+
+impl SpcrConsole {
+    pub fn kind(&self) -> UartKind {
+        if self.address_space != 0 || self.base == 0 {
+            return UartKind::Unsupported;
+        }
+        match self.interface_type {
+            0x00 | 0x12 if self.access_size == 3 || self.register_bit_width == 32 => {
+                UartKind::Ns16550Mmio32(self.base)
+            }
+            0x03 | 0x0d | 0x0e => UartKind::Pl011(self.base),
+            _ => UartKind::Unsupported,
+        }
+    }
+}
+
+const SPCR_INTERFACE_TYPE: usize = 36;
+const SPCR_BASE_GAS: usize = 40;
+
+/// Reads the console from a validated SPCR table.
+pub fn spcr_console(spcr: &[u8]) -> Result<SpcrConsole, AcpiError> {
+    let spcr = checked_table(spcr, b"SPCR")?;
+    let gas = spcr
+        .get(SPCR_BASE_GAS..SPCR_BASE_GAS + 12)
+        .ok_or(AcpiError::Truncated)?;
+    Ok(SpcrConsole {
+        interface_type: spcr[SPCR_INTERFACE_TYPE],
+        address_space: gas[0],
+        register_bit_width: gas[1],
+        access_size: gas[3],
+        base: u64_at(gas, 4).ok_or(AcpiError::Truncated)?,
+    })
+}
+
 /// MPIDR affinity fields (Aff3, Aff2, Aff1, Aff0); other bits are flags.
 pub const MPIDR_AFFINITY_MASK: u64 = 0xff_00ff_ffff;
 
@@ -262,6 +319,47 @@ mod tests {
         let sum = zero_len.iter().fold(0u8, |s, b| s.wrapping_add(*b));
         zero_len[9] = 0u8.wrapping_sub(sum);
         assert_eq!(madt_cpu_topology(&zero_len), Err(AcpiError::BadEntry));
+    }
+
+    fn spcr(interface_type: u8, space: u8, bit_width: u8, access: u8, base: u64) -> Vec<u8> {
+        let mut t = std::vec![0u8; 80];
+        t[..4].copy_from_slice(b"SPCR");
+        t[4..8].copy_from_slice(&80u32.to_le_bytes());
+        t[SPCR_INTERFACE_TYPE] = interface_type;
+        t[SPCR_BASE_GAS] = space;
+        t[SPCR_BASE_GAS + 1] = bit_width;
+        t[SPCR_BASE_GAS + 3] = access;
+        t[SPCR_BASE_GAS + 4..SPCR_BASE_GAS + 12].copy_from_slice(&base.to_le_bytes());
+        let sum = t.iter().fold(0u8, |s, b| s.wrapping_add(*b));
+        t[9] = 0u8.wrapping_sub(sum);
+        t
+    }
+
+    #[test]
+    fn spcr_selects_the_early_uart_driver() {
+        // DGX Spark style: 16550-compatible, 32-bit registers at 0x16A00000.
+        let spark = spcr_console(&spcr(0x12, 0, 32, 3, 0x16A0_0000)).unwrap();
+        assert_eq!(spark.kind(), UartKind::Ns16550Mmio32(0x16A0_0000));
+        // QEMU virt: ARM PL011 at 0x09000000.
+        let qemu = spcr_console(&spcr(0x03, 0, 32, 3, 0x0900_0000)).unwrap();
+        assert_eq!(qemu.kind(), UartKind::Pl011(0x0900_0000));
+        // Byte-wide 16550, I/O port space and unknown types are not drivable.
+        assert_eq!(
+            spcr_console(&spcr(0x00, 0, 8, 1, 0x3f8)).unwrap().kind(),
+            UartKind::Unsupported
+        );
+        assert_eq!(
+            spcr_console(&spcr(0x12, 1, 32, 3, 0x3f8)).unwrap().kind(),
+            UartKind::Unsupported
+        );
+        assert_eq!(
+            spcr_console(&spcr(0x20, 0, 32, 3, 0x1000)).unwrap().kind(),
+            UartKind::Unsupported
+        );
+        // A corrupted table is rejected.
+        let mut bad = spcr(0x03, 0, 32, 3, 0x0900_0000);
+        bad[50] ^= 1;
+        assert_eq!(spcr_console(&bad), Err(AcpiError::BadChecksum));
     }
 
     #[test]
