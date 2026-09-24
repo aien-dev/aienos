@@ -165,6 +165,7 @@ done
 elapsed=$(( $(date +%s) - started ))
 
 tr -d '\r' <"${work}/serial.log" >"${work}/serial.txt" 2>/dev/null || true
+[[ -z "${AIENOS_LOG_DIR:-}" ]] || cp "${work}/serial.txt" "${AIENOS_LOG_DIR}/qemu_$([[ "${AIENOS_QEMU_SMMU:-0}" == "1" ]] && echo smmu || echo keyboard)_serial.log" 2>/dev/null || true
 failed=0
 check() { # description, pattern
     if grep -q -- "$2" "${work}/serial.txt"; then

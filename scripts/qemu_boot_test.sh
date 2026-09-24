@@ -45,6 +45,7 @@ set -e
 elapsed=$(( $(date +%s) - started ))
 
 tr -d '\r' <"${log}" >"${work}/serial.txt"
+[[ -z "${AIENOS_LOG_DIR:-}" ]] || cp "${work}/serial.txt" "${AIENOS_LOG_DIR}/qemu_boot_serial.log"
 failed=0
 check() { # description, pattern
     if grep -q -- "$2" "${work}/serial.txt"; then
