@@ -167,6 +167,19 @@ pub type FaultHook = fn(&FaultInfo) -> !;
 
 #[cfg_attr(not(target_arch = "aarch64"), allow(dead_code))]
 static HOOK: AtomicUsize = AtomicUsize::new(0);
+static IRQ_HOOK: AtomicUsize = AtomicUsize::new(0);
+
+pub fn set_irq_hook(hook: extern "C" fn()) {
+    IRQ_HOOK.store(hook as usize, Ordering::SeqCst);
+}
+#[cfg(target_arch = "aarch64")]
+fn call_irq_hook() {
+    let raw = IRQ_HOOK.load(Ordering::SeqCst);
+    if raw != 0 {
+        let hook: extern "C" fn() = unsafe { core::mem::transmute(raw) };
+        hook();
+    }
+}
 
 pub fn set_fault_hook(hook: FaultHook) {
     HOOK.store(hook as usize, Ordering::SeqCst);
@@ -185,7 +198,7 @@ fn call_hook(info: &FaultInfo) -> ! {
 
 #[cfg(target_arch = "aarch64")]
 mod vectors {
-    use super::{call_hook, FaultInfo};
+    use super::{call_hook, call_irq_hook, FaultInfo};
     use crate::arch::aarch64::current_el;
 
     const STACK_BYTES: usize = 16 * 1024;
@@ -241,9 +254,78 @@ mod vectors {
         "aienos_exception_vectors:",
         ".irp slot, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15",
         ".balign 128",
+        ".if \\slot == 5",
+        "b aienos_irq_trampoline",
+        ".else",
         "mov x0, #\\slot",
         "b aienos_exception_trampoline",
+        ".endif",
         ".endr",
+        // IRQ entry: save everything the handler (Rust, AAPCS64) may clobber:
+        // x0-x18 and x30, ELR/SPSR_EL1, FPCR/FPSR, and SIMD/FP caller-saved
+        // q0-q7 and q16-q31 (compiler-generated SIMD must not corrupt the
+        // interrupted code). Frame: 576 bytes, 16-byte aligned.
+        "aienos_irq_trampoline:",
+        "sub sp, sp, #576",
+        "stp x0, x1, [sp, #0]",
+        "stp x2, x3, [sp, #16]",
+        "stp x4, x5, [sp, #32]",
+        "stp x6, x7, [sp, #48]",
+        "stp x8, x9, [sp, #64]",
+        "stp x10, x11, [sp, #80]",
+        "stp x12, x13, [sp, #96]",
+        "stp x14, x15, [sp, #112]",
+        "stp x16, x17, [sp, #128]",
+        "stp x18, x30, [sp, #144]",
+        "mrs x0, elr_el1",
+        "mrs x1, spsr_el1",
+        "stp x0, x1, [sp, #160]",
+        "mrs x0, fpcr",
+        "mrs x1, fpsr",
+        "stp x0, x1, [sp, #176]",
+        "stp q0, q1, [sp, #192]",
+        "stp q2, q3, [sp, #224]",
+        "stp q4, q5, [sp, #256]",
+        "stp q6, q7, [sp, #288]",
+        "stp q16, q17, [sp, #320]",
+        "stp q18, q19, [sp, #352]",
+        "stp q20, q21, [sp, #384]",
+        "stp q22, q23, [sp, #416]",
+        "stp q24, q25, [sp, #448]",
+        "stp q26, q27, [sp, #480]",
+        "stp q28, q29, [sp, #512]",
+        "stp q30, q31, [sp, #544]",
+        "bl {irq_handler}",
+        "ldp q0, q1, [sp, #192]",
+        "ldp q2, q3, [sp, #224]",
+        "ldp q4, q5, [sp, #256]",
+        "ldp q6, q7, [sp, #288]",
+        "ldp q16, q17, [sp, #320]",
+        "ldp q18, q19, [sp, #352]",
+        "ldp q20, q21, [sp, #384]",
+        "ldp q22, q23, [sp, #416]",
+        "ldp q24, q25, [sp, #448]",
+        "ldp q26, q27, [sp, #480]",
+        "ldp q28, q29, [sp, #512]",
+        "ldp q30, q31, [sp, #544]",
+        "ldp x0, x1, [sp, #176]",
+        "msr fpcr, x0",
+        "msr fpsr, x1",
+        "ldp x0, x1, [sp, #160]",
+        "msr elr_el1, x0",
+        "msr spsr_el1, x1",
+        "ldp x0, x1, [sp, #0]",
+        "ldp x2, x3, [sp, #16]",
+        "ldp x4, x5, [sp, #32]",
+        "ldp x6, x7, [sp, #48]",
+        "ldp x8, x9, [sp, #64]",
+        "ldp x10, x11, [sp, #80]",
+        "ldp x12, x13, [sp, #96]",
+        "ldp x14, x15, [sp, #112]",
+        "ldp x16, x17, [sp, #128]",
+        "ldp x18, x30, [sp, #144]",
+        "add sp, sp, #576",
+        "eret",
         "aienos_exception_trampoline:",
         "adrp x1, {stack}",
         "add x1, x1, :lo12:{stack}",
@@ -255,6 +337,7 @@ mod vectors {
         stack = sym EXCEPTION_STACK,
         stack_bytes_hi = const STACK_BYTES >> 12,
         handler = sym aienos_exception_handler,
+        irq_handler = sym call_irq_hook,
     );
 
     extern "C" {

@@ -166,6 +166,7 @@ fn enter_kernel_mmu(
     uart: Option<acpi::SpcrConsole>,
     xhci_mmio: Option<u64>,
     ecam: Option<AddressRange>,
+    gic: Option<acpi::GicBases>,
 ) -> (usize, usize, bool) {
     let descriptors: alloc::vec::Vec<_> = memory_map
         .entries()
@@ -197,6 +198,20 @@ fn enter_kernel_mmu(
     }
     if let Some(range) = ecam {
         mmio.push(range);
+    }
+    if let Some(gic) = gic {
+        if let Some(base) = gic.distributor {
+            mmio.push(AddressRange {
+                start: base,
+                length: 0x10000,
+            });
+        }
+        if let Some((base, size)) = gic.redistributor {
+            mmio.push(AddressRange {
+                start: base,
+                length: u64::from(size).max(0x20000),
+            });
+        }
     }
     let (plan, decision) =
         map_plan::build_map_plan(&descriptors, image.start, image, sections, attrs, &mmio)
@@ -318,6 +333,71 @@ static VAR_WRITES: AtomicU8 = AtomicU8::new(0);
 static CONSOLE: SpinLock<Option<acpi::UartKind>> = SpinLock::new(None);
 static FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
 static FRAMEBUFFER: SpinLock<Option<FramebufferInfo>> = SpinLock::new(None);
+static IRQ_TICKS: AtomicU64 = AtomicU64::new(0);
+static TIMER_DEADLINE: AtomicU64 = AtomicU64::new(0);
+
+extern "C" fn timer_irq() {
+    let mut cpu = aienos_kernel::gic::Aarch64GicCpuInterface;
+    let id = aienos_kernel::gic::GicCpuInterface::acknowledge(&mut cpu);
+    if id == 30 {
+        IRQ_TICKS.fetch_add(1, Ordering::Relaxed);
+        let next = TIMER_DEADLINE.load(Ordering::Relaxed);
+        let frequency = aienos_kernel::timer::TimerRegisters::frequency(
+            &aienos_kernel::timer::Aarch64TimerRegisters,
+        );
+        let deadline = next.wrapping_add(frequency / 100);
+        TIMER_DEADLINE.store(deadline, Ordering::Relaxed);
+        let mut timer = aienos_kernel::timer::Aarch64TimerRegisters;
+        aienos_kernel::timer::TimerRegisters::set_compare(&mut timer, deadline);
+        aienos_kernel::timer::TimerRegisters::enable_timer(&mut timer, true);
+    }
+    // End every acknowledged interrupt (not just the timer), or it stays
+    // active in the GIC and blocks its priority level. INTIDs 1020-1023 are
+    // special/spurious and must not be ended.
+    if id < 1020 {
+        aienos_kernel::gic::GicCpuInterface::end_interrupt(&mut cpu, id);
+    }
+}
+
+fn run_timer_window(gic: Option<acpi::GicBases>) -> Option<(u64, u64)> {
+    let bases = gic?;
+    let distributor = bases.distributor? as usize;
+    let (redistributor, _) = bases.redistributor?;
+    let mut rd = aienos_kernel::gic::GicRedistributor(aienos_kernel::gic::MmioGicRegisters {
+        base: redistributor as usize,
+    });
+    if !rd.wake(1_000_000) {
+        return None;
+    }
+    rd.configure_ppi(30, 0x80);
+    let mut dist = aienos_kernel::gic::GicDistributor(aienos_kernel::gic::MmioGicRegisters {
+        base: distributor,
+    });
+    dist.enable_group1();
+    let mut cpu = aienos_kernel::gic::Aarch64GicCpuInterface;
+    aienos_kernel::gic::GicCpuInterface::set_priority_mask(&mut cpu, 0xff);
+    aienos_kernel::gic::GicCpuInterface::enable_group1(&mut cpu);
+    let _ = distributor;
+    let mut timer = aienos_kernel::timer::Aarch64TimerRegisters;
+    let hz = aienos_kernel::timer::TimerRegisters::frequency(&timer);
+    let start = aienos_kernel::timer::TimerRegisters::counter(&timer);
+    let deadline = start.wrapping_add(hz / 100);
+    TIMER_DEADLINE.store(deadline, Ordering::Relaxed);
+    aienos_kernel::timer::TimerRegisters::set_compare(&mut timer, deadline);
+    aienos_kernel::timer::TimerRegisters::enable_timer(&mut timer, true);
+    aienos_kernel::fatal::set_irq_hook(timer_irq);
+    unsafe {
+        core::arch::asm!("msr daifclr, #2", "isb", options(nostack));
+    }
+    while aienos_kernel::timer::TimerRegisters::counter(&timer).wrapping_sub(start) < hz / 5 {
+        core::hint::spin_loop();
+    }
+    unsafe {
+        core::arch::asm!("msr daifset, #2", "isb", options(nostack));
+    }
+    aienos_kernel::timer::TimerRegisters::enable_timer(&mut timer, false);
+    Some((IRQ_TICKS.load(Ordering::Relaxed), 200))
+}
 
 fn stage(s: u8) {
     STAGE.store(s, Ordering::SeqCst);
@@ -617,6 +697,7 @@ unsafe fn table_at<'a>(addr: usize) -> Option<&'a [u8]> {
 struct AcpiFacts {
     cpu: Option<acpi::CpuTopology>,
     spcr: Option<acpi::SpcrConsole>,
+    gic: Option<acpi::GicBases>,
     #[cfg(feature = "usb-keyboard")]
     mcfg: Option<&'static [u8]>,
 }
@@ -651,7 +732,10 @@ fn discover_acpi(boot_mpidr: u64) -> AcpiFacts {
             continue;
         };
         match &table[..4] {
-            b"APIC" => facts.cpu = acpi::madt_cpu_topology_for(table, Some(boot_mpidr)).ok(),
+            b"APIC" => {
+                facts.cpu = acpi::madt_cpu_topology_for(table, Some(boot_mpidr)).ok();
+                facts.gic = acpi::madt_gic_bases(table).ok();
+            }
             b"SPCR" => facts.spcr = acpi::spcr_console(table).ok(),
             #[cfg(feature = "usb-keyboard")]
             b"MCFG" => facts.mcfg = Some(table),
@@ -1050,6 +1134,7 @@ fn main() -> Status {
         }),
         #[cfg(not(feature = "usb-keyboard"))]
         None,
+        acpi_facts.gic,
     );
 
     fatal::set_fault_hook(on_fault);
@@ -1087,6 +1172,7 @@ fn main() -> Status {
         gb10,
         cpu,
     );
+    let irq_result = run_timer_window(acpi_facts.gic);
 
     let mut report = Report::new();
     header(&mut report, "final");
@@ -1128,6 +1214,11 @@ fn main() -> Status {
         }
     );
     let _ = write!(report, "{}", kernel_report.as_str());
+    if let Some((ticks, ms)) = irq_result {
+        let _ = writeln!(report, "gic: v3\ntimer_irq: {ticks} ticks in {ms} ms");
+    } else {
+        let _ = writeln!(report, "gic: unavailable\ntimer_irq: unavailable");
+    }
     if gb10.is_none() {
         gb10_discovery.write_diagnostics(&mut report);
     }

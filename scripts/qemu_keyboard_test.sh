@@ -74,7 +74,7 @@ boot_once() {
     # Single-threaded TCG: multi-threaded TCG intermittently loses the
     # firmware's timer wake-up and hangs before AIENOS output (#61).
     qemu-system-aarch64 \
-        -M virt,virtualization=on -accel tcg,thread=single -cpu max -smp 4 -m 2048 \
+        -M virt,virtualization=on,gic-version=3 -accel tcg,thread=single -cpu max -smp 4 -m 2048 \
         -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
         -drive if=pflash,format=raw,file="${work}/vars.fd" \
         -drive if=none,id=esp,format=raw,file=fat:rw:"${work}/esp" \
