@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0.0",
+  "receipt_type": "trust1_gate0_baseline",
+  "procedure_id": "CARD-AIENOS-005A",
+  "timestamp_utc": "2026-09-24T03:35:40Z",
+  "target_machine": {
+    "hostname": "spark-b87b",
+    "architecture": "aarch64",
+    "cpu": "NVIDIA Grace (20 Arm Neoverse-V2 / Cortex-A725 cores, dual efficiency class)",
+    "accelerator": "NVIDIA Blackwell GB10"
+  },
+  "provenance": {
+    "repository": "https://github.com/aien-dev/aienos",
+    "base_commit": "68a674cf9ec1040106d6dc857fca9b182e52bac9",
+    "operator": "drakestapleton",
+    "zero_disk_secrets_certified": true,
+    "unslop_certified": true
+  },
+  "secure_boot": {
+    "state": "enabled",
+    "platform_key_pk": {
+      "subject": "CN=DGX Spark Platform Key, O=NVIDIA Corporation, L=Santa Clara, C=US",
+      "sha1_fingerprint": "14:42:7d:0c:5b:4d:09:be:7e:1f:57:4b:08:71:da:e3:0f:96:c7:4e"
+    },
+    "key_exchange_keys_kek": [
+      {
+        "subject": "CN=Microsoft Corporation KEK 2K CA 2023, O=Microsoft Corporation, C=US",
+        "sha1_fingerprint": "45:9a:b6:fb:5e:28:4d:27:2d:5e:3e:6a:bc:8e:d6:63:82:9d:63:2b"
+      },
+      {
+        "subject": "CN=Microsoft Corporation KEK CA 2011, O=Microsoft Corporation, C=US",
+        "sha1_fingerprint": "31:59:0b:fd:89:c9:d7:4e:d0:87:df:ac:66:33:4b:39:31:25:4b:30"
+      }
+    ],
+    "signature_database_db": [
+      {
+        "subject": "CN=Microsoft UEFI CA 2023, O=Microsoft Corporation, C=US",
+        "sha1_fingerprint": "b5:ee:b4:a6:70:60:48:07:3f:0e:d2:96:e7:f5:80:a7:90:b5:9e:aa"
+      },
+      {
+        "subject": "CN=Windows UEFI CA 2023, O=Microsoft Corporation, C=US",
+        "sha1_fingerprint": "45:a0:fa:32:60:47:73:c8:24:33:c3:b7:d5:9e:74:66:b3:ac:0c:67"
+      },
+      {
+        "subject": "CN=Microsoft Corporation UEFI CA 2011, O=Microsoft Corporation, C=US",
+        "sha1_fingerprint": "46:de:f6:3b:5c:e6:1c:f8:ba:0d:e2:e6:63:9c:10:19:d0:ed:14:f3"
+      },
+      {
+        "subject": "CN=Microsoft Windows Production PCA 2011, O=Microsoft Corporation, C=US",
+        "sha1_fingerprint": "58:0a:6f:4c:c4:e4:b6:69:b9:eb:dc:1b:2b:3e:08:7b:80:d0:67:8d"
+      }
+    ],
+    "forbidden_database_dbx_entries_count": 8
+  },
+  "tpm_baseline": {
+    "device_node": "/dev/tpmrm0",
+    "driver": "tpm_crb / tpm_tis (NTC0702:00)",
+    "sha256_pcrs": {
+      "0": "0x3D458CFE55CC03EA1F443F1562BEEC8DF51C75E14A9FCF9A7234A13F198E7969",
+      "1": "0xF56FDCCEE6FDF18A870DA81B78A20433AC4A576305D1EFF5CBC479406EFEBC5E",
+      "2": "0x4E0A0CF49A01DD797A54BEE5A8D01A73B9B4FDCE29B7B59177D8BEAEE45A7C6C",
+      "3": "0x3D458CFE55CC03EA1F443F1562BEEC8DF51C75E14A9FCF9A7234A13F198E7969",
+      "4": "0xFA1D64DE5ECB19C3DF0380CA7E8746F097B5A3ADA5E1C1386FACE5F0F5B0B2FC",
+      "5": "0xF72D2E96253DD2AFC446C37116813A711D649DAAAA12620F9A7CF5A0DEC47A58",
+      "6": "0x3D458CFE55CC03EA1F443F1562BEEC8DF51C75E14A9FCF9A7234A13F198E7969",
+      "7": "0xD76B3540204A6CE15763B17036028603ADF9774A03D91BFDA2792D8E91CF3046",
+      "8": "0xA471EC488F631421A813EDD781D079F98AC9AA433EF246ABB8C858698DAF97DC",
+      "9": "0x0FCD3715A3FFFEF1669E5835866350668A649180FF834F76DF41FF862FBF6506",
+      "10": "0x666C5717C9CEFFDDC71EC529833C0A6C3004912145C2E34363ED9AFE6F396B99",
+      "14": "0x306F9D8B94F17D93DC6E7CF8F5C79D652EB4C6C4D13DE2DDDC24AF416E13ECAF"
+    },
+    "binary_bios_measurements": {
+      "path": "/sys/kernel/security/tpm0/binary_bios_measurements",
+      "size_bytes": 19328,
+      "sha256": "3fe47419e108658d7c5cb1612e2c4dedefb27067639ba9baf59f6e83974f1042"
+    }
+  },
+  "storage_and_secrets_architecture": {
+    "nvme_storage": {
+      "device": "/dev/nvme0n1",
+      "disklabel": "gpt",
+      "partitions": [
+        {
+          "node": "/dev/nvme0n1p1",
+          "label": "EFI",
+          "fstype": "vfat",
+          "size": "298M",
+          "mountpoint": "/boot/efi"
+        },
+        {
+          "node": "/dev/nvme0n1p2",
+          "label": "root",
+          "fstype": "ext4",
+          "size": "3.7T",
+          "mountpoint": "/",
+          "encrypted_under_luks": false
+        }
+      ]
+    },
+    "encrypted_volumes": [
+      {
+        "service": "atlas-private-storage.service",
+        "cipher_type": "gocryptfs",
+        "cipher_dir": "/home/atlas/atlas-runtime-setup-20260905/private-cipher",
+        "mount_point": "/home/atlas/atlas-runtime-setup-20260905/private-data",
+        "key_source": "systemd-creds LoadCredentialEncrypted (/etc/credstore.encrypted/atlas-storage.key)",
+        "tpm_binding": "PCR 7 (host+tpm2)"
+      }
+    ],
+    "key_vault": {
+      "engine": "atlas-vault (systemd-creds backend)",
+      "vault_file": "/home/drakestapleton/.config/atlas/vault/vault.cred",
+      "keymode": "host+tpm2",
+      "tpm_binding": "PCR 7"
+    },
+    "offline_recovery": {
+      "media_device": "/dev/sda1",
+      "media_label": "ATLAS_RECOV",
+      "fs_type": "vfat (FAT32)",
+      "file_path": "/mnt/atlas-forge-state-luks-recovery-key.txt.age",
+      "age_encryption": {
+        "header_recipient_type": "ssh-ed25519",
+        "recipient_pubkey_hash": "SHA256:+4nykc4onMNyhwHwtg1ZaXzXxxUC8q5xiyhBP66+k3c",
+        "identity_location": "Operator MacBook shell (~/.ssh/id_ed25519)"
+      },
+      "invariant_status": "ATLAS_RECOV is verified and designated untouched. Gate 1 recovery media requires a separate physical USB drive."
+    }
+  },
+  "gate0_status": "RESOLVED",
+  "result": "PASS"
+}
