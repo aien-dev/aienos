@@ -29,6 +29,7 @@ pub mod recovery;
 pub mod report;
 pub mod scheduler;
 pub mod shell;
+pub mod smmu;
 pub mod store;
 pub mod sync;
 pub mod timer;
