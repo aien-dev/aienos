@@ -208,15 +208,27 @@ pub mod uart16550_regs {
     pub const TX_HOLDING_EMPTY: u32 = 1 << 5;
 }
 
+/// Status polls allowed per byte before the UART is treated as absent. At
+/// 921600 baud one byte takes about 11 us, far below this many MMIO reads.
+pub const UART_TX_SPIN_LIMIT: u32 = 1_000_000;
+
 /// Early 8250-compatible UART with 32-bit MMIO registers.
+///
+/// Transmission is bounded: if the transmitter never reports ready (no cable,
+/// unclocked or absent device), the UART marks itself dead and drops further
+/// output instead of hanging the boot before other outputs have run.
 pub struct EarlyUart {
     base_addr: usize,
+    dead: core::cell::Cell<bool>,
 }
 
 impl EarlyUart {
     /// Create a new EarlyUart driver instance at the specified MMIO base address.
     pub const fn new(base_addr: usize) -> Self {
-        Self { base_addr }
+        Self {
+            base_addr,
+            dead: core::cell::Cell::new(false),
+        }
     }
 
     /// Read raw register.
@@ -224,12 +236,27 @@ impl EarlyUart {
         MmioReg::new(self.base_addr + offset)
     }
 
-    /// Send a single byte through UART transmit FIFO.
+    /// True once a transmit timed out; later writes are skipped.
+    pub fn is_dead(&self) -> bool {
+        self.dead.get()
+    }
+
+    /// Send a single byte through UART transmit FIFO, giving up after
+    /// `UART_TX_SPIN_LIMIT` status polls.
     pub fn write_byte(&self, b: u8) {
+        if self.dead.get() {
+            return;
+        }
         let status = self.reg(uart16550_regs::LINE_STATUS);
         let data = self.reg(uart16550_regs::DATA);
 
+        let mut polls = 0u32;
         while (status.read() & uart16550_regs::TX_HOLDING_EMPTY) == 0 {
+            polls += 1;
+            if polls >= UART_TX_SPIN_LIMIT {
+                self.dead.set(true);
+                return;
+            }
             core::hint::spin_loop();
         }
         data.write(b as u32);
@@ -283,6 +310,13 @@ impl EarlyUart {
     }
 }
 
+impl core::fmt::Write for EarlyUart {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        EarlyUart::write_str(self, s);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,5 +332,14 @@ mod tests {
         MmioReg::new(registers.as_mut_ptr() as usize + uart16550_regs::LINE_STATUS)
             .write(uart16550_regs::TX_HOLDING_EMPTY | uart16550_regs::DATA_READY);
         assert_eq!(uart.try_read_byte(), Some(b'A'));
+    }
+
+    #[test]
+    fn a_uart_that_never_becomes_ready_is_abandoned_instead_of_hanging() {
+        let mut registers = [0u32; 8]; // TX_HOLDING_EMPTY never set
+        let uart = EarlyUart::new(registers.as_mut_ptr() as usize);
+        uart.write_str("AIENOS\n");
+        assert!(uart.is_dead());
+        assert_eq!(registers[0], 0);
     }
 }
