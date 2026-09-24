@@ -1,0 +1,42 @@
+{
+  "gate": "TRUST-1 Gate 1",
+  "name": "standalone_ram_recovery_media",
+  "status": "PASS_EMULATOR_VERIFIED",
+  "physical_hardware_status": "PENDING_ATTENDED_EXERCISE",
+  "captured_utc": "2026-09-24T04:18:09Z",
+  "host": "spark-b87b",
+  "arch": "aarch64",
+  "kernel_version": "7.0.0-1019-nvidia",
+  "artifacts": {
+    "kernel": {
+      "path": "/boot/vmlinuz-7.0.0-1019-nvidia",
+      "sha256": "ddd5a25c2326fbfdf7e03809c614fafe5a953416bbb1b80f9c2258f7260e44e3"
+    },
+    "standalone_initrd": {
+      "path": "aienos-recovery-standalone-initrd.img",
+      "size_bytes": 14895349,
+      "sha256": "f55e2d083c06a109e1a889c4423671549530f192e996308bf76ed1a3a7ab91d3",
+      "format": "cpio_gzip_ramfs"
+    }
+  },
+  "invariants": {
+    "zero_internal_storage_dependency": true,
+    "internal_nvme_unmounted": true,
+    "init_entrypoint": "rdinit=/init",
+    "atlas_recov_protected": true,
+    "qemu_zero_disk_verified": true
+  },
+  "utilities_packaged": [
+    "/bin/busybox",
+    "/bin/sh",
+    "/bin/bash",
+    "/bin/lsblk",
+    "/bin/blkid",
+    "/bin/mount",
+    "/bin/umount",
+    "/sbin/cryptsetup",
+    "/usr/bin/age",
+    "/usr/bin/tpm2_pcrread",
+    "/usr/bin/efibootmgr"
+  ]
+}

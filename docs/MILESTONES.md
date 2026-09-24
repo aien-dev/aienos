@@ -60,9 +60,10 @@ M0                     PARTIAL      snapshot PASS, benchmark PASS, rollback PASS
 M1 (QEMU substrate)    PASS         automated QEMU boot in CI (PR #42, #44)
 M2                     PASS         first native Spark boot
 Machine 1 core         PASS         core operational baseline recorded (PR #41)
-TRUST-1 Gate 0         IN PROGRESS  owner-controlled boot baseline, keyslot/TPM mapping in flight
-TRUST-1 Gate 4         PENDING      emulator security test suite, 100-boot soak, fault injection
-NEXT HARD GATE:        TRUST-1 Gate 0 -> Gate 1 recovery media -> Gate 4 security suite -> M3
+TRUST-1 Gate 0         DECLARED     baseline recorded (PR #46); independent key access pending attended proof
+TRUST-1 Gate 1         TOOLING PASS RAM-only recovery builder + QEMU zero-disk proof; physical USB boot pending
+TRUST-1 Gate 4         TOOLING PASS swTPM + soak + fault injection (PR #48); 100-boot campaign pending
+NEXT HARD GATE:        Physical Gate 1 USB boot on Spark -> Gate 2 TPM campaign -> Gate 3 owner keys -> M3
 ```
 
 Public roadmap and contributor entry points: [ROADMAP.md](../ROADMAP.md).
