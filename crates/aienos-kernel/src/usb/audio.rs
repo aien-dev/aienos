@@ -68,14 +68,11 @@ pub fn select_output(bytes: &[u8]) -> Option<AudioStream> {
             }
             CS_INTERFACE if len >= 3 => match d[2] {
                 1 if iface.map(|x| x.2).unwrap_or(false) => {
-                    // AS_GENERAL carries channel count; UAC2 also names the
-                    // clock entity. The version came from the AC header.
-                    if d.len() >= 5 {
-                        let channels = if version == Some(AudioVersion::Uac2) && d.len() >= 11 {
-                            d[10]
-                        } else {
-                            d[4]
-                        };
+                    // UAC2 AS_GENERAL carries bNrChannels at offset 10. UAC1
+                    // AS_GENERAL has none (offset 4 is bDelay); UAC1 channels
+                    // come from FORMAT_TYPE_I below.
+                    if version == Some(AudioVersion::Uac2) && d.len() >= 11 {
+                        let channels = d[10];
                         if let Some((_, sub, bits, rates, count)) = fmt {
                             fmt = Some((channels, sub, bits, rates, count));
                         } else {
@@ -94,12 +91,21 @@ pub fn select_output(bytes: &[u8]) -> Option<AudioStream> {
                         clock = Some(d[7]);
                     }
                 }
-                2 if d.len() >= 6 && iface.map(|x| x.2).unwrap_or(false) => {
-                    let channels = fmt.map(|x| x.0).unwrap_or(0);
-                    let (sub, bits) = if version == Some(AudioVersion::Uac2) {
-                        (d[4], d[5])
+                // FORMAT_TYPE_I. UAC1: bNrChannels[4], bSubframeSize[5],
+                // bBitResolution[6], bSamFreqType[7] (so at least 8 bytes).
+                // UAC2: bSubslotSize[4], bBitResolution[5] (at least 6 bytes).
+                2 if iface.map(|x| x.2).unwrap_or(false)
+                    && d.len()
+                        >= if version == Some(AudioVersion::Uac2) {
+                            6
+                        } else {
+                            8
+                        } =>
+                {
+                    let (channels, sub, bits) = if version == Some(AudioVersion::Uac2) {
+                        (fmt.map(|x| x.0).unwrap_or(0), d[4], d[5])
                     } else {
-                        (d[5], d[6])
+                        (d[4], d[5], d[6])
                     };
                     let mut rates = [0; 8];
                     let mut count = 0;
@@ -316,5 +322,29 @@ mod tests {
             let x = tone.next_sample();
             assert!((-32767..=32767).contains(&x));
         }
+    }
+    #[test]
+    fn uac1_channels_come_from_format_type_not_as_general_delay() {
+        // Review regression: UAC1 AS_GENERAL offset 4 is bDelay. In the UAC1
+        // vector bDelay happened to equal the channel count (2); set it to 7.
+        let mut v = UAC1.to_vec();
+        let at = v
+            .windows(7)
+            .position(|w| w == [7, 0x24, 1, 1, 2, 3, 0])
+            .expect("AS_GENERAL present");
+        v[at + 4] = 7;
+        assert_eq!(select_output(&v).unwrap().channels, 2);
+    }
+
+    #[test]
+    fn short_uac1_format_descriptor_does_not_panic() {
+        // FORMAT_TYPE_I with bLength 7 (< 8 required for UAC1): rejected, no panic.
+        let mut v = UAC1.to_vec();
+        let at = v
+            .windows(3)
+            .position(|w| w == [11, 0x24, 2])
+            .expect("FORMAT_TYPE_I present");
+        v[at] = 7;
+        let _ = select_output(&v);
     }
 }
