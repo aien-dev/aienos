@@ -24,10 +24,10 @@ pub struct BlockStore<D> {
 
 impl<D: BlockDevice> BlockStore<D> {
     pub fn format(mut device: D) -> Result<Self, BlockError> {
-        if device.block_size() < 92 || device.block_count() < 5 {
-            return Err(BlockError::InvalidGeometry);
+        if (device.block_size() as usize) < 92 || device.block_count() < 5 {
+            return Err(BlockError::InvalidInput);
         }
-        let zero = alloc::vec![0; device.block_size()];
+        let zero = alloc::vec![0; device.block_size() as usize];
         device.write_blocks(0, &zero)?;
         device.flush()?;
         device.write_blocks(1, &zero)?;
@@ -42,10 +42,10 @@ impl<D: BlockDevice> BlockStore<D> {
     }
 
     pub fn open(mut device: D) -> Result<Self, BlockError> {
-        if device.block_size() < 92 || device.block_count() < 5 {
-            return Err(BlockError::InvalidGeometry);
+        if (device.block_size() as usize) < 92 || device.block_count() < 5 {
+            return Err(BlockError::InvalidInput);
         }
-        let size = device.block_size();
+        let size = device.block_size() as usize;
         let mut best: Option<(u64, u64, usize, [u8; 32])> = None;
         let mut saw_data = false;
         for lba in 0..2 {
@@ -90,7 +90,7 @@ impl<D: BlockDevice> BlockStore<D> {
                 hash,
             })
         } else if saw_data {
-            Err(BlockError::Io)
+            Err(BlockError::DeviceError)
         } else {
             Self::format(device)
         }
@@ -98,11 +98,14 @@ impl<D: BlockDevice> BlockStore<D> {
 
     /// Append and commit one extent. The returned descriptor addresses its WAL payload.
     pub fn write_extent(&mut self, payload: &[u8]) -> Result<ExtentDescriptor, BlockError> {
-        let size = self.device.block_size();
+        let size = self.device.block_size() as usize;
         if payload.len() > size.saturating_sub(84) {
-            return Err(BlockError::BufferSize);
+            return Err(BlockError::InvalidInput);
         }
-        let generation = self.generation.checked_add(1).ok_or(BlockError::Io)?;
+        let generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(BlockError::DeviceError)?;
         let wal = 2 + (generation - 1) % (self.device.block_count() - 2);
         let hash = sha256::hash(payload);
         let mut record = alloc::vec![0; size];
@@ -140,11 +143,11 @@ impl<D: BlockDevice> BlockStore<D> {
         if self.generation == 0 {
             return Ok(None);
         }
-        let mut b = alloc::vec![0; self.device.block_size()];
+        let mut b = alloc::vec![0; self.device.block_size() as usize];
         self.device.read_blocks(self.wal_lba, &mut b)?;
         let data = &b[52..52 + self.length];
         if sha256::hash(data) != self.hash {
-            return Err(BlockError::Io);
+            return Err(BlockError::DeviceError);
         }
         Ok(Some(data.to_vec()))
     }
@@ -342,7 +345,10 @@ mod tests {
     fn block_store_rejects_wrong_magic() {
         let mut disk = RamDisk::new(256, 8).unwrap();
         disk.corrupt_byte(0, 0x7f).unwrap();
-        assert!(matches!(BlockStore::open(disk), Err(BlockError::Io)));
+        assert!(matches!(
+            BlockStore::open(disk),
+            Err(BlockError::DeviceError)
+        ));
     }
 
     #[test]
