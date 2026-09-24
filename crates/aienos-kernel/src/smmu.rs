@@ -25,6 +25,7 @@ pub const EVENTQ_BASE: u32 = 0xa0;
 pub const EVENTQ_PROD: u32 = 0xa8;
 pub const EVENTQ_CONS: u32 = 0xac;
 pub const GBPA: u32 = 0x44;
+pub const IDR1_SIDSIZE_MASK: u32 = 0x3f;
 
 pub trait Registers {
     fn read(&mut self, offset: u32) -> u32;
@@ -78,16 +79,16 @@ impl ContextDescriptor {
         let word0 = u64::from(t0sz)
             | (0b01 << 8)
             | (0b01 << 10)
-            | (0b10 << 12)
+            | (0b11 << 12)
             | (1 << 30)
             | (1 << 31)
-            // IPS (bits 34:32) = 0b101, a 48-bit output range: DMA windows
-            // above 4 GiB must translate (0 would limit it to 32 bits).
-            | (0b101 << 32)
-            | (1 << 41)
-            | (u64::from(asid) << 48);
-        let word1 = ttb0 & 0x000f_ffff_ffff_fff0;
-        Ok(Self([word0, word1, 0, mair, 0, 0, 0, 0]))
+            | (1 << 14); // Access flag enabled
+                         // CD word 1 carries IPS, ASID, AARCH64 and access-control bits.
+        let word1 = 0b101 | (1 << 9) | (1 << 13) | (1 << 14) | (u64::from(asid) << 16);
+        // TTB0 is the aligned 48-bit address in words 2/3; MAIR is word 4.
+        let word2 = ttb0 & 0x0000_ffff_ffff_fff0;
+        let word3 = 0;
+        Ok(Self([word0, word1, word2, word3, mair, 0, 0, 0]))
     }
 }
 
@@ -151,16 +152,183 @@ pub fn submit_command<R: Registers>(
 /// Keep global abort enabled until command queues and translation state are ready.
 pub fn enable<R: Registers>(regs: &mut R, spins: usize) -> Result<(), Error> {
     let gbpa = regs.read(GBPA);
-    regs.write(GBPA, gbpa | 1 | (1 << 31));
+    // GBPA.ABORT is bit 20; bit 31 commits the requested global-bypass update.
+    regs.write(GBPA, (gbpa & !(1 << 20)) | (1 << 31));
     regs.write(CR0, 0);
     wait_cr0(regs, 0, spins)?;
     regs.write(CR0, 1);
     wait_cr0(regs, 1, spins)
 }
 
+/// Register mapping for an identity-mapped SMMUv3 register aperture.
+pub struct MmioRegisters {
+    base: usize,
+}
+
+impl MmioRegisters {
+    /// # Safety
+    /// `base` must address a mapped SMMUv3 register aperture.
+    pub const unsafe fn new(base: usize) -> Self {
+        Self { base }
+    }
+
+    pub fn write64(&mut self, offset: u32, value: u64) {
+        unsafe {
+            core::ptr::write_volatile((self.base + offset as usize) as *mut u32, value as u32);
+            core::ptr::write_volatile(
+                (self.base + offset as usize + 4) as *mut u32,
+                (value >> 32) as u32,
+            );
+        }
+    }
+}
+
+impl Registers for MmioRegisters {
+    fn read(&mut self, offset: u32) -> u32 {
+        unsafe { core::ptr::read_volatile((self.base + offset as usize) as *const u32) }
+    }
+
+    fn write(&mut self, offset: u32, value: u32) {
+        unsafe { core::ptr::write_volatile((self.base + offset as usize) as *mut u32, value) }
+    }
+}
+
+fn submit_raw<R: Registers>(
+    regs: &mut R,
+    cursor: &mut QueueCursor,
+    entries: u32,
+    queue: *mut [u64; 2],
+    cmd: [u64; 2],
+) -> Result<(), Error> {
+    submit_command(
+        regs,
+        cursor,
+        entries,
+        cmd,
+        |index, words| unsafe { core::ptr::write_volatile(queue.add(index as usize), words) },
+        1_000_000,
+    )
+}
+
+/// Configure one DMA stream to translate only the supplied stream table's PTEs.
+/// The linear stream table starts with every stream in abort mode.
+///
+/// # Safety
+/// All descriptor and queue pointers must address live, aligned, physically
+/// contiguous RAM visible to the SMMU. `base` must be mapped device memory.
+pub unsafe fn configure_linear_stream(
+    regs: &mut MmioRegisters,
+    stream_id: u32,
+    stream_entries: u32,
+    stream_table: *mut [u64; 8],
+    command_entries: u32,
+    command_queue: *mut [u64; 2],
+    event_entries: u32,
+    event_queue: *mut [u64; 4],
+    context: *mut [u64; 8],
+    translation_root: u64,
+) -> Result<(), Error> {
+    if stream_entries == 0
+        || !stream_entries.is_power_of_two()
+        || stream_id >= stream_entries
+        || command_entries < 2
+        || !command_entries.is_power_of_two()
+        || event_entries < 2
+        || !event_entries.is_power_of_two()
+        || stream_table as usize & (stream_entries as usize * STE_BYTES - 1) != 0
+        || command_queue as usize & 0x3f != 0
+        || event_queue as usize & 0x3f != 0
+        || context as usize & 0x3f != 0
+        || translation_root & 0xfff != 0
+    {
+        return Err(Error::InvalidWindow);
+    }
+    let sid_bits = stream_entries.trailing_zeros();
+    if regs.read(IDR1) & IDR1_SIDSIZE_MASK < sid_bits {
+        return Err(Error::InvalidWindow);
+    }
+    let table = unsafe { core::slice::from_raw_parts_mut(stream_table, stream_entries as usize) };
+    for entry in table.iter_mut() {
+        unsafe { core::ptr::write(entry, Ste::abort().0) };
+    }
+    unsafe {
+        core::ptr::write(
+            context,
+            ContextDescriptor::stage1(translation_root, 1, 0x00ff, 16)?.0,
+        );
+        core::ptr::write(
+            stream_table.add(stream_id as usize),
+            Ste::stage1(context as u64).0,
+        );
+    }
+
+    let gbpa = regs.read(GBPA);
+    regs.write(GBPA, gbpa | (1 << 20) | (1 << 31));
+    for _ in 0..1_000_000 {
+        if regs.read(GBPA) & (1 << 31) == 0 {
+            break;
+        }
+    }
+    regs.write(CR0, 0);
+    wait_cr0(regs, 0, 1_000_000)?;
+    regs.write(CR1, 0x0d75);
+    regs.write64(
+        CMDQ_BASE,
+        command_queue as u64 | u64::from(command_entries.trailing_zeros()),
+    );
+    regs.write(CMDQ_CONS, 0);
+    regs.write(CMDQ_PROD, 0);
+    regs.write64(
+        EVENTQ_BASE,
+        event_queue as u64 | u64::from(event_entries.trailing_zeros()),
+    );
+    regs.write(EVENTQ_CONS, 0);
+    regs.write(EVENTQ_PROD, 0);
+    regs.write(STRTAB_BASE_CFG, sid_bits);
+    regs.write64(STRTAB_BASE, stream_table as u64);
+    regs.write(CR0, 0x0c); // CMDQEN | EVENTQEN; SMMUEN remains clear.
+    wait_cr0(regs, 0x0c, 1_000_000)?;
+
+    let mut cursor = QueueCursor {
+        index: 0,
+        wrap: false,
+    };
+    submit_raw(
+        regs,
+        &mut cursor,
+        command_entries,
+        command_queue,
+        command(CMD_CFGI_STE, stream_id, true),
+    )?;
+    submit_raw(
+        regs,
+        &mut cursor,
+        command_entries,
+        command_queue,
+        command(CMD_TLBI_NSNH_ALL, 0, false),
+    )?;
+    submit_raw(
+        regs,
+        &mut cursor,
+        command_entries,
+        command_queue,
+        command(CMD_SYNC, 0, false),
+    )?;
+    let gbpa = regs.read(GBPA);
+    regs.write(GBPA, (gbpa & !(1 << 20)) | (1 << 31));
+    for _ in 0..1_000_000 {
+        if regs.read(GBPA) & (1 << 31) == 0 {
+            break;
+        }
+    }
+    regs.write(CR0, 0x0d); // SMMUEN | CMDQEN | EVENTQEN
+    wait_cr0(regs, 0x0d, 1_000_000)
+}
+
 fn wait_cr0<R: Registers>(regs: &mut R, expected: u32, spins: usize) -> Result<(), Error> {
     for _ in 0..spins {
-        if regs.read(CR0ACK) & 1 == expected {
+        // CR0ACK mirrors the enabled queue and SMMU bits from CR0.
+        if regs.read(CR0ACK) & 0x0f == expected & 0x0f {
             return Ok(());
         }
     }
@@ -202,7 +370,7 @@ pub fn build_dma_policy<F: FrameSource, M: TableMemory>(
             .map(window.iova, window.pa, window.length, MapFlags::KERNEL_DATA)
             .map_err(Error::PageTable)?;
     }
-    let cd = ContextDescriptor::stage1(table.root().0 as u64, asid, 0xff00, 16)?;
+    let cd = ContextDescriptor::stage1(table.root().0 as u64, asid, 0x00ff, 16)?;
     Ok(DmaPolicy {
         stream_id,
         ste: Ste::stage1(cd_address),
@@ -255,17 +423,14 @@ mod tests {
         let cd = ContextDescriptor::stage1(0x4000, 0x1234, 0xff00, 16).unwrap();
         assert_eq!(
             cd.0[0],
-            16 | (1 << 8)
-                | (1 << 10)
-                | (2 << 12)
-                | (1 << 30)
-                | (1 << 31)
-                | (0b101 << 32)
-                | (1 << 41)
-                | (0x1234_u64 << 48)
+            16 | (1 << 8) | (1 << 10) | (3 << 12) | (1 << 14) | (1 << 30) | (1 << 31)
         );
-        assert_eq!(cd.0[1], 0x4000);
-        assert_eq!(cd.0[3], 0xff00);
+        assert_eq!(
+            cd.0[1],
+            (0x1234_u64 << 16) | (1 << 14) | (1 << 13) | (1 << 9) | 0b101
+        );
+        assert_eq!(cd.0[2], 0x4000);
+        assert_eq!(cd.0[4], 0xff00);
     }
     #[test]
     fn command_words_and_queue_wrap() {
@@ -294,11 +459,8 @@ mod tests {
         let mut regs = Fake::default();
         regs.values.insert(GBPA, 0);
         enable(&mut regs, 2).unwrap();
-        assert_eq!(
-            &regs.writes[..3],
-            &[(GBPA, 1 | (1 << 31)), (CR0, 0), (CR0, 1)]
-        );
-        assert_eq!(regs.values[&GBPA] & 1, 1);
+        assert_eq!(&regs.writes[..3], &[(GBPA, 1 << 31), (CR0, 0), (CR0, 1)]);
+        assert_eq!(regs.values[&GBPA] & (1 << 20), 0);
     }
     #[test]
     fn policy_maps_only_allowed_windows() {
@@ -339,7 +501,7 @@ mod tests {
         .unwrap();
         assert_eq!(policy.stream_id, 9);
         assert_eq!(policy.ste, Ste::stage1(0x8000));
-        assert_eq!(policy.cd.0[1], 0x100000);
+        assert_eq!(policy.cd.0[2], 0x100000);
         assert_eq!(
             policy
                 .page_table

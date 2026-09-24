@@ -25,6 +25,8 @@ fn listen_secs() -> u64 {
         .unwrap_or(30)
 }
 
+const DEBUG_XHCI_WITHOUT_SMMU: bool = cfg!(feature = "debug-xhci-without-smmu");
+
 /// DMA memory for the driver, used only after firmware exit.
 static mut DMA: DmaMemory = DmaMemory::new();
 
@@ -44,6 +46,16 @@ impl XhciLocation {
     }
     pub fn ecam_location(self) -> (u16, u8) {
         (self.segment, self.bus)
+    }
+    pub fn requester_id(self) -> u32 {
+        (u32::from(self.bus) << 8) | (u32::from(self.device) << 3) | u32::from(self.function)
+    }
+    pub fn stream_id(self, iort: &acpi::IortSmmu) -> Option<u32> {
+        iort.stream_id_for(self.requester_id())
+    }
+    pub fn dma_window(self) -> (u64, usize) {
+        let base = core::ptr::addr_of!(DMA) as u64;
+        (base & !0xfff, core::mem::size_of::<DmaMemory>())
     }
 }
 
@@ -140,8 +152,12 @@ pub fn run(
     conventional_memory_kb: u64,
     exception_level: u8,
     boot_report: &str,
+    smmu_ready: bool,
+    smmu_base: Option<u64>,
+    smmu_stream_id: Option<u32>,
+    smmu_events: *const [[u64; 4]; 16],
 ) {
-    let mut line = aienos_kernel::report::ReportBuf::<160>::new();
+    let mut line = aienos_kernel::report::ReportBuf::<512>::new();
     let Some(at) = xhci else {
         say(screen, "\nkeyboard: unavailable (no xHCI controller)\n");
         return;
@@ -152,6 +168,26 @@ pub fn run(
         at.segment, at.bus, at.device, at.function, at.mmio
     );
     say(screen, line.as_str());
+    if !smmu_ready && !DEBUG_XHCI_WITHOUT_SMMU {
+        say(
+            screen,
+            "keyboard: unavailable (SMMU DMA isolation not active)\n",
+        );
+        return;
+    }
+    let dma_mode = if smmu_ready {
+        "smmu-translated"
+    } else {
+        "debug-identity"
+    };
+    let mut mode = aienos_kernel::report::ReportBuf::<128>::new();
+    let _ = writeln!(
+        mode,
+        "xhci_debug: dma_mode={dma_mode} dma_base={:#x} bytes={}",
+        core::ptr::addr_of!(DMA) as usize,
+        core::mem::size_of::<DmaMemory>()
+    );
+    say(screen, mode.as_str());
     let ecam = mcfg.and_then(|t| acpi::mcfg_window(t, at.segment, at.bus).ok().flatten());
     if !ecam.is_some_and(|w| enable_controller(&w, &at)) {
         say(
@@ -166,9 +202,30 @@ pub fn run(
     let mut keyboard = match started {
         Ok(k) => k,
         Err(e) => {
-            let mut msg = aienos_kernel::report::ReportBuf::<160>::new();
-            let _ = writeln!(msg, "keyboard: unavailable ({e})");
+            let mut msg = aienos_kernel::report::ReportBuf::<512>::new();
+            let _ = writeln!(msg, "keyboard: unavailable ({e:?})");
             say(screen, msg.as_str());
+            if let Some(base) = smmu_base {
+                let reg = |offset| MmioReg::<u32>::new(base as usize + offset).read();
+                aienos_kernel::arch::aarch64::clean_invalidate_dcache_range(
+                    smmu_events as usize,
+                    core::mem::size_of::<[[u64; 4]; 16]>(),
+                );
+                let events = unsafe { core::ptr::read_volatile(smmu_events) };
+                let mut fault = aienos_kernel::report::ReportBuf::<1024>::new();
+                let _ = writeln!(fault, "smmu_fault: GERROR={:#x} GERRORN={:#x} EVENTQ_PROD={:#x} EVENTQ_CONS={:#x} events={events:016x?}", reg(0x60), reg(0x64), reg(0xa8), reg(0xac));
+                say(screen, fault.as_str());
+                if let Some(sid) = smmu_stream_id {
+                    let table_base = (u64::from(reg(0x84)) << 32 | u64::from(reg(0x80))) & !0x3f;
+                    let cfg = reg(0x88);
+                    let ste_addr = table_base + u64::from(sid) * 64;
+                    let ste0 = unsafe { core::ptr::read_volatile(ste_addr as *const u64) };
+                    let ste1 = unsafe { core::ptr::read_volatile((ste_addr + 8) as *const u64) };
+                    let mut entry = aienos_kernel::report::ReportBuf::<192>::new();
+                    let _ = writeln!(entry, "smmu_ste: base={table_base:#x} cfg={cfg:#x} sid={sid:#x} addr={ste_addr:#x} words=[{ste0:#x},{ste1:#x}]");
+                    say(screen, entry.as_str());
+                }
+            }
             return;
         }
     };

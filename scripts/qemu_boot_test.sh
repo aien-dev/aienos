@@ -73,6 +73,7 @@ if grep -qE 'preempt: ok a=([0-9]+) b=([0-9]+) switches=([0-9]+)' "${work}/seria
         failed=1
     fi
 fi
+check "EL0 capability and fault isolation" "el0: ok write=granted forged=denied fault=contained exit=0"
 check "EL1 page tables and caches enabled" "mmu: enabled"
 check "GICv3 enabled" "gic: v3"
 if grep -qE 'timer_irq: ([0-9]+) ticks' "${work}/serial.txt"; then

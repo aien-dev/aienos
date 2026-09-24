@@ -24,12 +24,16 @@ keys=(a b c)
 expected="abc"
 attempts="${AIENOS_KEYBOARD_ATTEMPTS:-3}"
 boot_timeout="${AIENOS_QEMU_TIMEOUT:-180}"
+machine="virt,virtualization=on,gic-version=3"
+if [[ "${AIENOS_QEMU_SMMU:-0}" == "1" ]]; then
+    machine+=",iommu=smmuv3"
+fi
 
 # Own target directory: a keyboard-enabled image never lands where hardware
 # staging or the other tests pick up the handoff image.
 commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 AIENOS_COMMIT="${commit}" AIENOS_RESTART_SECS=1 AIENOS_KEYBOARD_SECS=60 cargo build --quiet --release \
-    -p aienos-boot --target aarch64-unknown-uefi --features usb-keyboard --bin aienos-handoff \
+    -p aienos-boot --target aarch64-unknown-uefi --features "${AIENOS_BUILD_FEATURES:-usb-keyboard}" --bin aienos-handoff \
     --target-dir target/qemu-keyboard
 
 work="$(mktemp -d)"
@@ -73,8 +77,13 @@ boot_once() {
     mkfifo "${work}/mon.in" "${work}/mon.out"
     # Single-threaded TCG: multi-threaded TCG intermittently loses the
     # firmware's timer wake-up and hangs before AIENOS output (#61).
+    local -a smmu_trace=()
+    if [[ "${AIENOS_QEMU_SMMU_TRACE:-0}" == "1" ]]; then
+        smmu_trace=(-d unimp,guest_errors -trace "smmuv3_*")
+    fi
     qemu-system-aarch64 \
-        -M virt,virtualization=on,gic-version=3 -accel tcg,thread=single -cpu max -smp 4 -m 2048 \
+        "${smmu_trace[@]}" \
+        -M "${machine}" -accel tcg,thread=single -cpu max -smp 4 -m 2048 \
         -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
         -drive if=pflash,format=raw,file="${work}/vars.fd" \
         -drive if=none,id=esp,format=raw,file=fat:rw:"${work}/esp" \
@@ -138,6 +147,10 @@ echo "attempts ${attempt}, ${elapsed} s (commit ${commit:0:12}), sent lines: abc
 check "left firmware and entered the kernel" "kernel: alive"
 check "xHCI controller found before exit" "keyboard: xhci "
 check "keyboard attached by the AIENOS driver" "keyboard: ready"
+if [[ "${AIENOS_QEMU_SMMU:-0}" == "1" ]]; then
+    check "IORT stream configured for xHCI DMA" "smmu: enabled"
+    check "xHCI DMA window translated" "smmu_dma_window: xhci only, translation active"
+fi
 check "typed text echoed on the serial console" "keyboard_echo: ${expected}"
 check "line ended by Enter and reported" "keyboard_line: ${expected}\$"
 check "keyboard phase finished on Enter" "keyboard: done (enter)"

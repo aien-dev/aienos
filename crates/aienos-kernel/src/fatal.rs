@@ -256,6 +256,8 @@ mod vectors {
         ".balign 128",
         ".if \\slot == 5",
         "b aienos_irq_trampoline",
+        ".elseif \\slot == 8",
+        "b aienos_lower_el_sync_trampoline",
         ".else",
         "mov x0, #\\slot",
         "b aienos_exception_trampoline",

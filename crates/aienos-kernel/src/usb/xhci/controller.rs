@@ -84,7 +84,24 @@ pub enum Error {
     Unsupported(&'static str),
     Timeout(&'static str),
     HostSystemError,
-    Failed { step: &'static str, code: u8 },
+    CommandTimeout {
+        step: &'static str,
+        command_addr: u64,
+        command_words: [u32; 4],
+        dcbaap: u64,
+        erstba: u64,
+        erstsz: u32,
+        crcr: u64,
+        erdp: u64,
+        usbcmd: u32,
+        usbsts: u32,
+        config: u32,
+        last_event: [u32; 4],
+    },
+    Failed {
+        step: &'static str,
+        code: u8,
+    },
     NoKeyboard,
 }
 
@@ -94,6 +111,10 @@ impl fmt::Display for Error {
             Self::Absent => f.write_str("xHCI registers absent"),
             Self::Unsupported(what) => write!(f, "unsupported: {what}"),
             Self::Timeout(step) => write!(f, "timed out: {step}"),
+            Self::CommandTimeout { step, command_addr, command_words, crcr, erdp, usbcmd, usbsts, config, last_event, .. } => write!(
+                f,
+                "timed out: {step}; cmd@{command_addr:#x}={command_words:08x?}; CRCR={crcr:#x} ERDP={erdp:#x} USBCMD={usbcmd:#x} USBSTS={usbsts:#x} CONFIG={config:#x} last_event={last_event:08x?}"
+            ),
             Self::HostSystemError => f.write_str("host system error"),
             Self::Failed { step, code } => write!(f, "{step} failed (completion {code})"),
             Self::NoKeyboard => f.write_str("no boot keyboard on any connected port"),
@@ -144,6 +165,7 @@ pub struct Keyboard {
     control: ProducerRing,
     reports: ProducerRing,
     slot: u8,
+    last_event: [u32; 4],
     dci: u8,
     port: u8,
     device: Option<BootKeyboard>,
@@ -215,6 +237,7 @@ impl Keyboard {
             device: None,
             retire_pending: false,
             halted: false,
+            last_event: [0; 4],
         };
         keyboard.run()?;
 
@@ -428,11 +451,30 @@ impl Keyboard {
 
     fn command(&mut self, trb: Trb, step: &'static str) -> Result<Trb, Error> {
         let addr = self.commands.push(trb);
+        let command_words = unsafe { read_volatile(addr as *const Trb) }.0;
         self.sync_to_device();
         self.doorbell(0, 0);
-        let event = self.wait_event(step, |e| {
-            e.kind() == kind::COMMAND_COMPLETION && e.pointer() == addr
-        })?;
+        let event = self
+            .wait_event(step, |e| {
+                e.kind() == kind::COMMAND_COMPLETION && e.pointer() == addr
+            })
+            .map_err(|error| match error {
+                Error::Timeout(_) => Error::CommandTimeout {
+                    step,
+                    command_addr: addr,
+                    command_words,
+                    dcbaap: unsafe { read_volatile((self.op + op::DCBAAP) as *const u64) },
+                    erstba: unsafe { read_volatile((self.rt + rt::ERSTBA) as *const u64) },
+                    erstsz: MmioReg::<u32>::new(self.rt + rt::ERSTSZ).read(),
+                    crcr: unsafe { read_volatile((self.op + op::CRCR) as *const u64) },
+                    erdp: unsafe { read_volatile((self.rt + rt::ERDP) as *const u64) },
+                    usbcmd: self.op_reg(op::USBCMD).read(),
+                    usbsts: self.op_reg(op::USBSTS).read(),
+                    config: self.op_reg(op::CONFIG).read(),
+                    last_event: self.last_event,
+                },
+                other => other,
+            })?;
         match event.completion_code() {
             completion::SUCCESS => Ok(event),
             code => Err(Error::Failed { step, code }),
@@ -542,6 +584,7 @@ impl Keyboard {
             self.sync_from_device();
             while let Some(event) = self.events.pop() {
                 self.retire_pending = true;
+                self.last_event = event.0;
                 if wanted(&event) {
                     self.retire();
                     return Ok(event);
