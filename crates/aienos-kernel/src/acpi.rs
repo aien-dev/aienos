@@ -289,7 +289,9 @@ impl EcamWindow {
 /// The ECAM window of a validated MCFG table covering `segment` and `bus`.
 pub fn mcfg_window(mcfg: &[u8], segment: u16, bus: u8) -> Result<Option<EcamWindow>, AcpiError> {
     let mcfg = checked_table(mcfg, b"MCFG")?;
-    let entries = mcfg.get(MCFG_ENTRIES_OFFSET..).ok_or(AcpiError::Truncated)?;
+    let entries = mcfg
+        .get(MCFG_ENTRIES_OFFSET..)
+        .ok_or(AcpiError::Truncated)?;
     Ok(entries
         .as_chunks::<MCFG_ENTRY_LEN>()
         .0

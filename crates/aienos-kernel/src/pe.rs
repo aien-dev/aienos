@@ -79,14 +79,22 @@ pub fn parse_pe_sections(image: &[u8], image_base: u64) -> Result<Vec<PeSection>
         let virtual_size = u64::from(u32at(image, h + 8)?);
         let rva = u64::from(u32at(image, h + 12)?);
         let raw_size = u64::from(u32at(image, h + 16)?);
-        let size = virtual_size.max(raw_size);
-        let size = size.checked_add(PAGE - 1).ok_or(PeError::Overflow)? & !(PAGE - 1);
-        let va = image_base.checked_add(rva).ok_or(PeError::Overflow)?;
+        let bytes = virtual_size.max(raw_size);
+        let start = image_base.checked_add(rva).ok_or(PeError::Overflow)?;
         let characteristics = u32at(image, h + 36)?;
         if characteristics & WRITE != 0 && characteristics & EXECUTE != 0 {
             return Err(PeError::WritableExecutable);
         }
-        let end = va.checked_add(size).ok_or(PeError::Overflow)?;
+        // Page-round both ends: a section starting mid-page still owns that
+        // page, and two sections sharing a page must surface as Overlap
+        // because one page can't carry two different permissions.
+        let va = start & !(PAGE - 1);
+        let end = start
+            .checked_add(bytes)
+            .and_then(|e| e.checked_add(PAGE - 1))
+            .ok_or(PeError::Overflow)?
+            & !(PAGE - 1);
+        let size = end - va;
         for prior in &sections {
             let prior: &PeSection = prior;
             let prior_end = prior.va.checked_add(prior.size).ok_or(PeError::Overflow)?;
@@ -175,5 +183,26 @@ mod tests {
         let mut b = image(0);
         b[t + 40 + 12..t + 40 + 16].copy_from_slice(&0x1800u32.to_le_bytes());
         assert_eq!(parse_pe_sections(&b, 0), Err(PeError::Overlap));
+    }
+    #[test]
+    fn unaligned_sections_are_page_rounded_and_shared_pages_overlap() {
+        // One section at RVA 0x1001, 1 byte: must cover the whole page 0x1000..0x2000.
+        let mut b = image(0x1000);
+        let t = 0x80 + 24 + 240;
+        b[0x86..0x88].copy_from_slice(&1u16.to_le_bytes());
+        b[t + 8..t + 12].copy_from_slice(&1u32.to_le_bytes());
+        b[t + 12..t + 16].copy_from_slice(&0x1001u32.to_le_bytes());
+        b[t + 16..t + 20].copy_from_slice(&0u32.to_le_bytes());
+        b[t + 36..t + 40].copy_from_slice(&0x4000_0040u32.to_le_bytes());
+        let s = parse_pe_sections(&b, 0x4000_0000).unwrap();
+        assert_eq!((s[0].va, s[0].size), (0x4000_1000, 0x1000));
+        // A second section in the same page (RVA 0x1800) is a shared page: Overlap.
+        b[0x86..0x88].copy_from_slice(&2u16.to_le_bytes());
+        let t2 = t + 40;
+        b[t2 + 8..t2 + 12].copy_from_slice(&0x100u32.to_le_bytes());
+        b[t2 + 12..t2 + 16].copy_from_slice(&0x1800u32.to_le_bytes());
+        b[t2 + 16..t2 + 20].copy_from_slice(&0u32.to_le_bytes());
+        b[t2 + 36..t2 + 40].copy_from_slice(&0x6000_0020u32.to_le_bytes());
+        assert_eq!(parse_pe_sections(&b, 0x4000_0000), Err(PeError::Overlap));
     }
 }
