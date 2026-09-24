@@ -12,14 +12,35 @@ fn ln_approx(x: f32) -> f32 {
     2.0 * series + exponent as f32 * core::f32::consts::LN_2
 }
 
+/// sin and cos without libm. Reduce to [-pi, pi] (Euclidean, so negative
+/// angles are handled), then fold to [-pi/2, pi/2] using sin(pi - x) = sin(x),
+/// cos(pi - x) = -cos(x), where the Taylor series below is accurate to about
+/// 1e-6. Evaluating them directly out to +/-pi was off by up to ~0.03.
 fn sin_cos_approx(angle: f32) -> (f32, f32) {
-    let x = (angle + core::f32::consts::PI) % core::f32::consts::TAU - core::f32::consts::PI;
+    use core::f32::consts::{FRAC_PI_2, PI, TAU};
+    // Euclidean remainder by hand (f32::rem_euclid needs std).
+    let mut r = (angle + PI) % TAU;
+    if r < 0.0 {
+        r += TAU;
+    }
+    let mut x = r - PI;
+    let mut cos_sign = 1.0;
+    if x > FRAC_PI_2 {
+        x = PI - x;
+        cos_sign = -1.0;
+    } else if x < -FRAC_PI_2 {
+        x = -PI - x;
+        cos_sign = -1.0;
+    }
     let x2 = x * x;
-    let sin =
-        x * (1.0 + x2 * (-1.0 / 6.0 + x2 * (1.0 / 120.0 + x2 * (-1.0 / 5040.0 + x2 / 362880.0))));
-    let cos = 1.0 + x2 * (-1.0 / 2.0 + x2 * (1.0 / 24.0 + x2 * (-1.0 / 720.0 + x2 / 40320.0)));
-    let norm = gemm::sqrt_approx(sin * sin + cos * cos);
-    (sin / norm, cos / norm)
+    let sin = x
+        * (1.0
+            + x2 * (-1.0 / 6.0
+                + x2 * (1.0 / 120.0 + x2 * (-1.0 / 5040.0 + x2 * (1.0 / 362_880.0)))));
+    let cos = 1.0
+        + x2 * (-1.0 / 2.0
+            + x2 * (1.0 / 24.0 + x2 * (-1.0 / 720.0 + x2 * (1.0 / 40_320.0 - x2 / 3_628_800.0))));
+    (sin, cos_sign * cos)
 }
 
 /// Precomputes rotary cosine and sine values into caller-owned tables.
@@ -136,5 +157,20 @@ mod tests {
         ] {
             assert!((before - after).abs() < 1e-4);
         }
+    }
+    #[test]
+    fn sin_cos_matches_std_across_the_circle() {
+        // Review follow-up: accuracy over the whole reduced range, including
+        // negative and large angles (large positions at small frequencies).
+        let mut worst = 0.0f32;
+        let mut a = -50.0f32;
+        while a < 50.0 {
+            let (s, c) = sin_cos_approx(a);
+            worst = worst.max((s - a.sin()).abs()).max((c - a.cos()).abs());
+            a += 0.01;
+        }
+        assert!(worst < 2e-5, "worst error {worst}");
+        let (s, c) = sin_cos_approx(3.0);
+        assert!((s - 3.0f32.sin()).abs() < 2e-5 && (c - 3.0f32.cos()).abs() < 2e-5);
     }
 }
