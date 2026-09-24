@@ -3,9 +3,11 @@
 The `aienos-handoff` AArch64 UEFI image now checks the DGX Spark's observed
 GB10 PCI location first, then walks every bus in each root bridge's
 firmware-declared bus range. It opens the UEFI PCI root bridge protocol with a
-shared (`GetProtocol`) open, because the firmware PCI bus driver holds the
-protocol `ByDriver` and refuses an exclusive open with `ACCESS_DENIED` — the
-reason the first native boot reported `gb10: unavailable`. It accepts only
+shared (`GetProtocol`) open. The leading hypothesis for the first native
+boot's `gb10: unavailable` is that the firmware PCI bus driver holds the
+protocol `ByDriver` and refuses an exclusive open with `ACCESS_DENIED`; this is
+unconfirmed on hardware, and the next native boot's `gb10_pci_root_open[..]`
+lines will confirm or rule it out. It accepts only
 NVIDIA `10de:2e12` with a programmed 64-bit memory BAR and PCI memory
 decoding enabled. Through the UEFI PCI root bridge protocol, it reads the
 read-only PMC `BOOT_0` and `BOOT_42` registers from BAR0. It carries the
