@@ -69,7 +69,10 @@ impl<R: GicRegisters> GicDistributor<R> {
     }
 }
 
-/// Redistributor SGI/PPI frame. Caller supplies the SGI frame base (GICR base + 0x10000).
+/// One CPU's redistributor. The register view must start at that CPU's
+/// RD_base (the GICR frame base from the MADT), NOT the SGI frame: offsets
+/// are RD_base-relative, so `GICR_WAKER` is at +0x14 and the SGI/PPI
+/// registers sit in the SGI frame at +0x10000 (`GICR_IGROUPR0` = 0x10080).
 pub struct GicRedistributor<R>(pub R);
 
 impl<R: GicRegisters> GicRedistributor<R> {
@@ -187,6 +190,24 @@ mod tests {
             ]
         );
     }
+    #[test]
+    fn register_offsets_match_gicv3_spec() {
+        // Distributor (GICD_base-relative).
+        assert_eq!(
+            (GICD_CTLR, GICD_IGROUPR, GICD_ISENABLER, GICD_IPRIORITYR),
+            (0x0, 0x80, 0x100, 0x400)
+        );
+        // GICD_IROUTER<n> is at 0x6000 + 8n; the first SPI (32) is at 0x6100.
+        assert_eq!(GICD_IROUTER + 32 * 8, 0x6100);
+        // Redistributor (RD_base-relative): WAKER in the RD frame, SGI/PPI
+        // registers in the SGI frame at +0x10000.
+        assert_eq!(GICR_WAKER, 0x14);
+        assert_eq!(
+            (GICR_IGROUPR0, GICR_ISENABLER0, GICR_IPRIORITYR),
+            (0x1_0080, 0x1_0100, 0x1_0400)
+        );
+    }
+
     #[test]
     fn redistributor_wakes_and_sets_ppi() {
         let mut gic = GicRedistributor(Fake::default());
