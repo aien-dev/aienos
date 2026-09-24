@@ -11,55 +11,7 @@
 use crate::caps::{CapError, CapTable, Handle, Rights};
 use core::sync::atomic::{AtomicU32, Ordering};
 
-/// Identity of an isolated principal (a task with its own capability table).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TaskId(pub u32);
-
-/// Identity of a kernel object reachable through a capability handle.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ObjectId(pub u64);
-
-/// Identity of a kernel-owned message channel.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ChannelId(pub u32);
-
-/// A bounded memory extent carried by reference inside a message.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct MemoryRegion {
-    pub base: u64,
-    pub pages: u32,
-    pub _pad: u32,
-}
-
-/// Fixed-size typed message. `repr(C)` and allocator-free so it can cross the
-/// EL0 boundary in registers and sit in a static ring.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Message {
-    pub kind: u32,
-    pub _pad: u32,
-    pub payload: [u64; 3],
-    pub region: MemoryRegion,
-    pub object: ObjectId,
-}
-
-impl Message {
-    pub const NEW: Self = Self {
-        kind: 0,
-        _pad: 0,
-        payload: [0; 3],
-        region: MemoryRegion {
-            base: 0,
-            pages: 0,
-            _pad: 0,
-        },
-        object: ObjectId(0),
-    };
-}
+pub use crate::abi::{ChannelId, MemoryRegion, Message, ObjectId, TaskId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChannelError {
@@ -449,17 +401,12 @@ mod tests {
     }
 
     fn message(kind: u32) -> Message {
-        Message {
+        Message::new(
             kind,
-            _pad: 0,
-            payload: [kind as u64, 0x22, 0x33],
-            region: MemoryRegion {
-                base: 0x1000,
-                pages: 2,
-                _pad: 0,
-            },
-            object: ObjectId(0x0a),
-        }
+            [kind as u64, 0x22, 0x33],
+            MemoryRegion::new(0x1000, 2),
+            ObjectId(0x0a),
+        )
     }
 
     #[test]

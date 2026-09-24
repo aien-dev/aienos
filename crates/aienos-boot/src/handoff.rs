@@ -33,12 +33,12 @@ use aienos_kernel::display::{FramebufferInfo, PixelOrder, Screen, ACCENT, FOREGR
 use aienos_kernel::fatal::{self, FaultInfo};
 use aienos_kernel::mem::frame_allocator::PhysAddr;
 use aienos_kernel::mem::map_plan::{self, AddressRange, EfiMemoryDescriptor};
-use aienos_kernel::mem::pagetable::{FixedFramePool, MapFlags, PageTableBuilder, TableMemory};
+use aienos_kernel::mem::pagetable::{FixedFramePool, PageTableBuilder, TableMemory};
 use aienos_kernel::report::ReportBuf;
 use aienos_kernel::sync::spinlock::SpinLock;
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
 use uefi::prelude::*;

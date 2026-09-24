@@ -137,8 +137,8 @@ macro_rules! wire_impl {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Handle {
-    index: u32,
-    generation: u32,
+    pub index: u32,
+    pub generation: u32,
 }
 
 impl Handle {
@@ -185,21 +185,7 @@ impl Handle {
 
 wire_impl!(Handle, EnvelopeTag::Handle, 8);
 
-impl TryFrom<caps::Handle> for Handle {
-    type Error = AbiError;
-    fn try_from(handle: caps::Handle) -> Result<Self, AbiError> {
-        Self::new(handle.index, handle.generation)
-    }
-}
-
-impl From<Handle> for caps::Handle {
-    fn from(handle: Handle) -> Self {
-        caps::Handle {
-            index: handle.index,
-            generation: handle.generation,
-        }
-    }
-}
+// caps::Handle is a direct re-export of crate::abi::Handle
 
 // ---------------------------------------------------------------------------
 // Plain identifiers
@@ -456,15 +442,20 @@ wire_impl!(Capability, EnvelopeTag::Capability, 16);
 /// A bounded memory extent in pages. Wire: base u64 LE, pages u32 LE,
 /// reserved u32 (zero); 16 bytes.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MemoryRegion {
-    base: u64,
-    pages: u32,
-    reserved: u32,
+    pub base: u64,
+    pub pages: u32,
+    pub reserved: u32,
 }
 
 impl MemoryRegion {
     pub const SIZE: usize = 16;
+    pub const EMPTY: Self = Self {
+        base: 0,
+        pages: 0,
+        reserved: 0,
+    };
 
     pub const fn new(base: u64, pages: u32) -> Self {
         Self {
@@ -509,15 +500,22 @@ wire_impl!(MemoryRegion, EnvelopeTag::MemoryRegion, 16);
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Message {
-    kind: u32,
-    reserved: u32,
-    payload: [u64; 3],
-    region: MemoryRegion,
-    object: ObjectId,
+    pub kind: u32,
+    pub reserved: u32,
+    pub payload: [u64; 3],
+    pub region: MemoryRegion,
+    pub object: ObjectId,
 }
 
 impl Message {
     pub const SIZE: usize = 56;
+    pub const NEW: Self = Self {
+        kind: 0,
+        reserved: 0,
+        payload: [0; 3],
+        region: MemoryRegion::EMPTY,
+        object: ObjectId(0),
+    };
 
     pub const fn new(kind: u32, payload: [u64; 3], region: MemoryRegion, object: ObjectId) -> Self {
         Self {
@@ -784,20 +782,23 @@ mod tests {
             decode_enveloped::<Handle>(&env),
             Err(AbiError::InvalidHandle)
         );
-        let forged = caps::Handle {
+        let forged = Handle {
             index: 0,
             generation: 0,
         };
-        assert_eq!(Handle::try_from(forged), Err(AbiError::InvalidHandle));
+        assert_eq!(
+            Handle::from_raw(forged.to_raw()),
+            Err(AbiError::InvalidHandle)
+        );
     }
 
     #[test]
-    fn handle_converts_with_caps_handle() {
+    fn handle_raw_register_encoding() {
         let mut table = caps::CapTable::<4>::new(1);
         let issued = table.insert(9, caps::Rights::READ).unwrap();
-        let wire = Handle::try_from(issued).unwrap();
-        assert_eq!(wire.generation(), issued.generation);
-        assert_eq!(caps::Handle::from(wire), issued);
+        let raw = issued.to_raw();
+        assert_eq!(Handle::from_raw(raw), Ok(issued));
+        assert_eq!(Handle::from_raw(0), Err(AbiError::InvalidHandle));
     }
 
     #[test]

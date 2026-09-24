@@ -1,10 +1,6 @@
 //! Fixed-capacity capability handles with generation checks and revocation.
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Handle {
-    pub index: u32,
-    pub generation: u32,
-}
+pub use crate::abi::Handle;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rights(u8);
