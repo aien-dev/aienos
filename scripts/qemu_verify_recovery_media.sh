@@ -78,3 +78,61 @@ if [[ "${failed}" != 0 ]]; then
 fi
 
 echo "RECOVERY_ZERO_DISK: PASS (verified standalone RAM recovery with zero attached storage)"
+
+# Second boot: the packaged drivers must find a USB stick, an NVMe drive and a
+# USB keyboard. The disks are blank scratch images, never host storage.
+DEV_LOG="${WORK_DIR}/recovery_devices.log"
+truncate -s 64M "${WORK_DIR}/usb.img" "${WORK_DIR}/nvme.img"
+ACCEL=(-cpu max)
+DEV_TIMEOUT=120
+if [[ -w /dev/kvm ]]; then
+    ACCEL=(-accel kvm -cpu host)
+    DEV_TIMEOUT=60
+fi
+
+echo "Booting recovery kernel with a scratch USB stick, NVMe drive and USB keyboard..."
+set +e
+timeout "${DEV_TIMEOUT}" qemu-system-aarch64 \
+    -M virt "${ACCEL[@]}" -smp 2 -m 1024 \
+    -kernel "${KERNEL_IMAGE}" \
+    -initrd "${INITRD_TMP}" \
+    -append "rdinit=/init aienos.test=1 console=ttyAMA0 panic=1" \
+    -device qemu-xhci -device usb-kbd \
+    -drive if=none,id=usbstick,format=raw,file="${WORK_DIR}/usb.img" -device usb-storage,drive=usbstick \
+    -drive if=none,id=nvme0,format=raw,file="${WORK_DIR}/nvme.img" -device nvme,drive=nvme0,serial=aienos-test \
+    -display none -nic none \
+    -serial file:"${DEV_LOG}" -no-reboot
+DEV_STATUS=$?
+set -e
+
+tr -d '\r' <"${DEV_LOG}" >"${WORK_DIR}/recovery_devices.txt"
+echo "qemu exit ${DEV_STATUS}"
+
+failed=0
+check_devices() {
+    if grep -qE -- "$2" "${WORK_DIR}/recovery_devices.txt"; then
+        echo "PASS  $1"
+    else
+        echo "FAIL  $1"
+        failed=1
+    fi
+}
+modules_line=$(grep -m1 'Kernel modules loaded:' "${WORK_DIR}/recovery_devices.txt" || true)
+if [[ "${modules_line}" =~ loaded:\ ([0-9]+)/([0-9]+) ]] && [[ "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]] && [[ "${BASH_REMATCH[2]}" -gt 0 ]]; then
+    echo "PASS  All packaged kernel modules loaded (${BASH_REMATCH[1]}/${BASH_REMATCH[2]})"
+else
+    echo "FAIL  All packaged kernel modules loaded (${modules_line:-no report})"
+    failed=1
+fi
+check_devices "USB keyboard detected" "Input devices: [1-9]"
+check_devices "USB stick visible" "^sda"
+check_devices "NVMe drive visible" "^nvme0n1"
+
+if [[ "${failed}" != 0 ]]; then
+    echo "---- recovery device console log ----"
+    cat "${WORK_DIR}/recovery_devices.txt"
+    echo "RECOVERY_DEVICES: FAIL"
+    exit 1
+fi
+
+echo "RECOVERY_DEVICES: PASS (packaged drivers found USB keyboard, USB stick and NVMe)"
