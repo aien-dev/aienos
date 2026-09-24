@@ -72,3 +72,12 @@ if command -v qemu-system-aarch64 >/dev/null && command -v swtpm >/dev/null && [
 else
     echo "SKIPPED: qemu-system-aarch64, swtpm, or AAVMF firmware not present on host."
 fi
+
+# Step 8: TRUST-1 Gate 1 Standalone Recovery Verification (Zero-Disk Boot)
+echo ""
+echo "--- [TRUST-1 Gate 1 Standalone Recovery Verification] ---"
+if command -v qemu-system-aarch64 >/dev/null; then
+    ./scripts/qemu_verify_recovery_media.sh
+else
+    echo "SKIPPED: qemu-system-aarch64 not present on host."
+fi
