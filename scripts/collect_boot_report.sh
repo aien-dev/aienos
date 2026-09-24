@@ -42,7 +42,8 @@ echo "== native firmware-variable report"
 native=""
 if [[ -r "${report_var}" ]]; then
     # efivarfs prefixes the value with 4 bytes of attributes.
-    native="$(tail -c +5 "${report_var}")"
+    # efivarfs files cannot seek, so stream the value instead of `tail` on the path.
+    native="$(cat "${report_var}" 2>/dev/null | tail -c +5)"
 fi
 printf '%s\n' "${native:-missing}"
 
@@ -55,16 +56,25 @@ echo "root: $(findmnt -no OPTIONS / | cut -d, -f1)"
 echo "== verdict"
 check "image_unchanged" "$([[ -n "${digest_now}" && "${digest_now}" == "$(field image_sha256 "${staged}")" ]] && echo 1 || echo 0)" \
     "staged ${commit:0:12}, image ${digest_now:0:16}"
-check "left_firmware_into_aienos" "$([[ "$(field aienos_commit "${pre}")" == "${commit}" ]] && echo 1 || echo 0)" \
-    "pre-exit report from this commit, last stage $(field last_stage "${pre}")"
+# Either report proves the firmware ran this image; the variable is written only
+# after ExitBootServices, so it alone also proves firmware exit.
+check "left_firmware_into_aienos" "$([[ "$(field aienos_commit "${pre}")" == "${commit}" || "$(field aienos_commit "${native}")" == "${commit}" ]] && echo 1 || echo 0)" \
+    "pre-exit file: $([[ -n "${pre}" ]] && echo present || echo missing), native report: $([[ -n "${native}" ]] && echo present || echo missing)"
 check "native_code_after_firmware_exit" "$([[ -n "${native}" && "$(field aienos_commit "${native}")" == "${commit}" ]] && echo 1 || echo 0)" \
     "firmware variable written by AIENOS after ExitBootServices (kind $(field report_kind "${native}"))"
 check "kernel_alive" "$(grep -qx "kernel: alive" <<<"${native}" && echo 1 || echo 0)" \
     "last stage $(field last_stage "${native}")"
 check "boot_next_consumed" "$(grep -q "^BootNext:" <<<"${boot_state}" && echo 0 || echo 1)" \
     "no pending one-time boot"
-check "boot_order_unchanged" "$([[ "$(field BootOrder "${boot_state}")" == "$(field boot_order_before "${staged}")" ]] && echo 1 || echo 0)" \
-    "$(field BootOrder "${boot_state}")"
+# Firmware may append entries for removable media it finds (a USB stick). The
+# gate is that the original entries keep their order and AIENOS never joined.
+order_before="$(field boot_order_before "${staged}")"
+order_now="$(field BootOrder "${boot_state}")"
+kept="$(tr ',' '\n' <<<"${order_now}" | grep -Fx -f <(tr ',' '\n' <<<"${order_before}") | paste -sd,)"
+added="$(tr ',' '\n' <<<"${order_now}" | grep -Fvx -f <(tr ',' '\n' <<<"${order_before}") | paste -sd,)"
+aienos_in_order="$(tr ',' '\n' <<<"${order_now}" | grep -Fxc "$(field aienos_boot_entry "${staged}")")"
+check "boot_order_preserved" "$([[ "${kept}" == "${order_before}" && "${aienos_in_order}" == 0 ]] && echo 1 || echo 0)" \
+    "before ${order_before}, now ${order_now}${added:+ (added by firmware: ${added})}"
 check "linux_entry_booted" "$([[ "$(field BootCurrent "${boot_state}")" == "$(field boot_current_before "${staged}")" ]] && echo 1 || echo 0)" \
     "BootCurrent $(field BootCurrent "${boot_state}")"
 check "linux_kernel_unchanged" "$([[ "$(uname -r)" == "$(field linux_kernel_before "${staged}")" ]] && echo 1 || echo 0)" \
