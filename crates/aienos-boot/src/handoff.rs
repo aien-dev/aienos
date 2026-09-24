@@ -1539,6 +1539,37 @@ fn main() -> Status {
             let _ = writeln!(report, "placement: unavailable");
         }
     }
+    let ipc = unsafe { aienos_kernel::user::run_ipc_demo(kernel_root) };
+    let _ = writeln!(
+        report,
+        "ipc: {} message={} cap={} rights={} forged={} revoked={}",
+        if ipc.ok { "ok" } else { "failed" },
+        if ipc.message_delivered {
+            "delivered"
+        } else {
+            "missed"
+        },
+        if ipc.cap_delegated {
+            "delegated"
+        } else {
+            "failed"
+        },
+        if ipc.rights_attenuated {
+            "attenuated"
+        } else {
+            "escalated"
+        },
+        if ipc.forged_denied {
+            "denied"
+        } else {
+            "accepted"
+        },
+        if ipc.revoked_denied {
+            "denied"
+        } else {
+            "accepted"
+        },
+    );
     let _ = writeln!(
         report,
         "runtime_code: {}",
