@@ -60,8 +60,13 @@ fi
 echo ""
 echo "--- [SEED-0A USB Keyboard in QEMU (input.keyboard.usb)] ---"
 if command -v qemu-system-aarch64 >/dev/null && [[ -r "${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}" ]]; then
-    ./scripts/qemu_keyboard_test.sh
+    # Never an unsafe DMA bypass build here: clear any inherited override.
+    unset AIENOS_UNSAFE_DMA_BYPASS AIENOS_BUILD_FEATURES
+    # Default mode: keyboard DMA only through a QEMU SMMUv3 stream.
+    AIENOS_QEMU_SMMU=1 ./scripts/qemu_keyboard_test.sh
     ./scripts/qemu_smmu_test.sh
+    # No SMMU and no bypass: the keyboard must stay unavailable, DMA off.
+    AIENOS_QEMU_SMMU=0 ./scripts/qemu_keyboard_test.sh
 else
     echo "SKIPPED: qemu-system-aarch64 or AAVMF firmware not present on host."
 fi

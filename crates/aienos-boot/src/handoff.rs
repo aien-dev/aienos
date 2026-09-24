@@ -38,6 +38,8 @@ use aienos_kernel::report::ReportBuf;
 use aienos_kernel::sync::spinlock::SpinLock;
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
+#[cfg(feature = "usb-keyboard")]
+use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
@@ -60,15 +62,22 @@ static BOOT_SERVICES_LIVE: AtomicBool = AtomicBool::new(true);
 
 #[cfg(feature = "usb-keyboard")]
 #[repr(C)]
+// Field order keeps every queue aligned to its own size (the SMMU ignores
+// low base address bits below the queue size): stream table at 0 (256 KiB),
+// event queue at 256 KiB (512 bytes), command queue after it (256 bytes),
+// then the 64-byte context descriptor.
 struct SmmuTables {
     stream_table: [[u64; 8]; 4096],
-    command_queue: [[u64; 2]; 16],
-    event_queue: [[u64; 4]; 16],
+    event_queue: [[u64; 4]; SMMU_QUEUE_ENTRIES as usize],
+    command_queue: [[u64; 2]; SMMU_QUEUE_ENTRIES as usize],
     context: [u64; 8],
 }
 
 #[cfg(feature = "usb-keyboard")]
 const STREAM_ENTRIES: u32 = 4096;
+
+#[cfg(feature = "usb-keyboard")]
+const SMMU_QUEUE_ENTRIES: u32 = 16;
 
 // The linear stream table base must be aligned to its size (4096 * 64 bytes =
 // 256 KiB) or QEMU truncates it before fetching the STE. COFF/PE cannot encode
@@ -217,18 +226,19 @@ fn configure_smmu_for_xhci(
         .ok_or(aienos_kernel::smmu::Error::InvalidWindow)?;
     let frames = FixedFramePool::new(PhysAddr(next), remaining)
         .ok_or(aienos_kernel::smmu::Error::InvalidWindow)?;
-    let mut page_table = PageTableBuilder::new(frames, PhysicalTableMemory)
-        .map_err(aienos_kernel::smmu::Error::PageTable)?;
-    page_table
-        .map(
-            dma_base as usize,
-            PhysAddr(dma_base as usize),
-            dma_length,
-            MapFlags::KERNEL_DATA,
-        )
-        .map_err(aienos_kernel::smmu::Error::PageTable)?;
-    let dma_root = page_table.root().0;
-    let table_frames = page_table.frames_used().unwrap_or(0);
+    // Stage-1 table that maps only the xHCI DMA window (identity).
+    let policy = aienos_kernel::smmu::build_dma_policy(
+        stream_id,
+        1,
+        &[aienos_kernel::smmu::DmaWindow {
+            iova: dma_base as usize,
+            pa: PhysAddr(dma_base as usize),
+            length: dma_length,
+        }],
+        frames,
+        PhysicalTableMemory,
+    )?;
+    let table_frames = policy.page_table.frames_used().unwrap_or(0);
     clean_table_pool(next, table_frames * 4096);
 
     let tables = smmu_tables();
@@ -244,22 +254,30 @@ fn configure_smmu_for_xhci(
         0,
         "SMMU stream table is not 256 KiB aligned"
     );
-    clean_table_pool(tables as usize, core::mem::size_of::<SmmuTables>());
-    let mut regs = unsafe { aienos_kernel::smmu::MmioRegisters::new(iort.base as usize) };
-    unsafe {
-        aienos_kernel::smmu::configure_linear_stream(
-            &mut regs,
-            stream_id,
-            STREAM_ENTRIES,
+    // Safety: the tables are one live, identity-mapped, 256 KiB-aligned
+    // allocation owned by the SMMU from here on; the register aperture is
+    // identity mapped (128 KiB) by enter_kernel_mmu. configure_linear_stream
+    // writes the tables and cleans them to the SMMU itself before it
+    // programs STRTAB_BASE or enables anything.
+    let linear = unsafe {
+        aienos_kernel::smmu::LinearTables::new(
             core::ptr::addr_of_mut!((*tables).stream_table).cast(),
-            16,
+            STREAM_ENTRIES,
             core::ptr::addr_of_mut!((*tables).command_queue).cast(),
-            16,
+            SMMU_QUEUE_ENTRIES,
             core::ptr::addr_of_mut!((*tables).event_queue).cast(),
+            SMMU_QUEUE_ENTRIES,
             core::ptr::addr_of_mut!((*tables).context),
-            dma_root as u64,
-        )?;
-    }
+        )?
+    };
+    let mut regs = unsafe { aienos_kernel::smmu::MmioRegisters::new(iort.base as usize) };
+    aienos_kernel::smmu::configure_linear_stream(
+        &mut regs,
+        &linear,
+        policy.stream_id,
+        &policy.cd,
+        aienos_kernel::smmu::DEFAULT_SPINS,
+    )?;
     Ok(stream_id)
 }
 
@@ -1386,6 +1404,11 @@ fn main() -> Status {
     let kernel_root = kernel_mmu.root;
     let runtime_rx_unsplit = kernel_mmu.runtime_rx_unsplit;
 
+    // Devices start with DMA off: clear Bus Master Enable on the xHCI's PCI
+    // segment before any SMMU stream or driver is set up (M3 1C.3).
+    #[cfg(feature = "usb-keyboard")]
+    let dma_takeover = usb_keyboard::take_over_dma(xhci, acpi_facts.mcfg);
+
     #[cfg(feature = "usb-keyboard")]
     let smmu_result =
         configure_smmu_for_xhci(acpi_facts.iort.as_ref(), xhci, pt_pool, pt_frames_used);
@@ -1680,7 +1703,7 @@ fn main() -> Status {
     #[cfg(feature = "usb-keyboard")]
     usb_keyboard::run(
         xhci,
-        acpi_facts.mcfg,
+        dma_takeover,
         &mut screen,
         summary.conventional_kb(),
         el,
