@@ -4,13 +4,40 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use super::{
-    doorbell_offset, set_enabled, Cap, Completion, ControllerError, Registers, Submission, CC_EN,
-    CSTS_CFS, CSTS_RDY, REG_ACQ, REG_AQA, REG_ASQ, REG_CC, REG_CSTS,
+    doorbell_offset, Cap, Completion, ControllerError, Registers, Submission, CC_EN, CSTS_CFS,
+    CSTS_RDY, REG_ACQ, REG_AQA, REG_ASQ, REG_CC, REG_CSTS,
 };
 
 pub const PAGE_SIZE: usize = 4096;
 pub const ADMIN_DEPTH: usize = 8;
-const POLL_LIMIT: usize = 100;
+/// Admin commands complete quickly; bound the wait in real time.
+const ADMIN_TIMEOUT_MS: u32 = 1000;
+
+/// Real-time delay used to bound register and completion polling.
+pub trait Delay {
+    fn delay_us(&mut self, us: u32);
+}
+
+/// Wait for CSTS.RDY to equal `want`, polling every 1 ms for up to
+/// `timeout_ms`. CSTS.CFS aborts immediately.
+fn wait_ready<R: Registers, T: Delay>(
+    registers: &mut R,
+    delay: &mut T,
+    want: bool,
+    timeout_ms: u32,
+) -> Result<(), ControllerError> {
+    for _ in 0..=timeout_ms {
+        let status = registers.read32(REG_CSTS);
+        if status & CSTS_CFS != 0 {
+            return Err(ControllerError::Failed);
+        }
+        if (status & CSTS_RDY != 0) == want {
+            return Ok(());
+        }
+        delay.delay_us(1000);
+    }
+    Err(ControllerError::Timeout)
+}
 const CC_NVM: u32 = 0 << 4;
 const CC_MPS_4K: u32 = 0 << 7;
 const CC_IOSQES_64: u32 = 6 << 16;
@@ -43,9 +70,10 @@ pub struct NamespaceInfo {
     pub block_size: u32,
 }
 
-pub struct NvmeController<R: Registers, D: DmaMemory> {
+pub struct NvmeController<R: Registers, D: DmaMemory, T: Delay> {
     pub registers: R,
     pub dma: D,
+    delay: T,
     cap: Cap,
     sq: DmaRegion,
     cq: DmaRegion,
@@ -56,10 +84,14 @@ pub struct NvmeController<R: Registers, D: DmaMemory> {
     next_cid: u16,
 }
 
-impl<R: Registers, D: DmaMemory> NvmeController<R, D> {
-    pub fn init(mut registers: R, mut dma: D) -> Result<Self, NvmeError> {
+impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
+    /// Reset and enable the controller. Ready waits honour CAP.TO (500 ms units).
+    pub fn init(mut registers: R, mut dma: D, mut delay: T) -> Result<Self, NvmeError> {
         let cap = Cap(((registers.read32(4) as u64) << 32) | registers.read32(0) as u64);
-        set_enabled(&mut registers, false, POLL_LIMIT).map_err(NvmeError::Controller)?;
+        let timeout_ms = u32::from(cap.timeout_units().max(1)) * 500;
+        let cc = registers.read32(REG_CC);
+        registers.write32(REG_CC, cc & !CC_EN);
+        wait_ready(&mut registers, &mut delay, false, timeout_ms).map_err(NvmeError::Controller)?;
         let sq = dma.allocate(PAGE_SIZE, PAGE_SIZE)?;
         let cq = dma.allocate(PAGE_SIZE, PAGE_SIZE)?;
         let identify = dma.allocate(PAGE_SIZE, PAGE_SIZE)?;
@@ -73,23 +105,11 @@ impl<R: Registers, D: DmaMemory> NvmeController<R, D> {
         registers.write32(REG_ACQ + 4, (cq.physical >> 32) as u32);
         let cc = CC_NVM | CC_MPS_4K | CC_IOSQES_64 | CC_IOCQES_16 | CC_EN;
         registers.write32(REG_CC, cc);
-        let mut ready = false;
-        for _ in 0..POLL_LIMIT {
-            let status = registers.read32(REG_CSTS);
-            if status & CSTS_CFS != 0 {
-                return Err(NvmeError::Controller(ControllerError::Failed));
-            }
-            if status & CSTS_RDY != 0 {
-                ready = true;
-                break;
-            }
-        }
-        if !ready {
-            return Err(NvmeError::Controller(ControllerError::Timeout));
-        }
+        wait_ready(&mut registers, &mut delay, true, timeout_ms).map_err(NvmeError::Controller)?;
         let mut controller = Self {
             registers,
             dma,
+            delay,
             cap,
             sq,
             cq,
@@ -147,12 +167,13 @@ impl<R: Registers, D: DmaMemory> NvmeController<R, D> {
             self.sq_tail as u32,
         );
 
-        for _ in 0..POLL_LIMIT {
+        for _ in 0..=ADMIN_TIMEOUT_MS {
             let mut raw = [0u8; 16];
             self.dma
                 .read(self.cq.physical + (self.cq_head * 16) as u64, &mut raw)?;
             let completion = Completion(raw);
             if completion.phase() != self.phase {
+                self.delay.delay_us(1000);
                 continue;
             }
             if completion.command_id() != cid {
@@ -244,6 +265,7 @@ mod tests {
         namespace_size: u64,
         completion_status: u16,
         never_ready: bool,
+        ready_after_reads: u32,
         fatal: bool,
         cq_tail: usize,
         sq_tail: usize,
@@ -251,10 +273,16 @@ mod tests {
     impl Registers for FakeRegs {
         fn read32(&mut self, offset: u32) -> u32 {
             match offset {
-                0 => 0x3ff,
+                0 => 0x0100_03ff, // CAP.TO = 1 (500 ms), MQES = 1023
                 4 => 0,
                 REG_CC => self.cc,
-                REG_CSTS => self.status,
+                REG_CSTS => {
+                    if self.ready_after_reads > 0 && self.cc & CC_EN != 0 {
+                        self.ready_after_reads -= 1;
+                        return self.status & !CSTS_RDY;
+                    }
+                    self.status
+                }
                 _ => 0,
             }
         }
@@ -373,6 +401,7 @@ mod tests {
                 namespace_size: 12345,
                 completion_status: 0,
                 never_ready: false,
+                ready_after_reads: 0,
                 fatal: false,
                 cq_tail: 0,
                 sq_tail: 0,
@@ -384,10 +413,44 @@ mod tests {
         )
     }
 
+    /// Host stand-in for a real-time delay: counts 1 ms waits instead of sleeping.
+    #[derive(Default)]
+    struct CountingDelay {
+        waited_us: u64,
+    }
+    impl Delay for CountingDelay {
+        fn delay_us(&mut self, us: u32) {
+            self.waited_us += u64::from(us);
+        }
+    }
+
+    #[test]
+    fn readiness_wait_honours_cap_timeout() {
+        // CAP.TO = 1 (500 ms). Ready after 200 status reads (~200 ms): must succeed,
+        // where a fixed 100-read poll limit would have reported a timeout.
+        let (mut regs, dma) = fixture();
+        regs.ready_after_reads = 200;
+        let controller = NvmeController::init(regs, dma, CountingDelay::default()).unwrap();
+        let waited = controller.delay.waited_us;
+        assert!((199_000..=201_000).contains(&waited), "waited {waited} us");
+        // Never ready: gives up after about CAP.TO x 500 ms, not sooner.
+        let (mut regs, dma) = fixture();
+        regs.never_ready = true;
+        let mut delay = CountingDelay::default();
+        let mut regs2 = regs;
+        regs2.write32(REG_CC, CC_EN);
+        assert_eq!(
+            wait_ready(&mut regs2, &mut delay, true, 500),
+            Err(ControllerError::Timeout)
+        );
+        assert_eq!(delay.waited_us, 501_000);
+        let _ = dma;
+    }
+
     #[test]
     fn initializes_and_identifies_namespace() {
         let (regs, dma) = fixture();
-        let mut controller = NvmeController::init(regs, dma).unwrap();
+        let mut controller = NvmeController::init(regs, dma, CountingDelay::default()).unwrap();
         assert_eq!(
             controller
                 .registers
@@ -433,19 +496,19 @@ mod tests {
         let (mut regs, dma) = fixture();
         regs.never_ready = true;
         assert_eq!(
-            NvmeController::init(regs, dma).err(),
+            NvmeController::init(regs, dma, CountingDelay::default()).err(),
             Some(NvmeError::Controller(ControllerError::Timeout))
         );
         let (mut regs, dma) = fixture();
         regs.fatal = true;
         assert_eq!(
-            NvmeController::init(regs, dma).err(),
+            NvmeController::init(regs, dma, CountingDelay::default()).err(),
             Some(NvmeError::Controller(ControllerError::Failed))
         );
         let (mut regs, dma) = fixture();
         regs.completion_status = 2;
         assert!(matches!(
-            NvmeController::init(regs, dma),
+            NvmeController::init(regs, dma, CountingDelay::default()),
             Err(NvmeError::CompletionStatus { sc: 1, .. })
         ));
     }
