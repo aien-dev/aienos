@@ -37,7 +37,7 @@ pub struct PlannedMapping {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuntimeDecision {
-    AttributesTableUnavailableCallBeforeTransition,
+    RuntimeCodeRxUnsplit,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlanError {
@@ -52,6 +52,7 @@ pub enum PlanError {
 const EFI_LOADER_CODE: u32 = 1;
 const EFI_RUNTIME_CODE: u32 = 5;
 const EFI_RUNTIME_DATA: u32 = 6;
+const EFI_MMIO: u32 = 11;
 const IMAGE_SCN_MEM_EXECUTE: u32 = 0x2000_0000;
 const IMAGE_SCN_MEM_WRITE: u32 = 0x8000_0000;
 
@@ -83,6 +84,7 @@ pub fn build_map_plan(
     mmio: &[AddressRange],
 ) -> Result<(Vec<PlannedMapping>, Option<RuntimeDecision>), PlanError> {
     let mut out = Vec::new();
+    let mut decision = None;
     for d in memory {
         let length = d.page_count.checked_mul(4096).ok_or(PlanError::Overflow)?;
         if length == 0 {
@@ -134,14 +136,21 @@ pub fn build_map_plan(
                     flags: MapFlags::KERNEL_DATA,
                 });
             }
+        } else if d.memory_type == EFI_MMIO {
+            out.push(PlannedMapping {
+                range: region,
+                flags: flags(true, false, MemoryAttribute::DeviceNgnre),
+            });
         } else if d.memory_type == EFI_RUNTIME_CODE
             || (d.attribute & EFI_MEMORY_RUNTIME != 0 && d.memory_type != EFI_RUNTIME_DATA)
         {
             let Some(attrs) = runtime_attributes else {
-                return Ok((
-                    out,
-                    Some(RuntimeDecision::AttributesTableUnavailableCallBeforeTransition),
-                ));
+                out.push(PlannedMapping {
+                    range: region,
+                    flags: flags(false, true, MemoryAttribute::NormalWriteBack),
+                });
+                decision = Some(RuntimeDecision::RuntimeCodeRxUnsplit);
+                continue;
             };
             let mut cursor = region.start;
             while cursor < end(region)? {
@@ -152,7 +161,9 @@ pub fn build_map_plan(
                 let stop = end(attr.range)?.min(end(region)?);
                 let executable = !attr.execute_protect;
                 if executable && !attr.read_only {
-                    return Err(PlanError::RuntimeCodeCannotSplit);
+                    // Some firmware MATs describe a writable executable
+                    // runtime range. Preserve execution while enforcing W^X.
+                    decision = Some(RuntimeDecision::RuntimeCodeRxUnsplit);
                 }
                 out.push(PlannedMapping {
                     range: AddressRange {
@@ -167,18 +178,25 @@ pub fn build_map_plan(
                 });
                 cursor = stop;
             }
-        } else if d.memory_type == EFI_RUNTIME_DATA {
+        } else if matches!(d.memory_type, 2 | 3 | 4 | 7 | 9 | 10 | EFI_RUNTIME_DATA) {
             out.push(PlannedMapping {
                 range: region,
                 flags: MapFlags::KERNEL_DATA,
             });
         }
     }
+    let descriptor_mappings = out.len();
     for r in mmio {
-        out.push(PlannedMapping {
-            range: *r,
-            flags: flags(true, false, MemoryAttribute::DeviceNgnre),
-        });
+        if !out[..descriptor_mappings].iter().any(|m| {
+            m.flags.attribute == MemoryAttribute::DeviceNgnre
+                && m.range.start <= r.start
+                && end(m.range).is_ok_and(|e| e >= end(*r).unwrap_or(u64::MAX))
+        }) {
+            out.push(PlannedMapping {
+                range: *r,
+                flags: flags(true, false, MemoryAttribute::DeviceNgnre),
+            });
+        }
     }
     for i in 0..out.len() {
         for j in i + 1..out.len() {
@@ -187,7 +205,7 @@ pub fn build_map_plan(
             }
         }
     }
-    Ok((out, None))
+    Ok((out, decision))
 }
 
 pub const fn mair_el1() -> u64 {
@@ -286,7 +304,7 @@ mod tests {
         assert!(p[1].flags.writable && !p[1].flags.executable);
     }
     #[test]
-    fn missing_mat_has_explicit_runtime_call_decision() {
+    fn missing_mat_maps_runtime_code_rx_without_wx() {
         let (p, d) = build_map_plan(
             &[d(EFI_RUNTIME_CODE, 0x400000, 1, EFI_MEMORY_RUNTIME)],
             0,
@@ -299,11 +317,9 @@ mod tests {
             &[],
         )
         .unwrap();
-        assert!(p.is_empty());
-        assert_eq!(
-            d,
-            Some(RuntimeDecision::AttributesTableUnavailableCallBeforeTransition)
-        );
+        assert_eq!(p.len(), 1);
+        assert!(p[0].flags.executable && !p[0].flags.writable);
+        assert_eq!(d, Some(RuntimeDecision::RuntimeCodeRxUnsplit));
     }
     #[test]
     fn runtime_code_needs_ro_xp_split() {
@@ -343,7 +359,7 @@ mod tests {
         assert!(p[1].flags.writable && !p[1].flags.executable);
     }
     #[test]
-    fn unsplittable_runtime_code_is_rejected() {
+    fn writable_executable_runtime_code_is_mapped_rx() {
         let m = [d(EFI_RUNTIME_CODE, 0x400000, 1, EFI_MEMORY_RUNTIME)];
         let a = [RuntimeAttributes {
             range: AddressRange {
@@ -353,20 +369,20 @@ mod tests {
             read_only: false,
             execute_protect: false,
         }];
-        assert_eq!(
-            build_map_plan(
-                &m,
-                0,
-                AddressRange {
-                    start: 0,
-                    length: 1
-                },
-                &[],
-                Some(&a),
-                &[]
-            ),
-            Err(PlanError::RuntimeCodeCannotSplit)
-        );
+        let (plan, decision) = build_map_plan(
+            &m,
+            0,
+            AddressRange {
+                start: 0,
+                length: 1,
+            },
+            &[],
+            Some(&a),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(decision, Some(RuntimeDecision::RuntimeCodeRxUnsplit));
+        assert!(plan[0].flags.executable && !plan[0].flags.writable);
     }
     #[test]
     fn mmio_is_device_nx_and_overlap_rejected() {
