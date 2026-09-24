@@ -17,6 +17,7 @@ pub mod speed {
 /// Endpoint Context EP Type values.
 pub const EP_TYPE_CONTROL: u8 = 4;
 pub const EP_TYPE_INTERRUPT_IN: u8 = 7;
+pub const EP_TYPE_ISOCH_OUT: u8 = 1;
 /// Error count: retry a failing transaction three times before halting.
 const CERR: u32 = 3;
 /// Device context index of the default control endpoint.
@@ -43,6 +44,25 @@ pub fn interrupt_interval(port_speed: u8, b_interval: u8) -> u8 {
             (31 - microframes.leading_zeros()).clamp(3, 10) as u8
         }
         _ => b_interval.clamp(1, 16) - 1,
+    }
+}
+
+/// Configure an isochronous OUT endpoint. `max_esit_payload` is the maximum
+/// bytes sent in one service interval (including high-bandwidth multipliers).
+pub fn isoch_out_endpoint(
+    port_speed: u8,
+    b_interval: u8,
+    max_packet: u16,
+    max_esit_payload: u16,
+    dequeue: u64,
+) -> EndpointConfig {
+    EndpointConfig {
+        ep_type: EP_TYPE_ISOCH_OUT,
+        max_packet,
+        interval: interrupt_interval(port_speed, b_interval),
+        dequeue,
+        average_trb_length: max_esit_payload,
+        max_esit_payload,
     }
 }
 
@@ -222,5 +242,23 @@ mod tests {
         );
         assert!(InputContext::new(&mut words, 48).is_none());
         assert!(InputContext::new(&mut words[..100], 32).is_none());
+    }
+
+    #[test]
+    fn isochronous_out_endpoint_fields_encode_in_context() {
+        let mut words = [0u32; 8 * 33];
+        let mut input = InputContext::new(&mut words, 32).unwrap();
+        input.endpoint(
+            2,
+            &isoch_out_endpoint(speed::HIGH, 4, 192, 192, 0x1234_5001),
+        );
+        let ep = 8 * 3;
+        assert_eq!(words[ep], 3 << 16);
+        assert_eq!(
+            words[ep + 1],
+            CERR << 1 | (EP_TYPE_ISOCH_OUT as u32) << 3 | 192 << 16
+        );
+        assert_eq!([words[ep + 2], words[ep + 3]], [0x1234_5001, 0]);
+        assert_eq!(words[ep + 4], 192 | 192 << 16);
     }
 }

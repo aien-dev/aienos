@@ -86,6 +86,23 @@ impl ProducerRing {
         addr
     }
 
+    /// Enqueue a batch of isochronous packets, chaining all but the last and
+    /// requesting one completion event for the batch. Returns TRB addresses.
+    pub fn push_isoch_batch(&mut self, packets: &[Trb], addresses: &mut [u64]) -> usize {
+        let count = packets.len().min(addresses.len());
+        for (i, packet) in packets[..count].iter().enumerate() {
+            let mut trb = *packet;
+            trb.0[3] &= !(super::trb::IOC | super::trb::CHAIN);
+            trb.0[3] |= if i + 1 == count {
+                super::trb::IOC
+            } else {
+                super::trb::CHAIN
+            };
+            addresses[i] = self.push(trb);
+        }
+        count
+    }
+
     fn write_owned(&mut self, index: usize, trb: Trb) {
         let trb = trb.with_cycle(self.cycle);
         // SAFETY: `index < len` at every call site.
