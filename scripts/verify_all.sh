@@ -56,6 +56,15 @@ else
     echo "SKIPPED: qemu-system-aarch64 or AAVMF firmware not present on host."
 fi
 
+# Step 6b: SEED-0A USB keyboard candidate, proven in QEMU only (ADR 0012).
+echo ""
+echo "--- [SEED-0A USB Keyboard in QEMU (input.keyboard.usb)] ---"
+if command -v qemu-system-aarch64 >/dev/null && [[ -r "${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}" ]]; then
+    ./scripts/qemu_keyboard_test.sh
+else
+    echo "SKIPPED: qemu-system-aarch64 or AAVMF firmware not present on host."
+fi
+
 echo ""
 echo "============================================================"
 echo "HOST VERIFICATIONS PASSED."
