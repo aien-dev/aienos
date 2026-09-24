@@ -34,16 +34,17 @@ only at M8. Status words: **done** = verified on this repository's evidence;
 |---|---|---|---|
 | **M0** Close Config A | Clean reference snapshot | done | PR #12: schema 3.0.0 bundle, all repositories clean |
 | | Benchmark evidence | done | CPU baseline: Llama-3.2-1B Q4_K_M on 20 Arm cores, 256-token samples, mean decode 54.2 tokens/s |
-| | Verified recovery and rollback | pending | Needs the attended one-time boot ([procedure](NATIVE_BOOT_ONE_TIME.md)) |
+| | Native-boot rollback | done | First native boot returned to Linux on its own; BootNext consumed, Linux entry and kernel unchanged ([M2 evidence](../evidence/m2_first_boot_2026-09-24.md)) |
+| | Bootable recovery media | pending | The only USB stick holds a key backup, not a recovery system |
 | **M1** UEFI/QEMU substrate | Automated emulator boot proof | pending | No `qemu-system-aarch64` or AArch64 UEFI firmware on the host; UEFI images are format-checked only |
-| **M2A** Spark firmware handoff | Memory map into early allocator | built | PR #10 |
-| | GB10 PCI identity, BAR0, PMC_BOOT registers | built | PR #11 |
-| | CPU topology from the ACPI MADT (efficiency classes) and boot-core MIDR | built | Parser tested on constructed tables; Linux shows boot cpu0 is a Cortex-A725 |
+| **M2A** Spark firmware handoff | Memory map into early allocator | done on hardware | PR #10; 184 descriptors, 36 conventional regions, 0 rejected ([M2 evidence](../evidence/m2_first_boot_2026-09-24.md)) |
+| | GB10 PCI identity, BAR0, PMC_BOOT registers | built, not found on hardware | PR #11; pre-exit discovery reported `gb10: unavailable` although Linux sees it at `000f:01:00.0` |
+| | CPU topology from the ACPI MADT (efficiency classes) and boot-core MIDR | done on hardware | 10 cores in class 0, 10 in class 1; boot core class 0, MIDR part `0xd87` (Cortex-A725) ([M2 evidence](../evidence/m2_first_boot_2026-09-24.md)) |
 | | Broader ACPI device discovery | pending | |
-| **M2B** Human bring-up console | GOP framebuffer text after firmware exit | built | PR #13 |
-| | UART at `0x16A00000` (bounded, Spark only) | built | PR #13; external reachability unknown |
+| **M2B** Human bring-up console | GOP framebuffer text after firmware exit | built, unconfirmed | PR #13; the report does not record post-exit drawing, so the operator photograph is the evidence |
+| | UART at `0x16A00000` (bounded, Spark only) | built, not attempted | PR #13; skipped on the first boot because GB10 discovery failed |
 | | USB keyboard (xHCI + HID) | pending | |
-| **M2C** Hardware test automation | Exclusive Machine 1 key and ledger records in `aien-proof` | built | aien-sovereign-core PR #126: `aien-proof hold --resource machine-1 -- CMD` |
+| **M2C** Hardware test automation | Exclusive Machine 1 key and ledger records in `aien-proof` | done on hardware | aien-sovereign-core PR #126; first boot staged and collected under `machine-1` (ledger events 83 to 85) |
 | | Power/reset control, HDMI capture, USB input emulation | pending | Needs hardware chosen by the operator |
 | **M3** Kernel isolation | MMU, exceptions, interrupts, timer, scheduler, IPC/capabilities | pending | Scheduler consumes M2A CPU topology |
 | **M4** Storage and recovery | | pending | Host crates exist (`recovery`, `store`) |
@@ -78,6 +79,8 @@ AIENOS code with no Linux underneath, produces independently recoverable
 evidence that it did so, and returns to the existing system without damaging
 it. `scripts/collect_boot_report.sh` prints `M2_GATE: PASS` only when all of
 those checks hold.
+
+**Result 2026-09-24: `M2_GATE: PASS`** on the first attended boot ([evidence](../evidence/m2_first_boot_2026-09-24.md)). Open items: GB10 discovery before firmware exit, the pre-exit report file, recording post-exit screen drawing, UART output, and bootable recovery media.
 
 ---
 
