@@ -12,6 +12,8 @@
 pub const SDT_HEADER_LEN: usize = 36;
 const MADT_ENTRIES_OFFSET: usize = 44;
 const GICC_TYPE: u8 = 0x0B;
+const GICD_TYPE: u8 = 0x0C;
+const GICR_TYPE: u8 = 0x0E;
 const GICC_FLAGS: usize = 12;
 const GICC_MPIDR: usize = 68;
 const GICC_EFFICIENCY_CLASS: usize = 76;
@@ -29,6 +31,48 @@ pub enum AcpiError {
     BadSignature,
     BadChecksum,
     BadEntry,
+}
+
+/// GICv3 physical register regions advertised by the MADT.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GicBases {
+    pub distributor: Option<u64>,
+    pub redistributor: Option<(u64, u32)>,
+}
+
+/// Reads the first GIC distributor and redistributor regions from a MADT.
+pub fn madt_gic_bases(madt: &[u8]) -> Result<GicBases, AcpiError> {
+    let madt = checked_table(madt, b"APIC")?;
+    let mut bases = GicBases::default();
+    let mut at = MADT_ENTRIES_OFFSET;
+    while at < madt.len() {
+        let kind = madt[at];
+        let len = *madt.get(at + 1).ok_or(AcpiError::Truncated)? as usize;
+        if len < 2 || at + len > madt.len() {
+            return Err(AcpiError::BadEntry);
+        }
+        let entry = &madt[at..at + len];
+        if kind == GICD_TYPE {
+            if len < 24 {
+                return Err(AcpiError::BadEntry);
+            }
+            if bases.distributor.is_none() {
+                bases.distributor = u64_at(entry, 8);
+            }
+        } else if kind == GICR_TYPE {
+            if len < 16 {
+                return Err(AcpiError::BadEntry);
+            }
+            if bases.redistributor.is_none() {
+                bases.redistributor = Some((
+                    u64_at(entry, 4).ok_or(AcpiError::BadEntry)?,
+                    u32_at(entry, 12).ok_or(AcpiError::BadEntry)?,
+                ));
+            }
+        }
+        at += len;
+    }
+    Ok(bases)
 }
 
 fn u32_at(b: &[u8], at: usize) -> Option<u32> {
@@ -235,11 +279,6 @@ mod tests {
     fn madt(entries: &[Vec<u8>]) -> Vec<u8> {
         let mut t = std::vec![0u8; MADT_ENTRIES_OFFSET];
         t[..4].copy_from_slice(b"APIC");
-        // A non-GICC entry (GIC distributor) that must be skipped.
-        let mut gicd = std::vec![0u8; 24];
-        gicd[0] = 0x0C;
-        gicd[1] = 24;
-        t.extend_from_slice(&gicd);
         for e in entries {
             t.extend_from_slice(e);
         }
@@ -248,6 +287,27 @@ mod tests {
         let sum = t.iter().fold(0u8, |s, b| s.wrapping_add(*b));
         t[9] = 0u8.wrapping_sub(sum);
         t
+    }
+
+    #[test]
+    fn extracts_gicd_and_gicr_bases() {
+        let mut dist = std::vec![0u8; 24];
+        dist[0] = GICD_TYPE;
+        dist[1] = 24;
+        dist[8..16].copy_from_slice(&0x0800_0000u64.to_le_bytes());
+        let mut redist = std::vec![0u8; 16];
+        redist[0] = GICR_TYPE;
+        redist[1] = 16;
+        redist[4..12].copy_from_slice(&0x080a_0000u64.to_le_bytes());
+        redist[12..16].copy_from_slice(&0x20_0000u32.to_le_bytes());
+        let table = madt(&[dist, redist]);
+        assert_eq!(
+            madt_gic_bases(&table).unwrap(),
+            GicBases {
+                distributor: Some(0x0800_0000),
+                redistributor: Some((0x080a_0000, 0x20_0000)),
+            }
+        );
     }
 
     #[test]
