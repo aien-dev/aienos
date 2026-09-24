@@ -47,6 +47,13 @@ Stop condition: If Spark does not unlock tomorrow we must know what protects dat
 
 Objective: Dedicated recovery USB proven on the real Spark before any trust change.
 
+Runbook: [docs/RECOVERY_MEDIA_MACHINE1.md](RECOVERY_MEDIA_MACHINE1.md). The
+stick boots and returns unattended (#53); `scripts/build_standalone_recovery_initrd.sh`
+now also packages `fsck.vfat`, `mkfs.vfat`, `fsck.ext4`, and `chroot` for
+items 12-14 (mount recovered storage, repair `/boot/efi`, restore boot
+entries); `scripts/verify_recovery_tools.sh` is the pre-boot host proof;
+`scripts/collect_recovery_boot_evidence.sh` records the attended boot.
+
 Preconditions: Gate 0 PASS.
 
 Permitted mutations: Create recovery image on build host; write to separate physical USB (not ATLAS_RECOV); boot it once via operator-attended boot with Secure Boot enabled. No internal trust, TPM, or slot mutation.

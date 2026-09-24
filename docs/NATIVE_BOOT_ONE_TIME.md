@@ -28,10 +28,11 @@ The image does not touch the Linux installation, its partitions, or BootOrder.
 
 ## Before you start (at the machine)
 
-1. **Recovery media:** plug in a bootable Linux USB stick. As of 2026-09-24 no
-   removable media was attached. The internal fallbacks are present: the
-   `ubuntu` boot entry (shim + GRUB), the firmware fallback loader
-   `\EFI\BOOT\BOOTAA64.EFI`, and three installed kernels.
+1. **Recovery media:** plug in the `AIENOSRECOV` recovery USB stick, built
+   and proved per [RECOVERY_MEDIA_MACHINE1.md](RECOVERY_MEDIA_MACHINE1.md).
+   The internal fallbacks are also present: the `ubuntu` boot entry
+   (shim + GRUB), the firmware fallback loader `\EFI\BOOT\BOOTAA64.EFI`, and
+   three installed kernels.
 2. **Monitor and keyboard** attached to the Spark.
 3. **Everything on this Linux install stops** for each reboot: agents, model
    servers, the aienos.com waitlist API, and remote access.
