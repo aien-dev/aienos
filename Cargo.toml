@@ -8,6 +8,7 @@ members = [
     "crates/aienos-c1-tree",
     "crates/aienos-boot",
     "crates/aienos-accel",
+    "crates/aienos-evidence",
 ]
 
 [workspace.package]

@@ -56,6 +56,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aienos-evidence"
+version = "0.1.0"
+dependencies = [
+ "aienos-kernel",
+ "serde_json",
+]
+
+[[package]]
 name = "aienos-kernel"
 version = "0.1.0"
 dependencies = [

@@ -43,9 +43,9 @@ cargo build -p aienos-kernel --target aarch64-unknown-none --no-default-features
 echo ""
 echo "--- [AArch64 UEFI Image Builds] ---"
 cargo build --release -p aienos-boot --target aarch64-unknown-uefi --features firmware --bin aienos-boot
-python3 scripts/verify_uefi_image.py target/aarch64-unknown-uefi/release/aienos-boot.efi
+cargo run --quiet --release -p aienos-evidence -- verify-efi target/aarch64-unknown-uefi/release/aienos-boot.efi
 cargo build --release -p aienos-boot --target aarch64-unknown-uefi --features handoff --bin aienos-handoff
-python3 scripts/verify_uefi_image.py target/aarch64-unknown-uefi/release/aienos-handoff.efi
+cargo run --quiet --release -p aienos-evidence -- verify-efi target/aarch64-unknown-uefi/release/aienos-handoff.efi
 
 echo ""
 echo "============================================================"
