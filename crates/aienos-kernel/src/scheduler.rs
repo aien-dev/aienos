@@ -34,16 +34,32 @@ pub struct Scheduler<const CPUS: usize, const TASKS: usize> {
     tasks: [Option<Task>; TASKS],
     queues: [[Option<usize>; TASKS]; CPUS],
     queue_len: [usize; CPUS],
+    background_wait_ticks: [usize; CPUS],
+    background_interval: usize,
     cursor: usize,
 }
 
 impl<const CPUS: usize, const TASKS: usize> Scheduler<CPUS, TASKS> {
+    /// Create a scheduler that reserves one tick for waiting Background work
+    /// in every eight contested ticks.
     pub const fn new(classes: [u8; CPUS]) -> Self {
+        Self::with_background_interval(classes, 8)
+    }
+
+    /// Set the maximum number of consecutive contested ticks before a
+    /// Background task receives a slot. Values below one are treated as one.
+    pub const fn with_background_interval(classes: [u8; CPUS], background_interval: usize) -> Self {
         Self {
             classes,
             tasks: [None; TASKS],
             queues: [[None; TASKS]; CPUS],
             queue_len: [0; CPUS],
+            background_wait_ticks: [0; CPUS],
+            background_interval: if background_interval == 0 {
+                1
+            } else {
+                background_interval
+            },
             cursor: 0,
         }
     }
@@ -105,6 +121,26 @@ impl<const CPUS: usize, const TASKS: usize> Scheduler<CPUS, TASKS> {
         if self.queue_len[cpu] == 0 && !self.steal(cpu)? {
             return Ok(None);
         }
+        let has_background = self.queues[cpu][..self.queue_len[cpu]]
+            .iter()
+            .flatten()
+            .any(|&slot| {
+                self.tasks[slot].expect("queued task exists").priority == TaskPriority::Background
+            });
+        let has_higher_priority = self.queues[cpu][..self.queue_len[cpu]]
+            .iter()
+            .flatten()
+            .any(|&slot| {
+                self.tasks[slot].expect("queued task exists").priority > TaskPriority::Background
+            });
+        let force_background = has_background && has_higher_priority && {
+            self.background_wait_ticks[cpu] = self.background_wait_ticks[cpu].saturating_add(1);
+            self.background_wait_ticks[cpu] >= self.background_interval
+        };
+        if !has_background || !has_higher_priority {
+            self.background_wait_ticks[cpu] = 0;
+        }
+
         let mut selected: Option<usize> = None;
         for &slot in self.queues[cpu][..self.queue_len[cpu]].iter().flatten() {
             let task = self.tasks[slot].expect("queued task exists");
@@ -112,9 +148,15 @@ impl<const CPUS: usize, const TASKS: usize> Scheduler<CPUS, TASKS> {
                 None => Some(slot),
                 Some(old) => {
                     let previous = self.tasks[old].expect("queued task exists");
-                    if task.priority > previous.priority
-                        || (task.priority == previous.priority && task.ticks < previous.ticks)
-                    {
+                    let task_wins = if force_background {
+                        (task.priority == TaskPriority::Background
+                            && previous.priority != TaskPriority::Background)
+                            || (task.priority == previous.priority && task.ticks < previous.ticks)
+                    } else {
+                        task.priority > previous.priority
+                            || (task.priority == previous.priority && task.ticks < previous.ticks)
+                    };
+                    if task_wins {
                         Some(slot)
                     } else {
                         Some(old)
@@ -123,6 +165,9 @@ impl<const CPUS: usize, const TASKS: usize> Scheduler<CPUS, TASKS> {
             };
         }
         if let Some(slot) = selected {
+            if self.tasks[slot].expect("queued task exists").priority == TaskPriority::Background {
+                self.background_wait_ticks[cpu] = 0;
+            }
             let task = self.tasks[slot].as_mut().expect("queued task exists");
             task.ticks = task.ticks.saturating_add(1);
             Ok(Some(task.id))
@@ -224,6 +269,37 @@ mod tests {
         s.enqueue(1, TaskPriority::Background).unwrap();
         s.enqueue(2, TaskPriority::Latency).unwrap();
         assert_eq!(s.tick(0), Ok(Some(2)));
+    }
+
+    #[test]
+    fn background_runs_within_configured_interval_under_latency_load() {
+        const INTERVAL: usize = 7;
+        let mut s = Scheduler::<1, 2>::with_background_interval([0], INTERVAL);
+        s.enqueue(1, TaskPriority::Background).unwrap();
+        s.enqueue(2, TaskPriority::Latency).unwrap();
+
+        let mut background_ran = false;
+        for _ in 0..INTERVAL {
+            background_ran |= s.tick(0).unwrap() == Some(1);
+        }
+        assert!(background_ran);
+    }
+
+    #[test]
+    fn latency_keeps_large_majority_of_ticks_with_background_budget() {
+        const INTERVAL: usize = 8;
+        const TICKS: usize = 80;
+        let mut s = Scheduler::<1, 2>::with_background_interval([0], INTERVAL);
+        s.enqueue(1, TaskPriority::Background).unwrap();
+        s.enqueue(2, TaskPriority::Latency).unwrap();
+
+        for _ in 0..TICKS {
+            s.tick(0).unwrap();
+        }
+        let latency_ticks = s.task(2).unwrap().ticks;
+        let background_ticks = s.task(1).unwrap().ticks;
+        assert!(latency_ticks > TICKS as u64 * 3 / 4);
+        assert!(latency_ticks > background_ticks);
     }
 
     #[test]
