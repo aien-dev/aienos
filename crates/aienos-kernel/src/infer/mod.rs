@@ -1,3 +1,3 @@
-//! Host-testable inference primitives that do not touch system registers.
-
+//! Native CPU inference: tokenizer and compute kernels (host-testable, no system registers).
+pub mod gemm;
 pub mod tokenizer;
