@@ -51,8 +51,8 @@ echo "PASS  formatting: cargo fmt --all --check"
 # Step 2: Host component test suite
 echo ""
 echo "--- [Host Component Testing: Workspace Crates] ---"
-cargo test --workspace
-echo "PASS  host tests: cargo test --workspace"
+cargo test --workspace -- --format=pretty
+echo "PASS  host tests: cargo test --workspace -- --format=pretty"
 echo "PASS  ABI conformance: frozen wire format golden bytes and roundtrips verified"
 
 # Step 3: Linting & Zero-Warning Enforcement
