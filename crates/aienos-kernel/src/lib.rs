@@ -28,6 +28,7 @@ pub mod report;
 pub mod scheduler;
 pub mod store;
 pub mod sync;
+pub mod thread;
 pub mod timer;
 pub mod uefi;
 pub mod usb;
