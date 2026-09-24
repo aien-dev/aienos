@@ -38,7 +38,7 @@ use aienos_kernel::report::ReportBuf;
 use aienos_kernel::sync::spinlock::SpinLock;
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
 use uefi::prelude::*;
@@ -59,7 +59,7 @@ static POST_EXIT_HEAP_USED: AtomicU64 = AtomicU64::new(0);
 static BOOT_SERVICES_LIVE: AtomicBool = AtomicBool::new(true);
 
 #[cfg(feature = "usb-keyboard")]
-#[repr(C, align(4096))]
+#[repr(C)]
 struct SmmuTables {
     stream_table: [[u64; 8]; 4096],
     command_queue: [[u64; 2]; 16],
@@ -68,12 +68,33 @@ struct SmmuTables {
 }
 
 #[cfg(feature = "usb-keyboard")]
-static mut SMMU_TABLES: SmmuTables = SmmuTables {
-    stream_table: [[0; 8]; 4096],
-    command_queue: [[0; 2]; 16],
-    event_queue: [[0; 4]; 16],
-    context: [0; 8],
-};
+const STREAM_ENTRIES: u32 = 4096;
+
+// The linear stream table base must be aligned to its size (4096 * 64 bytes =
+// 256 KiB) or QEMU truncates it before fetching the STE. COFF/PE cannot encode
+// section alignment above 8192, so a 256 KiB-aligned static is unbuildable for
+// aarch64-unknown-uefi; allocate the tables at runtime with an over-aligned
+// Layout and hand out one shared pointer to every user instead.
+#[cfg(feature = "usb-keyboard")]
+const SMMU_TABLES_ALIGN: usize = 262144;
+
+#[cfg(feature = "usb-keyboard")]
+static SMMU_TABLES_PTR: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(feature = "usb-keyboard")]
+fn smmu_tables() -> *mut SmmuTables {
+    let existing = SMMU_TABLES_PTR.load(Ordering::Acquire);
+    if existing != 0 {
+        return existing as *mut SmmuTables;
+    }
+    let layout = Layout::from_size_align(core::mem::size_of::<SmmuTables>(), SMMU_TABLES_ALIGN)
+        .expect("smmu tables layout");
+    let raw = unsafe { ALLOCATOR.alloc(layout) };
+    assert!(!raw.is_null(), "smmu tables allocation failed");
+    unsafe { core::ptr::write_bytes(raw, 0, layout.size()) };
+    SMMU_TABLES_PTR.store(raw as usize, Ordering::Release);
+    raw.cast::<SmmuTables>()
+}
 
 struct BootHeap;
 unsafe impl GlobalAlloc for BootHeap {
@@ -210,14 +231,26 @@ fn configure_smmu_for_xhci(
     let table_frames = page_table.frames_used().unwrap_or(0);
     clean_table_pool(next, table_frames * 4096);
 
-    let tables = core::ptr::addr_of_mut!(SMMU_TABLES);
+    let tables = smmu_tables();
+    assert_eq!(
+        core::mem::size_of::<[[u64; 8]; STREAM_ENTRIES as usize]>(),
+        SMMU_TABLES_ALIGN,
+        "stream table must be exactly 256 KiB"
+    );
+    assert_eq!(STREAM_ENTRIES.trailing_zeros(), 12, "LOG2SIZE must be 12");
+    assert!(stream_id < STREAM_ENTRIES, "SID outside the stream table");
+    assert_eq!(
+        tables as usize % SMMU_TABLES_ALIGN,
+        0,
+        "SMMU stream table is not 256 KiB aligned"
+    );
     clean_table_pool(tables as usize, core::mem::size_of::<SmmuTables>());
     let mut regs = unsafe { aienos_kernel::smmu::MmioRegisters::new(iort.base as usize) };
     unsafe {
         aienos_kernel::smmu::configure_linear_stream(
             &mut regs,
             stream_id,
-            4096,
+            STREAM_ENTRIES,
             core::ptr::addr_of_mut!((*tables).stream_table).cast(),
             16,
             core::ptr::addr_of_mut!((*tables).command_queue).cast(),
@@ -1407,7 +1440,7 @@ fn main() -> Status {
         smmu_result.is_ok(),
         acpi_facts.iort.as_ref().map(|s| s.base),
         smmu_result.ok(),
-        unsafe { core::ptr::addr_of_mut!(SMMU_TABLES.event_queue).cast_const() },
+        unsafe { core::ptr::addr_of_mut!((*smmu_tables()).event_queue).cast_const() },
     );
     finish(screen)
 }
