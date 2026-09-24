@@ -10,11 +10,12 @@ description = "AArch64 UEFI entry diagnostic for AIENOS native boot bring-up"
 [features]
 default = []
 firmware = ["dep:uefi"]
-handoff = ["firmware", "dep:aienos-kernel"]
+handoff = ["firmware", "dep:aienos-kernel", "dep:aienos-accel", "uefi/alloc", "uefi/global_allocator"]
 
 [dependencies]
 uefi = { version = "0.41", default-features = false, features = ["panic_handler"], optional = true }
 aienos-kernel = { path = "../aienos-kernel", default-features = false, optional = true }
+aienos-accel = { path = "../aienos-accel", optional = true }
 
 [[bin]]
 name = "aienos-boot"

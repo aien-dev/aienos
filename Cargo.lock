@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "aienos-accel"
+version = "0.1.0"
+
+[[package]]
 name = "aienos-aegis"
 version = "0.1.0"
 dependencies = [
@@ -27,6 +31,7 @@ dependencies = [
 name = "aienos-boot"
 version = "0.1.0"
 dependencies = [
+ "aienos-accel",
  "aienos-kernel",
  "uefi",
 ]
@@ -53,6 +58,9 @@ dependencies = [
 [[package]]
 name = "aienos-kernel"
 version = "0.1.0"
+dependencies = [
+ "aienos-accel",
+]
 
 [[package]]
 name = "bit_field"

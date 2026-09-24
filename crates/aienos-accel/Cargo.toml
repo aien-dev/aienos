@@ -1,0 +1,10 @@
+[package]
+name = "aienos-accel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native GB10 PCI and BAR0 discovery for AIENOS"
+
+[dependencies]

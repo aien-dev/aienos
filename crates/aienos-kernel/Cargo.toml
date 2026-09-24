@@ -12,3 +12,4 @@ default = ["std"]
 std = []
 
 [dependencies]
+aienos-accel = { path = "../aienos-accel" }

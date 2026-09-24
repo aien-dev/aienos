@@ -7,6 +7,7 @@ members = [
     "crates/aienos-aegis",
     "crates/aienos-c1-tree",
     "crates/aienos-boot",
+    "crates/aienos-accel",
 ]
 
 [workspace.package]
@@ -22,5 +23,6 @@ aienos-agent-state = { path = "crates/aienos-agent-state" }
 aienos-cortex = { path = "crates/aienos-cortex" }
 aienos-aegis = { path = "crates/aienos-aegis" }
 aienos-c1-tree = { path = "crates/aienos-c1-tree" }
+aienos-accel = { path = "crates/aienos-accel" }
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
