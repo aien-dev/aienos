@@ -3,7 +3,7 @@
   "name": "standalone_ram_recovery_media",
   "status": "PASS_EMULATOR_VERIFIED",
   "physical_hardware_status": "PENDING_ATTENDED_EXERCISE",
-  "captured_utc": "2026-09-24T04:18:09Z",
+  "captured_utc": "2026-09-24T04:29:54Z",
   "host": "spark-b87b",
   "arch": "aarch64",
   "kernel_version": "7.0.0-1019-nvidia",
@@ -24,7 +24,8 @@
     "internal_nvme_unmounted": true,
     "init_entrypoint": "rdinit=/init",
     "atlas_recov_protected": true,
-    "qemu_zero_disk_verified": true
+    "qemu_zero_disk_verified": true,
+    "secrets_policy": "NO PLAINTEXT SECRETS IN REPOSITORY OR BUILD ARTIFACTS"
   },
   "utilities_packaged": [
     "/bin/busybox",
@@ -34,9 +35,15 @@
     "/bin/blkid",
     "/bin/mount",
     "/bin/umount",
-    "/sbin/cryptsetup",
-    "/usr/bin/age",
-    "/usr/bin/tpm2_pcrread",
-    "/usr/bin/efibootmgr"
+    "/bin/mkdir",
+    "/bin/cat",
+    "/bin/grep",
+    "/bin/sed",
+    "/bin/sha256sum",
+    "/bin/cryptsetup",
+    "/bin/age",
+    "/bin/tpm2_pcrread",
+    "/bin/efibootmgr",
+    "/bin/gocryptfs"
   ]
 }

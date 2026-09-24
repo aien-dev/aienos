@@ -2,8 +2,8 @@
 # build_recovery_media.sh: Build standalone UEFI recovery system on target USB drive
 # Certified for Secure Boot execution using signed Shim + GRUB / standalone RAM recovery payload.
 # Invariant: 100% self-contained RAM disk under rdinit=/init. Internal NVMe must not be mounted.
-# Guard: Explicitly rejects /dev/sda and any partition labeled ATLAS_RECOV to protect offline secrets.
-# Zero Disk Secrets and Unslop compliant.
+# Guard: Multi-factor validation rejects ATLAS_RECOV (label, UUID, PARTUUID) and host internal NVMe.
+# Invariant: NO PLAINTEXT SECRETS IN REPOSITORY OR BUILD ARTIFACTS. Unslop compliant.
 
 set -euo pipefail
 
@@ -20,11 +20,41 @@ if [[ ! -b "${TARGET_DEV}" ]]; then
     exit 1
 fi
 
-# Safety guard: Prevent accidental overwrite of ATLAS_RECOV or host disks
+# Multi-factor identity inspection
 TARGET_LABEL=$(lsblk -no LABEL "${TARGET_DEV}" 2>/dev/null || blkid -s LABEL -o value "${TARGET_DEV}" 2>/dev/null || true)
-if [[ "${TARGET_LABEL}" == "ATLAS_RECOV" || "${TARGET_DEV}" == "/dev/sda"* ]]; then
-    echo "FATAL: ${TARGET_DEV} (label: ) matches or resides on ATLAS_RECOV." >&2
-    echo "ATLAS_RECOV contains encrypted offline keys and must NEVER be overwritten." >&2
+TARGET_UUID=$(lsblk -no UUID "${TARGET_DEV}" 2>/dev/null || blkid -s UUID -o value "${TARGET_DEV}" 2>/dev/null || true)
+TARGET_PARTUUID=$(lsblk -no PARTUUID "${TARGET_DEV}" 2>/dev/null || blkid -s PARTUUID -o value "${TARGET_DEV}" 2>/dev/null || true)
+TARGET_MOUNTS=$(lsblk -no MOUNTPOINTS "${TARGET_DEV}" 2>/dev/null || true)
+
+# 1. Reject ATLAS_RECOV by label, filesystem UUID, and partition UUID
+KNOWN_ATLAS_RECOV_UUID="669D-4D0E"
+KNOWN_ATLAS_RECOV_PARTUUID="335d7260-01"
+
+if [[ "${TARGET_LABEL}" == "ATLAS_RECOV" || "${TARGET_UUID}" == "${KNOWN_ATLAS_RECOV_UUID}" || "${TARGET_PARTUUID}" == "${KNOWN_ATLAS_RECOV_PARTUUID}" ]]; then
+    echo "FATAL: Target matches ATLAS_RECOV identity (Label: , UUID: , PARTUUID: )." >&2
+    echo "ATLAS_RECOV contains encrypted offline recovery keys and must NEVER be overwritten." >&2
+    exit 1
+fi
+
+# 2. Reject internal NVMe storage and system partitions
+KNOWN_HOST_ROOT_UUID="d27bfd26-ff30-400e-9eca-9cdf73de9406"
+KNOWN_HOST_EFI_UUID="9DA2-3597"
+
+if [[ "${TARGET_DEV}" == *"nvme"* || "${TARGET_UUID}" == "${KNOWN_HOST_ROOT_UUID}" || "${TARGET_UUID}" == "${KNOWN_HOST_EFI_UUID}" ]]; then
+    echo "FATAL: Target ${TARGET_DEV} is an internal host system disk or EFI system partition." >&2
+    exit 1
+fi
+
+# 3. Reject active host mounts
+if [[ -n "${TARGET_MOUNTS}" ]]; then
+    echo "FATAL: Target ${TARGET_DEV} has active mountpoints: ${TARGET_MOUNTS}. Unmount before provisioning." >&2
+    exit 1
+fi
+
+# 4. If target is a disk containing partitions, ensure none of its child partitions match ATLAS_RECOV
+CHILD_IDS=$(lsblk -no LABEL,UUID,PARTUUID "${TARGET_DEV}" 2>/dev/null || true)
+if echo "${CHILD_IDS}" | grep -qE "ATLAS_RECOV|${KNOWN_ATLAS_RECOV_UUID}|${KNOWN_ATLAS_RECOV_PARTUUID}"; then
+    echo "FATAL: Device ${TARGET_DEV} contains partition matching ATLAS_RECOV identity." >&2
     exit 1
 fi
 

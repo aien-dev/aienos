@@ -26,10 +26,6 @@ AIENOS_COMMIT="${commit}" AIENOS_RESTART_SECS=1 cargo build --quiet --release \
     -p aienos-boot --target aarch64-unknown-uefi --features handoff --bin aienos-handoff
 
 work="$(mktemp -d)"
-tpm_dir="${work}/tpm"
-mkdir -p "${tpm_dir}" "${work}/esp/EFI/BOOT" "${work}/esp/EFI/AIENOS"
-touch "${work}/esp/EFI/AIENOS/BOOTREPORT.TXT"
-cp target/aarch64-unknown-uefi/release/aienos-handoff.efi "${work}/esp/EFI/BOOT/BOOTAA64.EFI"
 
 cleanup() {
     if [[ -n "${SWTPM_PID:-}" ]] && kill -0 "${SWTPM_PID}" 2>/dev/null; then
@@ -40,6 +36,11 @@ cleanup() {
 trap cleanup EXIT
 
 echo "=== Subtest 1: Software TPM 2.0 Integration & Live Boot ==="
+tpm_dir="${work}/tpm"
+mkdir -p "${tpm_dir}" "${work}/subtest1/esp/EFI/BOOT" "${work}/subtest1/esp/EFI/AIENOS"
+touch "${work}/subtest1/esp/EFI/AIENOS/BOOTREPORT.TXT"
+cp target/aarch64-unknown-uefi/release/aienos-handoff.efi "${work}/subtest1/esp/EFI/BOOT/BOOTAA64.EFI"
+
 swtpm socket --tpm2 \
     --tpmstate dir="${tpm_dir}" \
     --ctrl type=unixio,path="${tpm_dir}/swtpm-sock" \
@@ -47,8 +48,8 @@ swtpm socket --tpm2 \
 SWTPM_PID=$!
 sleep 1
 
-cp "${vars_fd}" "${work}/vars.fd"
-log="${work}/serial_tpm.log"
+cp "${vars_fd}" "${work}/subtest1/vars.fd"
+log="${work}/subtest1/serial_tpm.log"
 
 set +e
 timeout ${AIENOS_QEMU_TIMEOUT:-120} qemu-system-aarch64 \
@@ -57,44 +58,48 @@ timeout ${AIENOS_QEMU_TIMEOUT:-120} qemu-system-aarch64 \
     -tpmdev emulator,id=tpm0,chardev=chrtpm \
     -device tpm-tis-device,tpmdev=tpm0 \
     -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
-    -drive if=pflash,format=raw,file="${work}/vars.fd" \
-    -drive if=none,id=esp,format=raw,file=fat:rw:"${work}/esp" \
+    -drive if=pflash,format=raw,file="${work}/subtest1/vars.fd" \
+    -drive if=none,id=esp,format=raw,file=fat:rw:"${work}/subtest1/esp" \
     -device virtio-blk-pci,drive=esp \
     -device ramfb -display none -nic none \
     -serial file:"${log}" -no-reboot
 tpm_status=$?
 set -e
 
-tr -d '\r' <"${log}" >"${work}/serial_tpm.txt"
-if grep -q "kernel: alive" "${work}/serial_tpm.txt" && grep -q "report_kind: final" "${work}/serial_tpm.txt"; then
+tr -d "\r" <"${log}" >"${work}/subtest1/serial_tpm.txt"
+if grep -q "kernel: alive" "${work}/subtest1/serial_tpm.txt" && grep -q "report_kind: final" "${work}/subtest1/serial_tpm.txt"; then
     echo "PASS  swTPM live boot reached kernel alive and final report"
 else
     echo "FAIL  swTPM live boot did not complete cleanly"
-    cat "${work}/serial_tpm.txt"
+    cat "${work}/subtest1/serial_tpm.txt"
     exit 1
 fi
 
 echo "=== Subtest 2: Soak Testing (${ITERATIONS} Sequential Boots) ==="
 for i in $(seq 1 "${ITERATIONS}"); do
-    cp "${vars_fd}" "${work}/vars.fd"
-    soak_log="${work}/serial_soak_${i}.log"
+    soak_work="${work}/soak_${i}"
+    mkdir -p "${soak_work}/esp/EFI/BOOT" "${soak_work}/esp/EFI/AIENOS"
+    touch "${soak_work}/esp/EFI/AIENOS/BOOTREPORT.TXT"
+    cp target/aarch64-unknown-uefi/release/aienos-handoff.efi "${soak_work}/esp/EFI/BOOT/BOOTAA64.EFI"
+    cp "${vars_fd}" "${soak_work}/vars.fd"
+    soak_log="${soak_work}/serial_soak.log"
     set +e
     timeout ${AIENOS_QEMU_TIMEOUT:-120} qemu-system-aarch64 \
         -M virt,virtualization=on -cpu max -smp 4 -m 2048 \
         -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
-        -drive if=pflash,format=raw,file="${work}/vars.fd" \
-        -drive if=none,id=esp,format=raw,file=fat:rw:"${work}/esp" \
+        -drive if=pflash,format=raw,file="${soak_work}/vars.fd" \
+        -drive if=none,id=esp,format=raw,file=fat:rw:"${soak_work}/esp" \
         -device virtio-blk-pci,drive=esp \
         -device ramfb -display none -nic none \
         -serial file:"${soak_log}" -no-reboot
     soak_status=$?
     set -e
-    tr -d '\r' <"${soak_log}" >"${work}/serial_soak_${i}.txt"
-    if grep -q "kernel: alive" "${work}/serial_soak_${i}.txt" && grep -q "report_kind: final" "${work}/serial_soak_${i}.txt"; then
+    tr -d "\r" <"${soak_log}" >"${soak_work}/serial_soak.txt"
+    if grep -q "kernel: alive" "${soak_work}/serial_soak.txt" && grep -q "report_kind: final" "${soak_work}/serial_soak.txt"; then
         echo "PASS  Soak run ${i}/${ITERATIONS}: clean boot & reset"
     else
         echo "FAIL  Soak run ${i}/${ITERATIONS} failed"
-        cat "${work}/serial_soak_${i}.txt"
+        cat "${soak_work}/serial_soak.txt"
         exit 1
     fi
 done
@@ -119,7 +124,7 @@ corrupt_status=$?
 set -e
 
 if [[ -f "${corrupt_log}" ]]; then
-    tr -d '\r' <"${corrupt_log}" >"${corrupt_work}/serial_corrupt.txt"
+    tr -d "\r" <"${corrupt_log}" >"${corrupt_work}/serial_corrupt.txt"
     if grep -q "kernel: alive" "${corrupt_work}/serial_corrupt.txt"; then
         echo "FAIL  Corrupted binary unexpectedly reached kernel alive"
         exit 1
