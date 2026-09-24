@@ -38,6 +38,7 @@ use uefi::mem::memory_map::{MemoryMap, MemoryType};
 use uefi::prelude::*;
 use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
 use uefi::proto::media::file::{File, FileAttribute, FileMode};
+use uefi::proto::pci::configuration::ResourceRangeType;
 use uefi::proto::pci::root_bridge::PciRootBridgeIo;
 use uefi::proto::pci::PciIoAddress;
 use uefi::runtime::{ResetType, VariableAttributes, VariableVendor};
@@ -140,10 +141,55 @@ fn save_report_var(bytes: &[u8]) -> Result<u8, &'static str> {
     .map_err(|_| "firmware refused the write")
 }
 
-fn probe_gb10(
+type BridgeScan = aienos_accel::RootBridgeScan;
+type RootOutcome = aienos_accel::RootBridgeOutcome;
+
+/// Outcome of pre-exit GB10 discovery: the identity when found, plus a
+/// bounded record of why it was not (bridges seen, opens refused, segments,
+/// BAR state) so the pre-exit and final reports can say what happened.
+struct Gb10Discovery {
+    identity: Option<aienos_accel::Gb10Identity>,
+    /// Number of handles carrying the `PciRootBridgeIo` protocol, when the
+    /// handle database answered.
+    handles: Option<u16>,
+    roots: [Option<RootOutcome>; MAX_ROOT_BRIDGES],
+}
+
+/// At most this many root bridges are recorded; extras are still searched.
+const MAX_ROOT_BRIDGES: usize = 4;
+
+/// Compact status names for the report (no `Debug` tables in the image).
+fn status_name(status: Status) -> &'static str {
+    match status {
+        Status::ACCESS_DENIED => "ACCESS_DENIED",
+        Status::NOT_FOUND => "NOT_FOUND",
+        Status::INVALID_PARAMETER => "INVALID_PARAMETER",
+        Status::OUT_OF_RESOURCES => "OUT_OF_RESOURCES",
+        Status::UNSUPPORTED => "UNSUPPORTED",
+        _ => "OTHER",
+    }
+}
+
+impl Gb10Discovery {
+    /// Record the outcome of one root bridge, bounded by `MAX_ROOT_BRIDGES`.
+    fn record(&mut self, outcome: RootOutcome) {
+        if let Some(slot) = self.roots.iter_mut().find(|s| s.is_none()) {
+            *slot = Some(outcome);
+        }
+    }
+
+    /// Report lines explaining why no GB10 identity was produced.
+    fn write_diagnostics(&self, out: &mut Report) {
+        aienos_accel::write_discovery_diagnostics(out, self.handles, &self.roots);
+    }
+}
+
+/// Read the config registers needed for the BAR check. `None` when the
+/// vendor/device pair does not match the GB10 or a config read failed.
+fn read_candidate(
     root: &mut PciRootBridgeIo,
     address: PciIoAddress,
-) -> Option<aienos_accel::Gb10Identity> {
+) -> Option<(u32, u32, u32, u32)> {
     let config = |offset| address.with_register(offset);
     let vendor_device = root.pci().read_one::<u32>(config(0)).ok()?;
     if vendor_device != 0x2e12_10de {
@@ -152,7 +198,16 @@ fn probe_gb10(
     let command_status = root.pci().read_one::<u32>(config(4)).ok()?;
     let bar0_low = root.pci().read_one::<u32>(config(0x10)).ok()?;
     let bar0_high = root.pci().read_one::<u32>(config(0x14)).ok()?;
-    let bar = aienos_accel::Gb10Bar::from_config(
+    Some((vendor_device, command_status, bar0_low, bar0_high))
+}
+
+fn probe_gb10(
+    root: &mut PciRootBridgeIo,
+    address: PciIoAddress,
+    scan: &mut BridgeScan,
+) -> Option<aienos_accel::Gb10Identity> {
+    let (vendor_device, command_status, bar0_low, bar0_high) = read_candidate(root, address)?;
+    let bar = match aienos_accel::Gb10Bar::from_config(
         aienos_accel::PciLocation {
             segment: root.segment_nr(),
             bus: address.bus,
@@ -163,7 +218,15 @@ fn probe_gb10(
         command_status,
         bar0_low,
         bar0_high,
-    )?;
+    ) {
+        Some(bar) => bar,
+        None => {
+            // The GB10 was found but its BAR or command register was not
+            // usable; keep the raw values so the report shows the BAR state.
+            scan.rejected_candidate = Some((command_status, bar0_low, bar0_high));
+            return None;
+        }
+    };
     let pmc_boot_0 = root
         .memory()
         .read_one::<u32>(bar.physical_base + aienos_accel::PMC_BOOT_0)
@@ -179,29 +242,136 @@ fn probe_gb10(
     })
 }
 
-fn discover_gb10() -> Option<aienos_accel::Gb10Identity> {
-    let handles = uefi::boot::find_handles::<PciRootBridgeIo>().ok()?;
-    for handle in handles {
-        let Ok(mut root) = uefi::boot::open_protocol_exclusive::<PciRootBridgeIo>(handle) else {
-            continue;
-        };
-        // Config A puts GB10 at segment 15, bus 1, device 0, function 0.
-        // Try that first so the common boot path does not enumerate every bus.
-        if root.segment_nr() == 15 {
-            if let Some(identity) = probe_gb10(&mut root, PciIoAddress::new(1, 0, 0)) {
-                return Some(identity);
+/// Walk every function on one bus of this root bridge.
+/// Returns the GB10 identity when the GB10 is found here.
+fn scan_bus(root: &mut PciRootBridgeIo, bus: u8, scan: &mut BridgeScan) -> Option<aienos_accel::Gb10Identity> {
+    for dev in 0..32u8 {
+        for fun in 0..8u8 {
+            let address = PciIoAddress::new(bus, dev, fun);
+            let config = |offset| address.with_register(offset);
+            let Ok(vendor_device) = root.pci().read_one::<u32>(config(0)) else {
+                continue;
+            };
+            if vendor_device & 0xffff == 0xffff {
+                if fun == 0 {
+                    break; // no function 0: no further functions on this device
+                }
+                continue;
             }
-        }
-        let Ok(tree) = root.enumerate() else {
-            continue;
-        };
-        for address in tree {
-            if let Some(identity) = probe_gb10(&mut root, address) {
-                return Some(identity);
+            scan.devices += 1;
+            if vendor_device == 0x2e12_10de {
+                if let Some(identity) = probe_gb10(root, address, scan) {
+                    return Some(identity);
+                }
+            }
+            let header_type = root
+                .pci()
+                .read_one::<u32>(config(0x0c))
+                .map(|v| ((v >> 16) & 0xff) as u8)
+                .unwrap_or(0);
+            if header_type & 0x7f == 0x01 {
+                scan.bridges += 1;
+                let window = root
+                    .pci()
+                    .read_one::<u32>(config(0x18))
+                    .map(|v| (((v >> 8) & 0xff) as u8, ((v >> 16) & 0xff) as u8))
+                    .unwrap_or((0, 0));
+                if window.0 != 0 && window.1 >= window.0 {
+                    scan.windows += 1;
+                }
+            }
+            if fun == 0 && header_type & 0x80 == 0 {
+                break; // single-function device: skip functions 1..8
             }
         }
     }
     None
+}
+
+/// Read the bus-range resource descriptors of this root bridge, or `None`.
+fn bus_ranges(root: &mut PciRootBridgeIo) -> Option<(u8, u8)> {
+    let mut range: Option<(u8, u8)> = None;
+    for descriptor in root.configuration().ok()? {
+        if descriptor.resource_range_type == ResourceRangeType::Bus {
+            let min = u8::try_from(descriptor.address_min).unwrap_or(u8::MAX);
+            let max = u8::try_from(descriptor.address_max).unwrap_or(u8::MAX);
+            range = Some(match range {
+                Some((lo, hi)) => (lo.min(min), hi.max(max)),
+                None => (min, max),
+            });
+        }
+    }
+    range
+}
+
+/// Scan one root bridge. Returns the GB10 identity and the outcome to record.
+fn scan_root(root: &mut PciRootBridgeIo) -> (Option<aienos_accel::Gb10Identity>, RootOutcome) {
+    let mut scan = BridgeScan {
+        segment: root.segment_nr(),
+        devices: 0,
+        bridges: 0,
+        windows: 0,
+        rejected_candidate: None,
+    };
+    // Config A puts GB10 at segment 15, bus 1, device 0, function 0.
+    // Try that first so the common boot path does not walk every bus.
+    if scan.segment == 15 {
+        if let Some(identity) = probe_gb10(root, PciIoAddress::new(1, 0, 0), &mut scan) {
+            return (Some(identity), RootOutcome::Scanned(scan));
+        }
+    }
+    // No firmware bus descriptors: fall back to the root bus so the scan
+    // still sees devices whose bus numbers firmware never published.
+    let (bus_min, bus_max) = bus_ranges(root).unwrap_or((0, 0));
+    for bus in bus_min..=bus_max {
+        if let Some(identity) = scan_bus(root, bus, &mut scan) {
+            return (Some(identity), RootOutcome::Scanned(scan));
+        }
+    }
+    (None, RootOutcome::Scanned(scan))
+}
+
+fn discover_gb10() -> Gb10Discovery {
+    let mut discovery = Gb10Discovery {
+        identity: None,
+        handles: None,
+        roots: [const { None }; MAX_ROOT_BRIDGES],
+    };
+    let handles = match uefi::boot::find_handles::<PciRootBridgeIo>() {
+        Ok(handles) => handles,
+        Err(_) => return discovery,
+    };
+    discovery.handles = Some(u16::try_from(handles.len()).unwrap_or(u16::MAX));
+    for handle in handles {
+        // Shared (GetProtocol) open: the firmware PCI bus driver holds this
+        // protocol open ByDriver, so an exclusive open is refused with
+        // ACCESS_DENIED. Shared reads are safe here: this boot code only
+        // reads through the protocol, and firmware keeps the protocol
+        // installed until boot services are exited.
+        let mut root = match unsafe {
+            uefi::boot::open_protocol::<PciRootBridgeIo>(
+                OpenProtocolParams {
+                    handle,
+                    agent: uefi::boot::image_handle(),
+                    controller: None,
+                },
+                OpenProtocolAttributes::GetProtocol,
+            )
+        } {
+            Ok(root) => root,
+            Err(e) => {
+                discovery.record(RootOutcome::OpenRefused(status_name(e.status())));
+                continue;
+            }
+        };
+        let (found, outcome) = scan_root(&mut root);
+        discovery.record(outcome);
+        if let Some(identity) = found {
+            discovery.identity = Some(identity);
+            return discovery;
+        }
+    }
+    discovery
 }
 
 /// Reads a firmware ACPI table whose header is at `addr`.
@@ -523,7 +693,8 @@ fn main() -> Status {
     stage(FIRMWARE_ENTRY);
 
     stage(GB10_DISCOVERY);
-    let gb10 = discover_gb10();
+    let gb10_discovery = discover_gb10();
+    let gb10 = gb10_discovery.identity;
 
     stage(ACPI_TOPOLOGY);
     let boot_midr = midr_el1();
@@ -565,6 +736,7 @@ fn main() -> Status {
         }
         None => {
             let _ = writeln!(pre, "gb10: unavailable");
+            gb10_discovery.write_diagnostics(&mut pre);
         }
     }
     write_cpu(&mut pre, cpu, boot_midr, boot_mpidr);
@@ -636,6 +808,9 @@ fn main() -> Status {
     header(&mut report, "final");
     write_index_line(&mut report);
     let _ = write!(report, "{}", kernel_report.as_str());
+    if gb10.is_none() {
+        gb10_discovery.write_diagnostics(&mut report);
+    }
     match progress_saved {
         Ok(_) => {
             let _ = writeln!(report, "progress_record: saved");

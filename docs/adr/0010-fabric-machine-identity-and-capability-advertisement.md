@@ -1,6 +1,8 @@
 # ADR 0010: Fabric Machine Identity and Capability Advertisement
 
-Status: design record, open for early discussion per
+Status: Proposed.
+
+Open for early discussion per
 [issue #37](https://github.com/aien-dev/aienos/issues/37). Not yet accepted.
 Nothing in this record is active before native networking
 ([M6](../MILESTONES.md)) and the preconditions below are met. No code is
