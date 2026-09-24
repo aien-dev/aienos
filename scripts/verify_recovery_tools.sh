@@ -11,18 +11,30 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
-INITRD_IMG="${1:-/tmp/aienos-recovery-standalone-initrd.img}"
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "${WORK_DIR}"' EXIT
 
-if [[ ! -f "${INITRD_IMG}" ]]; then
+# With an argument: inspect exactly that image, and fail if it is missing
+# (never substitute a freshly built one). Without: build a private copy in
+# WORK_DIR, so parallel runs never share a fixed /tmp path and no stale
+# user-owned file is left where a root build would later collide with it.
+if [[ $# -ge 1 ]]; then
+    INITRD_IMG="$1"
+    if [[ ! -f "${INITRD_IMG}" ]]; then
+        echo "FAIL  initrd image not found: ${INITRD_IMG}" >&2
+        exit 1
+    fi
+else
+    INITRD_IMG="${WORK_DIR}/aienos-recovery-standalone-initrd.img"
     echo "Building standalone recovery initrd..."
     bash "${REPO_ROOT}/scripts/build_standalone_recovery_initrd.sh" "${INITRD_IMG}"
 fi
 
-WORK_DIR=$(mktemp -d)
-trap 'rm -rf "${WORK_DIR}"' EXIT
+ROOT_DIR="${WORK_DIR}/root"
+mkdir -p "${ROOT_DIR}"
 
 echo "Extracting ${INITRD_IMG}..."
-gzip -dc "${INITRD_IMG}" | (cd "${WORK_DIR}" && cpio -idm --quiet)
+gzip -dc "${INITRD_IMG}" | (cd "${ROOT_DIR}" && cpio -idm --quiet)
 
 FAILED=0
 check() {
@@ -34,9 +46,9 @@ check() {
     fi
 }
 
-have_file() { [[ -f "${WORK_DIR}/$1" || -x "${WORK_DIR}/$1" || -L "${WORK_DIR}/$1" ]] && echo 1 || echo 0; }
-init_has() { grep -q -- "$1" "${WORK_DIR}/init" 2>/dev/null && echo 1 || echo 0; }
-module_packaged() { grep -qxF "$1.ko" "${WORK_DIR}/etc/aienos-modules.order" 2>/dev/null && echo 1 || echo 0; }
+have_file() { [[ -f "${ROOT_DIR}/$1" || -x "${ROOT_DIR}/$1" || -L "${ROOT_DIR}/$1" ]] && echo 1 || echo 0; }
+init_has() { grep -q -- "$1" "${ROOT_DIR}/init" 2>/dev/null && echo 1 || echo 0; }
+module_packaged() { grep -qxF "$1.ko" "${ROOT_DIR}/etc/aienos-modules.order" 2>/dev/null && echo 1 || echo 0; }
 
 echo ""
 echo "-- required tools for NVMe root mount --"
@@ -62,7 +74,7 @@ check "chroot present" "$(have_file bin/chroot)"
 
 echo ""
 echo "-- init hooks --"
-check "init is executable" "$([[ -x "${WORK_DIR}/init" ]] && echo 1 || echo 0)"
+check "init is executable" "$([[ -x "${ROOT_DIR}/init" ]] && echo 1 || echo 0)"
 check "init keeps zero-disk test mode (aienos.test=1)" "$(init_has 'aienos.test=1')"
 check "init reports EFI boot entries (efibootmgr)" "$(init_has 'efibootmgr')"
 check "init drops into an interactive maintenance shell" "$(init_has 'exec /bin/sh')"
