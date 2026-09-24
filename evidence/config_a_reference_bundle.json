@@ -1,340 +1,134 @@
 {
-  "schema_version": "2.0.0",
-  "generated_at_utc": "2026-09-23T23:10:08.215161+00:00",
-  "config_identity": {
-    "host": "spark-b87b",
-    "kernel": "7.0.0-1019-nvidia",
-    "architecture": "aarch64",
-    "os_distribution": "Ubuntu 24.04.5 LTS",
-    "kernel_command_line": "BOOT_IMAGE=/boot/vmlinuz-7.0.0-1019-nvidia root=UUID=d27bfd26-ff30-400e-9eca-9cdf73de9406 ro init_on_alloc=0 iommu.passthrough=0 console=tty0 plymouth.ignore-serial-consoles plymouth.use-simpledrm earlycon=uart,mmio32,0x16A00000 console=tty0 console=ttyS0,921600 crashkernel=1G-:0M quiet splash initcall_blacklist=tegra234_cbb_init pci=pcie_bus_safe vt.handoff=7"
-  },
-  "machine_capsule": {
-    "firmware": {
-      "uefi_present": true,
-      "platform_bits": "64"
-    },
-    "cpu": {
-      "models": [
-        "0xd85",
-        "0xd87"
-      ],
-      "cores": 20,
-      "architecture": "aarch64"
-    },
-    "accelerator": [
-      {
-        "model": "NVIDIA GB10",
-        "driver_version": "580.173.02",
-        "pci_bus_id": "0000000F:01:00.0"
-      }
-    ],
-    "memory": {
-      "total_kb": 127598748,
-      "swap_kb": 0
-    },
-    "storage": {
-      "root_available_bytes": 1868129050624,
-      "block_devices": {
-        "blockdevices": [
-          {
-            "name": "loop0",
-            "type": "loop",
-            "size": "4K",
-            "model": null,
-            "mountpoints": [
-              "/snap/bare/5"
-            ]
-          },
-          {
-            "name": "loop1",
-            "type": "loop",
-            "size": "69M",
-            "model": null,
-            "mountpoints": [
-              "/snap/core22/2438"
-            ]
-          },
-          {
-            "name": "loop2",
-            "type": "loop",
-            "size": "69M",
-            "model": null,
-            "mountpoints": [
-              "/snap/core22/2956"
-            ]
-          },
-          {
-            "name": "loop3",
-            "type": "loop",
-            "size": "61.8M",
-            "model": null,
-            "mountpoints": [
-              "/snap/core24/2125"
-            ]
-          },
-          {
-            "name": "loop4",
-            "type": "loop",
-            "size": "61.9M",
-            "model": null,
-            "mountpoints": [
-              "/snap/core24/1644"
-            ]
-          },
-          {
-            "name": "loop6",
-            "type": "loop",
-            "size": "10.2M",
-            "model": null,
-            "mountpoints": [
-              "/snap/firmware-updater/168"
-            ]
-          },
-          {
-            "name": "loop7",
-            "type": "loop",
-            "size": "503.1M",
-            "model": null,
-            "mountpoints": [
-              "/snap/gnome-42-2204/264"
-            ]
-          },
-          {
-            "name": "loop8",
-            "type": "loop",
-            "size": "15.6M",
-            "model": null,
-            "mountpoints": [
-              "/snap/firmware-updater/227"
-            ]
-          },
-          {
-            "name": "loop9",
-            "type": "loop",
-            "size": "188.2M",
-            "model": null,
-            "mountpoints": [
-              "/snap/mesa-2404/1836"
-            ]
-          },
-          {
-            "name": "loop10",
-            "type": "loop",
-            "size": "552.9M",
-            "model": null,
-            "mountpoints": [
-              "/snap/gnome-46-2404/154"
-            ]
-          },
-          {
-            "name": "loop11",
-            "type": "loop",
-            "size": "91.7M",
-            "model": null,
-            "mountpoints": [
-              "/snap/gtk-common-themes/1535"
-            ]
-          },
-          {
-            "name": "loop12",
-            "type": "loop",
-            "size": "12.2M",
-            "model": null,
-            "mountpoints": [
-              "/snap/snap-store/1217"
-            ]
-          },
-          {
-            "name": "loop13",
-            "type": "loop",
-            "size": "249.8M",
-            "model": null,
-            "mountpoints": [
-              "/snap/firefox/8968"
-            ]
-          },
-          {
-            "name": "loop14",
-            "type": "loop",
-            "size": "43.4M",
-            "model": null,
-            "mountpoints": [
-              "/snap/snapd/27709"
-            ]
-          },
-          {
-            "name": "loop15",
-            "type": "loop",
-            "size": "43.5M",
-            "model": null,
-            "mountpoints": [
-              "/snap/snapd/27740"
-            ]
-          },
-          {
-            "name": "loop16",
-            "type": "loop",
-            "size": "552K",
-            "model": null,
-            "mountpoints": [
-              "/snap/snapd-desktop-integration/316"
-            ]
-          },
-          {
-            "name": "loop17",
-            "type": "loop",
-            "size": "804K",
-            "model": null,
-            "mountpoints": [
-              "/snap/snapd-desktop-integration/396"
-            ]
-          },
-          {
-            "name": "loop18",
-            "type": "loop",
-            "size": "249.7M",
-            "model": null,
-            "mountpoints": [
-              "/snap/firefox/8926"
-            ]
-          },
-          {
-            "name": "loop19",
-            "type": "loop",
-            "size": "214.7M",
-            "model": null,
-            "mountpoints": [
-              "/snap/thunderbird/1256"
-            ]
-          },
-          {
-            "name": "loop20",
-            "type": "loop",
-            "size": "215.2M",
-            "model": null,
-            "mountpoints": [
-              "/snap/thunderbird/1261"
-            ]
-          },
-          {
-            "name": "loop21",
-            "type": "loop",
-            "size": "73.7M",
-            "model": null,
-            "mountpoints": [
-              "/snap/snap-store/1420"
-            ]
-          },
-          {
-            "name": "loop22",
-            "type": "loop",
-            "size": "561.1M",
-            "model": null,
-            "mountpoints": [
-              "/snap/gnome-46-2404/169"
-            ]
-          },
-          {
-            "name": "nvme0n1",
-            "type": "disk",
-            "size": "3.7T",
-            "model": "SAMSUNG MZALC4T0HBL1-00B07",
-            "mountpoints": [
-              null
-            ],
-            "children": [
-              {
-                "name": "nvme0n1p1",
-                "type": "part",
-                "size": "298M",
-                "model": null,
-                "mountpoints": [
-                  "/boot/efi"
-                ]
-              },
-              {
-                "name": "nvme0n1p2",
-                "type": "part",
-                "size": "3.7T",
-                "model": null,
-                "mountpoints": [
-                  "/"
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    }
-  },
-  "toolchains": {
-    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
-    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
-    "python": "3.12.3",
-    "cuda_compiler_release": "13.0"
-  },
   "baseline_model": {
     "path": "/home/drakestapleton/models/aien-mail/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-    "size_bytes": 807694368,
-    "sha256": "3f5a22426976ab26cfe84dba63c1d08391717abb1af893e10f1b2968d862dcc1"
+    "sha256": "3f5a22426976ab26cfe84dba63c1d08391717abb1af893e10f1b2968d862dcc1",
+    "size_bytes": 807694368
+  },
+  "bundle_checksum_sha256": "5124beef2252b873c21ecbb9618044ba1d0514e9d7e294444dbfd9a61dfc74ed",
+  "capture_tool": {
+    "name": "aienos-evidence",
+    "version": "0.1.0"
+  },
+  "config_identity": {
+    "architecture": "aarch64",
+    "host": "spark-b87b",
+    "kernel": "7.0.0-1019-nvidia",
+    "kernel_command_line": "BOOT_IMAGE=/boot/vmlinuz-7.0.0-1019-nvidia root=UUID=d27bfd26-ff30-400e-9eca-9cdf73de9406 ro init_on_alloc=0 iommu.passthrough=0 console=tty0 plymouth.ignore-serial-consoles plymouth.use-simpledrm earlycon=uart,mmio32,0x16A00000 console=tty0 console=ttyS0,921600 crashkernel=1G-:0M quiet splash initcall_blacklist=tegra234_cbb_init pci=pcie_bus_safe vt.handoff=7",
+    "os_distribution": "Ubuntu 24.04.5 LTS"
+  },
+  "generated_at_utc": "2026-09-24T00:28:37Z",
+  "machine_capsule": {
+    "accelerators": [
+      {
+        "class": "0x030000",
+        "driver": "nvidia",
+        "driver_version": "580.173.02",
+        "pci_bus_id": "000f:01:00.0",
+        "vendor_device": "10de:2e12"
+      }
+    ],
+    "block_devices": [
+      {
+        "model": "SAMSUNG MZALC4T0HBL1-00B07",
+        "name": "nvme0n1",
+        "size_bytes": 4096805658624
+      }
+    ],
+    "cpu": {
+      "architecture": "aarch64",
+      "cores": 20,
+      "parts": {
+        "0xd85": 10,
+        "0xd87": 10
+      }
+    },
+    "firmware": {
+      "platform_bits": "64",
+      "uefi_present": true
+    },
+    "memory": {
+      "swap_kb": 0,
+      "total_kb": 127598748
+    }
+  },
+  "recovery_procedure": {
+    "native_boot_rollback_tested": false,
+    "status": "documented_only"
+  },
+  "reference_workload": {
+    "endpoint": "http://127.0.0.1:18094/v1",
+    "max_tokens": 256,
+    "model": "unsloth/Llama-3.2-1B-Instruct",
+    "prompt": "Explain in about two hundred words how a copy-on-write page table lets two processes share memory until one of them writes, and what the kernel does on that first write.",
+    "samples": [
+      {
+        "decode_tokens_per_second": 52.101,
+        "index": 0,
+        "output_tokens": 256,
+        "total_ms": 5020.417,
+        "ttft_ms": 126.062
+      },
+      {
+        "decode_tokens_per_second": 53.601,
+        "index": 1,
+        "output_tokens": 256,
+        "total_ms": 4892.718,
+        "ttft_ms": 135.307
+      },
+      {
+        "decode_tokens_per_second": 55.007,
+        "index": 2,
+        "output_tokens": 256,
+        "total_ms": 4756.065,
+        "ttft_ms": 120.265
+      },
+      {
+        "decode_tokens_per_second": 53.533,
+        "index": 3,
+        "output_tokens": 256,
+        "total_ms": 4881.566,
+        "ttft_ms": 118.176
+      },
+      {
+        "decode_tokens_per_second": 56.918,
+        "index": 4,
+        "output_tokens": 256,
+        "total_ms": 4596.281,
+        "ttft_ms": 116.121
+      }
+    ],
+    "temperature": 0,
+    "warmup_samples": 1
+  },
+  "schema_version": "3.0.0",
+  "toolchains": {
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)"
   },
   "workspace_repositories": [
     {
-      "name": "aienos-repo",
-      "commit": "f6350b548cccc53ec03825021112be75c2b30667",
-      "branch": "feat/aienos-m1-integration",
-      "dirty": true
+      "branch": "feat/rust-evidence-tool",
+      "commit": "e01987306f44f6044d94f5129c1bbff24ef20820",
+      "dirty": false,
+      "name": "aienos"
     },
     {
-      "name": "aegis-runtime",
-      "commit": "e8eed5aac8612c1b846284c09d58e798e382c11b",
+      "branch": null,
+      "commit": "640a0ebb7969d7f2c3dbfd61a8f6ebd5e1e27611",
+      "dirty": false,
+      "name": "aien-sovereign-core"
+    },
+    {
       "branch": "fix/rust-simd-oracle",
-      "dirty": false
+      "commit": "e8eed5aac8612c1b846284c09d58e798e382c11b",
+      "dirty": false,
+      "name": "aegis-runtime"
     },
     {
-      "name": "aien-sovereign-core",
-      "commit": "c83eb5b2f96b3d0a36fcb5092fcf0d66af5dd0d0",
-      "branch": "docs/readme-restructure",
-      "dirty": true
-    },
-    {
-      "name": "spark-sentinel",
-      "commit": "f5a8546016cbb31982ace7fda91ace3ce7f335e6",
       "branch": "main",
-      "dirty": false
+      "commit": "f5a8546016cbb31982ace7fda91ace3ce7f335e6",
+      "dirty": false,
+      "name": "spark-sentinel"
     }
-  ],
-  "reference_workload": {
-    "endpoint": "http://127.0.0.1:18094/v1",
-    "model": "unsloth/Llama-3.2-1B-Instruct",
-    "prompt": "Reply with one word: ready",
-    "samples": [
-      {
-        "index": 0,
-        "ttft_ms": 85.445,
-        "total_ms": 99.962,
-        "output_tokens": 2,
-        "output_tokens_per_second": 20.008
-      },
-      {
-        "index": 1,
-        "ttft_ms": 86.248,
-        "total_ms": 102.887,
-        "output_tokens": 2,
-        "output_tokens_per_second": 19.439
-      },
-      {
-        "index": 2,
-        "ttft_ms": 84.974,
-        "total_ms": 103.17,
-        "output_tokens": 2,
-        "output_tokens_per_second": 19.385
-      }
-    ]
-  },
-  "recovery_procedure": {
-    "status": "documented_only",
-    "native_boot_rollback_tested": false
-  },
-  "bundle_checksum_sha256": "d642a2724e9b27ca480883d14a00e6c2ab80d7c605b75ced457f6cafbdff78f1"
+  ]
 }

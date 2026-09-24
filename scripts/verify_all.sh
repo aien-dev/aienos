@@ -43,14 +43,14 @@ cargo build -p aienos-kernel --target aarch64-unknown-none --no-default-features
 echo ""
 echo "--- [AArch64 UEFI Image Builds] ---"
 cargo build --release -p aienos-boot --target aarch64-unknown-uefi --features firmware --bin aienos-boot
-python3 scripts/verify_uefi_image.py target/aarch64-unknown-uefi/release/aienos-boot.efi
+cargo run --quiet --release -p aienos-evidence -- verify-efi target/aarch64-unknown-uefi/release/aienos-boot.efi
 cargo build --release -p aienos-boot --target aarch64-unknown-uefi --features handoff --bin aienos-handoff
-python3 scripts/verify_uefi_image.py target/aarch64-unknown-uefi/release/aienos-handoff.efi
+cargo run --quiet --release -p aienos-evidence -- verify-efi target/aarch64-unknown-uefi/release/aienos-handoff.efi
 
 echo ""
 echo "============================================================"
 echo "HOST VERIFICATIONS PASSED."
-echo "Config A: observed capture and three local inference samples verified."
+echo "Config A: observed capture verified. M0 stays open until native-boot rollback is tested."
 echo "Kernel: aarch64-unknown-none library compiles. Native boot remains untested."
 echo "UEFI: diagnostic and GB10-discovering handoff images build; hardware boot remains untested."
 echo "============================================================"
