@@ -45,6 +45,9 @@ use uefi::runtime::{ResetType, VariableAttributes, VariableVendor};
 use uefi::table::cfg::ConfigTableEntry;
 use uefi::{cstr16, guid, CStr16};
 
+#[cfg(feature = "usb-keyboard")]
+mod usb_keyboard;
+
 /// Commit this image was built from; `scripts/stage_one_time_boot.sh` sets it.
 const COMMIT: &str = match option_env!("AIENOS_COMMIT") {
     Some(commit) => commit,
@@ -396,6 +399,8 @@ unsafe fn table_at<'a>(addr: usize) -> Option<&'a [u8]> {
 struct AcpiFacts {
     cpu: Option<acpi::CpuTopology>,
     spcr: Option<acpi::SpcrConsole>,
+    #[cfg(feature = "usb-keyboard")]
+    mcfg: Option<&'static [u8]>,
 }
 
 fn discover_acpi(boot_mpidr: u64) -> AcpiFacts {
@@ -430,6 +435,8 @@ fn discover_acpi(boot_mpidr: u64) -> AcpiFacts {
         match &table[..4] {
             b"APIC" => facts.cpu = acpi::madt_cpu_topology_for(table, Some(boot_mpidr)).ok(),
             b"SPCR" => facts.spcr = acpi::spcr_console(table).ok(),
+            #[cfg(feature = "usb-keyboard")]
+            b"MCFG" => facts.mcfg = Some(table),
             _ => {}
         }
     }
@@ -706,6 +713,8 @@ fn main() -> Status {
     stage(FRAMEBUFFER_DISCOVERY);
     let framebuffer = discover_framebuffer();
     *FRAMEBUFFER.lock() = framebuffer;
+    #[cfg(feature = "usb-keyboard")]
+    let xhci = usb_keyboard::find_xhci();
 
     let mut pre = Report::new();
     header(&mut pre, "pre_exit");
@@ -878,5 +887,7 @@ fn main() -> Status {
             let _ = writeln!(s, "boot halted: no usable memory region");
         }
     }
+    #[cfg(feature = "usb-keyboard")]
+    usb_keyboard::run(xhci, acpi_facts.mcfg, &mut screen);
     finish(screen)
 }
