@@ -163,7 +163,10 @@ mod tests {
             "gb10_pci_root[1]: segment 15 devices 4 bridges 1 windows 1",
             "gb10_pci_candidate[1]: command_status 0x00100004 bar0 0x00000000:0x00000000",
         ] {
-            assert!(text.lines().any(|l| l == line), "missing {line:?} in:\n{text}");
+            assert!(
+                text.lines().any(|l| l == line),
+                "missing {line:?} in:\n{text}"
+            );
         }
 
         let mut text = String::new();

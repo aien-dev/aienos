@@ -52,6 +52,81 @@ pub fn current_el() -> u8 {
     }
 }
 
+/// True when running at EL1 with stage-1 translation on (SCTLR_EL1.M set).
+pub fn el1_mmu_enabled() -> bool {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if current_el() != 1 {
+            return false;
+        }
+        let sctlr: u64;
+        unsafe {
+            core::arch::asm!("mrs {0}, sctlr_el1", out(reg) sctlr, options(nomem, nostack));
+        }
+        sctlr & 1 != 0
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        false
+    }
+}
+
+/// Configure stage-1 translation and enter EL1h using an identity-mapped root.
+/// The caller must ensure the current PC, stack, code, and data are mapped.
+///
+/// # Safety
+/// `root` must reference a valid 4 KiB-granule EL1 table tree whose identity
+/// mappings cover this function, its caller, the active stack, and all live data.
+pub unsafe fn enter_el1h_mmu(root: usize, mair: u64, tcr: u64, sctlr: u64) -> bool {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if current_el() != 2 {
+            return false;
+        }
+        core::arch::asm!(
+            "msr daifset, #0xf",
+            "mov x9, sp",
+            "msr sp_el1, x9",
+            "mov x9, #0x80000000",
+            "msr hcr_el2, x9",
+            "mov x9, #0x33ff",
+            "msr cptr_el2, x9",
+            "mov x9, #3",
+            "msr cnthctl_el2, x9",
+            "msr cntvoff_el2, xzr",
+            "mov x9, #0x300000",
+            "msr cpacr_el1, x9",
+            "msr mair_el1, x1",
+            "msr tcr_el1, x2",
+            "msr ttbr0_el1, x0",
+            "tlbi vmalle1",
+            "dsb ish",
+            "isb",
+            "msr sctlr_el1, x3",
+            "isb",
+            "mov x9, #0x3c5",
+            "msr spsr_el2, x9",
+            "adr x9, 2f",
+            "msr elr_el2, x9",
+            "isb",
+            "eret",
+            "2:",
+            in("x0") root as u64,
+            in("x1") mair,
+            in("x2") tcr,
+            in("x3") sctlr,
+            lateout("x9") _,
+            options(nostack)
+        );
+        true
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        let _ = (root, mair, tcr, sctlr);
+        false
+    }
+}
+
 /// Read the architectural virtual counter. Its frequency is reported by `counter_frequency_hz`.
 #[inline(always)]
 pub fn counter_ticks() -> u64 {

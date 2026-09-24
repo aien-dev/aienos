@@ -38,6 +38,15 @@ pub struct XhciLocation {
     mmio: u64,
 }
 
+impl XhciLocation {
+    pub fn mmio_base(self) -> u64 {
+        self.mmio
+    }
+    pub fn ecam_location(self) -> (u16, u8) {
+        (self.segment, self.bus)
+    }
+}
+
 /// Walk every root bridge for the first xHCI controller (pre-exit only).
 pub fn find_xhci() -> Option<XhciLocation> {
     for handle in uefi::boot::find_handles::<PciRootBridgeIo>().ok()? {

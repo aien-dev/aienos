@@ -21,6 +21,8 @@
 //!   /boot/efi/EFI/AIENOS/BOOTREPORT.TXT
 //!   /sys/firmware/efi/efivars/AienosBootReportV1-a1e05b0e-7c3d-4f51-9b6a-2d8e4c1f0a37
 
+extern crate alloc;
+
 use aienos_kernel::acpi;
 use aienos_kernel::arch::aarch64::{
     counter_frequency_hz, counter_ticks, midr_el1, midr_part, mpidr_el1, psci_system_reset,
@@ -29,14 +31,19 @@ use aienos_kernel::boot::{BootTiming, MemoryMapSummary};
 use aienos_kernel::console::EarlyConsole;
 use aienos_kernel::display::{FramebufferInfo, PixelOrder, Screen, ACCENT, FOREGROUND};
 use aienos_kernel::fatal::{self, FaultInfo};
+use aienos_kernel::mem::frame_allocator::PhysAddr;
+use aienos_kernel::mem::map_plan::{self, AddressRange, EfiMemoryDescriptor};
+use aienos_kernel::mem::pagetable::{FixedFramePool, PageTableBuilder, TableMemory};
 use aienos_kernel::report::ReportBuf;
 use aienos_kernel::sync::spinlock::SpinLock;
+use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
 use uefi::prelude::*;
 use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
+use uefi::proto::loaded_image::LoadedImage;
 use uefi::proto::media::file::{File, FileAttribute, FileMode};
 use uefi::proto::pci::configuration::ResourceRangeType;
 use uefi::proto::pci::root_bridge::PciRootBridgeIo;
@@ -44,6 +51,201 @@ use uefi::proto::pci::PciIoAddress;
 use uefi::runtime::{ResetType, VariableAttributes, VariableVendor};
 use uefi::table::cfg::ConfigTableEntry;
 use uefi::{cstr16, guid, CStr16};
+
+const PT_POOL_PAGES: usize = 256;
+const POST_EXIT_HEAP_PAGES: usize = 1024;
+static POST_EXIT_HEAP: AtomicU64 = AtomicU64::new(0);
+static POST_EXIT_HEAP_USED: AtomicU64 = AtomicU64::new(0);
+static BOOT_SERVICES_LIVE: AtomicBool = AtomicBool::new(true);
+
+struct BootHeap;
+unsafe impl GlobalAlloc for BootHeap {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if BOOT_SERVICES_LIVE.load(Ordering::Acquire) {
+            return unsafe { GlobalAlloc::alloc(&uefi::allocator::Allocator, layout) };
+        }
+        let base = POST_EXIT_HEAP.load(Ordering::Acquire) as usize;
+        if base == 0 {
+            return core::ptr::null_mut();
+        }
+        let mut old = POST_EXIT_HEAP_USED.load(Ordering::Relaxed) as usize;
+        loop {
+            let aligned = match (base + old).checked_add(layout.align() - 1) {
+                Some(v) => v & !(layout.align() - 1),
+                None => return core::ptr::null_mut(),
+            };
+            let next = match aligned.checked_add(layout.size()) {
+                Some(v) => v - base,
+                None => return core::ptr::null_mut(),
+            };
+            if next > POST_EXIT_HEAP_PAGES * 4096 {
+                return core::ptr::null_mut();
+            }
+            match POST_EXIT_HEAP_USED.compare_exchange_weak(
+                old as u64,
+                next as u64,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return aligned as *mut u8,
+                Err(v) => old = v as usize,
+            }
+        }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        if BOOT_SERVICES_LIVE.load(Ordering::Acquire) {
+            unsafe { GlobalAlloc::dealloc(&uefi::allocator::Allocator, ptr, layout) };
+        }
+    }
+}
+#[global_allocator]
+static ALLOCATOR: BootHeap = BootHeap;
+
+struct PhysicalTableMemory;
+impl TableMemory for PhysicalTableMemory {
+    fn read_entry(&self, table: PhysAddr, index: usize) -> Option<u64> {
+        if index >= 512 {
+            return None;
+        }
+        Some(unsafe { core::ptr::read_volatile((table.0 as *const u64).add(index)) })
+    }
+    fn write_entry(&mut self, table: PhysAddr, index: usize, value: u64) -> bool {
+        if index >= 512 {
+            return false;
+        }
+        unsafe { core::ptr::write_volatile((table.0 as *mut u64).add(index), value) };
+        true
+    }
+}
+
+fn runtime_attributes() -> Option<alloc::vec::Vec<aienos_kernel::mem::map_plan::RuntimeAttributes>>
+{
+    let mut table = None;
+    uefi::system::with_config_table(|entries| {
+        if let Some(entry) = entries
+            .iter()
+            .find(|e| e.guid == ConfigTableEntry::MEMORY_ATTRIBUTES_GUID)
+        {
+            table = Some(entry.address.cast::<u8>());
+        }
+    });
+    let ptr = table?;
+    let header = unsafe { core::slice::from_raw_parts(ptr, 16) };
+    let count = u32::from_le_bytes(header[4..8].try_into().ok()?) as usize;
+    let stride = u32::from_le_bytes(header[8..12].try_into().ok()?) as usize;
+    let length = 16usize.checked_add(count.checked_mul(stride)?)?;
+    if length > 1 << 20 {
+        return None;
+    }
+    let bytes = unsafe { core::slice::from_raw_parts(ptr, length) };
+    aienos_kernel::uefi::parse_memory_attributes_table(bytes).ok()
+}
+
+fn clean_table_pool(base: usize, bytes: usize) {
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        let ctr: u64;
+        core::arch::asm!("mrs {0}, ctr_el0", out(reg) ctr, options(nomem, nostack));
+        let line = 4usize << ((ctr >> 16) & 0xf);
+        for address in (base..base + bytes).step_by(line) {
+            core::arch::asm!("dc cvac, {0}", in(reg) address, options(nostack));
+        }
+        core::arch::asm!("dsb ish", options(nostack));
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    let _ = (base, bytes);
+}
+
+fn enter_kernel_mmu(
+    memory_map: &impl MemoryMap,
+    pool_base: usize,
+    image: AddressRange,
+    sections: &[aienos_kernel::mem::map_plan::PeSection],
+    attrs: Option<&[aienos_kernel::mem::map_plan::RuntimeAttributes]>,
+    framebuffer: Option<FramebufferInfo>,
+    uart: Option<acpi::SpcrConsole>,
+    xhci_mmio: Option<u64>,
+    ecam: Option<AddressRange>,
+) -> (usize, usize, bool) {
+    let descriptors: alloc::vec::Vec<_> = memory_map
+        .entries()
+        .map(|d| EfiMemoryDescriptor {
+            memory_type: d.ty.0,
+            phys_start: d.phys_start,
+            page_count: d.page_count,
+            attribute: d.att.bits(),
+        })
+        .collect();
+    let mut mmio = alloc::vec::Vec::new();
+    if let Some(fb) = framebuffer {
+        mmio.push(AddressRange {
+            start: fb.base & !4095,
+            length: (fb.size_bytes + (fb.base & 4095) + 4095) & !4095,
+        });
+    }
+    if let Some(console) = uart {
+        mmio.push(AddressRange {
+            start: console.base & !4095,
+            length: 4096,
+        });
+    }
+    if let Some(base) = xhci_mmio {
+        mmio.push(AddressRange {
+            start: base & !4095,
+            length: 0x10000,
+        });
+    }
+    if let Some(range) = ecam {
+        mmio.push(range);
+    }
+    let (plan, decision) =
+        map_plan::build_map_plan(&descriptors, image.start, image, sections, attrs, &mmio)
+            .expect("identity map plan rejected firmware layout");
+    let pool =
+        FixedFramePool::new(PhysAddr(pool_base), PT_POOL_PAGES).expect("invalid page table pool");
+    let mut tables = PageTableBuilder::new(pool, PhysicalTableMemory)
+        .expect("page table root allocation failed");
+    for mapping in plan {
+        tables
+            .map(
+                mapping.range.start as usize,
+                PhysAddr(mapping.range.start as usize),
+                mapping.range.length as usize,
+                mapping.flags,
+            )
+            .expect("identity mapping failed");
+    }
+    let root = tables.root().0;
+    let used = tables.frames_used().unwrap_or(0);
+    clean_table_pool(pool_base, PT_POOL_PAGES * 4096);
+    let parange: u64;
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        core::arch::asm!("mrs {0}, id_aa64mmfr0_el1", out(reg) parange, options(nomem, nostack));
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        parange = 5;
+    }
+    let entered = unsafe {
+        aienos_kernel::arch::aarch64::enter_el1h_mmu(
+            root,
+            map_plan::mair_el1(),
+            map_plan::tcr_el1((parange & 0xf) as u8),
+            map_plan::sctlr_el1(),
+        )
+    };
+    if !entered {
+        // Not at EL2: the kernel must not continue on firmware's translation.
+        aienos_kernel::arch::aarch64::halt();
+    }
+    fatal::install_exception_vectors();
+    (
+        used,
+        root,
+        decision == Some(map_plan::RuntimeDecision::RuntimeCodeRxUnsplit),
+    )
+}
 
 #[cfg(feature = "usb-keyboard")]
 mod usb_keyboard;
@@ -247,7 +449,11 @@ fn probe_gb10(
 
 /// Walk every function on one bus of this root bridge.
 /// Returns the GB10 identity when the GB10 is found here.
-fn scan_bus(root: &mut PciRootBridgeIo, bus: u8, scan: &mut BridgeScan) -> Option<aienos_accel::Gb10Identity> {
+fn scan_bus(
+    root: &mut PciRootBridgeIo,
+    bus: u8,
+    scan: &mut BridgeScan,
+) -> Option<aienos_accel::Gb10Identity> {
     for dev in 0..32u8 {
         for fun in 0..8u8 {
             let address = PciIoAddress::new(bus, dev, fun);
@@ -713,6 +919,31 @@ fn main() -> Status {
     stage(FRAMEBUFFER_DISCOVERY);
     let framebuffer = discover_framebuffer();
     *FRAMEBUFFER.lock() = framebuffer;
+    let (loaded_base, loaded_size) =
+        uefi::boot::open_protocol_exclusive::<LoadedImage>(uefi::boot::image_handle())
+            .expect("LoadedImage protocol unavailable")
+            .info();
+    let loaded_base = loaded_base as usize;
+    let loaded_size = usize::try_from(loaded_size).expect("loaded image too large");
+    let image_bytes = unsafe { core::slice::from_raw_parts(loaded_base as *const u8, loaded_size) };
+    let sections = aienos_kernel::pe::parse_pe_sections(image_bytes, loaded_base as u64)
+        .expect("loaded PE section table invalid");
+    let runtime_attrs = runtime_attributes();
+    let pt_pool = uefi::boot::allocate_pages(
+        uefi::boot::AllocateType::AnyPages,
+        MemoryType::LOADER_DATA,
+        PT_POOL_PAGES,
+    )
+    .expect("page table pool allocation failed")
+    .as_ptr() as usize;
+    let post_exit_heap = uefi::boot::allocate_pages(
+        uefi::boot::AllocateType::AnyPages,
+        MemoryType::LOADER_DATA,
+        POST_EXIT_HEAP_PAGES,
+    )
+    .expect("post-exit heap allocation failed")
+    .as_ptr() as usize;
+    POST_EXIT_HEAP.store(post_exit_heap as u64, Ordering::Release);
     #[cfg(feature = "usb-keyboard")]
     let xhci = usb_keyboard::find_xhci();
 
@@ -771,11 +1002,43 @@ fn main() -> Status {
     }
     stage(PRE_EXIT_SAVED);
 
-    // After this point only runtime services (variables, reset) are used. The
-    // returned map owns its backing allocation and stays live below.
+    // The firmware map and every buffer used below remain identity-mapped.
     stage(EXIT_BOOT_SERVICES);
     let memory_map = unsafe { uefi::boot::exit_boot_services(None) };
+    BOOT_SERVICES_LIVE.store(false, Ordering::Release);
     EXITED.store(true, Ordering::SeqCst);
+
+    let (pt_frames_used, _, runtime_rx_unsplit) = enter_kernel_mmu(
+        &memory_map,
+        pt_pool,
+        AddressRange {
+            start: loaded_base as u64,
+            length: loaded_size as u64,
+        },
+        &sections,
+        runtime_attrs.as_deref(),
+        framebuffer,
+        acpi_facts.spcr,
+        #[cfg(feature = "usb-keyboard")]
+        xhci.map(|x| x.mmio_base()),
+        #[cfg(not(feature = "usb-keyboard"))]
+        None,
+        #[cfg(feature = "usb-keyboard")]
+        xhci.and_then(|x| {
+            let (segment, bus) = x.ecam_location();
+            acpi_facts.mcfg.and_then(|t| {
+                acpi::mcfg_window(t, segment, bus)
+                    .ok()
+                    .flatten()
+                    .map(|w| AddressRange {
+                        start: w.base,
+                        length: (u64::from(w.end_bus) - u64::from(w.start_bus) + 1) << 20,
+                    })
+            })
+        }),
+        #[cfg(not(feature = "usb-keyboard"))]
+        None,
+    );
 
     fatal::set_fault_hook(on_fault);
     fatal::install_exception_vectors();
@@ -816,6 +1079,29 @@ fn main() -> Status {
     let mut report = Report::new();
     header(&mut report, "final");
     write_index_line(&mut report);
+    // Measured, not asserted: read the live exception level and SCTLR_EL1.M.
+    let el = aienos_kernel::arch::aarch64::current_el();
+    if el == 1 {
+        let _ = writeln!(report, "kernel_el: EL1h");
+    } else {
+        let _ = writeln!(report, "kernel_el: unexpected EL{el}");
+    }
+    let mmu_on = aienos_kernel::arch::aarch64::el1_mmu_enabled();
+    let _ = writeln!(
+        report,
+        "mmu: {}",
+        if mmu_on { "enabled" } else { "disabled" }
+    );
+    let _ = writeln!(report, "pt_frames_used: {pt_frames_used}");
+    let _ = writeln!(
+        report,
+        "runtime_code: {}",
+        if runtime_rx_unsplit {
+            "rx-unsplit"
+        } else {
+            "mat-split"
+        }
+    );
     let _ = write!(report, "{}", kernel_report.as_str());
     if gb10.is_none() {
         gb10_discovery.write_diagnostics(&mut report);
