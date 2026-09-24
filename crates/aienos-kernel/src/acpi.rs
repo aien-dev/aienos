@@ -262,6 +262,96 @@ pub fn madt_cpu_topology_for(
 /// MCFG allocations start after the header and 8 reserved bytes.
 const MCFG_ENTRIES_OFFSET: usize = 44;
 const MCFG_ENTRY_LEN: usize = 16;
+const IORT_NODE_HEADER_LEN: usize = 16;
+const IORT_NODE_SMMUV3: u8 = 4;
+const IORT_NODE_ROOT_COMPLEX: u8 = 2;
+
+/// PCI requester ID range routed through a SMMUv3 node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IortStreamMapping {
+    pub input_base: u32,
+    pub id_count: u32,
+    pub output_base: u32,
+}
+
+/// SMMUv3 base and the PCI requester ID mappings that target it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IortSmmu {
+    pub base: u64,
+    pub pci_streams: alloc::vec::Vec<IortStreamMapping>,
+}
+
+impl IortSmmu {
+    /// Resolve a PCI requester ID through the first matching root-complex map.
+    pub fn stream_id_for(&self, requester_id: u32) -> Option<u32> {
+        self.pci_streams.iter().find_map(|mapping| {
+            let relative = requester_id.checked_sub(mapping.input_base)?;
+            (relative <= mapping.id_count)
+                .then(|| mapping.output_base.checked_add(relative))
+                .flatten()
+        })
+    }
+}
+
+/// Reads the first SMMUv3 node and PCI root-complex mappings to it from IORT.
+pub fn iort_smmuv3(iort: &[u8]) -> Result<Option<IortSmmu>, AcpiError> {
+    let iort = checked_table(iort, b"IORT")?;
+    let count = u32_at(iort, 36).ok_or(AcpiError::Truncated)? as usize;
+    let mut at = u32_at(iort, 40).ok_or(AcpiError::Truncated)? as usize;
+    let mut smmu = None;
+    let mut roots = alloc::vec::Vec::new();
+    for _ in 0..count {
+        let hdr = iort
+            .get(at..at + IORT_NODE_HEADER_LEN)
+            .ok_or(AcpiError::BadEntry)?;
+        let kind = hdr[0];
+        let len = u16::from_le_bytes([hdr[1], hdr[2]]) as usize;
+        if len < IORT_NODE_HEADER_LEN || at.checked_add(len).is_none_or(|end| end > iort.len()) {
+            return Err(AcpiError::BadEntry);
+        }
+        let node = &iort[at..at + len];
+        let map_count = u32_at(node, 8).ok_or(AcpiError::BadEntry)? as usize;
+        let map_offset = u32_at(node, 12).ok_or(AcpiError::BadEntry)? as usize;
+        let map_bytes = map_count.checked_mul(20).ok_or(AcpiError::BadEntry)?;
+        if map_count != 0
+            && (map_offset < IORT_NODE_HEADER_LEN
+                || map_offset
+                    .checked_add(map_bytes)
+                    .is_none_or(|end| end > len))
+        {
+            return Err(AcpiError::BadEntry);
+        }
+        if kind == IORT_NODE_SMMUV3 && smmu.is_none() {
+            // SMMUv3 node's first field after the common header is Base Address.
+            let base = u64_at(node, 16).ok_or(AcpiError::BadEntry)?;
+            if base == 0 {
+                return Err(AcpiError::BadEntry);
+            }
+            smmu = Some((at as u32, base));
+        }
+        if kind == IORT_NODE_ROOT_COMPLEX {
+            roots.push((node.to_vec(), map_offset, map_count));
+        }
+        at += len;
+    }
+    let Some((smmu_offset, base)) = smmu else {
+        return Ok(None);
+    };
+    let mut pci_streams = alloc::vec::Vec::new();
+    for (node, map_offset, map_count) in roots {
+        for i in 0..map_count {
+            let m = &node[map_offset + i * 20..map_offset + (i + 1) * 20];
+            if u32_at(m, 12) == Some(smmu_offset) {
+                pci_streams.push(IortStreamMapping {
+                    input_base: u32_at(m, 0).ok_or(AcpiError::BadEntry)?,
+                    id_count: u32_at(m, 4).ok_or(AcpiError::BadEntry)?,
+                    output_base: u32_at(m, 8).ok_or(AcpiError::BadEntry)?,
+                });
+            }
+        }
+    }
+    Ok(Some(IortSmmu { base, pci_streams }))
+}
 
 /// One PCI Express enhanced configuration (ECAM) window from the MCFG table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -333,6 +423,46 @@ mod tests {
         let sum = t.iter().fold(0u8, |s, b| s.wrapping_add(*b));
         t[9] = 0u8.wrapping_sub(sum);
         t
+    }
+
+    #[test]
+    fn parses_iort_smmuv3_base_and_pci_stream_mapping() {
+        let mut table = std::vec![0u8; 48 + 36 + 36];
+        table[..4].copy_from_slice(b"IORT");
+        table[36..40].copy_from_slice(&2u32.to_le_bytes());
+        table[40..44].copy_from_slice(&48u32.to_le_bytes());
+        let smmu = 48;
+        table[smmu] = IORT_NODE_SMMUV3;
+        table[smmu + 1..smmu + 3].copy_from_slice(&36u16.to_le_bytes());
+        table[smmu + 16..smmu + 24].copy_from_slice(&0x0900_0000u64.to_le_bytes());
+        let root = smmu + 36;
+        table[root] = IORT_NODE_ROOT_COMPLEX;
+        table[root + 1..root + 3].copy_from_slice(&36u16.to_le_bytes());
+        table[root + 8..root + 12].copy_from_slice(&1u32.to_le_bytes());
+        table[root + 12..root + 16].copy_from_slice(&16u32.to_le_bytes());
+        table[root + 16..root + 20].copy_from_slice(&0x400u32.to_le_bytes());
+        table[root + 20..root + 24].copy_from_slice(&0xffu32.to_le_bytes());
+        table[root + 24..root + 28].copy_from_slice(&0x800u32.to_le_bytes());
+        table[root + 28..root + 32].copy_from_slice(&(smmu as u32).to_le_bytes());
+        let len = table.len() as u32;
+        table[4..8].copy_from_slice(&len.to_le_bytes());
+        let sum = table.iter().fold(0u8, |s, b| s.wrapping_add(*b));
+        table[9] = 0u8.wrapping_sub(sum);
+        assert_eq!(
+            iort_smmuv3(&table).unwrap(),
+            Some(IortSmmu {
+                base: 0x0900_0000,
+                pci_streams: std::vec![IortStreamMapping {
+                    input_base: 0x400,
+                    id_count: 0xff,
+                    output_base: 0x800,
+                }],
+            })
+        );
+        let smmu = iort_smmuv3(&table).unwrap().unwrap();
+        assert_eq!(smmu.stream_id_for(0x400), Some(0x800));
+        assert_eq!(smmu.stream_id_for(0x4ff), Some(0x8ff));
+        assert_eq!(smmu.stream_id_for(0x500), None);
     }
 
     #[test]

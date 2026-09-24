@@ -18,6 +18,7 @@ handoff = ["uefi-base", "dep:aienos-kernel", "dep:aienos-accel", "uefi/alloc"]
 # SEED-0A candidate: polled USB keyboard after firmware exit (ADR 0012).
 # Only the QEMU keyboard test enables it; hardware staging never does.
 usb-keyboard = ["handoff"]
+debug-xhci-without-smmu = ["usb-keyboard"]
 
 [dependencies]
 uefi = { version = "0.41", default-features = false, optional = true }

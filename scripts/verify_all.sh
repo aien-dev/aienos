@@ -61,6 +61,7 @@ echo ""
 echo "--- [SEED-0A USB Keyboard in QEMU (input.keyboard.usb)] ---"
 if command -v qemu-system-aarch64 >/dev/null && [[ -r "${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}" ]]; then
     ./scripts/qemu_keyboard_test.sh
+    ./scripts/qemu_smmu_test.sh
 else
     echo "SKIPPED: qemu-system-aarch64 or AAVMF firmware not present on host."
 fi
