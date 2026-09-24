@@ -45,7 +45,7 @@ only at M8. Status words: **done** = verified on this repository's evidence;
 | | UART at `0x16A00000` (bounded, Spark only) | built, not attempted | PR #13; skipped on the first boot because GB10 discovery failed |
 | | USB keyboard (xHCI + HID) | pending | |
 | **M2C** Hardware test automation | Exclusive Machine 1 key and ledger records in `aien-proof` | done on hardware | aien-sovereign-core PR #126; first boot staged and collected under `machine-1` (ledger events 83 to 85) |
-| | Power/reset control, HDMI capture, USB input emulation | pending | Needs hardware chosen by the operator |
+| | Power/reset control, HDMI capture, USB input emulation | design proposed, wiring pending | [HARDWARE_TEST_RIG.md](HARDWARE_TEST_RIG.md) and [ADR 0010](adr/0010-machine-1-hardware-test-rig.md); Raspberry Pi controller, parts chosen, operator approval and wiring pending |
 | **M3** Kernel isolation | MMU, exceptions, interrupts, timer, scheduler, IPC/capabilities | pending | Scheduler consumes M2A CPU topology |
 | **M4** Storage and recovery | | pending | Host crates exist (`recovery`, `store`) |
 | **M5** Encryption and identity | | pending | |
@@ -98,7 +98,7 @@ evidence that it did so, and returns to the existing system without damaging
 it. `scripts/collect_boot_report.sh` prints `M2_GATE: PASS` only when all of
 those checks hold.
 
-**Result 2026-09-24: `M2_GATE: PASS`** on the first attended boot ([evidence](../evidence/m2_first_boot_2026-09-24.md)). Open items: GB10 discovery before firmware exit, the pre-exit report file, recording post-exit screen drawing, UART output, and bootable recovery media.
+**Result 2026-09-24: `M2_GATE: PASS`** on the first attended boot ([evidence](../evidence/m2_first_boot_2026-09-24.md)). Open items: GB10 discovery before firmware exit, the pre-exit report file, recording post-exit screen drawing (covered by rig HDMI capture once wired, see [HARDWARE_TEST_RIG.md](HARDWARE_TEST_RIG.md)), UART output, and bootable recovery media.
 
 ---
 
