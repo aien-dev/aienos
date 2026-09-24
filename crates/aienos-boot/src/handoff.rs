@@ -227,7 +227,7 @@ fn enter_kernel_mmu(
     {
         parange = 5;
     }
-    let _ = unsafe {
+    let entered = unsafe {
         aienos_kernel::arch::aarch64::enter_el1h_mmu(
             root,
             map_plan::mair_el1(),
@@ -235,6 +235,10 @@ fn enter_kernel_mmu(
             map_plan::sctlr_el1(),
         )
     };
+    if !entered {
+        // Not at EL2: the kernel must not continue on firmware's translation.
+        aienos_kernel::arch::aarch64::halt();
+    }
     fatal::install_exception_vectors();
     (
         used,
