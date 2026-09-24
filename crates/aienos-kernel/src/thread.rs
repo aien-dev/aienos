@@ -11,34 +11,66 @@ pub struct Context {
     pub d8_d15: [u64; 8],
 }
 
-/// Save the current callee-saved context and resume `to`.
-/// Both contexts and their stacks must remain valid for the switch.
+// Context switch and thread entry live in global assembly so no compiler
+// prologue/epilogue sits between saving and restoring a context, and the
+// argument registers are fixed (x0 = from, x1 = to).
+#[cfg(target_arch = "aarch64")]
+core::arch::global_asm!(
+    ".global aienos_ctx_switch",
+    "aienos_ctx_switch:",
+    "stp x19, x20, [x0, #0]",
+    "stp x21, x22, [x0, #16]",
+    "stp x23, x24, [x0, #32]",
+    "stp x25, x26, [x0, #48]",
+    "stp x27, x28, [x0, #64]",
+    "stp x29, x30, [x0, #80]",
+    "mov x9, sp",
+    "str x9, [x0, #96]",
+    "stp d8, d9, [x0, #104]",
+    "stp d10, d11, [x0, #120]",
+    "stp d12, d13, [x0, #136]",
+    "stp d14, d15, [x0, #152]",
+    "ldp d8, d9, [x1, #104]",
+    "ldp d10, d11, [x1, #120]",
+    "ldp d12, d13, [x1, #136]",
+    "ldp d14, d15, [x1, #152]",
+    "ldr x9, [x1, #96]",
+    "mov sp, x9",
+    "ldp x19, x20, [x1, #0]",
+    "ldp x21, x22, [x1, #16]",
+    "ldp x23, x24, [x1, #32]",
+    "ldp x25, x26, [x1, #48]",
+    "ldp x27, x28, [x1, #64]",
+    "ldp x29, x30, [x1, #80]",
+    "ret",
+    ".global aienos_thread_start",
+    "aienos_thread_start:",
+    "mov x0, x19",
+    "blr x20",
+    "bl aienos_thread_exit",
+);
+
+#[cfg(target_arch = "aarch64")]
+extern "C" {
+    fn aienos_ctx_switch(from: *mut Context, to: *const Context);
+    fn aienos_thread_start();
+}
+
+/// Save the current callee-saved context into `from` and resume `to`.
 ///
 /// # Safety
-/// The destination context must have a valid stack and resume address. `from` must
-/// remain writable, and execution must be serialized with interrupts disabled.
+/// `to` must hold a valid stack and resume address; both contexts must stay
+/// valid; execution must be serialized with interrupts masked.
 #[cfg(target_arch = "aarch64")]
-pub unsafe fn switch(from: &mut Context, to: &Context) {
-    core::arch::asm!(
-        "stp x19, x20, [{from}, #0]", "stp x21, x22, [{from}, #16]",
-        "stp x23, x24, [{from}, #32]", "stp x25, x26, [{from}, #48]",
-        "stp x27, x28, [{from}, #64]", "stp x29, x30, [{from}, #80]",
-        "mov x9, sp", "str x9, [{from}, #96]",
-        "stp d8, d9, [{from}, #104]", "stp d10, d11, [{from}, #120]",
-        "stp d12, d13, [{from}, #136]", "stp d14, d15, [{from}, #152]",
-        "ldp d8, d9, [{to}, #104]", "ldp d10, d11, [{to}, #120]",
-        "ldp d12, d13, [{to}, #136]", "ldp d14, d15, [{to}, #152]",
-        "ldr x9, [{to}, #96]", "mov sp, x9",
-        "ldp x19, x20, [{to}, #0]", "ldp x21, x22, [{to}, #16]",
-        "ldp x23, x24, [{to}, #32]", "ldp x25, x26, [{to}, #48]",
-        "ldp x27, x28, [{to}, #64]", "ldp x29, x30, [{to}, #80]",
-        "ret", from = in(reg) from, to = in(reg) to, lateout("x9") _, options(nostack)
-    );
+pub unsafe fn switch(from: *mut Context, to: *const Context) {
+    aienos_ctx_switch(from, to);
 }
 #[cfg(not(target_arch = "aarch64"))]
-pub unsafe fn switch(_from: &mut Context, _to: &Context) {}
+pub unsafe fn switch(_from: *mut Context, _to: *const Context) {}
 
 /// Prepare a new context at the aligned top of a caller-provided stack.
+/// The thread starts in `aienos_thread_start`, which calls `entry(arg)` from
+/// x19/x20 and parks the thread when it returns.
 pub fn prepare(stack: &mut [u8], entry: extern "C" fn(usize), arg: usize) -> Option<Context> {
     let base = stack.as_mut_ptr() as usize;
     let end = base.checked_add(stack.len())? & !15usize;
@@ -52,18 +84,23 @@ pub fn prepare(stack: &mut [u8], entry: extern "C" fn(usize), arg: usize) -> Opt
     };
     ctx.x19_x30[0] = arg as u64;
     ctx.x19_x30[1] = entry as *const () as usize as u64;
-    ctx.x19_x30[11] = trampoline as *const () as usize as u64;
+    ctx.x19_x30[11] = thread_start_address();
     Some(ctx)
 }
-extern "C" fn trampoline() -> ! {
-    // x19 and x20 hold the argument and entry through the initial context.
+
+fn thread_start_address() -> u64 {
     #[cfg(target_arch = "aarch64")]
-    unsafe {
-        let arg: usize;
-        let fun: extern "C" fn(usize);
-        core::arch::asm!("mov x0, x19", "mov x1, x20", out("x0") arg, out("x1") fun, options(nomem, nostack));
-        fun(arg);
+    {
+        aienos_thread_start as *const () as usize as u64
     }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        0
+    }
+}
+
+#[no_mangle]
+extern "C" fn aienos_thread_exit() -> ! {
     unsafe { park() }
 }
 
@@ -74,7 +111,8 @@ static mut CONTEXTS: [Context; MAX] = [Context {
     d8_d15: [0; 8],
 }; MAX];
 static mut RUNNABLE: [bool; MAX] = [false; MAX];
-static mut CURRENT: usize = 0;
+/// Index of the running thread; MAX means the boot context.
+static mut CURRENT: usize = MAX;
 static mut SCHED: Scheduler<1, MAX> = Scheduler::new([0]);
 static mut MAIN: Context = Context {
     x19_x30: [0; 12],
@@ -113,11 +151,11 @@ pub unsafe fn yield_now() {
     }
     CURRENT = target;
     if target == MAX {
-        switch(&mut CONTEXTS[from], &MAIN);
+        switch(&raw mut CONTEXTS[from], &raw const MAIN);
     } else if from == MAX {
-        switch(&mut MAIN, &CONTEXTS[target]);
+        switch(&raw mut MAIN, &raw const CONTEXTS[target]);
     } else {
-        switch(&mut CONTEXTS[from], &CONTEXTS[target]);
+        switch(&raw mut CONTEXTS[from], &raw const CONTEXTS[target]);
     }
 }
 /// Mark the current thread finished and transfer control to another runnable thread.
@@ -151,13 +189,15 @@ mod tests {
     }
 }
 
-/// Run two bounded threads and return whether they produced five A/B pairs.
+/// Run two bounded threads that each record a tag and yield five times.
+/// Returns the observed interleaving (up to 10 bytes) and its length.
 ///
 /// # Safety
-/// Call once during single-core boot before other threads are registered.
-pub unsafe fn run_demo() -> bool {
-    static mut STACK_A: [u8; 4096] = [0; 4096];
-    static mut STACK_B: [u8; 4096] = [0; 4096];
+/// Call once during single-core boot, at EL1 with interrupts masked, before
+/// other threads are registered.
+pub unsafe fn run_demo() -> ([u8; 10], usize) {
+    static mut STACK_A: [u8; 8192] = [0; 8192];
+    static mut STACK_B: [u8; 8192] = [0; 8192];
     static mut TRACE: [u8; 10] = [0; 10];
     static mut LEN: usize = 0;
     extern "C" fn worker(tag: usize) {
@@ -172,9 +212,12 @@ pub unsafe fn run_demo() -> bool {
         }
     }
     if spawn(&mut STACK_A, worker, 0).is_none() || spawn(&mut STACK_B, worker, 1).is_none() {
-        return false;
+        return ([0; 10], 0);
     }
     CURRENT = MAX;
-    yield_now();
-    LEN == 10 && TRACE == *b"ABABABABAB"
+    // Run until both workers have parked and control returns here.
+    while RUNNABLE.iter().any(|r| *r) {
+        yield_now();
+    }
+    (TRACE, LEN)
 }

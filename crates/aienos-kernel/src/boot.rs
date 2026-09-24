@@ -288,18 +288,6 @@ pub fn write_boot_report(out: &mut impl Write, facts: &BootFacts) -> bool {
     }
     let _ = writeln!(out, "exception_level: EL{}", facts.exception_level);
     let _ = writeln!(out, "kernel: alive");
-    #[cfg(all(target_arch = "aarch64", target_os = "uefi"))]
-    unsafe {
-        let _ = writeln!(
-            out,
-            "threads: {} interleave=ABABABABAB",
-            if crate::thread::run_demo() {
-                "ok"
-            } else {
-                "failed"
-            }
-        );
-    }
     true
 }
 

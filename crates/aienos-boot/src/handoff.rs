@@ -1093,6 +1093,19 @@ fn main() -> Status {
         if mmu_on { "enabled" } else { "disabled" }
     );
     let _ = writeln!(report, "pt_frames_used: {pt_frames_used}");
+    // Cooperative threads at EL1 (issue #29): two workers each record a tag and
+    // yield five times; the line reports the order actually observed.
+    let (trace, trace_len) = unsafe { aienos_kernel::thread::run_demo() };
+    let observed = core::str::from_utf8(&trace[..trace_len]).unwrap_or("?");
+    let _ = writeln!(
+        report,
+        "threads: {} interleave={observed}",
+        if observed == "ABABABABAB" {
+            "ok"
+        } else {
+            "unexpected"
+        }
+    );
     let _ = writeln!(
         report,
         "runtime_code: {}",
