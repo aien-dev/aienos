@@ -29,11 +29,19 @@ if [[ "${AIENOS_QEMU_SMMU:-0}" == "1" ]]; then
     machine+=",iommu=smmuv3"
 fi
 
+# Without an SMMU the keyboard capability is fail-closed, so the identity-DMA
+# path is only reachable behind the debug bypass feature. The confined path is
+# covered by qemu_smmu_test.sh (AIENOS_QEMU_SMMU=1).
+default_features="usb-keyboard"
+if [[ "${AIENOS_QEMU_SMMU:-0}" != "1" ]]; then
+    default_features="usb-keyboard,debug-xhci-without-smmu"
+fi
+
 # Own target directory: a keyboard-enabled image never lands where hardware
 # staging or the other tests pick up the handoff image.
 commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 AIENOS_COMMIT="${commit}" AIENOS_RESTART_SECS=1 AIENOS_KEYBOARD_SECS=60 cargo build --quiet --release \
-    -p aienos-boot --target aarch64-unknown-uefi --features "${AIENOS_BUILD_FEATURES:-usb-keyboard}" --bin aienos-handoff \
+    -p aienos-boot --target aarch64-unknown-uefi --features "${AIENOS_BUILD_FEATURES:-$default_features}" --bin aienos-handoff \
     --target-dir target/qemu-keyboard
 
 work="$(mktemp -d)"
