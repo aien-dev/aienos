@@ -58,6 +58,49 @@ impl BootMemoryRegion {
     pub const fn page_count(self) -> usize {
         self.page_count
     }
+
+    /// Physical start address of the region.
+    pub const fn start(self) -> u64 {
+        self.start.0 as u64
+    }
+}
+
+/// What the firmware memory map contained and what the kernel accepted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MemoryMapSummary {
+    pub descriptors: u64,
+    pub conventional_regions: u64,
+    pub conventional_pages: u64,
+    /// Conventional regions that failed `BootMemoryRegion::new` validation.
+    pub rejected_regions: u64,
+    pub largest: Option<BootMemoryRegion>,
+}
+
+impl MemoryMapSummary {
+    /// Account for one firmware memory descriptor.
+    pub fn add(&mut self, conventional: bool, physical_start: u64, page_count: u64) {
+        self.descriptors += 1;
+        if !conventional {
+            return;
+        }
+        self.conventional_regions += 1;
+        self.conventional_pages = self.conventional_pages.saturating_add(page_count);
+        match BootMemoryRegion::new(physical_start, page_count) {
+            Some(region) => {
+                if self
+                    .largest
+                    .is_none_or(|l| region.page_count() > l.page_count())
+                {
+                    self.largest = Some(region);
+                }
+            }
+            None => self.rejected_regions += 1,
+        }
+    }
+
+    pub fn conventional_kb(&self) -> u64 {
+        self.conventional_pages.saturating_mul(4)
+    }
 }
 
 /// Counter samples taken by the Rust UEFI entry and passed to the kernel.
@@ -136,6 +179,8 @@ pub type BootReport = ReportBuf<REPORT_CAPACITY>;
 /// Facts the kernel reports after taking control from firmware.
 pub struct BootFacts {
     pub conventional_memory_kb: u64,
+    /// Firmware memory map validation, when the caller walked the map.
+    pub memory_map: Option<MemoryMapSummary>,
     /// `(managed_frames, reserved_frame)` or `None` if no usable region.
     pub allocator: Option<(usize, PhysAddr)>,
     pub timing: Option<BootTiming>,
@@ -158,6 +203,28 @@ pub fn write_boot_report(out: &mut impl Write, facts: &BootFacts) -> bool {
         "conventional_memory_kb: {}",
         facts.conventional_memory_kb
     );
+    if let Some(m) = facts.memory_map {
+        let _ = writeln!(out, "memory_map_descriptors: {}", m.descriptors);
+        let _ = writeln!(
+            out,
+            "memory_map_conventional_regions: {}",
+            m.conventional_regions
+        );
+        let _ = writeln!(out, "memory_map_rejected_regions: {}", m.rejected_regions);
+        match m.largest {
+            Some(r) => {
+                let _ = writeln!(
+                    out,
+                    "memory_map_largest_region: {:#x} pages {}",
+                    r.start(),
+                    r.page_count()
+                );
+            }
+            None => {
+                let _ = writeln!(out, "memory_map_largest_region: none");
+            }
+        }
+    }
     match facts.gb10 {
         Some(g) => {
             let _ = writeln!(out, "gb10_segment: {}", g.bar.location.segment);
@@ -177,6 +244,19 @@ pub fn write_boot_report(out: &mut impl Write, facts: &BootFacts) -> bool {
             }
             if t.unknown_class > 0 {
                 let _ = writeln!(out, "cpu_efficiency_class_unknown: {}", t.unknown_class);
+            }
+            let _ = writeln!(
+                out,
+                "cpu_boot_core_listed: {}",
+                if t.boot_core_listed { "yes" } else { "no" }
+            );
+            match t.boot_class {
+                Some(class) => {
+                    let _ = writeln!(out, "cpu_boot_core_class: {class}");
+                }
+                None => {
+                    let _ = writeln!(out, "cpu_boot_core_class: unknown");
+                }
             }
         }
         None => {
@@ -217,6 +297,7 @@ pub fn write_boot_report(out: &mut impl Write, facts: &BootFacts) -> bool {
 pub fn early_kernel_enter(
     conventional_memory_kb: u64,
     memory_region: Option<BootMemoryRegion>,
+    memory_map: Option<MemoryMapSummary>,
     boot_timing: Option<BootTiming>,
     gb10: Option<aienos_accel::Gb10Identity>,
     cpu: Option<CpuTopology>,
@@ -229,6 +310,7 @@ pub fn early_kernel_enter(
     // This reserves an address in bookkeeping only; it does not dereference RAM.
     let facts = BootFacts {
         conventional_memory_kb,
+        memory_map,
         allocator: memory_region.and_then(initialize_early_allocator),
         timing: boot_timing,
         kernel_entry_ticks,
@@ -253,6 +335,7 @@ pub fn early_kernel_init_with_gpu(
     let (report, ok) = early_kernel_enter(
         conventional_memory_kb,
         memory_region,
+        None,
         boot_timing,
         gb10,
         None,
@@ -305,8 +388,13 @@ mod tests {
             pmc_boot_0: 0x1b00_00a1,
             pmc_boot_42: 0x1b0a_0000,
         };
+        let mut memory_map = super::MemoryMapSummary::default();
+        memory_map.add(false, 0x0, 16);
+        memory_map.add(true, 0x1000_0000, 128);
+        memory_map.add(true, 0x2000_0001, 64);
         let facts = BootFacts {
             conventional_memory_kb: 4096,
+            memory_map: Some(memory_map),
             allocator: Some((128, PhysAddr(0x1000_0000))),
             timing: Some(BootTiming {
                 uefi_entry_ticks: 0,
@@ -330,6 +418,8 @@ mod tests {
                 distinct_classes: 2,
                 unknown_class: 0,
                 first_mpidr: Some(0x8100_0000),
+                boot_core_listed: true,
+                boot_class: Some(0),
             }),
             boot_midr: 0x410f_d870,
             exception_level: 2,
@@ -344,7 +434,13 @@ mod tests {
             "cpu_cores: 20",
             "cpu_efficiency_class_0: 10",
             "cpu_efficiency_class_1: 10",
+            "cpu_boot_core_listed: yes",
+            "cpu_boot_core_class: 0",
             "boot_cpu_midr: 0x410fd870 (part 0xd87)",
+            "memory_map_descriptors: 3",
+            "memory_map_conventional_regions: 2",
+            "memory_map_rejected_regions: 1",
+            "memory_map_largest_region: 0x10000000 pages 128",
             "allocator_reserved_frame_phys: 0x10000000",
             "uefi_entry_to_handoff_ms: 1",
             "handoff_to_kernel_entry_ms: 2",

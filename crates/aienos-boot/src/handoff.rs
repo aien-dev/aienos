@@ -1,26 +1,38 @@
 #![no_std]
 #![no_main]
 
-//! Native handoff image with a boot report that does not depend on a serial
-//! cable being attached.
+//! First-boot evidence image for Machine 1.
 //!
-//! Before firmware exit it prints a pre-exit report on the firmware console and
-//! saves it to `\EFI\AIENOS\BOOTREPORT.TXT` on the boot volume. After exit the
-//! kernel's report is drawn on the firmware-configured screen, stored in the
-//! `AienosBootReport` firmware variable, and sent to the Spark UART (bounded).
-//! The image then counts down and cold-resets, so a one-time boot entry
-//! returns the machine to its normal boot order without a power cycle.
-//! Linux reads both reports after reboot:
+//! Before firmware exit it discovers the GB10, the CPU topology (ACPI MADT),
+//! and the firmware display mode, prints a pre-exit report on the firmware
+//! console, and saves it to `\EFI\AIENOS\BOOTREPORT.TXT`.
+//!
+//! After `ExitBootServices` it installs AIENOS exception vectors, writes an
+//! early progress record, enters the kernel, and reports the result on the
+//! screen, in the `AienosBootReportV1` firmware variable and on the Spark UART
+//! (bounded). A panic or CPU fault takes the same reporting path with the last
+//! boot stage and fault registers. It then counts down and cold-resets, so a
+//! one-time boot entry returns to the normal boot order.
+//!
+//! The post-handoff firmware variable write is a temporary bootstrap exception
+//! (ADR 0008): versioned name, at most `MAX_VAR_WRITES` writes of at most
+//! `MAX_VAR_BYTES` each, diagnostics only, and a failed write never stops boot.
+//! Linux reads the evidence after reboot:
 //!   /boot/efi/EFI/AIENOS/BOOTREPORT.TXT
-//!   /sys/firmware/efi/efivars/AienosBootReport-a1e05b0e-7c3d-4f51-9b6a-2d8e4c1f0a37
+//!   /sys/firmware/efi/efivars/AienosBootReportV1-a1e05b0e-7c3d-4f51-9b6a-2d8e4c1f0a37
 
 use aienos_kernel::acpi;
 use aienos_kernel::arch::aarch64::{
-    counter_frequency_hz, counter_ticks, EarlyUart, SPARK_16550_UART_BASE,
+    counter_frequency_hz, counter_ticks, midr_el1, midr_part, mpidr_el1, psci_system_reset,
+    EarlyUart, SPARK_16550_UART_BASE,
 };
+use aienos_kernel::boot::{BootTiming, MemoryMapSummary};
 use aienos_kernel::display::{FramebufferInfo, PixelOrder, Screen, ACCENT, FOREGROUND};
+use aienos_kernel::fatal::{self, FaultInfo};
 use aienos_kernel::report::ReportBuf;
+use aienos_kernel::sync::spinlock::SpinLock;
 use core::fmt::Write;
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
 use uefi::prelude::*;
@@ -30,10 +42,97 @@ use uefi::proto::pci::root_bridge::PciRootBridgeIo;
 use uefi::proto::pci::PciIoAddress;
 use uefi::runtime::{ResetType, VariableAttributes, VariableVendor};
 use uefi::table::cfg::ConfigTableEntry;
-use uefi::{cstr16, guid};
+use uefi::{cstr16, guid, CStr16};
 
+/// Commit this image was built from; `scripts/stage_one_time_boot.sh` sets it.
+const COMMIT: &str = match option_env!("AIENOS_COMMIT") {
+    Some(commit) => commit,
+    None => "unknown",
+};
+const REPORT_VERSION: u32 = 1;
+const REPORT_VAR: &CStr16 = cstr16!("AienosBootReportV1");
 const REPORT_VENDOR: VariableVendor = VariableVendor(guid!("a1e05b0e-7c3d-4f51-9b6a-2d8e4c1f0a37"));
+/// ADR 0008 bounds on the post-handoff firmware variable.
+const MAX_VAR_WRITES: u8 = 3;
+const MAX_VAR_BYTES: usize = 3072;
 const RESTART_AFTER_SECS: u64 = 30;
+const ERROR: (u8, u8, u8) = (0xff, 0x6b, 0x6b);
+
+type Report = ReportBuf<MAX_VAR_BYTES>;
+
+const STAGES: [&str; 12] = [
+    "firmware_entry",
+    "gb10_discovery",
+    "acpi_topology",
+    "framebuffer_discovery",
+    "pre_exit_report_saved",
+    "exit_boot_services",
+    "exception_vectors_installed",
+    "kernel_entered",
+    "screen_report_drawn",
+    "final_report_saved",
+    "uart_report_sent",
+    "countdown",
+];
+const FIRMWARE_ENTRY: u8 = 0;
+const GB10_DISCOVERY: u8 = 1;
+const ACPI_TOPOLOGY: u8 = 2;
+const FRAMEBUFFER_DISCOVERY: u8 = 3;
+const PRE_EXIT_SAVED: u8 = 4;
+const EXIT_BOOT_SERVICES: u8 = 5;
+const VECTORS_INSTALLED: u8 = 6;
+const KERNEL_ENTERED: u8 = 7;
+const SCREEN_DRAWN: u8 = 8;
+const FINAL_SAVED: u8 = 9;
+const UART_SENT: u8 = 10;
+const COUNTDOWN: u8 = 11;
+
+static STAGE: AtomicU8 = AtomicU8::new(FIRMWARE_ENTRY);
+static EXITED: AtomicBool = AtomicBool::new(false);
+static IN_FATAL: AtomicBool = AtomicBool::new(false);
+static VAR_WRITES: AtomicU8 = AtomicU8::new(0);
+static ON_SPARK: AtomicBool = AtomicBool::new(false);
+static FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
+static FRAMEBUFFER: SpinLock<Option<FramebufferInfo>> = SpinLock::new(None);
+
+fn stage(s: u8) {
+    STAGE.store(s, Ordering::SeqCst);
+}
+
+fn stage_name() -> &'static str {
+    STAGES
+        .get(STAGE.load(Ordering::SeqCst) as usize)
+        .copied()
+        .unwrap_or("unknown")
+}
+
+fn header(out: &mut impl Write, kind: &str) {
+    let _ = writeln!(out, "report_version: {REPORT_VERSION}");
+    let _ = writeln!(out, "aienos_commit: {COMMIT}");
+    let _ = writeln!(out, "report_kind: {kind}");
+    let _ = writeln!(out, "last_stage: {}", stage_name());
+}
+
+/// Bounded report write (ADR 0008). Failure is reported, never fatal.
+fn save_report_var(bytes: &[u8]) -> Result<u8, &'static str> {
+    if bytes.len() > MAX_VAR_BYTES {
+        return Err("report larger than the bound");
+    }
+    let n = VAR_WRITES.fetch_add(1, Ordering::SeqCst);
+    if n >= MAX_VAR_WRITES {
+        return Err("write budget for this boot spent");
+    }
+    uefi::runtime::set_variable(
+        REPORT_VAR,
+        &REPORT_VENDOR,
+        VariableAttributes::NON_VOLATILE
+            | VariableAttributes::BOOTSERVICE_ACCESS
+            | VariableAttributes::RUNTIME_ACCESS,
+        bytes,
+    )
+    .map(|()| n + 1)
+    .map_err(|_| "firmware refused the write")
+}
 
 fn probe_gb10(
     root: &mut PciRootBridgeIo,
@@ -116,7 +215,7 @@ unsafe fn table_at<'a>(addr: usize) -> Option<&'a [u8]> {
 }
 
 /// Core inventory from the firmware MADT (RSDP, then XSDT, then "APIC").
-fn discover_cpu_topology() -> Option<acpi::CpuTopology> {
+fn discover_cpu_topology(boot_mpidr: u64) -> Option<acpi::CpuTopology> {
     let rsdp = uefi::system::with_config_table(|entries| {
         entries
             .iter()
@@ -137,7 +236,7 @@ fn discover_cpu_topology() -> Option<acpi::CpuTopology> {
             continue;
         };
         if &table[..4] == b"APIC" {
-            return acpi::madt_cpu_topology(table).ok();
+            return acpi::madt_cpu_topology_for(table, Some(boot_mpidr)).ok();
         }
     }
     None
@@ -199,7 +298,8 @@ fn save_report_file(text: &str) -> uefi::Result {
     file.flush()
 }
 
-fn wait_seconds(seconds: u64, frequency_hz: u64) {
+fn wait_seconds(seconds: u64) {
+    let frequency_hz = FREQUENCY_HZ.load(Ordering::SeqCst);
     let start = counter_ticks();
     let ticks = seconds.saturating_mul(frequency_hz);
     while counter_ticks().wrapping_sub(start) < ticks {
@@ -207,27 +307,196 @@ fn wait_seconds(seconds: u64, frequency_hz: u64) {
     }
 }
 
-/// Explicit native handoff image. Building it does not install or boot it.
+fn screen() -> Option<Screen> {
+    let info = (*FRAMEBUFFER.try_lock()?)?;
+    // SAFETY: firmware reported this buffer for the active mode, and nothing
+    // else draws to it after boot services have exited.
+    unsafe { Screen::new(info) }
+}
+
+fn write_cpu(
+    out: &mut impl Write,
+    cpu: Option<acpi::CpuTopology>,
+    boot_midr: u64,
+    boot_mpidr: u64,
+) {
+    match cpu {
+        Some(t) => {
+            let _ = writeln!(out, "cpu_cores: {}", t.cores);
+            for (class, count) in t.classes() {
+                let _ = writeln!(out, "cpu_efficiency_class_{class}: {count}");
+            }
+            if t.unknown_class > 0 {
+                let _ = writeln!(out, "cpu_efficiency_class_unknown: {}", t.unknown_class);
+            }
+            match t.boot_class {
+                Some(class) => {
+                    let _ = writeln!(out, "cpu_boot_core_class: {class}");
+                }
+                None => {
+                    let _ = writeln!(
+                        out,
+                        "cpu_boot_core_class: unknown (listed: {})",
+                        if t.boot_core_listed { "yes" } else { "no" }
+                    );
+                }
+            }
+        }
+        None => {
+            let _ = writeln!(out, "cpu_topology: unavailable");
+        }
+    }
+    let _ = writeln!(
+        out,
+        "boot_cpu_midr: {:#x} (part {:#05x})",
+        boot_midr,
+        midr_part(boot_midr)
+    );
+    let _ = writeln!(out, "boot_cpu_mpidr: {boot_mpidr:#x}");
+}
+
+/// Reset after firmware exit: PSCI first (not a UEFI runtime service). UEFI
+/// ResetSystem is used only if PSCI returns without resetting (ADR 0008).
+fn reset_after_exit(status: Status) -> ! {
+    psci_system_reset();
+    uefi::runtime::reset(ResetType::COLD, status, None)
+}
+
+/// Line recording which bounded firmware-variable write this report will be.
+fn write_index_line(out: &mut impl Write) {
+    let _ = writeln!(
+        out,
+        "nvram_write_index: {} of {MAX_VAR_WRITES}",
+        VAR_WRITES.load(Ordering::SeqCst) + 1
+    );
+}
+
+/// Count down on screen, then reset.
+fn finish(mut screen: Option<Screen>) -> ! {
+    stage(COUNTDOWN);
+    match screen.as_mut() {
+        Some(s) => {
+            let _ = writeln!(s);
+            s.set_color(ACCENT);
+            for remaining in (1..=RESTART_AFTER_SECS).rev() {
+                s.clear_row();
+                let _ = write!(s, "restarting in {remaining} s");
+                wait_seconds(1);
+            }
+        }
+        None => wait_seconds(RESTART_AFTER_SECS),
+    }
+    reset_after_exit(Status::SUCCESS)
+}
+
+/// Shared path for panics and CPU faults.
+fn fatal_report(kind: &str, detail: &dyn Fn(&mut Report)) -> ! {
+    if IN_FATAL.swap(true, Ordering::SeqCst) {
+        // A fault while reporting a fault: firmware services are suspect, so
+        // only the architected PSCI reset is tried before parking the core.
+        psci_system_reset();
+        aienos_kernel::arch::aarch64::halt();
+    }
+    let mut report = Report::new();
+    header(&mut report, kind);
+    if EXITED.load(Ordering::SeqCst) {
+        write_index_line(&mut report);
+    }
+    detail(&mut report);
+
+    if !EXITED.load(Ordering::SeqCst) {
+        uefi::println!("{}", report.as_str());
+        let _ = save_report_file(report.as_str());
+        wait_seconds(RESTART_AFTER_SECS);
+        uefi::runtime::reset(ResetType::COLD, Status::ABORTED, None)
+    }
+
+    let mut screen = screen();
+    if let Some(s) = screen.as_mut() {
+        s.clear();
+        s.set_color(ERROR);
+        let _ = writeln!(s, "AIENOS BOOT STOPPED: {kind}");
+        s.set_color(FOREGROUND);
+        let _ = write!(s, "{}", report.as_str());
+    }
+    let saved = save_report_var(report.as_bytes());
+    if ON_SPARK.load(Ordering::SeqCst) {
+        let uart = EarlyUart::new(SPARK_16550_UART_BASE);
+        uart.write_str("\n");
+        uart.write_str(report.as_str());
+    }
+    if let Some(s) = screen.as_mut() {
+        match saved {
+            Ok(n) => {
+                let _ = writeln!(s, "nvram_report: saved (write {n} of {MAX_VAR_WRITES})");
+            }
+            Err(e) => {
+                let _ = writeln!(s, "nvram_report: not saved ({e})");
+            }
+        }
+    }
+    finish(screen)
+}
+
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    fatal_report("panic", &|r| {
+        let _ = writeln!(r, "panic: {}", info.message());
+        if let Some(loc) = info.location() {
+            let _ = writeln!(r, "panic_location: {}:{}", loc.file(), loc.line());
+        }
+    })
+}
+
+fn on_fault(info: &FaultInfo) -> ! {
+    fatal_report("fault", &|r| {
+        let _ = write!(r, "{info}");
+    })
+}
+
+/// First-boot evidence image. Building it does not install or boot it.
 #[entry]
 fn main() -> Status {
     let uefi_entry_ticks = counter_ticks();
-    let frequency_hz = counter_frequency_hz();
-    let gb10 = discover_gb10();
-    let framebuffer = discover_framebuffer();
-    let cpu = discover_cpu_topology();
-    let boot_midr = aienos_kernel::arch::aarch64::midr_el1();
+    FREQUENCY_HZ.store(counter_frequency_hz(), Ordering::SeqCst);
+    stage(FIRMWARE_ENTRY);
 
-    let mut pre = ReportBuf::<1024>::new();
-    let _ = writeln!(pre, "AIENOS pre-exit report");
+    stage(GB10_DISCOVERY);
+    let gb10 = discover_gb10();
+    ON_SPARK.store(gb10.is_some(), Ordering::SeqCst);
+
+    stage(ACPI_TOPOLOGY);
+    let boot_midr = midr_el1();
+    let boot_mpidr = mpidr_el1();
+    let cpu = discover_cpu_topology(boot_mpidr);
+
+    stage(FRAMEBUFFER_DISCOVERY);
+    let framebuffer = discover_framebuffer();
+    *FRAMEBUFFER.lock() = framebuffer;
+
+    let mut pre = Report::new();
+    header(&mut pre, "pre_exit");
     let _ = writeln!(pre, "firmware_vendor: {}", uefi::system::firmware_vendor());
     let _ = writeln!(
         pre,
         "firmware_revision: {:#x}",
         uefi::system::firmware_revision()
     );
-    let _ = writeln!(pre, "counter_frequency_hz: {frequency_hz}");
+    let _ = writeln!(
+        pre,
+        "counter_frequency_hz: {}",
+        FREQUENCY_HZ.load(Ordering::SeqCst)
+    );
     match gb10 {
         Some(g) => {
+            let _ = writeln!(
+                pre,
+                "gb10_pci: {:04x}:{:02x}:{:02x}.{}",
+                g.bar.location.segment,
+                g.bar.location.bus,
+                g.bar.location.device,
+                g.bar.location.function
+            );
             let _ = writeln!(pre, "gb10_bar0_phys: {:#x}", g.bar.physical_base);
             let _ = writeln!(pre, "gb10_pmc_boot_0: {:#010x}", g.pmc_boot_0);
             let _ = writeln!(pre, "gb10_pmc_boot_42: {:#010x}", g.pmc_boot_42);
@@ -236,26 +505,7 @@ fn main() -> Status {
             let _ = writeln!(pre, "gb10: unavailable");
         }
     }
-    match cpu {
-        Some(t) => {
-            let _ = writeln!(pre, "cpu_cores: {}", t.cores);
-            for (class, count) in t.classes() {
-                let _ = writeln!(pre, "cpu_efficiency_class_{class}: {count}");
-            }
-            if t.unknown_class > 0 {
-                let _ = writeln!(pre, "cpu_efficiency_class_unknown: {}", t.unknown_class);
-            }
-        }
-        None => {
-            let _ = writeln!(pre, "cpu_topology: unavailable");
-        }
-    }
-    let _ = writeln!(
-        pre,
-        "boot_cpu_midr: {:#x} (part {:#05x})",
-        boot_midr,
-        aienos_kernel::arch::aarch64::midr_part(boot_midr)
-    );
+    write_cpu(&mut pre, cpu, boot_midr, boot_mpidr);
     match framebuffer {
         Some(f) => {
             let _ = writeln!(
@@ -274,78 +524,94 @@ fn main() -> Status {
         Ok(()) => uefi::println!("report file: \\EFI\\AIENOS\\BOOTREPORT.TXT saved"),
         Err(e) => uefi::println!("report file: not saved ({:?})", e.status()),
     }
+    stage(PRE_EXIT_SAVED);
 
-    // No UEFI protocol, allocator, console, or boot-service reference is used
-    // after this point; only runtime services (variables, reset) remain. The
+    // After this point only runtime services (variables, reset) are used. The
     // returned map owns its backing allocation and stays live below.
+    stage(EXIT_BOOT_SERVICES);
     let memory_map = unsafe { uefi::boot::exit_boot_services(None) };
-    let mut conventional_pages = 0u64;
-    let mut largest_region = None;
+    EXITED.store(true, Ordering::SeqCst);
+
+    fatal::set_fault_hook(on_fault);
+    fatal::install_exception_vectors();
+    stage(VECTORS_INSTALLED);
+
+    // Early progress record: proves native AIENOS code ran after firmware exit
+    // even if a later step hangs.
+    let mut progress = Report::new();
+    header(&mut progress, "progress");
+    write_index_line(&mut progress);
+    let _ = writeln!(progress, "firmware_exit: ok");
+    let progress_saved = save_report_var(progress.as_bytes());
+
+    let mut summary = MemoryMapSummary::default();
     for descriptor in memory_map.entries() {
-        if descriptor.ty != MemoryType::CONVENTIONAL {
-            continue;
-        }
-        conventional_pages = conventional_pages.saturating_add(descriptor.page_count);
-        if let Some(region) =
-            aienos_kernel::boot::BootMemoryRegion::new(descriptor.phys_start, descriptor.page_count)
-        {
-            if largest_region.is_none_or(|largest: aienos_kernel::boot::BootMemoryRegion| {
-                region.page_count() > largest.page_count()
-            }) {
-                largest_region = Some(region);
-            }
-        }
+        summary.add(
+            descriptor.ty == MemoryType::CONVENTIONAL,
+            descriptor.phys_start,
+            descriptor.page_count,
+        );
     }
-    let timing = aienos_kernel::boot::BootTiming {
+    let timing = BootTiming {
         uefi_entry_ticks,
         kernel_handoff_ticks: counter_ticks(),
-        counter_frequency_hz: frequency_hz,
+        counter_frequency_hz: FREQUENCY_HZ.load(Ordering::SeqCst),
     };
-    let (report, boot_ok) = aienos_kernel::boot::early_kernel_enter(
-        conventional_pages.saturating_mul(4),
-        largest_region,
+
+    stage(KERNEL_ENTERED);
+    let (kernel_report, boot_ok) = aienos_kernel::boot::early_kernel_enter(
+        summary.conventional_kb(),
+        summary.largest,
+        Some(summary),
         Some(timing),
         gb10,
         cpu,
     );
 
-    // 1. Screen: the display mode firmware set up, written directly.
-    // SAFETY: firmware reported this buffer for the active mode, and nothing
-    // else draws to it after boot services have exited.
-    let mut screen = framebuffer.and_then(|info| unsafe { Screen::new(info) });
+    let mut report = Report::new();
+    header(&mut report, "final");
+    write_index_line(&mut report);
+    let _ = write!(report, "{}", kernel_report.as_str());
+    match progress_saved {
+        Ok(_) => {
+            let _ = writeln!(report, "progress_record: saved");
+        }
+        Err(e) => {
+            let _ = writeln!(report, "progress_record: not saved ({e})");
+        }
+    }
+    if report.truncated() {
+        let _ = writeln!(report, "truncated: yes");
+    }
+
+    let mut screen = screen();
     if let Some(s) = screen.as_mut() {
         s.clear();
         s.set_color(ACCENT);
         let _ = writeln!(s, "AIENOS NATIVE BOOT REPORT");
         s.set_color(FOREGROUND);
         let _ = write!(s, "{}", report.as_str());
+        stage(SCREEN_DRAWN);
     }
 
-    // 2. Firmware variable, readable from Linux after the reset below.
-    let nvram = uefi::runtime::set_variable(
-        cstr16!("AienosBootReport"),
-        &REPORT_VENDOR,
-        VariableAttributes::NON_VOLATILE
-            | VariableAttributes::BOOTSERVICE_ACCESS
-            | VariableAttributes::RUNTIME_ACCESS,
-        report.as_bytes(),
-    );
+    let saved = save_report_var(report.as_bytes());
+    stage(FINAL_SAVED);
     if let Some(s) = screen.as_mut() {
-        match &nvram {
-            Ok(()) => {
-                let _ = writeln!(s, "nvram_report: saved");
+        match saved {
+            Ok(n) => {
+                let _ = writeln!(s, "nvram_report: saved (write {n} of {MAX_VAR_WRITES})");
             }
             Err(e) => {
-                let _ = writeln!(s, "nvram_report: failed ({:?})", e.status());
+                let _ = writeln!(s, "nvram_report: not saved ({e})");
             }
         }
     }
 
-    // 3. Serial, only where the Spark's UART is known to exist, and bounded.
     if gb10.is_some() {
         let uart = EarlyUart::new(SPARK_16550_UART_BASE);
         uart.write_str("\n");
         uart.write_str(report.as_str());
+        stage(UART_SENT);
         if let Some(s) = screen.as_mut() {
             let _ = writeln!(
                 s,
@@ -359,19 +625,11 @@ fn main() -> Status {
         }
     }
 
-    if let Some(s) = screen.as_mut() {
-        if !boot_ok {
+    if !boot_ok {
+        if let Some(s) = screen.as_mut() {
+            s.set_color(ERROR);
             let _ = writeln!(s, "boot halted: no usable memory region");
         }
-        let _ = writeln!(s);
-        s.set_color(ACCENT);
-        for remaining in (1..=RESTART_AFTER_SECS).rev() {
-            s.clear_row();
-            let _ = write!(s, "restarting in {remaining} s");
-            wait_seconds(1, frequency_hz);
-        }
-    } else {
-        wait_seconds(RESTART_AFTER_SECS, frequency_hz);
     }
-    uefi::runtime::reset(ResetType::COLD, Status::SUCCESS, None)
+    finish(screen)
 }
