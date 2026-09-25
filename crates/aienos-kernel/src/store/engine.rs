@@ -160,13 +160,16 @@ impl<D: StoreDevice> Store<D> {
                         poisoned: false,
                     })
                 } else if malformed[other] {
-                    Err(
-                        if unsupported_superblock(&raw[other]) && crc_valid(&raw[other]) {
-                            MountError::UnsupportedVersion
-                        } else {
-                            MountError::CorruptRecoveryRequired
-                        },
-                    )
+                    if unsupported_superblock(&raw[other]) && crc_valid(&raw[other]) {
+                        Err(MountError::UnsupportedVersion)
+                    } else {
+                        Ok(Self {
+                            device,
+                            root,
+                            state: MountState::DegradedRecovery,
+                            poisoned: false,
+                        })
+                    }
                 } else if graph_bad[other] && crc_supported[other] {
                     if generation_of(&raw[other]) > root.superblock.generation {
                         Ok(Self {
@@ -1261,5 +1264,79 @@ mod tests {
         store.device.fail_write = Some(4);
         assert_eq!(store.transact(&one(b"fault")), Err(StoreError::Io));
         assert_eq!(store.transact(&one(b"again")), Err(StoreError::NeedsReopen));
+    }
+
+    #[test]
+    fn store_malformed_peer_recovery_matrix() {
+        let rechecksum = |bytes: &mut [u8; STORE_UNIT_BYTES]| {
+            bytes[168..172].fill(0);
+            let crc = super::super::v1::crc32c(bytes);
+            bytes[168..172].copy_from_slice(&crc.to_le_bytes());
+        };
+
+        // 1. Bad CRC peer: Valid root in slot 0 + bad CRC in slot 1 -> DegradedRecovery
+        let mut dev = seed_genesis(blank(32));
+        dev.units[1][..8].copy_from_slice(b"AIENSTR1");
+        dev.units[1][168] ^= 1;
+        let store = Store::open(dev).unwrap();
+        assert_eq!(store.mount_state(), MountState::DegradedRecovery);
+        assert_eq!(store.generation(), 1);
+
+        // 2. Wrong magic peer: Valid root in slot 0 + non-zero wrong magic in slot 1 -> DegradedRecovery
+        let mut dev = seed_genesis(blank(32));
+        dev.units[1][..8].copy_from_slice(b"BADMAGIC");
+        let store = Store::open(dev).unwrap();
+        assert_eq!(store.mount_state(), MountState::DegradedRecovery);
+        assert_eq!(store.generation(), 1);
+
+        // 3. Malformed shape peer: Valid root in slot 0 + non-zero reserved in slot 1 -> DegradedRecovery
+        let mut dev = seed_genesis(blank(32));
+        let root = Superblock::decode(&dev.units[0], 0).unwrap();
+        let mut peer = root;
+        peer.slot_id = 1;
+        dev.units[1] = peer.encode().unwrap();
+        dev.units[1][200] = 0xff; // non-zero reserved byte
+        rechecksum(&mut dev.units[1]);
+        let store = Store::open(dev).unwrap();
+        assert_eq!(store.mount_state(), MountState::DegradedRecovery);
+        assert_eq!(store.generation(), 1);
+
+        // 4. Unsupported version peer: Valid root in slot 0 + CRC-valid major=2 in slot 1 -> UnsupportedVersion
+        let mut dev = seed_genesis(blank(32));
+        let root = Superblock::decode(&dev.units[0], 0).unwrap();
+        let mut peer = root;
+        peer.slot_id = 1;
+        dev.units[1] = peer.encode().unwrap();
+        dev.units[1][8..10].copy_from_slice(&2u16.to_le_bytes()); // major = 2
+        rechecksum(&mut dev.units[1]);
+        assert_eq!(
+            Store::open(dev).err().unwrap(),
+            MountError::UnsupportedVersion
+        );
+
+        // 5. I/O failure peer: Valid root in slot 0 + read error on slot 1 -> MountError::Io
+        let mut dev = seed_genesis(blank(32));
+        dev.fail_read = Some(1);
+        assert_eq!(Store::open(dev).err().unwrap(), MountError::Io);
+
+        // 6. Two bad roots: bad CRC on slot 0 and slot 1 -> MountError::CorruptRecoveryRequired
+        let mut dev = seed_genesis(blank(32));
+        dev.units[0][168] ^= 1;
+        dev.units[1][..8].copy_from_slice(b"AIENSTR1");
+        dev.units[1][168] ^= 1;
+        assert_eq!(
+            Store::open(dev).err().unwrap(),
+            MountError::CorruptRecoveryRequired
+        );
+
+        // 7. Transact on DegradedRecovery -> Err(StoreError::ReadOnlyDegraded)
+        let mut dev = seed_genesis(blank(32));
+        dev.units[1][..8].copy_from_slice(b"BADMAGIC");
+        let mut store = Store::open(dev).unwrap();
+        assert_eq!(store.mount_state(), MountState::DegradedRecovery);
+        assert_eq!(
+            store.transact(&one(b"blocked mutation")),
+            Err(StoreError::ReadOnlyDegraded)
+        );
     }
 }
