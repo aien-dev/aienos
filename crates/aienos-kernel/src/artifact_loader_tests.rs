@@ -88,7 +88,11 @@ impl MockPlatform {
             KernelMap::Blocks2M => {
                 p.put(l1, 1, l2 | DESC_TABLE);
                 for k in 0..512u64 {
-                    p.put(l2, k as usize, (ARENA_BASE + (k << 21)) | KERNEL_ATTRS | DESC_BLOCK);
+                    p.put(
+                        l2,
+                        k as usize,
+                        (ARENA_BASE + (k << 21)) | KERNEL_ATTRS | DESC_BLOCK,
+                    );
                 }
                 p.kernel_frames = 3;
             }
@@ -102,7 +106,11 @@ impl MockPlatform {
                         let l3 = frame(3 + k as usize);
                         p.put(l2, k as usize, l3 | DESC_TABLE);
                         for j in 0..512u64 {
-                            p.put(l3, j as usize, (region + (j << 12)) | KERNEL_ATTRS | DESC_TABLE);
+                            p.put(
+                                l3,
+                                j as usize,
+                                (region + (j << 12)) | KERNEL_ATTRS | DESC_TABLE,
+                            );
                         }
                     } else {
                         p.put(l2, k as usize, region | KERNEL_ATTRS | DESC_BLOCK);
@@ -487,11 +495,19 @@ impl Run {
 
     /// Invariants every candidate, admitted or not, must leave behind.
     fn assert_clean(&self, report: &CandidateReport) {
-        assert_eq!(self.platform.free_frames(), self.free_before, "frames leaked");
+        assert_eq!(
+            self.platform.free_frames(),
+            self.free_before,
+            "frames leaked"
+        );
         assert_eq!(report.frames_free_before, self.free_before);
         assert_eq!(report.frames_free_after, self.free_before);
         assert!(report.reclaimed(), "{report:?}");
-        assert_eq!(self.scheduler.queue_len(0), Some(0), "scheduler slot leaked");
+        assert_eq!(
+            self.scheduler.queue_len(0),
+            Some(0),
+            "scheduler slot leaked"
+        );
         assert!(self.platform.all_handed_out_zero(), "unscrubbed frame");
         assert_eq!(
             self.platform.kernel_snapshot(),
@@ -826,7 +842,10 @@ fn tampered_payload_is_rejected_before_any_task_frame() {
         CandidateState::Verified,
         LoadError::Artifact(ArtifactError::BadSignature),
     );
-    assert_eq!(run.platform.batch_calls, 0, "task frames reserved before verification");
+    assert_eq!(
+        run.platform.batch_calls, 0,
+        "task frames reserved before verification"
+    );
     run.assert_clean(&report);
 }
 
@@ -844,8 +863,13 @@ fn unknown_signer_rejected_by_anchors_and_by_policy() {
     // Anchors know the key but local policy does not allow it.
     let bytes = pack_signed(&spec(), &TEST_SEED);
     let empty_policy = boot_policy(&[]).unwrap();
-    let (report, run) =
-        reject_case(KernelMap::Block1G, &bytes, &anchors(), &empty_policy, |_| {});
+    let (report, run) = reject_case(
+        KernelMap::Block1G,
+        &bytes,
+        &anchors(),
+        &empty_policy,
+        |_| {},
+    );
     assert_rejected(
         &report,
         CandidateState::Authorized,
@@ -872,9 +896,12 @@ fn ipc_request_exceeds_policy_and_is_rejected() {
 #[test]
 fn empty_and_oversized_inputs_are_refused_before_staging() {
     for bytes in [Vec::new(), vec![0u8; (MAX_STAGING_FRAMES + 1) * PAGE]] {
-        let (report, run) =
-            reject_case(KernelMap::Block1G, &bytes, &anchors(), &policy(), |_| {});
-        assert_rejected(&report, CandidateState::Received, LoadError::StagingTooLarge);
+        let (report, run) = reject_case(KernelMap::Block1G, &bytes, &anchors(), &policy(), |_| {});
+        assert_rejected(
+            &report,
+            CandidateState::Received,
+            LoadError::StagingTooLarge,
+        );
         assert!(run.platform.handed_out.is_empty());
         run.assert_clean(&report);
     }
@@ -921,7 +948,9 @@ fn full_scheduler_fails_closed_at_admission() {
     let bytes = pack_signed(&spec(), &TEST_SEED);
     let (report, run) = reject_case(KernelMap::Block1G, &bytes, &anchors(), &policy(), |r| {
         for id in 0..LOADED_TASK_SLOTS as u32 {
-            r.scheduler.enqueue(1000 + id, TaskPriority::Normal).unwrap();
+            r.scheduler
+                .enqueue(1000 + id, TaskPriority::Normal)
+                .unwrap();
         }
     });
     assert_rejected(
@@ -971,7 +1000,11 @@ fn corrupted_mapped_bytes_fail_the_read_back_hash() {
             let (report, run) = reject_case(map, &bytes, &anchors(), &policy(), |r| {
                 r.platform.corrupt_after_copy = Some(k);
             });
-            assert_rejected(&report, CandidateState::Hashed, LoadError::MappedDigestMismatch);
+            assert_rejected(
+                &report,
+                CandidateState::Hashed,
+                LoadError::MappedDigestMismatch,
+            );
             run.assert_clean(&report);
         }
     }
@@ -1032,10 +1065,15 @@ fn installed_rights(caps: Vec<CapabilityRequest>) -> (CandidateReport, Vec<(bool
 
 #[test]
 fn grants_never_exceed_requests_or_policy() {
-    let (report, rights) = installed_rights(vec![seed_read(RIGHT_READ | RIGHT_WRITE, SEED_OBJECT_ID)]);
+    let (report, rights) =
+        installed_rights(vec![seed_read(RIGHT_READ | RIGHT_WRITE, SEED_OBJECT_ID)]);
     assert_eq!(report.decision, Decision::Admitted);
     assert_eq!(report.caps_installed, 1);
-    assert_eq!(rights, [(true, false)], "READ|WRITE request must reduce to READ");
+    assert_eq!(
+        rights,
+        [(true, false)],
+        "READ|WRITE request must reduce to READ"
+    );
 
     let (report, rights) = installed_rights(vec![seed_read(RIGHT_WRITE, SEED_OBJECT_ID)]);
     assert_eq!(report.decision, Decision::Admitted);
@@ -1117,13 +1155,28 @@ fn task_layout_rejects_every_bound_violation() {
     assert!(ok(1, &res(64, 64, 16), 64 * PAGE, 1, 64 * PAGE, 0).is_ok());
     assert_eq!(ok(0, &r, 8, 4, 4096, 0), limit);
     assert_eq!(ok(256, &r, 8, 4, 4096, 0), limit);
-    for bad in [res(0, 1, 1), res(65, 1, 1), res(1, 0, 1), res(1, 65, 1), res(1, 1, 0), res(1, 1, 17)] {
+    for bad in [
+        res(0, 1, 1),
+        res(65, 1, 1),
+        res(1, 0, 1),
+        res(1, 65, 1),
+        res(1, 1, 0),
+        res(1, 1, 17),
+    ] {
         assert_eq!(ok(1, &bad, 8, 4, 4096, 0), limit, "{bad:?}");
     }
     assert_eq!(ok(1, &r, 0, 4, 4096, 0), limit, "empty code");
-    assert_eq!(ok(1, &r, PAGE + 1, 4, 4096, 0), limit, "code overflows pages");
+    assert_eq!(
+        ok(1, &r, PAGE + 1, 4, 4096, 0),
+        limit,
+        "code overflows pages"
+    );
     assert_eq!(ok(1, &r, 8, 5, 4, 0), limit, "data longer than memory");
-    assert_eq!(ok(1, &r, 8, 4, PAGE + 1, 0), limit, "data memory overflows pages");
+    assert_eq!(
+        ok(1, &r, 8, 4, PAGE + 1, 0),
+        limit,
+        "data memory overflows pages"
+    );
     assert_eq!(ok(1, &r, 8, 4, 4096, 2), limit, "unaligned entry");
     assert_eq!(ok(1, &r, 8, 4, 4096, 8), limit, "entry at code end");
     assert_eq!(ok(1, &r, 8, 4, 4096, 12), limit, "entry past code");
@@ -1142,7 +1195,13 @@ fn admitted_report(status: ExecutionStatus) -> CandidateReport {
     r.caps_installed = 1;
     r.byte_chain = true;
     r.wx_enforced = true;
-    r.outcome = outcome(status);
+    r.outcome = TaskOutcome {
+        status,
+        syscalls: 3,
+        object_reads_ok: 2,
+        denials: 1,
+        elapsed_ticks: 10,
+    };
     r.code_base = 0x80_0000_1000;
     r.code_end = 0x80_0000_2000;
     r
@@ -1156,7 +1215,7 @@ fn line(r: &CandidateReport) -> String {
 
 #[test]
 fn candidate_lines_are_stable() {
-    let tail = "bytes=identified=verified=admitted=mapped=executed wx=enforced caps=1 revoked=yes reclaimed=yes frames=10\n";
+    let tail = "bytes=identified=verified=admitted=mapped=executed wx=enforced caps=1 revoked=yes reclaimed=yes frames=10 syscalls=3 reads=2 denials=1\n";
     let head = "artifact: P25EXEC.AIEN admitted id=abababababababab tier=seed0b-test exec=";
     assert_eq!(
         line(&admitted_report(ExecutionStatus::Exited(0))),
