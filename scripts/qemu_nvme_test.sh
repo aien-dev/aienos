@@ -27,10 +27,8 @@
 #
 # Needs qemu-system-aarch64 and AAVMF (Ubuntu: qemu-system-arm qemu-efi-aarch64).
 #
-# NOTE: scripts/verify_all.sh is intentionally NOT edited here. Wiring this
-# harness into verify_all.sh (a dedicated QEMU step plus the aarch64 clippy
-# feature loop in step 3b) is a follow-up change owned by the integration
-# lane.
+# scripts/verify_all.sh step 6e runs this harness in both DMA modes, and
+# step 3b lints the nvme-read feature set.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
