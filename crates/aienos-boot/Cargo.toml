@@ -18,6 +18,9 @@ handoff = ["uefi-base", "dep:aienos-kernel", "dep:aienos-accel", "uefi/alloc"]
 # SEED-0A candidate: polled USB keyboard after firmware exit (ADR 0012).
 # Only the QEMU keyboard test enables it; hardware staging never does.
 usb-keyboard = ["handoff"]
+# P3 candidate: polled native NVMe read after firmware exit. Only
+# scripts/qemu_nvme_test.sh enables it; hardware staging never does.
+nvme-read = ["handoff"]
 # SEED-0B qualification build (ADR 0014 §6): the kernel trusts the public,
 # TEST ONLY RFC 8032 qualification key in addition to the (empty) production
 # set, and every report says so. Without it, every artifact candidate is
@@ -36,6 +39,13 @@ hardware-staging = ["handoff"]
 # `hardware-staging`. Reach it only through AIENOS_UNSAFE_DMA_BYPASS=1 in
 # scripts/qemu_keyboard_test.sh.
 unsafe-debug-dma-without-smmu = ["usb-keyboard"]
+# UNSAFE. DEBUG ONLY. QEMU ONLY. Same bypass for the NVMe read candidate:
+# it lets the NVMe function DMA to physical memory with NO SMMU confinement
+# when the platform has no SMMU. It never applies when an SMMU exists but
+# failed to initialise, prints a warning on every boot, and is a compile
+# error together with `hardware-staging`. Reach it only through
+# AIENOS_UNSAFE_DMA_BYPASS=1 in scripts/qemu_nvme_test.sh.
+unsafe-debug-nvme-dma-without-smmu = ["nvme-read"]
 
 [dependencies]
 uefi = { version = "0.41", default-features = false, optional = true }

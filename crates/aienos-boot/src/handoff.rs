@@ -38,7 +38,7 @@ use aienos_kernel::report::ReportBuf;
 use aienos_kernel::sync::spinlock::SpinLock;
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
-#[cfg(feature = "usb-keyboard")]
+#[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
@@ -60,7 +60,7 @@ static POST_EXIT_HEAP: AtomicU64 = AtomicU64::new(0);
 static POST_EXIT_HEAP_USED: AtomicU64 = AtomicU64::new(0);
 static BOOT_SERVICES_LIVE: AtomicBool = AtomicBool::new(true);
 
-#[cfg(feature = "usb-keyboard")]
+#[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
 #[repr(C)]
 // Field order keeps every queue aligned to its own size (the SMMU ignores
 // low base address bits below the queue size): stream table at 0 (256 KiB),
@@ -73,10 +73,10 @@ struct SmmuTables {
     context: [u64; 8],
 }
 
-#[cfg(feature = "usb-keyboard")]
+#[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
 const STREAM_ENTRIES: u32 = 4096;
 
-#[cfg(feature = "usb-keyboard")]
+#[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
 const SMMU_QUEUE_ENTRIES: u32 = 16;
 
 // The linear stream table base must be aligned to its size (4096 * 64 bytes =
@@ -84,13 +84,13 @@ const SMMU_QUEUE_ENTRIES: u32 = 16;
 // section alignment above 8192, so a 256 KiB-aligned static is unbuildable for
 // aarch64-unknown-uefi; allocate the tables at runtime with an over-aligned
 // Layout and hand out one shared pointer to every user instead.
-#[cfg(feature = "usb-keyboard")]
+#[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
 const SMMU_TABLES_ALIGN: usize = 262144;
 
-#[cfg(feature = "usb-keyboard")]
+#[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
 static SMMU_TABLES_PTR: AtomicUsize = AtomicUsize::new(0);
 
-#[cfg(feature = "usb-keyboard")]
+#[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
 fn smmu_tables() -> *mut SmmuTables {
     let existing = SMMU_TABLES_PTR.load(Ordering::Acquire);
     if existing != 0 {
@@ -103,6 +103,15 @@ fn smmu_tables() -> *mut SmmuTables {
     unsafe { core::ptr::write_bytes(raw, 0, layout.size()) };
     SMMU_TABLES_PTR.store(raw as usize, Ordering::Release);
     raw.cast::<SmmuTables>()
+}
+
+/// Pointer to the shared event queue ring, reached by byte offset so no typed
+/// pointer dereference is needed.
+#[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
+fn smmu_event_queue_ptr() -> *const [[u64; 4]; SMMU_QUEUE_ENTRIES as usize] {
+    let base = smmu_tables() as *mut u8;
+    base.wrapping_add(core::mem::offset_of!(SmmuTables, event_queue))
+        .cast()
 }
 
 struct BootHeap;
@@ -281,6 +290,74 @@ fn configure_smmu_for_xhci(
     Ok(stream_id)
 }
 
+#[cfg(feature = "nvme-read")]
+fn configure_smmu_for_nvme(
+    iort: Option<&acpi::IortSmmu>,
+    nvme: Option<nvme_read::NvmeLocation>,
+    pool_base: usize,
+    frames_used: usize,
+) -> Result<u32, aienos_kernel::smmu::Error> {
+    let iort = iort.ok_or(aienos_kernel::smmu::Error::InvalidWindow)?;
+    let nvme = nvme.ok_or(aienos_kernel::smmu::Error::InvalidWindow)?;
+    let stream_id = nvme
+        .stream_id(iort)
+        .ok_or(aienos_kernel::smmu::Error::InvalidWindow)?;
+    let (dma_base, dma_length) = nvme.dma_window();
+    let remaining = PT_POOL_PAGES.saturating_sub(frames_used);
+    let next = pool_base
+        .checked_add(
+            frames_used
+                .checked_mul(4096)
+                .ok_or(aienos_kernel::smmu::Error::InvalidWindow)?,
+        )
+        .ok_or(aienos_kernel::smmu::Error::InvalidWindow)?;
+    let frames = FixedFramePool::new(PhysAddr(next), remaining)
+        .ok_or(aienos_kernel::smmu::Error::InvalidWindow)?;
+    // Stage-1 table that maps only the NVMe DMA arena (identity).
+    let policy = aienos_kernel::smmu::build_dma_policy(
+        stream_id,
+        1,
+        &[aienos_kernel::smmu::DmaWindow {
+            iova: dma_base as usize,
+            pa: PhysAddr(dma_base as usize),
+            length: dma_length,
+        }],
+        frames,
+        PhysicalTableMemory,
+    )?;
+    let table_frames = policy.page_table.frames_used().unwrap_or(0);
+    clean_table_pool(next, table_frames * 4096);
+
+    let base = smmu_tables() as *mut u8;
+    assert!(stream_id < STREAM_ENTRIES, "SID outside the stream table");
+    // Field addresses are reached by byte offset from the allocation base, so
+    // no typed pointer dereference happens here.
+    let field = |offset: usize| base.wrapping_add(offset);
+    // Safety: as in configure_smmu_for_xhci, the tables are one live,
+    // identity-mapped, 256 KiB-aligned allocation owned by the SMMU; the
+    // register aperture is identity mapped by enter_kernel_mmu.
+    let linear = unsafe {
+        aienos_kernel::smmu::LinearTables::new(
+            field(core::mem::offset_of!(SmmuTables, stream_table)).cast::<[u64; 8]>(),
+            STREAM_ENTRIES,
+            field(core::mem::offset_of!(SmmuTables, command_queue)).cast::<[u64; 2]>(),
+            SMMU_QUEUE_ENTRIES,
+            field(core::mem::offset_of!(SmmuTables, event_queue)).cast::<[u64; 4]>(),
+            SMMU_QUEUE_ENTRIES,
+            field(core::mem::offset_of!(SmmuTables, context)).cast::<[u64; 8]>(),
+        )?
+    };
+    let mut regs = unsafe { aienos_kernel::smmu::MmioRegisters::new(iort.base as usize) };
+    aienos_kernel::smmu::configure_linear_stream(
+        &mut regs,
+        &linear,
+        policy.stream_id,
+        &policy.cd,
+        aienos_kernel::smmu::DEFAULT_SPINS,
+    )?;
+    Ok(stream_id)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn enter_kernel_mmu(
     memory_map: &impl MemoryMap,
@@ -294,6 +371,8 @@ fn enter_kernel_mmu(
     ecam: Option<AddressRange>,
     gic: Option<acpi::GicBases>,
     smmu_mmio: Option<u64>,
+    nvme_mmio: Option<u64>,
+    nvme_ecam: Option<AddressRange>,
 ) -> KernelMmu {
     let descriptors: alloc::vec::Vec<_> = memory_map
         .entries()
@@ -324,6 +403,15 @@ fn enter_kernel_mmu(
         });
     }
     if let Some(range) = ecam {
+        mmio.push(range);
+    }
+    if let Some(base) = nvme_mmio {
+        mmio.push(AddressRange {
+            start: base & !4095,
+            length: 0x10000,
+        });
+    }
+    if let Some(range) = nvme_ecam {
         mmio.push(range);
     }
     if let Some(gic) = gic {
@@ -468,6 +556,9 @@ fn current_ttbr0_el1() -> u64 {
 
 #[cfg(feature = "usb-keyboard")]
 mod usb_keyboard;
+
+#[cfg(feature = "nvme-read")]
+mod nvme_read;
 
 /// Commit this image was built from; `scripts/stage_one_time_boot.sh` sets it.
 const COMMIT: &str = match option_env!("AIENOS_COMMIT") {
@@ -945,9 +1036,9 @@ struct AcpiFacts {
     cpu: Option<acpi::CpuTopology>,
     spcr: Option<acpi::SpcrConsole>,
     gic: Option<acpi::GicBases>,
-    #[cfg(feature = "usb-keyboard")]
+    #[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
     mcfg: Option<&'static [u8]>,
-    #[cfg(feature = "usb-keyboard")]
+    #[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
     iort: Option<acpi::IortSmmu>,
 }
 
@@ -986,9 +1077,9 @@ fn discover_acpi(boot_mpidr: u64) -> AcpiFacts {
                 facts.gic = acpi::madt_gic_bases(table).ok();
             }
             b"SPCR" => facts.spcr = acpi::spcr_console(table).ok(),
-            #[cfg(feature = "usb-keyboard")]
+            #[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
             b"MCFG" => facts.mcfg = Some(table),
-            #[cfg(feature = "usb-keyboard")]
+            #[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
             b"IORT" => facts.iort = acpi::iort_smmuv3(table).ok().flatten(),
             _ => {}
         }
@@ -1550,6 +1641,8 @@ fn main() -> Status {
     let artifact_candidates = read_artifact_candidates();
     #[cfg(feature = "usb-keyboard")]
     let xhci = usb_keyboard::find_xhci();
+    #[cfg(feature = "nvme-read")]
+    let nvme = nvme_read::find_nvme();
 
     let mut pre = Report::new();
     header(&mut pre, "pre_exit");
@@ -1653,9 +1746,28 @@ fn main() -> Status {
         #[cfg(not(feature = "usb-keyboard"))]
         None,
         acpi_facts.gic,
-        #[cfg(feature = "usb-keyboard")]
+        #[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
         acpi_facts.iort.as_ref().map(|i| i.base),
-        #[cfg(not(feature = "usb-keyboard"))]
+        #[cfg(not(any(feature = "usb-keyboard", feature = "nvme-read")))]
+        None,
+        #[cfg(feature = "nvme-read")]
+        nvme.map(|n| n.mmio_base()),
+        #[cfg(not(feature = "nvme-read"))]
+        None,
+        #[cfg(feature = "nvme-read")]
+        nvme.and_then(|n| {
+            let (segment, bus) = n.ecam_location();
+            acpi_facts.mcfg.and_then(|t| {
+                acpi::mcfg_window(t, segment, bus)
+                    .ok()
+                    .flatten()
+                    .map(|w| AddressRange {
+                        start: w.base,
+                        length: (u64::from(w.end_bus) - u64::from(w.start_bus) + 1) << 20,
+                    })
+            })
+        }),
+        #[cfg(not(feature = "nvme-read"))]
         None,
     );
     let pt_frames_used = kernel_mmu.pt_frames_used;
@@ -1670,6 +1782,16 @@ fn main() -> Status {
     #[cfg(feature = "usb-keyboard")]
     let smmu_result =
         configure_smmu_for_xhci(acpi_facts.iort.as_ref(), xhci, pt_pool, pt_frames_used);
+
+    // NVMe read candidate: same fail-closed DMA discipline. Enabling both
+    // `usb-keyboard` and `nvme-read` in one image is not a supported build;
+    // each QEMU harness enables exactly one.
+    #[cfg(feature = "nvme-read")]
+    let nvme_takeover = nvme_read::take_over_dma(nvme, acpi_facts.mcfg);
+
+    #[cfg(feature = "nvme-read")]
+    let nvme_smmu_result =
+        configure_smmu_for_nvme(acpi_facts.iort.as_ref(), nvme, pt_pool, pt_frames_used);
 
     fatal::set_fault_hook(on_fault);
     fatal::install_exception_vectors();
@@ -1983,7 +2105,17 @@ fn main() -> Status {
         smmu_result.is_ok(),
         acpi_facts.iort.as_ref().map(|s| s.base),
         smmu_result.ok(),
-        unsafe { core::ptr::addr_of_mut!((*smmu_tables()).event_queue).cast_const() },
+        smmu_event_queue_ptr(),
+    );
+    #[cfg(feature = "nvme-read")]
+    nvme_read::run(
+        nvme,
+        nvme_takeover,
+        &mut screen,
+        nvme_smmu_result.is_ok(),
+        acpi_facts.iort.as_ref().map(|s| s.base),
+        nvme_smmu_result.ok(),
+        smmu_event_queue_ptr(),
     );
     finish(screen)
 }

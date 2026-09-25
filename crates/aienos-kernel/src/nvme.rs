@@ -40,6 +40,10 @@ impl Cap {
     pub const fn timeout_units(self) -> u8 {
         ((self.0 >> 24) & 0xff) as u8
     }
+    /// CAP.MPSMIN: log2 of the minimum memory page size, in 4 KiB units.
+    pub const fn mpsmin(self) -> u8 {
+        ((self.0 >> 48) & 0xf) as u8
+    }
 }
 
 pub const fn doorbell_offset(qid: u16, completion: bool, stride: u32) -> u32 {
@@ -274,7 +278,11 @@ pub fn build_prps(
     if pages == 1 {
         return Ok((address, 0, 0));
     }
-    let second = (address & !((page_size as u64) - 1)) + page_size as u64;
+    // The second data page starts at the next page boundary after `address`.
+    // A near-`u64::MAX` address must be rejected, not wrapped or panicked.
+    let second = (address & !((page_size as u64) - 1))
+        .checked_add(page_size as u64)
+        .ok_or(PrpError::Invalid)?;
     if pages == 2 {
         return Ok((address, second, 0));
     }
@@ -292,9 +300,15 @@ pub fn build_prps(
         let entry = list.get_mut(slot).ok_or(PrpError::ListTooSmall)?;
         let last_in_page = slot % per_page == per_page - 1;
         if last_in_page && count - data > 1 {
-            *entry = list_address + ((slot / per_page + 1) * page_size) as u64;
+            let offset = (slot / per_page + 1)
+                .checked_mul(page_size)
+                .ok_or(PrpError::Invalid)?;
+            *entry = list_address
+                .checked_add(offset as u64)
+                .ok_or(PrpError::Invalid)?;
         } else {
-            *entry = second + (data * page_size) as u64;
+            let offset = data.checked_mul(page_size).ok_or(PrpError::Invalid)?;
+            *entry = second.checked_add(offset as u64).ok_or(PrpError::Invalid)?;
             data += 1;
         }
         slot += 1;

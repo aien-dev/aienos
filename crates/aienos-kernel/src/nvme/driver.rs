@@ -49,9 +49,16 @@ pub enum NvmeError {
     Controller(ControllerError),
     Dma,
     Timeout,
-    CompletionStatus { sct: u8, sc: u8 },
+    CompletionStatus {
+        sct: u8,
+        sc: u8,
+    },
     InvalidIdentify,
     InvalidQueueDepth,
+    /// The controller needs a memory page size larger than the 4 KiB the
+    /// driver programs into CC.MPS (CAP.MPSMIN != 0), or another base
+    /// property this read substrate does not support.
+    UnsupportedController,
 }
 
 /// A zeroed, physically contiguous DMA allocation and its CPU byte view.
@@ -105,6 +112,12 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
     /// Reset and enable the controller. Ready waits honour CAP.TO (500 ms units).
     pub fn init(mut registers: R, mut dma: D, mut delay: T) -> Result<Self, NvmeError> {
         let cap = Cap(((registers.read32(4) as u64) << 32) | registers.read32(0) as u64);
+        // The driver programs CC.MPS for a 4 KiB memory page (CC_MPS_4K) and
+        // builds 4 KiB queues, so a controller that demands a larger minimum
+        // page size is refused rather than mis-programmed.
+        if cap.mpsmin() != 0 {
+            return Err(NvmeError::UnsupportedController);
+        }
         let timeout_ms = u32::from(cap.timeout_units().max(1)) * 500;
         let cc = registers.read32(REG_CC);
         registers.write32(REG_CC, cc & !CC_EN);
@@ -159,7 +172,9 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
         let lbads = *bytes
             .get(descriptor + 2)
             .ok_or(NvmeError::InvalidIdentify)?;
-        if block_count == 0 || lbads >= 32 {
+        // NVMe LBA sizes are 512 bytes (lbads 9) through 2^31; anything smaller
+        // is not a valid data block size.
+        if block_count == 0 || !(9..=31).contains(&lbads) {
             return Err(NvmeError::InvalidIdentify);
         }
         let info = NamespaceInfo {
@@ -172,7 +187,9 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
 
     /// Create polled I/O completion and submission queues, both with QID 1.
     pub fn create_io_queues(&mut self, depth: u16) -> Result<(), NvmeError> {
-        if depth < 2 {
+        // NVMe requires at least 2 entries, and the queue may not exceed the
+        // controller's advertised maximum (CAP.MQES + 1).
+        if depth < 2 || depth > self.cap.mqes() {
             return Err(NvmeError::InvalidQueueDepth);
         }
         let size = usize::from(depth).checked_mul(16).ok_or(NvmeError::Dma)?;
@@ -496,12 +513,16 @@ mod tests {
         io_cq_tail: usize,
         io_sq_tail: usize,
         io_phase: bool,
+        /// CAP high dword (offset 4). Bits 16..20 carry CAP.MPSMIN.
+        cap_high: u32,
+        /// LBA data size (lbads) the fake reports for namespace 1.
+        lbads: u8,
     }
     impl Registers for FakeRegs {
         fn read32(&mut self, offset: u32) -> u32 {
             match offset {
                 0 => 0x0100_03ff, // CAP.TO = 1 (500 ms), MQES = 1023
-                4 => 0,
+                4 => self.cap_high,
                 REG_CC => self.cc,
                 REG_CSTS => {
                     if self.ready_after_reads > 0 && self.cc & CC_EN != 0 {
@@ -577,7 +598,7 @@ mod tests {
                         if cns == 0 {
                             data[0..8].copy_from_slice(&self.namespace_size.to_le_bytes());
                             data[26] = 0;
-                            data[130] = 9;
+                            data[130] = self.lbads;
                         }
                     }
                     0x05 => {
@@ -750,6 +771,8 @@ mod tests {
                 io_cq_tail: 0,
                 io_sq_tail: 0,
                 io_phase: true,
+                cap_high: 0,
+                lbads: 9,
             },
             FakeDma {
                 shared,
@@ -973,5 +996,38 @@ mod tests {
             NvmeController::init(regs, dma, CountingDelay::default()),
             Err(NvmeError::CompletionStatus { sc: 1, .. })
         ));
+    }
+
+    #[test]
+    fn controller_requiring_larger_pages_is_refused() {
+        let (mut regs, dma) = fixture();
+        // CAP.MPSMIN = 1 means the controller needs 8 KiB pages; the driver
+        // only programs 4 KiB.
+        regs.cap_high = 1 << 16;
+        assert_eq!(
+            NvmeController::init(regs, dma, CountingDelay::default()).err(),
+            Some(NvmeError::UnsupportedController)
+        );
+    }
+
+    #[test]
+    fn io_queue_depth_above_mqes_is_rejected() {
+        let (regs, dma) = fixture();
+        let mut controller = NvmeController::init(regs, dma, CountingDelay::default()).unwrap();
+        // CAP.MQES + 1 = 1024 in the fixture.
+        assert_eq!(
+            controller.create_io_queues(1025),
+            Err(NvmeError::InvalidQueueDepth)
+        );
+    }
+
+    #[test]
+    fn lbads_below_512_is_invalid_identify() {
+        let (mut regs, dma) = fixture();
+        regs.lbads = 8;
+        assert_eq!(
+            NvmeController::init(regs, dma, CountingDelay::default()).err(),
+            Some(NvmeError::InvalidIdentify)
+        );
     }
 }
