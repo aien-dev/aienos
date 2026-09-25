@@ -12,6 +12,7 @@ members = [
     "crates/aienos-artifact",
     "crates/aienos-artifact-tool",
     "crates/aienos-evidence",
+    "crates/aienos-store-qualification",
 ]
 
 [workspace.package]

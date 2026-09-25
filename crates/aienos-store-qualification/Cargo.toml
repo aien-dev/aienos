@@ -1,0 +1,13 @@
+[package]
+name = "aienos-store-qualification"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Independent adversarial qualification oracle and test suite for AIENOS P3 System Store v1"
+
+[dependencies]
+sha2 = "0.10"
+serde = { workspace = true }
+serde_json = { workspace = true }

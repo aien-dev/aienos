@@ -1,0 +1,4 @@
+# Temporary and generated artifacts from crash harness runs
+.base/
+results/
+*.img
