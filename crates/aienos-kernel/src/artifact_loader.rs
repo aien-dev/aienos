@@ -1270,7 +1270,7 @@ pub unsafe fn run_boot_candidate(bytes: &[u8], kernel_root: usize) -> CandidateR
 
 /// One stable report line per candidate. Formats (QEMU checks grep these):
 ///
-/// `artifact: NAME admitted id=HEX16 tier=seed0b-test exec=EXEC bytes=identified=verified=admitted=mapped=executed wx=enforced caps=N revoked=yes reclaimed=yes frames=N`
+/// `artifact: NAME admitted id=HEX16 tier=seed0b-test exec=EXEC bytes=identified=verified=admitted=mapped=executed wx=enforced caps=N revoked=yes reclaimed=yes frames=N syscalls=N reads=N denials=N`
 /// `artifact: NAME rejected stage=STAGE reason=REASON reclaimed=yes`
 ///
 /// EXEC is `exited:0x..`, `timeout`, `fault:code-write`, `fault:other`,
@@ -1335,7 +1335,7 @@ pub fn write_candidate_line(out: &mut impl core::fmt::Write, name: &str, r: &Can
             }
             let _ = writeln!(
                 out,
-                " bytes={} wx={} caps={} revoked={} reclaimed={} frames={}",
+                " bytes={} wx={} caps={} revoked={} reclaimed={} frames={} syscalls={} reads={} denials={}",
                 if r.byte_chain {
                     "identified=verified=admitted=mapped=executed"
                 } else {
@@ -1350,6 +1350,9 @@ pub fn write_candidate_line(out: &mut impl core::fmt::Write, name: &str, r: &Can
                 yes_no(r.caps_live_after == 0),
                 yes_no(r.reclaimed()),
                 r.frames_reserved,
+                r.outcome.syscalls,
+                r.outcome.object_reads_ok,
+                r.outcome.denials,
             );
         }
     }
