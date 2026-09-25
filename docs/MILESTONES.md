@@ -22,23 +22,24 @@
 
 ---
 
-## 0. Current Critical Path (revised 2026-09-24)
+## 0. Current Critical Path (revised 2026-09-25)
 
 The phases in section 1 remain the destination. This is the gate order being
 executed now, adopted from the reviewed roadmap. The first vision is proven
 only at M8. Status words: **done** = verified on this repository's evidence;
 **built** = code merged and host-verified, never run on hardware; **pending**
-= not started or blocked.
+= not started or blocked. Every **done** names its level: host-tested, in
+QEMU, or on hardware (Machine 1). A QEMU result is never a hardware result.
 
 | Gate | Scope | Status | Evidence / blocker |
 |---|---|---|---|
 | **M0** Close Config A (**partial**) | Clean reference snapshot | done | PR #12: schema 3.0.0 bundle, all repositories clean |
 | | Benchmark evidence | done | CPU baseline: Llama-3.2-1B Q4_K_M on 20 Arm cores, 256-token samples, mean decode 54.2 tokens/s |
-| | Native-boot rollback | done | First native boot returned to Linux on its own; BootNext consumed, Linux entry and kernel unchanged ([M2 evidence](../evidence/m2_first_boot_2026-09-24.md)) |
-| | Bootable recovery media | done on hardware; repair tooling added, attended repair boot pending | AIENOSRECOV boots with Secure Boot on and returns unattended (#53, [Gate 1 evidence](../evidence/gate1_machine1_selftest_2026-09-24.md)); `fsck.vfat`/`mkfs.vfat`/`fsck.ext4`/`chroot` added to the initrd, stick rebuild and attended `/boot/efi` repair + boot-entry restore still needed ([procedure](RECOVERY_MEDIA_MACHINE1.md), [evidence](../evidence/recovery_boot_machine1.md)) |
+| | Native-boot rollback | done in QEMU; hardware blocked | PR #126: `M0_NATIVE_ROLLBACK_QEMU: PASS` (real AAVMF `BootNext`/NVRAM, six rollback branches, gated by `scripts/verify_all.sh` step 6d); `M0_NATIVE_ROLLBACK_MACHINE1: BLOCKED` (reason = `HARDWARE_QUALIFICATION_BLOCKED_BY_TRUST_CHAIN`, [procedure](NATIVE_BOOT_ONE_TIME.md)). The M2 boot returned to Linux ([M2 evidence](../evidence/m2_first_boot_2026-09-24.md)) but ran with Secure Boot off, so it does not close this row ([audit](M0_NATIVE_BOOT_ROLLBACK_AUDIT.md)) |
+| | Bootable recovery media | done on hardware (read-only inspection); no repair exercised | AIENOSRECOV boots with Secure Boot on and returns unattended (#53, [Gate 1 evidence](../evidence/gate1_machine1_selftest_2026-09-24.md)); PR #117: attended USB boot `RECOVERY_BOOT_GATE: PASS` on Machine 1, root and ESP mounted read-only, tools present, returned to Ubuntu; no filesystem repair or firmware mutation performed ([procedure](RECOVERY_MEDIA_MACHINE1.md), [evidence](../evidence/recovery_boot_machine1.md)) |
 | **M1** UEFI/QEMU substrate | Automated emulator boot proof | done | PR #42 (SPCR/boot harness) and PR #44 (CI automation). Reaches EL2, discovers MADT/SPCR, reports kernel alive. (Note: distinct from TRUST-1 Gate 4 security test suite) |
 | **M2A** Spark firmware handoff | Memory map into early allocator | done on hardware | PR #10; 184 descriptors, 36 conventional regions, 0 rejected ([M2 evidence](../evidence/m2_first_boot_2026-09-24.md)) |
-| | GB10 PCI identity, BAR0, PMC_BOOT registers | built, not found on hardware | PR #11; pre-exit discovery reported `gb10: unavailable` although Linux sees it at `000f:01:00.0` |
+| | GB10 PCI identity, BAR0, PMC_BOOT registers | built, not found on hardware | PR #11; pre-exit discovery reported `gb10: unavailable` although Linux sees it at `000f:01:00.0`. PR #125: read-only Linux characterization on Machine 1 ([evidence](../evidence/gb10_linux_readonly_2026-09-25.md)); no native AIENOS GB10 observation exists; the updated discovery path is built, not booted on hardware |
 | | CPU topology from the ACPI MADT (efficiency classes) and boot-core MIDR | done on hardware | 10 cores in class 0, 10 in class 1; boot core class 0, MIDR part `0xd87` (Cortex-A725) ([M2 evidence](../evidence/m2_first_boot_2026-09-24.md)) |
 | | Broader ACPI device discovery | pending | |
 | **M2B** Human bring-up console | GOP framebuffer text after firmware exit | built, unconfirmed | PR #13; the report does not record post-exit drawing, so the operator photograph is the evidence |
@@ -46,25 +47,57 @@ only at M8. Status words: **done** = verified on this repository's evidence;
 | | USB keyboard (xHCI + HID) | pending | |
 | **M2C** Hardware test automation | Exclusive Machine 1 key and ledger records in `aien-proof` | done on hardware | aien-sovereign-core PR #126; first boot staged and collected under `machine-1` (ledger events 83 to 85) |
 | | Power/reset control, HDMI capture, USB input emulation | design proposed, wiring pending | [HARDWARE_TEST_RIG.md](HARDWARE_TEST_RIG.md) and [ADR 0011](adr/0011-machine-1-hardware-test-rig.md); Raspberry Pi controller, parts chosen, operator approval and wiring pending |
-| **M3** Kernel isolation | MMU, exceptions, interrupts, timer, scheduler, IPC/capabilities | pending | Scheduler consumes M2A CPU topology |
-| **M4** Storage and recovery | | pending | Host crates exist (`recovery`, `store`) |
+| **M3** Kernel isolation | MMU, exceptions, interrupts, timer, scheduler, IPC/capabilities, SMMUv3 DMA confinement, ABI v1 | done in QEMU; not run on Machine 1 | PRs #103–#115; [M3 canonical receipt](../evidence/m3_canonical_receipt.md) (`Overall: PASS`); ABI v1 frozen in [ADR 0013](adr/0013-aienos-abi-v1.md). Scheduler consumes M2A CPU topology |
+| **SEED-0B** Native capability admission (Phase 2) | Signed Binary Artifact v0, admission, W^X EL0 execution, Admission Receipt v0, hostile matrix | done in QEMU (TEST-ONLY keys) | PRs #118–#122, #124, #127, #128; `SEED_0B_QEMU: PASS` ([evidence](../evidence/seed0b_qemu_2026-09-25.md)) |
+| | P2-9 Machine 1 qualification | prepared, not run | Blocked on the TRUST-1 owner-signed boot chain (#40) ([procedure](SEED0B_MACHINE1_QUALIFICATION.md)) |
+| **M4** Storage and recovery | Native NVMe read | done in QEMU | PR #129; `QEMU_NVME: PASS` in SMMU-confined and fail-closed modes ([evidence](../evidence/p3_nvme_read_qemu_2026-09-25.md)) |
+| | Native NVMe write and flush | done in QEMU | PR #132; `QEMU_NVME_RW: PASS` in both modes, persisted across a restart ([evidence](../evidence/p3_nvme_write_flush_qemu_2026-09-25.md)) |
+| | Store root-write power-fail atomicity | done in QEMU at 4096-byte LBA; Machine 1 SSD does not meet it | PR #133; `QEMU_NVME_ATOMICITY_4K: PASS`; read-only Identify of the Machine 1 SSD gives `NATIVE_GB10_STORE_ROOT_ATOMICITY: FAIL` (512-byte LBA, one-block guarantee) ([evidence](../evidence/p3_nvme_atomicity_2026-09-25.md)) |
+| | System Store v1 format and engine | done, host-tested | PR #130 format frozen in [ADR 0015](adr/0015-system-store-v1-format.md) with canonical vectors; PR #131 mount and transaction engine; PR #135 malformed-peer amendment (`STORE_MALFORMED_PEER_RECOVERY: PASS`, read-only `DegradedRecovery`) |
+| | Store v1 over NVMe, crash and reboot | done in QEMU | PR #134; `STORE_V1_QEMU: PASS` at 4096-byte LBA ([evidence](../evidence/store_nvme_qemu_2026-09-25.md)); PR #136; `STORE_512B_CRASH_RECOVERY_QEMU: PASS` at 512-byte LBA ([evidence](../evidence/store_512b_qemu_2026-09-25.md)). `P3_STORE_QEMU` and `P3_STORE_NATIVE` are not claimed. PR #137 gates the NVMe read, write/flush, 4K atomicity and both Store-over-NVMe QEMU runs in `scripts/verify_all.sh` step 6e |
+| | Continuity objects over Store v1 (Generation, agent identity and state, Cortex checkpoint/WAL, artifact references) | pending | Host crates exist (`aienos-agent-state`, `aienos-cortex`); not yet persisted over Store v1 |
+| | Recovery Core ([ADR 0006](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md)) | pending | Host-tested kernel module `recovery` exists; the deterministic scenarios (including identity-loss refusal) are not qualified |
+| | Storage on Machine 1 | pending | Waits for TRUST-1 and a decision on the 512-byte-LBA SSD |
 | **M5** Encryption and identity | | pending | |
 | **M6** Minimal wired networking | DHCP/static IP, ARP/NDP, IP, UDP/TCP, secure control transport | pending | Before the self-maintaining agent; Wi-Fi and Bluetooth later |
 | **M7** AIEN runtime and native CPU inference | | pending | Compare against the M0 CPU baseline |
 | **M8** Cortex and persistent agent | | pending | Host crates exist (`cortex`, `agent-state`) |
 
-**Overall gate status (2026-09-24):**
+**Overall gate status (2026-09-25):**
 
 ```text
-M0                     PARTIAL      snapshot PASS, benchmark PASS, rollback PASS, recovery media boots on Machine 1; Config A recovery_procedure stays documented_only until restore (Gate 1 items 12-14) is exercised
+M0                     PARTIAL      snapshot PASS, benchmark PASS, rollback PASS in QEMU (M0_NATIVE_ROLLBACK_QEMU: PASS, PR #126) and BLOCKED on Machine 1 (HARDWARE_QUALIFICATION_BLOCKED_BY_TRUST_CHAIN), recovery media RECOVERY_BOOT_GATE: PASS on Machine 1 (PR #117); Config A recovery_procedure stays documented_only until restore (Gate 1 items 12-14) is exercised
 M1 (QEMU substrate)    PASS         automated QEMU boot in CI (PR #42, #44)
 M2                     PASS         first native Spark boot
 Machine 1 core         PASS         core operational baseline recorded (PR #41)
+M3                     PASS (QEMU)  kernel isolation, PRs #103-#115, evidence/m3_canonical_receipt.md; not run on Machine 1
+SEED-0B (Phase 2)      PASS (QEMU)  SEED_0B_QEMU: PASS, TEST-ONLY keys (evidence/seed0b_qemu_2026-09-25.md); P2-9 Machine 1 prepared, not run, blocked on TRUST-1
+M4                     PARTIAL      QEMU: QEMU_NVME, QEMU_NVME_RW, QEMU_NVME_ATOMICITY_4K, STORE_V1_QEMU, STORE_512B_CRASH_RECOVERY_QEMU all PASS (PRs #129, #132-#134, #136; gated by verify_all step 6e, PR #137); continuity objects, Recovery Core and Machine 1 storage pending
+GB10 lane              LINUX ONLY   read-only characterization on Machine 1 (PR #125); no native AIENOS GB10 observation
 TRUST-1 Gate 0         DECLARED     baseline recorded (PR #46); independent key access pending attended proof
 TRUST-1 Gate 1         PARTIAL      stick boots on Machine 1 with Secure Boot on, inspects SB/PCRs/disks, returns (items 1-5, 7, 8, 15, 16 PASS; 6 partial); repair tooling added ([procedure](RECOVERY_MEDIA_MACHINE1.md)); items 9-14 + artifact round trip pending
 TRUST-1 Gate 4         TOOLING PASS swTPM + soak + fault injection (PR #48); 100-boot campaign pending
-NEXT HARD GATE:        Gate 0 key proof (decrypt on MacBook) + Gate 1 items 9-14 -> Gate 2 TPM campaign -> Gate 3 owner keys -> M3
+TRUST-1 path:          Gate 0 key proof (decrypt on MacBook) + Gate 1 items 9-14 -> Gate 2 TPM campaign -> Gate 3 owner keys (runs in parallel with the plan below)
+NEXT:                  M4 continuity objects over Store v1 (plan item 1)
 ```
+
+**Adopted forward plan, in order:**
+
+1. **M4 continuity:** Generation, LogicalAgentId and agent state, Cortex
+   checkpoint/WAL and artifact references over System Store v1, proven by a
+   QEMU cold restart that returns the same identity and memory.
+2. **Recovery Core:** the deterministic scenarios of
+   [ADR 0006](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md),
+   including refusal on identity loss.
+3. **M5 encryption and identity:** the key hierarchy and encrypted-store format
+   are decided with the operator before implementation.
+4. **Minimal M7 CPU inference:** one model, correct and acceptable;
+   optimization waits until after M8.
+5. **M8 persistent agent in QEMU.** M6 networking runs in parallel.
+6. **TRUST-1 Gates 0–9** run in parallel (operator-attended hardware steps).
+7. **One consolidated Machine 1 qualification wave** after TRUST-1 Gate 7:
+   native-boot rollback, SEED-0B (P2-9), isolation, Store on the real NVMe,
+   NIC, inference and the M8 demo.
 
 Public roadmap and contributor entry points: [ROADMAP.md](../ROADMAP.md).
 
