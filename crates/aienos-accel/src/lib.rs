@@ -2,6 +2,10 @@
 
 use core::fmt::Write;
 
+pub mod pci;
+pub mod profile;
+pub mod registers;
+
 /// PCI identity observed for the GB10 GPU in the DGX Spark.
 pub const NVIDIA_VENDOR_ID: u16 = 0x10de;
 pub const GB10_DEVICE_ID: u16 = 0x2e12;
