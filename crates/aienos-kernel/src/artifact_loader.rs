@@ -141,7 +141,6 @@ impl CandidateReport {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Platform contract
 // ---------------------------------------------------------------------------
@@ -485,9 +484,16 @@ struct Reservation {
 }
 
 impl Reservation {
-    fn release<P: LoaderPlatform>(&mut self, platform: &mut P, scheduler: &mut LoaderScheduler) -> bool {
+    fn release<P: LoaderPlatform>(
+        &mut self,
+        platform: &mut P,
+        scheduler: &mut LoaderScheduler,
+    ) -> bool {
         let mut ok = true;
-        for batch in [self.frames.take(), self.shadow.take()].into_iter().flatten() {
+        for batch in [self.frames.take(), self.shadow.take()]
+            .into_iter()
+            .flatten()
+        {
             for frame in batch.as_slice() {
                 platform.bytes_mut(frame.0 as u64, PAGE).fill(0);
             }
@@ -781,7 +787,8 @@ fn shadow_frames_needed<P: LoaderPlatform>(
     kernel_root: u64,
     frames: &[PhysAddr],
 ) -> Result<usize, LoadError> {
-    let mut prefixes: [[u64; 3]; MAX_CODE_PAGES as usize] = [[u64::MAX; 3]; MAX_CODE_PAGES as usize];
+    let mut prefixes: [[u64; 3]; MAX_CODE_PAGES as usize] =
+        [[u64::MAX; 3]; MAX_CODE_PAGES as usize];
     let mut count = 0usize;
     for (n, frame) in frames.iter().enumerate() {
         let pa = frame.0 as u64;
@@ -840,19 +847,34 @@ fn shadow_code_alias<P: LoaderPlatform>(
                         let attrs = entry & ATTR_MASK;
                         let base = entry & BLOCK_1G_MASK;
                         for k in 0..ENTRIES as u64 {
-                            write_entry(p, fresh, k as usize, (base + (k << 21)) | attrs | DESC_BLOCK);
+                            write_entry(
+                                p,
+                                fresh,
+                                k as usize,
+                                (base + (k << 21)) | attrs | DESC_BLOCK,
+                            );
                         }
                     }
                     (2, DESC_BLOCK) => {
                         let attrs = entry & ATTR_MASK;
                         let base = entry & BLOCK_2M_MASK;
                         for k in 0..ENTRIES as u64 {
-                            write_entry(p, fresh, k as usize, (base + (k << 12)) | attrs | DESC_TABLE);
+                            write_entry(
+                                p,
+                                fresh,
+                                k as usize,
+                                (base + (k << 12)) | attrs | DESC_TABLE,
+                            );
                         }
                     }
                     _ => return Err(LoadError::Mapping),
                 }
-                write_entry(p, table, index, (entry & !ADDRESS_MASK & !DESC_TYPE) | fresh | DESC_TABLE);
+                write_entry(
+                    p,
+                    table,
+                    index,
+                    (entry & !ADDRESS_MASK & !DESC_TYPE) | fresh | DESC_TABLE,
+                );
                 fresh
             };
             table = next;
@@ -989,7 +1011,6 @@ pub fn destroy<P: LoaderPlatform>(
         shadow: Some(task.address_space.shadow),
     };
     let released = reservation.release(platform, scheduler);
-    task.state = CandidateState::Destroyed;
     Teardown {
         executed_bytes_match,
         caps_live_after,
@@ -1042,14 +1063,26 @@ where
     platform
         .bytes_mut(staged, bytes.len())
         .copy_from_slice(bytes);
-    let loaded = load(platform, staged, bytes.len(), verifier, policy, scheduler, task_id);
+    let loaded = load(
+        platform,
+        staged,
+        bytes.len(),
+        verifier,
+        policy,
+        scheduler,
+        task_id,
+    );
     // The task owns its own copy; staging is scrubbed and returned now.
     platform.bytes_mut(staged, pages * PAGE).fill(0);
     let staging_released = platform.release_contiguous(staged, pages);
     let mut task = match loaded {
         Ok(task) => task,
         Err((stage, error)) => {
-            let error = if staging_released { error } else { LoadError::Reclaim };
+            let error = if staging_released {
+                error
+            } else {
+                LoadError::Reclaim
+            };
             return reject(report, stage, error, platform.free_frames());
         }
     };
@@ -1321,3 +1354,7 @@ pub fn write_candidate_line(out: &mut impl core::fmt::Write, name: &str, r: &Can
         }
     }
 }
+
+#[cfg(test)]
+#[path = "artifact_loader_tests.rs"]
+mod tests;
