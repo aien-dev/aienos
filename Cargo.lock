@@ -97,6 +97,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aienos-store-tool"
+version = "0.1.0"
+dependencies = [
+ "aienos-kernel",
+]
+
+[[package]]
 name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

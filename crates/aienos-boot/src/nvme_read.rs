@@ -988,18 +988,11 @@ fn run_store_phase(screen: &mut Option<Screen>, mut controller: QualController, 
 }
 
 #[cfg(feature = "store-qual")]
-fn verify_reopen(screen: &mut Option<Screen>, mut adapter: QualAdapter, settle: u8, is_512: bool) {
+fn verify_reopen(screen: &mut Option<Screen>, adapter: QualAdapter, settle: u8, is_512: bool) {
     use aienos_kernel::store::engine::{MountState, ObjectInput, Store, StoreError};
-    use aienos_kernel::store::v1::{crc32c, ObjectId, Superblock, SUPERBLOCK_CRC_OFFSET};
+    use aienos_kernel::store::v1::ObjectId;
 
     let upper = u64::from(settle) + 2;
-
-    // Read both superblock slots before opening.
-    let mut raw0 = [0u8; 4096];
-    let mut raw1 = [0u8; 4096];
-    let r0 = adapter.read_unit(0, &mut raw0);
-    let r1 = adapter.read_unit(1, &mut raw1);
-    let region_units = adapter.region_units();
 
     let mut store = match Store::open(adapter) {
         Ok(s) => s,
@@ -1019,56 +1012,13 @@ fn verify_reopen(screen: &mut Option<Screen>, mut adapter: QualAdapter, settle: 
     let state = store.mount_state();
 
     if is_512 {
-        let active_slot = store.active_slot();
-        let peer_slot = 1 - active_slot;
-        let peer_raw = if peer_slot == 0 { &raw0 } else { &raw1 };
-        let peer_read_ok = if peer_slot == 0 {
-            r0.is_ok()
-        } else {
-            r1.is_ok()
-        };
-        let peer_class = if !peer_read_ok {
-            "IoError"
-        } else if peer_raw.iter().all(|b| *b == 0) {
-            "Zero"
-        } else {
-            let has_magic = &peer_raw[..8] == b"AIENSTR1";
-            let stored_crc = u32::from_le_bytes(
-                peer_raw[SUPERBLOCK_CRC_OFFSET..SUPERBLOCK_CRC_OFFSET + 4]
-                    .try_into()
-                    .unwrap_or([0; 4]),
-            );
-            let mut canonical = *peer_raw;
-            canonical[SUPERBLOCK_CRC_OFFSET..SUPERBLOCK_CRC_OFFSET + 4].fill(0);
-            let crc_ok = crc32c(&canonical) == stored_crc;
-
-            if has_magic && crc_ok {
-                let major = u16::from_le_bytes([peer_raw[8], peer_raw[9]]);
-                let minor = u16::from_le_bytes([peer_raw[10], peer_raw[11]]);
-                let reserved_nonzero = peer_raw[12..28].iter().any(|b| *b != 0);
-                if major != 1 || minor != 0 || reserved_nonzero {
-                    "Unsupported"
-                } else {
-                    match Superblock::decode(peer_raw, peer_slot) {
-                        Ok(sb) if sb.region_units == region_units => {
-                            if state == MountState::DegradedRecovery {
-                                "GraphBad"
-                            } else {
-                                "Valid"
-                            }
-                        }
-                        _ => "Malformed",
-                    }
-                }
-            } else {
-                "Malformed"
-            }
-        };
-
+        // Peer classification is the engine's own decision at open, not a
+        // re-derivation here.
+        let peer_class = store.peer_condition();
         let mut l512 = aienos_kernel::report::ReportBuf::<192>::new();
         let _ = writeln!(
             l512,
-            "STORE_REOPEN_512B_QEMU: generation={} state={:?} peer_classification={}",
+            "STORE_REOPEN_512B_QEMU: generation={} state={:?} peer_classification={:?}",
             generation, state, peer_class
         );
         say(screen, l512.as_str());

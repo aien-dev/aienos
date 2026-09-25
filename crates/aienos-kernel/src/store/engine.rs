@@ -31,6 +31,21 @@ pub enum MountState {
     DegradedRecovery,
 }
 
+/// What `Store::open` found in the superblock slot that is not the active root.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PeerCondition {
+    /// All-zero slot (never written).
+    Zero,
+    /// A second fully validated root.
+    Valid,
+    /// Non-zero bytes that are not a CRC-valid, supported, decodable superblock.
+    Malformed,
+    /// CRC-valid superblock whose object graph fails validation, newer than the active root.
+    GraphBadNewer,
+    /// CRC-valid superblock whose object graph fails validation, older than the active root.
+    GraphBadOlder,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MountError {
     Io,
@@ -77,6 +92,7 @@ pub struct Store<D> {
     device: D,
     root: ValidatedRoot,
     state: MountState,
+    peer: PeerCondition,
     poisoned: bool,
 }
 
@@ -139,52 +155,59 @@ impl<D: StoreDevice> Store<D> {
             }
         }
 
+        let mounted = |device, root, state, peer| Self {
+            device,
+            root,
+            state,
+            peer,
+            poisoned: false,
+        };
         match (roots[0].take(), roots[1].take()) {
             (Some(a), Some(b)) => {
                 let chosen = select_two(a, b)?;
-                Ok(Self {
+                Ok(mounted(
                     device,
-                    root: chosen,
-                    state: MountState::Valid,
-                    poisoned: false,
-                })
+                    chosen,
+                    MountState::Valid,
+                    PeerCondition::Valid,
+                ))
             }
             (Some(root), None) | (None, Some(root)) => {
                 let good_slot = if root.superblock.slot_id == 0 { 0 } else { 1 };
                 let other = 1 - good_slot;
                 if zero[other] {
-                    Ok(Self {
+                    Ok(mounted(
                         device,
                         root,
-                        state: MountState::Valid,
-                        poisoned: false,
-                    })
+                        MountState::Valid,
+                        PeerCondition::Zero,
+                    ))
                 } else if malformed[other] {
                     if unsupported_superblock(&raw[other]) && crc_valid(&raw[other]) {
                         Err(MountError::UnsupportedVersion)
                     } else {
-                        Ok(Self {
+                        Ok(mounted(
                             device,
                             root,
-                            state: MountState::DegradedRecovery,
-                            poisoned: false,
-                        })
+                            MountState::DegradedRecovery,
+                            PeerCondition::Malformed,
+                        ))
                     }
                 } else if graph_bad[other] && crc_supported[other] {
                     if generation_of(&raw[other]) > root.superblock.generation {
-                        Ok(Self {
+                        Ok(mounted(
                             device,
                             root,
-                            state: MountState::DegradedRecovery,
-                            poisoned: false,
-                        })
+                            MountState::DegradedRecovery,
+                            PeerCondition::GraphBadNewer,
+                        ))
                     } else if generation_of(&raw[other]) < root.superblock.generation {
-                        Ok(Self {
+                        Ok(mounted(
                             device,
                             root,
-                            state: MountState::Valid,
-                            poisoned: false,
-                        })
+                            MountState::Valid,
+                            PeerCondition::GraphBadOlder,
+                        ))
                     } else {
                         Err(MountError::CorruptRecoveryRequired)
                     }
@@ -198,6 +221,11 @@ impl<D: StoreDevice> Store<D> {
 
     pub fn mount_state(&self) -> MountState {
         self.state
+    }
+    /// Condition of the non-active superblock slot as classified at open, or
+    /// `Valid` once a committed transaction has made it the previous root.
+    pub fn peer_condition(&self) -> PeerCondition {
+        self.peer
     }
     pub fn generation(&self) -> u64 {
         self.root.commit.generation
@@ -292,6 +320,7 @@ impl<D: StoreDevice> Store<D> {
         })?;
         hook.on_checkpoint(Checkpoint::AfterFinalFlush);
         self.root = plan.root;
+        self.peer = PeerCondition::Valid;
         Ok(())
     }
 
@@ -1267,6 +1296,30 @@ mod tests {
     }
 
     #[test]
+    fn store_peer_condition_reports_open_classification() {
+        let store = Store::open(seed_genesis(blank(32))).unwrap();
+        assert_eq!(store.peer_condition(), PeerCondition::Zero);
+
+        let mut store = store;
+        store.transact(&one(b"second generation")).unwrap();
+        assert_eq!(store.peer_condition(), PeerCondition::Valid);
+        let dev = store.into_device();
+        let reopened = Store::open(dev).unwrap();
+        assert_eq!(reopened.mount_state(), MountState::Valid);
+        assert_eq!(reopened.peer_condition(), PeerCondition::Valid);
+
+        // Newer root whose commit record is gone: older root mounts read-only.
+        let mut dev = reopened.into_device();
+        let newer = Superblock::decode(&dev.units[1], 1).unwrap();
+        assert_eq!(newer.generation, 2);
+        dev.units[newer.commit_record_unit as usize] = [0; STORE_UNIT_BYTES];
+        let store = Store::open(dev).unwrap();
+        assert_eq!(store.generation(), 1);
+        assert_eq!(store.mount_state(), MountState::DegradedRecovery);
+        assert_eq!(store.peer_condition(), PeerCondition::GraphBadNewer);
+    }
+
+    #[test]
     fn store_malformed_peer_recovery_matrix() {
         let rechecksum = |bytes: &mut [u8; STORE_UNIT_BYTES]| {
             bytes[168..172].fill(0);
@@ -1280,6 +1333,7 @@ mod tests {
         dev.units[1][168] ^= 1;
         let store = Store::open(dev).unwrap();
         assert_eq!(store.mount_state(), MountState::DegradedRecovery);
+        assert_eq!(store.peer_condition(), PeerCondition::Malformed);
         assert_eq!(store.generation(), 1);
 
         // 2. Wrong magic peer: Valid root in slot 0 + non-zero wrong magic in slot 1 -> DegradedRecovery
@@ -1287,6 +1341,7 @@ mod tests {
         dev.units[1][..8].copy_from_slice(b"BADMAGIC");
         let store = Store::open(dev).unwrap();
         assert_eq!(store.mount_state(), MountState::DegradedRecovery);
+        assert_eq!(store.peer_condition(), PeerCondition::Malformed);
         assert_eq!(store.generation(), 1);
 
         // 3. Malformed shape peer: Valid root in slot 0 + non-zero reserved in slot 1 -> DegradedRecovery
@@ -1299,6 +1354,7 @@ mod tests {
         rechecksum(&mut dev.units[1]);
         let store = Store::open(dev).unwrap();
         assert_eq!(store.mount_state(), MountState::DegradedRecovery);
+        assert_eq!(store.peer_condition(), PeerCondition::Malformed);
         assert_eq!(store.generation(), 1);
 
         // 4. Unsupported version peer: Valid root in slot 0 + CRC-valid major=2 in slot 1 -> UnsupportedVersion

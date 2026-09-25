@@ -1,17 +1,29 @@
 #!/usr/bin/env bash
-# System Store v1 over the native NVMe driver: 512-byte-LBA QEMU crash/reboot campaign.
+# System Store v1 over the native NVMe driver: 512-byte-LBA QEMU qualification.
 #
-# Geometry: 512-byte LBA (the native DGX Spark geometry, AWUPF=0, non-atomic root).
-# The Store root write is 4096 bytes (8 logical blocks), which exceeds AWUPF.
+# Geometry: 512-byte LBA (the native DGX Spark geometry, AWUPF=0: one logical
+# block is the power-fail atomic unit). A Store root write is 4096 bytes
+# (8 logical blocks), so the device does not promise it lands atomically.
 #
-# Exercises two tiers of qualification:
-# - Tier 1: Observational checkpoint / SIGKILL campaign (STORE_512B_CRASH_OBSERVED_QEMU)
-# - Tier 2: Deterministic torn root recovery campaign (STORE_512B_TORN_ROOT_RECOVERY_QEMU)
+# Tier 1  STORE_512B_CRASH_OBSERVED_QEMU
+#   QEMU is killed (SIGKILL) at each engine checkpoint, then reopened through the
+#   real NVMe path. This models a VM/process crash: every write QEMU accepted is
+#   in the host file, flushed or not. It is not a power-loss model (volatile
+#   cache loss is covered by the #133 atomicity qualification).
+# Tier 2a STORE_512B_ROOT_TEAR_CLOSURE
+#   Host proof on the Tier 1 images: the image killed at after_first_flush and
+#   the image killed at after_final_flush differ only inside one superblock
+#   slot, and every sector-granular tear of that write (all 2^8 subsets)
+#   reproduces either the old or the new slot bytes. So on this format a torn
+#   root write can only leave a state Tier 1 already booted.
+# Tier 2b STORE_512B_INJECTED_ROOT_RECOVERY_QEMU
+#   Deterministic media-corruption injection, not a crash: one defect per case
+#   is written into the inactive slot of the after_first_flush image by
+#   aienos-store-tool (the kernel's own encoder and CRC), then the guest reopens.
 #
-# Emits STORE_512B_CRASH_RECOVERY_QEMU: PASS only when both tiers succeed.
-#
-# Test-only. QEMU only. No production ADR 0015, recovery, Store-format, NVMe-policy,
-# or Machine 1 changes. P3_STORE_QEMU and P3_STORE_NATIVE remain strictly unclaimed.
+# Emits STORE_512B_CRASH_RECOVERY_QEMU: PASS only when all tiers pass.
+# Test-only. QEMU only. No ADR 0015, recovery, Store-format, NVMe-policy, or
+# Machine 1 changes. P3_STORE_QEMU and P3_STORE_NATIVE remain unclaimed.
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -25,38 +37,34 @@ command -v qemu-system-aarch64 >/dev/null || { echo "qemu-system-aarch64 not ins
 boot_timeout="${AIENOS_QEMU_TIMEOUT:-180}"
 img_bytes=67108864
 lba_bytes=512
-cfg_lba=256
-store_base_lba=512
-slot0_byte_offset=$(( store_base_lba * lba_bytes ))
-slot1_byte_offset=$(( (store_base_lba + 8) * lba_bytes ))
+cfg_offset=$(( 256 * lba_bytes ))
+store_offset=$(( 512 * lba_bytes ))
 
 machine="virt,virtualization=on,gic-version=3,iommu=smmuv3"
 target_dir="target/qemu-store-512b-crash"
 
-echo "=== Building aienos-handoff with store-qual for 512b crash test ==="
+echo "=== Building aienos-handoff (store-qual) and aienos-store-tool ==="
 commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+git diff --quiet HEAD 2>/dev/null || commit="${commit}-dirty"
 AIENOS_COMMIT="${commit}" AIENOS_RESTART_SECS=1 cargo build --quiet --release \
     -p aienos-boot --target aarch64-unknown-uefi --features store-qual --bin aienos-handoff \
     --target-dir "${target_dir}" || { echo "build failed"; exit 2; }
+cargo build --quiet --release -p aienos-store-tool || { echo "store tool build failed"; exit 2; }
+tool="target/release/aienos-store-tool"
 
 work="$(mktemp -d)"
 qemu_pid=""
 cleanup() { [[ -n "${qemu_pid}" ]] && kill -9 "${qemu_pid}" 2>/dev/null || true; rm -rf "${work}"; }
 trap cleanup EXIT
-mkdir -p "${work}/esp/EFI/BOOT" "${work}/esp/EFI/AIENOS"
+mkdir -p "${work}/esp/EFI/BOOT" "${work}/esp/EFI/AIENOS" "${work}/saved"
 touch "${work}/esp/EFI/AIENOS/BOOTREPORT.TXT"
 cp "${target_dir}/aarch64-unknown-uefi/release/aienos-handoff.efi" "${work}/esp/EFI/BOOT/BOOTAA64.EFI"
 
 image="${work}/nvme.img"
 serial="${work}/serial.log"
-cfgfile="${work}/cfg.bin"
 
 fresh_image() { rm -f "${image}"; truncate -s "${img_bytes}" "${image}"; }
-
-write_cfg() { # mode settle
-    python3 -c "open('${cfgfile}','wb').write(bytes([$1,$2]) + bytes(4094))"
-    dd if="${cfgfile}" of="${image}" bs="${lba_bytes}" seek="${cfg_lba}" conv=notrunc status=none
-}
+write_cfg() { "${tool}" cfg "${image}" "${cfg_offset}" "$1" "$2" >/dev/null || { echo "cfg write failed"; exit 2; }; }
 
 # run_qemu <marker> [kill]
 run_qemu() {
@@ -85,17 +93,26 @@ run_qemu() {
     qemu_pid=""
 }
 
+# Fields of this run's single STORE_REOPEN_512B_QEMU line (serial is per run).
+reopen_fields() {
+    local line
+    line="$(grep -oE "STORE_REOPEN_512B_QEMU: generation=[0-9]+ state=[A-Za-z]+ peer_classification=[A-Za-z]+" "${serial}" | tail -1)"
+    gen="$(sed -nE 's/.*generation=([0-9]+).*/\1/p' <<<"${line}")"
+    st="$(sed -nE 's/.*state=([A-Za-z]+).*/\1/p' <<<"${line}")"
+    pclass="$(sed -nE 's/.*peer_classification=([A-Za-z]+).*/\1/p' <<<"${line}")"
+}
+
 checkpoints=(before_first_write after_payloads after_catalog after_commit_record \
              after_first_flush after_superblock_write after_final_flush)
 
 fail=0
 integration_pass=0
-tier1_pass=0
-tier2_pass=0
 reopen_pass=0
-slot_pass=0
+tier1_pass=0
+tier2a_pass=0
+tier2b_pass=0
 : > "${work}/results_tier1.txt"
-: > "${work}/results_tier2.txt"
+: > "${work}/results_tier2b.txt"
 
 # --- integration smoke (no crash): provision, transact, reopen -------------
 echo "=== Integration Smoke (512-byte LBA) ==="
@@ -114,20 +131,21 @@ fi
 
 write_cfg 4 0
 run_qemu "STORE_REOPEN_QEMU:"
-if grep -q "STORE_REOPEN_512B_QEMU: generation=2 state=Valid peer_classification=Valid" "${serial}" && \
+reopen_fields
+if [[ "${gen}" == 2 && "${st}" == Valid && "${pclass}" == Valid ]] && \
    grep -q "STORE_REOPEN_QEMU: PASS" "${serial}"; then
     reopen_pass=1
-    echo "PASS  reopen smoke (mode=4 verify, peer_classification=Valid)"
+    echo "PASS  reopen smoke (generation=2 state=Valid peer=Valid)"
 else
     echo "FAIL  reopen smoke"
     fail=1
     grep -E "STORE_REOPEN_512B_QEMU|STORE_REOPEN_QEMU" "${serial}" | sed 's/^/      /'
 fi
 
-# --- Tier 1: Observational checkpoint / SIGKILL campaign -------------------
+# --- Tier 1: checkpoint SIGKILL campaign ------------------------------------
 echo
-echo "=== Tier 1: Observational Checkpoint / SIGKILL Campaign ==="
-expect_for() { # checkpoint settle
+echo "=== Tier 1: Checkpoint SIGKILL Campaign ==="
+expect_for() { # checkpoint
     case "$1" in
         after_superblock_write) echo "N_NP1" ;;
         after_final_flush)      echo "NP1" ;;
@@ -141,6 +159,8 @@ for settle in 0 3; do
         fresh_image; write_cfg 3 "${settle}"
         run_qemu "CHECKPOINT: ${cp}" kill
         saw_cp=0; grep -q -- "CHECKPOINT: ${cp}" "${serial}" && saw_cp=1
+        # Keep the crashed image for Tier 2 before the verify boot touches it.
+        cp "${image}" "${work}/saved/s${settle}_${cp}.img"
         write_cfg 4 "${settle}"
         run_qemu "STORE_REOPEN_QEMU:"
         guest_reopen=0; grep -q "STORE_REOPEN_QEMU: PASS" "${serial}" && guest_reopen=1
@@ -148,9 +168,7 @@ for settle in 0 3; do
         if [[ "${settle}" -ge 3 ]]; then
             guest_slot=0; grep -q "STORE_SLOT_REUSE_QEMU: PASS" "${serial}" && guest_slot=1
         fi
-        gen="$(grep -oE "STORE_REOPEN_512B_QEMU: generation=[0-9]+" "${serial}" | tail -1 | grep -oE '[0-9]+$')"
-        st="$(grep -oE "STORE_REOPEN_512B_QEMU: generation=[0-9]+ state=[A-Za-z]+" "${serial}" | tail -1 | sed 's/.*state=//')"
-        pclass="$(grep -oE "peer_classification=[A-Za-z]+" "${serial}" | tail -1 | sed 's/.*peer_classification=//')"
+        reopen_fields
         exp="$(expect_for "${cp}")"
         gen_ok=0
         case "${exp}" in
@@ -159,161 +177,100 @@ for settle in 0 3; do
             N_NP1) [[ "${gen}" == "${N}" || "${gen}" == "${NP1}" ]] && gen_ok=1 ;;
         esac
         ok=0
-        if [[ "${saw_cp}" == "1" && "${gen_ok}" == "1" && "${guest_reopen}" == "1" && "${guest_slot}" == "1" ]]; then ok=1; fi
-        printf 'settle=%s cp=%-24s saw=%s reopen=%s slot=%s gen=%s state=%-16s peer=%-10s expect=%-5s -> %s\n' \
-            "${settle}" "${cp}" "${saw_cp}" "${guest_reopen}" "${guest_slot}" "${gen:-none}" "${st:-none}" "${pclass:-none}" "${exp}" \
-            "$([ "${ok}" = 1 ] && echo OK || echo BAD)" >> "${work}/results_tier1.txt"
-        if [[ "${ok}" != "1" ]]; then fail=1; fi
+        if [[ "${saw_cp}" == 1 && "${gen_ok}" == 1 && "${guest_reopen}" == 1 && "${guest_slot}" == 1 \
+              && "${st}" == Valid ]]; then ok=1; fi
+        printf 'settle=%s cp=%-24s saw=%s reopen=%s slot=%s gen=%s state=%-16s peer=%-13s expect=%-5s -> %s\n' \
+            "${settle}" "${cp}" "${saw_cp}" "${guest_reopen}" "${guest_slot}" "${gen:-none}" "${st:-none}" \
+            "${pclass:-none}" "${exp}" "$([ "${ok}" = 1 ] && echo OK || echo BAD)" >> "${work}/results_tier1.txt"
+        if [[ "${ok}" != 1 ]]; then fail=1; fi
     done
 done
-
 cat "${work}/results_tier1.txt"
-
 tier1_pass=1
 grep -q ' -> BAD' "${work}/results_tier1.txt" && tier1_pass=0
+[[ "${tier1_pass}" == 1 ]] && echo "STORE_512B_CRASH_OBSERVED_QEMU: PASS" || echo "STORE_512B_CRASH_OBSERVED_QEMU: FAIL"
 
-if [[ "${tier1_pass}" == 1 ]]; then
-    echo "STORE_512B_CRASH_OBSERVED_QEMU: PASS"
-else
-    echo "STORE_512B_CRASH_OBSERVED_QEMU: FAIL"
-fi
-
-# --- Tier 2: Deterministic Torn Root Recovery Campaign --------------------
+# --- Tier 2a: root tear closure on the real Tier 1 images -------------------
 echo
-echo "=== Tier 2: Deterministic Torn Root Recovery Campaign ==="
+echo "=== Tier 2a: Root Tear Closure (host proof over Tier 1 images) ==="
+tier2a_pass=1
+for settle in 0 3; do
+    if ! "${tool}" tear-closure "${work}/saved/s${settle}_after_first_flush.img" \
+            "${work}/saved/s${settle}_after_final_flush.img" "${store_offset}" "${lba_bytes}" \
+            | sed "s/^/settle=${settle} /"; then
+        tier2a_pass=0; fail=1
+        echo "settle=${settle} STORE_ROOT_TEAR_CLOSURE: FAIL"
+    fi
+done
+[[ "${tier2a_pass}" == 1 ]] && echo "STORE_512B_ROOT_TEAR_CLOSURE: PASS" || echo "STORE_512B_ROOT_TEAR_CLOSURE: FAIL"
 
-# Step 2a: Obtain golden genesis image template
-fresh_image; write_cfg 3 0
-run_qemu "CHECKPOINT: before_first_write" kill
-if ! grep -q "STORE_512B_NONATOMIC_QUALIFICATION: ACTIVE" "${serial}"; then
-    echo "FAIL  could not produce clean genesis template"
-    exit 1
-fi
-cp "${image}" "${work}/genesis_template.img"
+# --- Tier 2b: deterministic injected-root recovery --------------------------
+echo
+echo "=== Tier 2b: Injected Root Recovery (media corruption, one defect per case) ==="
+# Base: settle-0 image killed at after_first_flush (gen 1 in slot 0, gen 2
+# objects durable, slot 1 zero). Source: the real gen-2 superblock from the
+# after_final_flush image. graph_bad_newer uses the after_payloads image,
+# where the gen-2 catalog and commit record were never written.
+base_flush="${work}/saved/s0_after_first_flush.img"
+base_payloads="${work}/saved/s0_after_payloads.img"
+source_root="${work}/saved/s0_after_final_flush.img"
 
-torn_cases=(
-    torn_1_of_8_blocks
-    torn_2_of_8_blocks
-    torn_4_of_8_blocks
-    torn_7_of_8_blocks
-    torn_tail_only
-    bad_crc
-    wrong_magic
-    dirty_reserved
-    arbitrary_garbage
+# case  base  tool-case  expected-outcome
+inject_cases=(
+    "bad_crc             flush     bad_crc             degraded:Malformed"
+    "wrong_magic         flush     wrong_magic         degraded:Malformed"
+    "nonzero_reserved    flush     nonzero_reserved    degraded:Malformed"
+    "wrong_slot_id       flush     wrong_slot_id       degraded:Malformed"
+    "region_mismatch     flush     region_mismatch     degraded:Malformed"
+    "seeded_garbage      flush     seeded_garbage      degraded:Malformed"
+    "unsupported_version flush     unsupported_version refuse:UnsupportedVersion"
+    "graph_bad_newer     payloads  new_root            degraded:GraphBadNewer"
+    "control_new_root    flush     new_root            valid:gen2"
 )
 
-inject_slot1() { # image_path case_name
-    python3 - "${1}" "${2}" << 'EOF'
-import sys, os
-
-image_path = sys.argv[1]
-case_name = sys.argv[2]
-
-with open(image_path, 'r+b') as f:
-    f.seek(262144) # LBA 512 * 512 (Slot 0)
-    slot0 = f.read(4096)
-
-    # Build candidate slot 1
-    sb = bytearray(slot0)
-    sb[44:48] = (1).to_bytes(4, 'little') # slot_id = 1
-    sb[56:64] = (2).to_bytes(8, 'little') # generation = 2
-    sb[168:172] = bytes(4)
-
-    def crc32c(data: bytes) -> int:
-        crc = 0xffffffff
-        for b in data:
-            crc ^= b
-            for _ in range(8):
-                mask = 0xffffffff if (crc & 1) else 0
-                crc = (crc >> 1) ^ (0x82f63b78 & mask)
-        return (~crc) & 0xffffffff
-
-    c = crc32c(bytes(sb))
-    sb[168:172] = c.to_bytes(4, 'little')
-
-    pre = bytearray([0xaa] * 4096)
-    if case_name == 'torn_1_of_8_blocks':
-        pre[:512] = sb[:512]
-        payload = bytes(pre)
-    elif case_name == 'torn_2_of_8_blocks':
-        pre[:1024] = sb[:1024]
-        payload = bytes(pre)
-    elif case_name == 'torn_4_of_8_blocks':
-        pre[:2048] = sb[:2048]
-        payload = bytes(pre)
-    elif case_name == 'torn_7_of_8_blocks':
-        pre[:3584] = sb[:3584]
-        payload = bytes(pre)
-    elif case_name == 'torn_tail_only':
-        pre[512:] = sb[512:]
-        payload = bytes(pre)
-    elif case_name == 'bad_crc':
-        sb[168] ^= 0xff
-        payload = bytes(sb)
-    elif case_name == 'wrong_magic':
-        sb[:8] = b'AIENBAD1'
-        payload = bytes(sb)
-    elif case_name == 'dirty_reserved':
-        sb[200] = 0x42
-        payload = bytes(sb)
-    elif case_name == 'arbitrary_garbage':
-        payload = os.urandom(4096)
-    else:
-        raise ValueError('unknown case: ' + case_name)
-
-    f.seek(266240) # LBA 520 * 512 (Slot 1)
-    f.write(payload)
-EOF
-}
-
-tier2_ok=1
-for tc in "${torn_cases[@]}"; do
-    cp "${work}/genesis_template.img" "${image}"
-    inject_slot1 "${image}" "${tc}"
-    write_cfg 4 0 # MODE_VERIFY_512B, settle=0
-    run_qemu "STORE_REOPEN_QEMU:"
-
-    saw_active=0; grep -q "STORE_512B_NONATOMIC_QUALIFICATION: ACTIVE" "${serial}" && saw_active=1
-    saw_degraded=0; grep -q "state=DegradedRecovery" "${serial}" && saw_degraded=1
-    saw_malformed=0; grep -q "peer_classification=Malformed" "${serial}" && saw_malformed=1
-    saw_readonly=0; grep -q "STORE_DEGRADED_READONLY_QEMU: PASS" "${serial}" && saw_readonly=1
-    saw_reopen=0; grep -q "STORE_REOPEN_QEMU: PASS" "${serial}" && saw_reopen=1
-
-    gen="$(grep -oE "STORE_REOPEN_512B_QEMU: generation=[0-9]+" "${serial}" | tail -1 | grep -oE '[0-9]+$')"
-    st="$(grep -oE "STORE_REOPEN_512B_QEMU: generation=[0-9]+ state=[A-Za-z]+" "${serial}" | tail -1 | sed 's/.*state=//')"
-    pclass="$(grep -oE "peer_classification=[A-Za-z]+" "${serial}" | tail -1 | sed 's/.*peer_classification=//')"
-
-    tc_ok=0
-    if [[ "${saw_active}" == "1" && "${saw_degraded}" == "1" && "${saw_malformed}" == "1" && \
-          "${saw_readonly}" == "1" && "${saw_reopen}" == "1" && "${gen}" == "1" ]]; then
-        tc_ok=1
-    else
-        tier2_ok=0
-        fail=1
+tier2b_pass=1
+for row in "${inject_cases[@]}"; do
+    read -r name base tcase expect <<<"${row}"
+    if [[ "${base}" == flush ]]; then cp "${base_flush}" "${image}"; else cp "${base_payloads}" "${image}"; fi
+    if ! "${tool}" inject "${image}" "${store_offset}" 1 "${tcase}" "${source_root}" >"${work}/inject.txt" 2>&1; then
+        echo "case=${name} injection refused: $(cat "${work}/inject.txt")" >> "${work}/results_tier2b.txt"
+        tier2b_pass=0; fail=1; continue
     fi
-
-    printf 'case=%-20s gen=%s state=%-16s peer=%-10s readonly_pass=%s reopen_pass=%s -> %s\n' \
-        "${tc}" "${gen:-none}" "${st:-none}" "${pclass:-none}" "${saw_readonly}" "${saw_reopen}" \
-        "$([ "${tc_ok}" = 1 ] && echo OK || echo BAD)" >> "${work}/results_tier2.txt"
+    write_cfg 4 0
+    run_qemu "STORE_REOPEN_QEMU:"
+    gen=""; st=""; pclass=""
+    reopen_fields
+    active=0; grep -q "STORE_512B_NONATOMIC_QUALIFICATION: ACTIVE" "${serial}" && active=1
+    ro=0; grep -q "STORE_DEGRADED_READONLY_QEMU: PASS" "${serial}" && ro=1
+    ok=0
+    case "${expect}" in
+        degraded:*)
+            [[ "${active}" == 1 && "${gen}" == 1 && "${st}" == DegradedRecovery && \
+               "${pclass}" == "${expect#degraded:}" && "${ro}" == 1 ]] && \
+               grep -q "STORE_REOPEN_QEMU: PASS" "${serial}" && ok=1 ;;
+        refuse:*)
+            grep -q "STORE_REOPEN_QEMU: FAIL (open ${expect#refuse:})" "${serial}" && [[ -z "${gen}" ]] && ok=1 ;;
+        valid:gen2)
+            [[ "${gen}" == 2 && "${st}" == Valid && "${pclass}" == Valid ]] && \
+               grep -q "STORE_REOPEN_QEMU: PASS" "${serial}" && ok=1 ;;
+    esac
+    printf 'case=%-20s %-32s gen=%s state=%-16s peer=%-13s readonly=%s expect=%-28s -> %s\n' \
+        "${name}" "$(cut -d' ' -f4 "${work}/inject.txt")" "${gen:-none}" "${st:-none}" "${pclass:-none}" "${ro}" \
+        "${expect}" "$([ "${ok}" = 1 ] && echo OK || echo BAD)" >> "${work}/results_tier2b.txt"
+    if [[ "${ok}" != 1 ]]; then tier2b_pass=0; fail=1; fi
 done
-
-cat "${work}/results_tier2.txt"
-
-if [[ "${tier2_ok}" == 1 ]]; then
-    tier2_pass=1
-    echo "STORE_512B_TORN_ROOT_RECOVERY_QEMU: PASS"
-else
-    echo "STORE_512B_TORN_ROOT_RECOVERY_QEMU: FAIL"
-fi
+cat "${work}/results_tier2b.txt"
+[[ "${tier2b_pass}" == 1 ]] && echo "STORE_512B_INJECTED_ROOT_RECOVERY_QEMU: PASS" || echo "STORE_512B_INJECTED_ROOT_RECOVERY_QEMU: FAIL"
 
 echo
-echo "=== Final Summary ==="
-[[ "${integration_pass}" == 1 ]] && echo "STORE_NVME_INTEGRATION_512B_QEMU: PASS" || echo "STORE_NVME_INTEGRATION_512B_QEMU: FAIL"
+echo "=== Final Summary (commit ${commit}) ==="
+[[ "${integration_pass}" == 1 && "${reopen_pass}" == 1 ]] && echo "STORE_NVME_INTEGRATION_512B_QEMU: PASS" || echo "STORE_NVME_INTEGRATION_512B_QEMU: FAIL"
 [[ "${tier1_pass}" == 1 ]] && echo "STORE_512B_CRASH_OBSERVED_QEMU: PASS" || echo "STORE_512B_CRASH_OBSERVED_QEMU: FAIL"
-[[ "${tier2_pass}" == 1 ]] && echo "STORE_512B_TORN_ROOT_RECOVERY_QEMU: PASS" || echo "STORE_512B_TORN_ROOT_RECOVERY_QEMU: FAIL"
+[[ "${tier2a_pass}" == 1 ]] && echo "STORE_512B_ROOT_TEAR_CLOSURE: PASS" || echo "STORE_512B_ROOT_TEAR_CLOSURE: FAIL"
+[[ "${tier2b_pass}" == 1 ]] && echo "STORE_512B_INJECTED_ROOT_RECOVERY_QEMU: PASS" || echo "STORE_512B_INJECTED_ROOT_RECOVERY_QEMU: FAIL"
 
-if [[ "${fail}" == 0 && "${tier1_pass}" == 1 && "${tier2_pass}" == 1 ]]; then
+if [[ "${fail}" == 0 && "${integration_pass}" == 1 && "${reopen_pass}" == 1 && "${tier1_pass}" == 1 \
+      && "${tier2a_pass}" == 1 && "${tier2b_pass}" == 1 ]]; then
     echo "STORE_512B_CRASH_RECOVERY_QEMU: PASS"
 else
     echo "STORE_512B_CRASH_RECOVERY_QEMU: FAIL"
