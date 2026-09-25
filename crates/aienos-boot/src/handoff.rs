@@ -281,6 +281,7 @@ fn configure_smmu_for_xhci(
     Ok(stream_id)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn enter_kernel_mmu(
     memory_map: &impl MemoryMap,
     pool_base: usize,
@@ -1856,7 +1857,7 @@ fn main() -> Status {
             "gic_madt: gicd={:#x} gicr={:#x} arch_rev={} icc_sre={}",
             w.distributor, w.redistributor, w.arch_rev, w.icc_sre
         );
-        let avg = if w.ticks == 0 { 0 } else { w.span / w.ticks };
+        let avg = w.span.checked_div(w.ticks).unwrap_or(0);
         let _ = writeln!(
             report,
             "timer_stats: intid=30 freq_hz={} period_us={} min_us={} avg_us={} max_us={}",
