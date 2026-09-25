@@ -292,16 +292,20 @@ presence flags, and nonzero absent optional fields are rejected.
 | 12 | 4 | record_size | `512` |
 | 16 | 4 | flags | bit 0 machine ID present; bit 1 context ID present; bit 2 timestamp present; all others zero |
 | 20 | 2 | decision | `1` admitted; `2` rejected; `3` canary failed; `4` destroyed |
-| 22 | 2 | qualification_tier | `1` = SEED-0B test qualification |
+| 22 | 2 | qualification_tier | `1` = SEED-0B QEMU test qualification; `2` = SEED-0B Machine 1 test qualification; `0` and all others rejected (no production tier in v0) |
 | 24 | 8 | sequence | monotonically increasing sequence within one verifier context |
 | 32 | 16 | nonce | unique within that verifier context |
 | 48 | 8 | observed_time_ns | UTC observation metadata, or zero when flag 2 is clear; never an admission input |
 | 56 | 8 | reserved | zero |
 | 64 | 4 | execution_status | `0` not run; `1` exited; `2` timeout; `3` fault; `4` bad syscall; `5` resource overrun; `6` canary failed |
 | 68 | 4 | exit_status | signed 32-bit little-endian task exit code; zero if not executed |
-| 72 | 4 | result_flags | bit 0 read succeeded; bit 1 write denied; bit 2 candidate reclaimed; bit 3 canary passed; all others zero |
-| 76 | 4 | reserved | zero |
-| 80 | 16 | reserved | zero |
+| 72 | 4 | result_flags | bit 0 authorized read succeeded; bit 1 write denied; bit 2 candidate reclaimed; bit 3 canary passed; bit 4 forged handle denied; bit 5 mapped bytes matched admitted digest; bit 6 executed bytes matched mapped bytes; bit 7 W^X seal audit passed; all others zero |
+| 76 | 2 | rejection_stage | `0` when admitted; otherwise the §7.3 stage code at which the candidate was refused |
+| 78 | 2 | rejection_reason | `0` when admitted; otherwise the §7.3 stable reason code |
+| 80 | 4 | syscalls | EL0 syscalls taken; zero if not executed |
+| 84 | 4 | object_reads_ok | authorized object reads that succeeded |
+| 88 | 4 | denials | syscalls answered with a denial |
+| 92 | 4 | frames_reserved | task frames reserved (content, window tables, shadow tables); zero if refused before reservation |
 | 96 | 32 | artifact_id | ArtifactId |
 | 128 | 32 | payload_digest | SHA-256 of exact serialized code/data payload |
 | 160 | 32 | artifact_signer_fingerprint | fingerprint from verified artifact signature block |
@@ -345,6 +349,46 @@ ordinary builds; one for `seed0b-test-anchor`).
 The machine ID slot contains this digest of the opaque provisioned MachineId,
 not hardware make/model data. If M5 has not provisioned a MachineId, the
 field is all zero and the presence flag is clear.
+
+Consistency rules (decoder-enforced): an admitted receipt has zero
+`rejection_stage` and `rejection_reason`. A rejected receipt has both
+nonzero, `execution_status` 0, `exit_status` 0, zero counters, and no
+result flag other than bit 2. Canary passed (bit 3) requires
+`execution_status` 1 and `exit_status` 0. Fields that the failing stage had
+not yet computed are all zero (for example `granted_capability_digest`
+before Authorized; every identity field when parsing failed).
+
+### 7.3 Stage, reason and outcome codes
+
+Stage codes: `1` received, `2` staged, `3` verified, `4` authorized,
+`5` reserved, `6` mapped, `7` hashed, `8` sealed, `9` capabilities
+installed.
+
+Reason codes `1..=19` are the `ArtifactError` values of §4 in declaration
+order (`BadMagic` = 1 … `RightsEscalation` = 19); `MalformedReceipt` (20)
+is a receipt-decoding error and never a candidate reason. Loader reasons:
+`0x101` no frames, `0x102` staging too large, `0x103` mapping, `0x104`
+mapped digest mismatch, `0x105` W^X audit, `0x106` capability install,
+`0x107` scheduler full, `0x108` executed digest mismatch, `0x109` reclaim,
+`0x10a` firmware read. Any other value is rejected.
+
+`execution_status` maps the task runtime outcome: not run `0`, exited `1`,
+timeout `2`, fault `3`, bad syscall `4`, resource overrun `5`. `exit_status`
+is the low 32 bits of the EL0 exit code read as a two's-complement `i32`.
+
+Sequence and nonce in a qualification boot: `sequence` counts candidates
+from 1 within one boot (the verifier context; there is no persistent
+counter before M4) and `flags` bit 1 stays clear.
+`nonce = SHA256("AIENOS-ADMISSION-RECEIPT-NONCE-V1\0" || verifier_identity || sequence_u64_le)[0..16]`,
+which is unique within the context and reproducible from the receipt.
+
+Signing custody in SEED-0B: the kernel never holds a receipt private key.
+It emits the canonical record with the signature block (bytes 400..512)
+all zero plus the ReceiptDigest. The host qualification harness re-derives
+the digest from the emitted bytes, checks every bound field against the
+artifact it supplied, and signs the record with the TEST-ONLY SEED-0B
+receipt key (RFC 8032 TEST 2, distinct from the artifact test key), then
+verifies the signed record. Production receipt keys wait for M5.
 
 ### 7.2 Receipt digest and signature
 
