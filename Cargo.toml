@@ -10,6 +10,7 @@ members = [
     "crates/aienos-accel",
     "crates/aienos-crypto",
     "crates/aienos-artifact",
+    "crates/aienos-artifact-tool",
     "crates/aienos-evidence",
 ]
 
@@ -23,6 +24,7 @@ repository = "https://github.com/aien-dev/aienos"
 [workspace.dependencies]
 aienos-crypto = { path = "crates/aienos-crypto" }
 aienos-artifact = { path = "crates/aienos-artifact" }
+aienos-artifact-tool = { path = "crates/aienos-artifact-tool" }
 aienos-kernel = { path = "crates/aienos-kernel" }
 aienos-agent-state = { path = "crates/aienos-agent-state" }
 aienos-cortex = { path = "crates/aienos-cortex" }

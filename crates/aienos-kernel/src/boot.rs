@@ -198,6 +198,13 @@ pub fn write_boot_report(out: &mut impl Write, facts: &BootFacts) -> bool {
     let _ = writeln!(out, "AIENOS");
     let _ = writeln!(out, "arch: aarch64");
     let _ = writeln!(out, "boot: native");
+    #[cfg(feature = "seed0b-test-anchor")]
+    let _ = writeln!(
+        out,
+        "artifact_trust: SEED-0B QUALIFICATION BUILD — TEST ONLY TRUST ANCHOR"
+    );
+    #[cfg(not(feature = "seed0b-test-anchor"))]
+    let _ = writeln!(out, "artifact_trust: no production anchors enrolled");
     let _ = writeln!(
         out,
         "conventional_memory_kb: {}",
@@ -427,6 +434,12 @@ mod tests {
         let mut report = BootReport::new();
         assert!(write_boot_report(&mut report, &facts));
         let text = report.as_str();
+        #[cfg(feature = "seed0b-test-anchor")]
+        assert!(
+            text.contains("artifact_trust: SEED-0B QUALIFICATION BUILD — TEST ONLY TRUST ANCHOR")
+        );
+        #[cfg(not(feature = "seed0b-test-anchor"))]
+        assert!(text.contains("artifact_trust: no production anchors enrolled"));
         for line in [
             "gb10_segment: 15",
             "gb10_bar0_phys: 0x650000000",

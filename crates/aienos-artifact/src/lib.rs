@@ -20,6 +20,11 @@ pub mod verify;
 pub use error::ArtifactError;
 pub use format::{Artifact, Section};
 pub use id::ArtifactId;
+pub use signature::{
+    ArtifactVerifier, ConfiguredArtifactVerifier, Ed25519Verifier, EmptyTrustAnchorSet,
+    ProductionTrustAnchorSet, ReceiptSigner, SignatureVerifier, TrustAnchorSet, TrustTier,
+    TrustedSigner, VerifiedArtifact,
+};
 
 #[cfg(test)]
 mod tests;

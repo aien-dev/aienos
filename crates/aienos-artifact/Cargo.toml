@@ -9,3 +9,8 @@ description = "Canonical no_std parser and identity for AIENOS Binary Artifact v
 
 [dependencies]
 aienos-crypto = { path = "../aienos-crypto" }
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["fast"] }
+
+[features]
+default = []
+seed0b-test-anchor = []
