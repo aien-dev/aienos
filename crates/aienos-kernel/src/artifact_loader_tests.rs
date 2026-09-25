@@ -431,6 +431,8 @@ fn outcome(status: ExecutionStatus) -> TaskOutcome {
         syscalls: 1,
         object_reads_ok: 0,
         denials: 0,
+        write_denials: 0,
+        invalid_handle_denials: 0,
         elapsed_ticks: 10,
     }
 }
@@ -1200,6 +1202,8 @@ fn admitted_report(status: ExecutionStatus) -> CandidateReport {
         syscalls: 3,
         object_reads_ok: 2,
         denials: 1,
+        write_denials: 0,
+        invalid_handle_denials: 1,
         elapsed_ticks: 10,
     };
     r.code_base = 0x80_0000_1000;
@@ -1308,4 +1312,235 @@ fn sequential_candidates_reuse_resources_cleanly() {
     table_ids.sort_unstable();
     table_ids.dedup();
     assert_eq!(table_ids.len(), 3, "task principals must be distinct");
+}
+
+// ---------------------------------------------------------------------------
+// Admission Receipt v0 emission
+// ---------------------------------------------------------------------------
+
+const CTX: ReceiptContext = ReceiptContext {
+    verifier_identity: [0x5a; 32],
+    tier: QualificationTier::Seed0bQemu,
+};
+
+fn emitted(report: &CandidateReport, seq: u64) -> Receipt {
+    let receipt = build_receipt(report, &CTX, seq).expect("receipt must satisfy §7");
+    let bytes = aienos_artifact::receipt::encode(&receipt);
+    assert!(aienos_artifact::receipt::is_unsigned(&bytes));
+    assert_eq!(aienos_artifact::receipt::decode(&bytes), Ok(receipt));
+    receipt
+}
+
+#[test]
+fn admitted_receipt_binds_identity_and_observed_outcome() {
+    let bytes = pack_signed(&spec(), &TEST_SEED);
+    let identified = aienos_artifact::verify::parse_and_identify(&bytes).unwrap();
+    let a = anchors();
+    let pol = policy();
+    let mut run = Run::new(KernelMap::Blocks2M);
+    let mut executor = exec(|_, _| TaskOutcome {
+        status: ExecutionStatus::Exited(0),
+        syscalls: 9,
+        object_reads_ok: 3,
+        denials: 5,
+        write_denials: 1,
+        invalid_handle_denials: 3,
+        elapsed_ticks: 10,
+    });
+    let report = run.candidate(&bytes, &verifier(&a), &pol, &mut executor, 21);
+    run.assert_clean(&report);
+    let r = emitted(&report, 1);
+    assert_eq!(r.decision, ReceiptDecision::Admitted);
+    assert_eq!((r.rejection_stage, r.rejection_reason), (0, 0));
+    assert_eq!(r.execution_status, ExecutionStatusCode::Exited);
+    assert_eq!((r.syscalls, r.object_reads_ok, r.denials), (9, 3, 5));
+    assert_eq!(r.frames_reserved as usize, report.frames_reserved);
+    assert_eq!(r.result_flags, 0xff, "every observed check passed");
+    assert_eq!(&r.artifact_id, identified.artifact_id.as_bytes());
+    assert_eq!(r.payload_digest, identified.payload_digest);
+    assert_eq!(
+        &r.artifact_signer_fingerprint,
+        identified.artifact.signer_fingerprint
+    );
+    assert_eq!(r.policy_digest, pol.digest());
+    assert_eq!(
+        r.requested_capability_digest,
+        aienos_artifact::canonical::requested_capability_digest(
+            identified.artifact.capability_request_bytes
+        )
+    );
+    assert_ne!(r.granted_capability_digest, [0; 32]);
+    assert_eq!(r.verifier_identity, CTX.verifier_identity);
+}
+
+#[test]
+fn receipt_flags_follow_observations_not_expectations() {
+    let bytes = pack_signed(&spec(), &TEST_SEED);
+    let a = anchors();
+    // A task that read nothing, was denied nothing and faulted.
+    let mut run = Run::new(KernelMap::Block1G);
+    let mut executor = exec(|_, _| {
+        outcome(ExecutionStatus::Fault {
+            esr: 0x9200_0047,
+            far: 0,
+            elr: 0,
+        })
+    });
+    let report = run.candidate(&bytes, &verifier(&a), &policy(), &mut executor, 22);
+    let r = emitted(&report, 2);
+    assert_eq!(r.execution_status, ExecutionStatusCode::Fault);
+    for flag in [
+        RESULT_READ_OK,
+        RESULT_WRITE_DENIED,
+        RESULT_FORGED_DENIED,
+        RESULT_CANARY_PASSED,
+    ] {
+        assert_eq!(
+            r.result_flags & flag,
+            0,
+            "flag {flag:#x} set without observation"
+        );
+    }
+    assert_ne!(r.result_flags & RESULT_WX_SEALED, 0);
+    assert_ne!(r.result_flags & RESULT_MAPPED_BYTES_MATCH, 0);
+    // A non-zero self-check exit never counts as a passed canary.
+    let mut run = Run::new(KernelMap::Block1G);
+    let mut executor = exec(|_, _| outcome(ExecutionStatus::Exited(0x10)));
+    let report = run.candidate(&bytes, &verifier(&a), &policy(), &mut executor, 23);
+    let r = emitted(&report, 3);
+    assert_eq!(
+        (r.exit_status, r.result_flags & RESULT_CANARY_PASSED),
+        (0x10, 0)
+    );
+    // Code changed during execution: executed-bytes flag must be clear.
+    let mut run = Run::new(KernelMap::Pages4K);
+    let mut executor = exec(|ctx: TaskContext<'_>, p: &mut MockPlatform| {
+        let (pa, _) = effective(p, ctx.root, ctx.entry_pc).unwrap();
+        p.bytes_mut(pa + (ctx.entry_pc & 0xfff), 1)[0] ^= 0xff;
+        outcome(ExecutionStatus::Exited(0))
+    });
+    let report = run.candidate(&bytes, &verifier(&a), &policy(), &mut executor, 24);
+    let r = emitted(&report, 4);
+    assert_eq!(r.result_flags & RESULT_EXECUTED_BYTES_MATCH, 0);
+    assert_ne!(r.result_flags & RESULT_MAPPED_BYTES_MATCH, 0);
+}
+
+#[test]
+fn rejection_receipts_record_earliest_stage_and_only_computed_fields() {
+    let a = anchors();
+    let pol = policy();
+    // Unparseable: every identity field zero, reason BadMagic at Verified.
+    let mut junk = pack_signed(&spec(), &TEST_SEED);
+    junk[0] ^= 0xff;
+    let (report, run) = reject_case(KernelMap::Block1G, &junk, &a, &pol, |_| {});
+    run.assert_clean(&report);
+    let r = emitted(&report, 5);
+    assert_eq!(r.decision, ReceiptDecision::Rejected);
+    assert_eq!(
+        (r.rejection_stage, r.rejection_reason),
+        (3, ArtifactError::BadMagic as u16)
+    );
+    assert_eq!(r.artifact_id, [0; 32]);
+    assert_eq!(r.payload_digest, [0; 32]);
+    assert_eq!(r.artifact_signer_fingerprint, [0; 32]);
+    assert_eq!(r.granted_capability_digest, [0; 32]);
+    assert_eq!(r.policy_digest, pol.digest());
+    assert_eq!(r.execution_status, ExecutionStatusCode::NotRun);
+    assert_eq!(r.result_flags, RESULT_RECLAIMED);
+    assert_eq!(
+        (r.syscalls, r.object_reads_ok, r.denials, r.frames_reserved),
+        (0, 0, 0, 0)
+    );
+
+    // Bad signature: identity derived from structure, signer never trusted.
+    let mut tampered = pack_signed(&spec(), &TEST_SEED);
+    let at = payload_offset(&tampered);
+    tampered[at] ^= 1;
+    let (report, _) = reject_case(KernelMap::Block1G, &tampered, &a, &pol, |_| {});
+    let r = emitted(&report, 6);
+    let identified = aienos_artifact::verify::parse_and_identify(&tampered).unwrap();
+    assert_eq!(
+        (r.rejection_stage, r.rejection_reason),
+        (3, ArtifactError::BadSignature as u16)
+    );
+    assert_eq!(&r.artifact_id, identified.artifact_id.as_bytes());
+    assert_eq!(r.artifact_signer_fingerprint, [0; 32]);
+    assert_eq!(r.granted_capability_digest, [0; 32]);
+
+    // Mapped-byte corruption: authorised (signer and grants bound), refused
+    // at Hashed with the loader reason, never executed.
+    let good = pack_signed(&spec(), &TEST_SEED);
+    let (report, run) = reject_case(KernelMap::Blocks2M, &good, &a, &pol, |r| {
+        r.platform.corrupt_after_copy = Some(2);
+    });
+    run.assert_clean(&report);
+    let r = emitted(&report, 7);
+    assert_eq!((r.rejection_stage, r.rejection_reason), (7, 0x104));
+    assert_ne!(r.artifact_signer_fingerprint, [0; 32]);
+    assert_ne!(r.granted_capability_digest, [0; 32]);
+    assert_eq!(r.result_flags, RESULT_RECLAIMED);
+    assert_eq!(r.execution_status, ExecutionStatusCode::NotRun);
+}
+
+#[test]
+fn stage_and_reason_codes_match_adr_0014_section_7_3() {
+    let stages = [
+        (CandidateState::Received, 1),
+        (CandidateState::Staged, 2),
+        (CandidateState::Verified, 3),
+        (CandidateState::Authorized, 4),
+        (CandidateState::Reserved, 5),
+        (CandidateState::Mapped, 6),
+        (CandidateState::Hashed, 7),
+        (CandidateState::Sealed, 8),
+        (CandidateState::CapsInstalled, 9),
+        (CandidateState::Admitted, 0),
+        (CandidateState::Running, 0),
+    ];
+    for (state, code) in stages {
+        assert_eq!(state.stage_code(), code, "{state:?}");
+    }
+    assert_eq!(
+        LoadError::Artifact(ArtifactError::BadMagic).reason_code(),
+        1
+    );
+    assert_eq!(
+        LoadError::Artifact(ArtifactError::RightsEscalation).reason_code(),
+        19
+    );
+    let loader = [
+        LoadError::NoFrames,
+        LoadError::StagingTooLarge,
+        LoadError::Mapping,
+        LoadError::MappedDigestMismatch,
+        LoadError::WxAudit,
+        LoadError::CapabilityInstall,
+        LoadError::SchedulerFull,
+        LoadError::ExecutedDigestMismatch,
+        LoadError::Reclaim,
+        LoadError::FirmwareRead,
+    ];
+    for (i, e) in loader.iter().enumerate() {
+        assert_eq!(e.reason_code(), 0x101 + i as u16, "{e:?}");
+    }
+}
+
+#[test]
+fn receipt_line_carries_digest_and_full_record() {
+    let bytes = pack_signed(&spec(), &TEST_SEED);
+    let (report, _) = reject_case(KernelMap::Block1G, &bytes, &anchors(), &policy(), |r| {
+        r.platform.corrupt_after_copy = Some(2);
+    });
+    let record = aienos_artifact::receipt::encode(&emitted(&report, 9));
+    let mut out = String::new();
+    write_receipt_line(&mut out, "X.AIEN", 9, &record);
+    let digest: String = aienos_artifact::receipt::receipt_digest(&record)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let hex: String = record.iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(
+        out,
+        format!("receipt: X.AIEN seq=9 digest={digest} record={hex}\n")
+    );
 }

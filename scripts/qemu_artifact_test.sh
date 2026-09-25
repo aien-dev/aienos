@@ -10,11 +10,17 @@
 #      P25WX    admitted, killed by a W^X permission fault on its code page
 #      P25SPIN  admitted, killed when its admitted time budget runs out
 #      P25TAMP  one payload byte flipped after signing: rejected BadSignature
+#      P26SEED  first SEED-0B capability artifact: READ granted and used,
+#               WRITE through the READ handle denied, forged/never-issued/
+#               zero handles denied, read past the grant denied, exits 0
 #   2. ordinary build (empty production trust set): every candidate rejected
 #      UntrustedSigner. Production trust fails closed.
 #
 # Every candidate must end with reclaimed=yes (all frames returned, no live
-# capabilities). No physical hardware is touched.
+# capabilities). Every candidate also emits an unsigned Admission Receipt v0
+# on the console; the host checks it binds the artifact it supplied, signs
+# it with the TEST ONLY SEED-0B receipt key, and verifies the signed record.
+# No physical hardware is touched.
 #
 # Needs qemu-system-aarch64 and AAVMF (Ubuntu: qemu-system-arm qemu-efi-aarch64).
 set -euo pipefail
@@ -28,6 +34,7 @@ command -v qemu-system-aarch64 >/dev/null || { echo "qemu-system-aarch64 not ins
 [[ -r "${code_fd}" && -r "${vars_fd}" ]] || { echo "AAVMF firmware not found"; exit 2; }
 
 fixtures="crates/aienos-artifact-tool/fixtures/p2_5"
+seed_fixtures="crates/aienos-artifact-tool/fixtures/p2_6"
 work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
 failed=0
@@ -47,6 +54,12 @@ if command -v "${as_bin}" >/dev/null; then
             fail "${probe} code.bin differs from probe.S"
         fi
     done
+    "${seed_fixtures}/assemble.sh" "${work}/asm"
+    if cmp -s "${work}/asm/p26seed/code.bin" "${seed_fixtures}/p26seed/code.bin"; then
+        pass "p26seed code.bin is exactly what probe.S assembles to"
+    else
+        fail "p26seed code.bin differs from probe.S"
+    fi
 else
     echo "NOTE  no AArch64 assembler; using committed probe bytes unchecked"
 fi
@@ -56,6 +69,7 @@ cargo build --quiet -p aienos-artifact-tool --features seed0b-test-signing
 tool="target/debug/aienos-artifact-tool"
 mkdir -p "${work}/esp/EFI/BOOT" "${work}/esp/EFI/AIENOS/ARTIFACTS"
 "${fixtures}/pack.sh" "${tool}" "${work}/esp/EFI/AIENOS/ARTIFACTS"
+"${seed_fixtures}/pack.sh" "${tool}" "${work}/esp/EFI/AIENOS/ARTIFACTS"
 mv "${work}/esp/EFI/AIENOS/ARTIFACTS/ids.txt" "${work}/ids.txt"
 touch "${work}/esp/EFI/AIENOS/BOOTREPORT.TXT"
 id_prefix() { # name -> first 16 hex digits of its ArtifactId
@@ -102,9 +116,50 @@ common_checks() { # serial
     check "$1" "M3 cooperative threads unchanged" "threads: ok"
     check "$1" "M3 EL0 isolation proof unchanged" "el0: ok write=granted forged=denied fault=contained exit=0"
     check "$1" "M3 typed IPC proof unchanged" "ipc: ok message=delivered cap=delegated rights=attenuated forged=denied revoked=denied"
-    check "$1" "firmware read four artifact candidates" "artifact_candidates: 4$"
+    check "$1" "firmware read five artifact candidates" "artifact_candidates: 5$"
     check "$1" "final report reached the console" "report_kind: final"
     if has "$1" "report_kind: (panic|fault)"; then fail "panic or fault reported"; fi
+    local before after
+    before=$(grep -oE "artifact_frames_free_before: [0-9]+" "$1" | awk '{print $2}' | tail -1)
+    after=$(grep -oE "artifact_frames_free_after: [0-9]+" "$1" | awk '{print $2}' | tail -1)
+    if [[ -n "${before}" && "${before}" == "${after}" ]]; then
+        pass "every frame returned after all candidates (${before} free before and after)"
+    else
+        fail "frame accounting across candidates (before=${before:-?} after=${after:-?})"
+    fi
+}
+
+# receipt_check SERIAL NAME PATTERN: the kernel's unsigned receipt for NAME
+# must decode, bind the supplied artifact, match PATTERN, carry the digest
+# the host recomputes, and sign/verify with the TEST ONLY receipt key.
+receipt_check() {
+    local serial="$1" name="$2" want="$3" line record kdigest out
+    line=$(grep -E "^receipt: ${name} seq=[0-9]+ digest=[0-9a-f]{64} record=[0-9a-f]{1024}$" "${serial}" | tail -1 || true)
+    if [[ -z "${line}" ]]; then
+        fail "${name} receipt emitted"
+        return
+    fi
+    record=${line##*record=}
+    kdigest=$(sed -E 's/.* digest=([0-9a-f]{64}) .*/\1/' <<<"${line}")
+    "${tool}" receipt from-hex "${record}" "${work}/${name}.receipt" >/dev/null
+    if ! out=$("${tool}" receipt check "${work}/${name}.receipt" "${work}/esp/EFI/AIENOS/ARTIFACTS/${name}" 2>&1); then
+        fail "${name} receipt binds the supplied artifact (${out})"
+        return
+    fi
+    if [[ "${out}" != *"digest=${kdigest} "* ]]; then
+        fail "${name} receipt digest recomputed by the host"
+        return
+    fi
+    if ! grep -qE -- "${want}" <<<"${out}"; then
+        fail "${name} receipt records the observed outcome (${out})"
+        return
+    fi
+    "${tool}" receipt sign-test "${work}/${name}.receipt" "${work}/${name}.receipt.signed" >/dev/null
+    if "${tool}" receipt verify "${work}/${name}.receipt.signed" | grep -q "RECEIPT_VERIFY: PASS digest=${kdigest} "; then
+        pass "${name} receipt: bound, host digest match, observed outcome, TEST ONLY signature verifies"
+    else
+        fail "${name} signed receipt verifies"
+    fi
 }
 
 # ---- boot 1: qualification build --------------------------------------------
@@ -122,8 +177,16 @@ check "${qual}" "P25SPIN admitted then killed at its time budget, reclaimed" \
     "artifact: P25SPIN\.AIEN admitted id=$(id_prefix P25SPIN.AIEN) tier=seed0b-test exec=timeout .*wx=enforced caps=0 revoked=yes reclaimed=yes frames=[0-9]+ syscalls=0 reads=0 denials=0$"
 check "${qual}" "P25TAMP (payload byte flipped after signing) rejected BadSignature, reclaimed" \
     "artifact: P25TAMP\.AIEN rejected stage=(received|staged|verified) reason=BadSignature reclaimed=yes"
-check "${qual}" "final report summarises three admitted, one rejected" \
-    "artifacts: candidates=4 admitted=3 rejected=1"
+check "${qual}" "P26SEED (first SEED-0B capability artifact) read through its grant, WRITE and forged authority denied, exit 0, reclaimed" \
+    "artifact: P26SEED\.AIEN admitted id=$(id_prefix P26SEED.AIEN) tier=seed0b-test exec=exited:0x0 bytes=identified=verified=admitted=mapped=executed wx=enforced caps=1 revoked=yes reclaimed=yes frames=[0-9]+ syscalls=9 reads=3 denials=5$"
+check "${qual}" "final report summarises four admitted, one rejected" \
+    "artifacts: candidates=5 admitted=4 rejected=1"
+check "${qual}" "receipts carry the SEED-0B-QEMU tier" "^artifact_receipt_tier: SEED-0B-QEMU$"
+receipt_check "${qual}" P26SEED.AIEN "decision=Admitted tier=SEED-0B-QEMU stage=0 reason=0x0 status=Exited exit=0 syscalls=9 reads_ok=3 denials=5 flags=0xff$"
+receipt_check "${qual}" P25EXEC.AIEN "decision=Admitted .* status=Exited exit=0 syscalls=3 reads_ok=1 denials=1 flags=0xfd$"
+receipt_check "${qual}" P25WX.AIEN "decision=Admitted .* status=Fault exit=0 syscalls=0 reads_ok=0 denials=0 flags=0xe4$"
+receipt_check "${qual}" P25SPIN.AIEN "decision=Admitted .* status=Timeout exit=0 syscalls=0 reads_ok=0 denials=0 flags=0xe4$"
+receipt_check "${qual}" P25TAMP.AIEN "decision=Rejected .* stage=3 reason=0x12 status=NotRun exit=0 syscalls=0 reads_ok=0 denials=0 flags=0x04$"
 
 # ---- boot 2: ordinary build, empty production trust -------------------------
 prod="${work}/production.txt"
@@ -132,19 +195,20 @@ common_checks "${prod}"
 if has "${prod}" "seed0b-test qualification build"; then
     fail "ordinary build must not carry the qualification label"
 fi
-for name in P25EXEC P25WX P25SPIN P25TAMP; do
+for name in P25EXEC P25WX P25SPIN P25TAMP P26SEED; do
     reason=UntrustedSigner
     # The tampered file may fail its signature check before or after signer
     # lookup; either way it must be rejected, never run.
     [[ "${name}" != P25TAMP ]] || reason="(UntrustedSigner|BadSignature)"
     check "${prod}" "ordinary build rejects ${name} (${reason}), reclaimed" \
         "artifact: ${name}\.AIEN rejected stage=[a-z]+ reason=${reason} reclaimed=yes"
+    receipt_check "${prod}" "${name}.AIEN" "decision=Rejected .* stage=3 reason=0x11 status=NotRun .* flags=0x04$"
 done
 if has "${prod}" "artifact: [A-Z0-9]+\.AIEN admitted"; then
     fail "ordinary build admitted an artifact"
 fi
 check "${prod}" "final report summarises zero admitted" \
-    "artifacts: candidates=4 admitted=0 rejected=4"
+    "artifacts: candidates=5 admitted=0 rejected=5"
 
 if [[ -n "${AIENOS_LOG_DIR:-}" ]]; then
     cp "${qual}" "${AIENOS_LOG_DIR}/qemu_artifact_qualification_serial.log"

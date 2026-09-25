@@ -1102,7 +1102,7 @@ fn save_report_file(text: &str) -> uefi::Result {
 }
 
 /// Most signed-artifact candidates firmware reads from `\EFI\AIENOS\ARTIFACTS`.
-const MAX_ARTIFACT_CANDIDATES: usize = 8;
+const MAX_ARTIFACT_CANDIDATES: usize = 32;
 /// Largest candidate firmware will read. Bigger files are refused unread.
 const MAX_ARTIFACT_FILE_BYTES: u64 = 640 * 1024;
 const ARTIFACT_NAME_BYTES: usize = 32;
@@ -1267,10 +1267,21 @@ fn read_artifact_candidates() -> ArtifactCandidates {
     out
 }
 
-/// Hand each candidate to the kernel loader, then send one `artifacts`
-/// record with a line per candidate to the console. Returns the number of
-/// admitted and rejected candidates.
+/// Hand each candidate to the kernel loader. One `artifacts` header record
+/// goes to the console first; then each candidate's result line and its
+/// unsigned Admission Receipt v0 stream to the console on their own (they do
+/// not fit, and do not belong, in the bounded NVRAM report). Returns the
+/// number of admitted and rejected candidates.
 fn run_artifact_candidates(candidates: &ArtifactCandidates, kernel_root: usize) -> (usize, usize) {
+    use aienos_kernel::artifact_loader as loader;
+    let context = loader::ReceiptContext {
+        verifier_identity: loader::boot_verifier_identity(COMMIT),
+        tier: if cfg!(feature = "hardware-staging") {
+            aienos_kernel::artifact_loader::QualificationTier::Seed0bMachine1
+        } else {
+            aienos_kernel::artifact_loader::QualificationTier::Seed0bQemu
+        },
+    };
     let mut record = Report::new();
     header(&mut record, "artifacts");
     #[cfg(feature = "seed0b-qualification")]
@@ -1279,37 +1290,53 @@ fn run_artifact_candidates(candidates: &ArtifactCandidates, kernel_root: usize) 
         "artifact_trust: seed0b-test qualification build — TEST ONLY"
     );
     let _ = writeln!(record, "artifact_candidates: {}", candidates.count);
+    let _ = write!(
+        record,
+        "artifact_receipt_tier: {}\nartifact_verifier_identity: ",
+        context.tier.label()
+    );
+    for byte in context.verifier_identity {
+        let _ = write!(record, "{byte:02x}");
+    }
+    let _ = writeln!(record);
+    let _ = writeln!(
+        record,
+        "artifact_frames_free_before: {}",
+        aienos_kernel::boot::early_free_frames()
+    );
+    send_to_console(record.as_str());
+
     let (mut admitted, mut rejected) = (0, 0);
     for candidate in &candidates.entries[..candidates.count] {
         let name = candidate.name();
-        if candidate.oversize() {
-            rejected += 1;
-            let _ = writeln!(
-                record,
-                "artifact: {name} rejected stage=received reason=StagingTooLarge reclaimed=yes"
-            );
-            continue;
-        }
-        let Some(bytes) = candidate.bytes() else {
-            rejected += 1;
-            let _ = writeln!(
-                record,
-                "artifact: {name} rejected stage=received reason=FirmwareRead reclaimed=yes"
-            );
-            continue;
+        let report = if candidate.oversize() {
+            loader::firmware_rejection(loader::LoadError::StagingTooLarge)
+        } else if let Some(bytes) = candidate.bytes() {
+            unsafe { loader::run_boot_candidate(bytes, kernel_root) }
+        } else {
+            loader::firmware_rejection(loader::LoadError::FirmwareRead)
         };
-        let result =
-            unsafe { aienos_kernel::artifact_loader::run_boot_candidate(bytes, kernel_root) };
-        match result.decision {
-            aienos_kernel::artifact_loader::Decision::Admitted => admitted += 1,
-            aienos_kernel::artifact_loader::Decision::Rejected => rejected += 1,
+        match report.decision {
+            loader::Decision::Admitted => admitted += 1,
+            loader::Decision::Rejected => rejected += 1,
         }
-        aienos_kernel::artifact_loader::write_candidate_line(&mut record, name, &result);
+        let mut out = ReportBuf::<2048>::new();
+        loader::write_candidate_line(&mut out, name, &report);
+        match loader::boot_receipt(&report, &context) {
+            (sequence, Some(bytes)) => loader::write_receipt_line(&mut out, name, sequence, &bytes),
+            (sequence, None) => {
+                let _ = writeln!(out, "receipt: {name} seq={sequence} invalid");
+            }
+        }
+        send_to_console(out.as_str());
     }
-    if record.truncated() {
-        let _ = writeln!(record, "truncated: yes");
-    }
-    send_to_console(record.as_str());
+    let mut tail = ReportBuf::<128>::new();
+    let _ = writeln!(
+        tail,
+        "artifact_frames_free_after: {}",
+        aienos_kernel::boot::early_free_frames()
+    );
+    send_to_console(tail.as_str());
     (admitted, rejected)
 }
 
