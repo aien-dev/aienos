@@ -34,6 +34,10 @@ _Avoid_: Binary, program, module (when referring to an admitted executable packa
 The stable cryptographic identity of a Binary Artifact's canonical execution contract and exact payload bytes.
 _Avoid_: File hash, signer identity
 
+**Qualification Trust Anchor**:
+An explicitly test-only public key admitted for SEED-0B qualification; it conveys no production owner or machine identity.
+_Avoid_: Production root, enrolled key
+
 **Model**:
 A replaceable, swappable intelligence component accessed via the Model ABI that proposes thought and action without possessing inherent authority.
 _Avoid_: Operating system, AI, brain

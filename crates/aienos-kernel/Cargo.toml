@@ -10,7 +10,9 @@ description = "AIENOS bare-metal no_std kernel substrate for aarch64"
 [features]
 default = ["std"]
 std = []
+seed0b-test-anchor = ["aienos-artifact/seed0b-test-anchor"]
 
 [dependencies]
 aienos-accel = { path = "../aienos-accel" }
+aienos-artifact = { path = "../aienos-artifact" }
 aienos-crypto = { path = "../aienos-crypto" }

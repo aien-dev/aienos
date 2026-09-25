@@ -151,7 +151,15 @@ The public key is obtained only from the selected local trust-anchor set by
 fingerprint. The artifact never supplies a key that can make itself trusted.
 Ed25519 means the RFC 8032 pure Ed25519 operation over the exact domain-plus-ID
 message shown below; Ed25519ph and Ed25519ctx are not interchangeable v0
-encodings.
+encodings. The kernel uses the pinned `no_std` RustCrypto `ed25519-dalek`
+verifier with strict signature validation. Its locked source dependency graph
+is vendored for offline builds; the implementation and feature review is
+recorded in [`ED25519_DEPENDENCY_REVIEW.md`](../ED25519_DEPENDENCY_REVIEW.md).
+Production trust-anchor sets are empty. Only a build explicitly marked
+`seed0b-test-anchor` may contain the public qualification key, and its boot
+report must identify the SEED-0B test qualification tier. The matching private
+test-vector seed is restricted to debug host qualification tooling and is not
+compiled into the kernel or ordinary release tooling.
 
 ## 3. Canonical identity and signature
 

@@ -1,5 +1,5 @@
 //! Admission Receipt v0 constants. Canonical receipt encoding and signing are
-//! implemented in P2-3 alongside the signature-verification interfaces.
+//! implemented with the admission lifecycle and qualification receipt work.
 
 pub const RECEIPT_MAGIC: &[u8; 8] = b"AIENRCP\0";
 pub const RECEIPT_VERSION: u16 = 0;
