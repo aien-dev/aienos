@@ -1,0 +1,22 @@
+# GB10 read-only hardware characterization (Linux-observed)
+
+schema: aienos.gb10.profile.v1
+collector commit: 71cb1703484cbc9d56eabe43402a6f9bf62b1028
+sudo used for read-only config/ACPI: yes
+GB10 devices found: 1
+
+## 000f:01:00.0
+  vendor:device      0x10de:0x2e12  class 0x030000
+  location           domain=15 bus=1 device=0 function=0
+  iommu_group        20
+  driver             nvidia
+  numa_node          -1
+  firmware_node      /sys/devices/LNXSYSTM:00/LNXSYBUS:00/PNP0A08:0b/device:1b/device:1c
+  pcie link          current 2.5 GT/s PCIe x1  max 2.5 GT/s PCIe x16
+  capability status  decoded
+  BARs:
+    [0] memory base=0x24000000 size=67108864 64bit=true prefetch=true
+
+The structured profile records source, method, whether Linux interpreted
+the value, and whether AIENOS independently verified it. No observation
+here is a native AIENOS proof, and none of it involved a GPU command.
