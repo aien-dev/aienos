@@ -87,6 +87,17 @@ else
     skipped "qemu-system-aarch64 or AAVMF firmware not present on host."
 fi
 
+# Step 6a: P2-5 Binary Artifact loader. Signed candidates are staged,
+# verified, admitted, run at EL0 from their exact authenticated bytes under
+# W^X, and reclaimed; the ordinary build rejects every one (QEMU only).
+echo ""
+echo "--- [P2-5 Binary Artifact Loader in QEMU] ---"
+if command -v qemu-system-aarch64 >/dev/null && [[ -r "${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}" ]]; then
+    ./scripts/qemu_artifact_test.sh
+else
+    skipped "qemu-system-aarch64 or AAVMF firmware not present on host."
+fi
+
 # Step 6b: SEED-0A USB keyboard candidate, proven in QEMU only (ADR 0012).
 echo ""
 echo "--- [SEED-0A USB Keyboard in QEMU (input.keyboard.usb)] ---"

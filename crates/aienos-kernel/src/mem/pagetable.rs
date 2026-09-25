@@ -391,6 +391,12 @@ fn indexes(va: u64) -> [usize; 4] {
     ]
 }
 
+/// Level-3 page descriptor for `frame` with `flags` (same encoding as
+/// [`PageTableBuilder::map`] leaves).
+pub fn page_descriptor(frame: PhysAddr, flags: MapFlags) -> u64 {
+    (frame.0 as u64 & ADDRESS_MASK) | TABLE | leaf_attributes(flags)
+}
+
 fn leaf_attributes(flags: MapFlags) -> u64 {
     let attr = match flags.attribute {
         MemoryAttribute::NormalWriteBack => MAIR_NORMAL_WB,

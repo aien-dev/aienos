@@ -93,6 +93,7 @@ dependencies = [
  "aienos-accel",
  "aienos-artifact",
  "aienos-crypto",
+ "ed25519-dalek",
 ]
 
 [[package]]

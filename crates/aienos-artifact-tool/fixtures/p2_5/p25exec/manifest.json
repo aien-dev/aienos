@@ -1,0 +1,26 @@
+{
+  "entry_offset": 0,
+  "capabilities": [
+    {
+      "resource_kind": 3,
+      "resource_id": 1,
+      "rights": 1,
+      "bounds_kind": 1,
+      "max_operations": 4,
+      "max_bytes": 32,
+      "byte_offset": 0,
+      "byte_length": 32
+    }
+  ],
+  "resources": {
+    "code_pages": 1,
+    "data_pages": 1,
+    "stack_pages": 1,
+    "max_capabilities": 1,
+    "ipc_messages": 0,
+    "ipc_bytes": 0,
+    "cpu_ticks": 100000000,
+    "elapsed_ticks": 100000000,
+    "syscall_count": 16
+  }
+}

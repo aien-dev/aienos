@@ -254,7 +254,11 @@ mod vectors {
         "aienos_exception_vectors:",
         ".irp slot, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15",
         ".balign 128",
+        // Slot 5: IRQ at EL1h. Slot 9: IRQ from lower-EL AArch64 (EL0 tasks),
+        // which saves and restores the EL0 context through the same frame.
         ".if \\slot == 5",
+        "b aienos_irq_trampoline",
+        ".elseif \\slot == 9",
         "b aienos_irq_trampoline",
         ".elseif \\slot == 8",
         "b aienos_lower_el_sync_trampoline",

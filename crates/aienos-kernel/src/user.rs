@@ -198,6 +198,21 @@ pub unsafe extern "C" fn aienos_lower_el_sync_dispatcher(frame: *mut TrapFrame) 
     {
         esr = 0;
     }
+    // A loaded artifact task owns EL0: its syscalls and faults never reach
+    // the M3 demo paths below or the fatal handler.
+    if crate::task_runtime::is_active() {
+        let far: u64;
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            core::arch::asm!("mrs {0}, far_el1", out(reg) far, options(nomem, nostack));
+        }
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            far = 0;
+        }
+        unsafe { crate::task_runtime::dispatch_sync(frame, esr, far) };
+        return;
+    }
     match (esr >> 26) & 0x3f {
         0x15 if esr & 0xffff == 0 => {
             if IPC_ACTIVE.load(Ordering::Acquire) {
