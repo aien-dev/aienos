@@ -199,6 +199,8 @@ pub struct CandidateReport {
     pub code_base: u64,
     pub code_end: u64,
     pub bindings: ReceiptBindings,
+    /// Grants installed in the task's capability table, in grant order.
+    pub granted: [Option<GrantedCapability>; MAX_CAPABILITIES],
 }
 
 impl CandidateReport {
@@ -1195,6 +1197,7 @@ where
     report.trust_tier = Some(task.trust_tier);
     report.frames_reserved = task.address_space.frames_reserved();
     report.caps_installed = task.grant_count;
+    report.granted = task.grants;
     report.code_base = task.address_space.layout.code_base();
     report.code_end = task.address_space.layout.code_end();
     report.wx_enforced = report.bindings.wx_sealed;
@@ -1230,6 +1233,7 @@ fn empty_report(free_before: usize) -> CandidateReport {
         code_base: 0,
         code_end: 0,
         bindings: ReceiptBindings::default(),
+        granted: [None; MAX_CAPABILITIES],
     }
 }
 
@@ -1332,10 +1336,7 @@ pub fn firmware_rejection(error: LoadError) -> CandidateReport {
     let mut report = empty_report(free);
     report.failed_stage = Some(CandidateState::Received);
     report.error = Some(error);
-    report.bindings.policy_digest = match boot_policy(&boot_signers()) {
-        Ok(policy) => policy.digest(),
-        Err(_) => [0; 32],
-    };
+    report.bindings.policy_digest = boot_policy_digest();
     report
 }
 
@@ -1351,6 +1352,11 @@ pub fn boot_receipt(
         .ok()
         .map(|receipt| aienos_artifact::receipt::encode(&receipt));
     (sequence, record)
+}
+
+/// Digest of the local boot admission policy (ADR 0014 §5).
+pub fn boot_policy_digest() -> Digest {
+    boot_policy(&boot_signers()).map_or([0; 32], |policy| policy.digest())
 }
 
 /// Verifier identity digest for this build (ADR 0014 §7.1).
@@ -1521,6 +1527,29 @@ pub fn build_receipt(
     Ok(receipt)
 }
 
+/// One `grant:` line per capability the task actually received, so the
+/// evidence shows granted ⊆ requested directly.
+pub fn write_grant_lines(out: &mut impl core::fmt::Write, name: &str, r: &CandidateReport) {
+    for (index, grant) in r.granted.iter().enumerate() {
+        let Some(g) = grant else { continue };
+        let kind = match g.resource.kind() {
+            crate::abi::ResourceKind::Object => "object",
+            crate::abi::ResourceKind::Channel => "channel",
+            _ => "other",
+        };
+        let _ = writeln!(
+            out,
+            "grant: {name}[{index}] kind={kind} id={} rights={:#x} bounds={}+{} max_ops={} max_bytes={}",
+            g.resource.id(),
+            g.rights.bits(),
+            g.bounds.byte_offset,
+            g.bounds.byte_length,
+            g.bounds.max_operations,
+            g.bounds.max_bytes,
+        );
+    }
+}
+
 /// `receipt: NAME seq=N digest=HEX64 record=HEX1024` — the unsigned record
 /// the host qualification harness checks, signs and verifies.
 pub fn write_receipt_line(
@@ -1592,8 +1621,13 @@ pub fn write_candidate_line(out: &mut impl core::fmt::Write, name: &str, r: &Can
                 ExecutionStatus::Fault { esr, far, .. } => {
                     // EC 0x24 data abort from EL0, ISS.WnR (bit 6) set.
                     let write_abort = (esr >> 26) & 0x3f == 0x24 && esr & (1 << 6) != 0;
+                    // EC 0x20: instruction abort from EL0, i.e. an attempt to
+                    // execute a page mapped non-executable (data or stack).
+                    let exec_abort = (esr >> 26) & 0x3f == 0x20;
                     if write_abort && far >= r.code_base && far < r.code_end {
                         let _ = write!(out, "fault:code-write");
+                    } else if exec_abort && (far < r.code_base || far >= r.code_end) {
+                        let _ = write!(out, "fault:exec-nx");
                     } else {
                         let _ = write!(out, "fault:other");
                     }

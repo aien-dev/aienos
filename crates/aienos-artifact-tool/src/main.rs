@@ -27,6 +27,8 @@ use serde::Deserialize;
 #[cfg(all(feature = "seed0b-test-signing", not(debug_assertions)))]
 compile_error!("the SEED-0B test signing identity is unavailable to release builds");
 
+#[cfg(feature = "seed0b-test-signing")]
+mod corpus;
 mod receipt_cmd;
 
 const PAGE_SIZE: u32 = 4096;
@@ -96,6 +98,8 @@ fn run() -> Result<(), Box<dyn Error>> {
         Some("sign") if args.len() == 4 => sign_file(Path::new(&args[2]), Path::new(&args[3]))?,
         Some("verify") if args.len() == 3 => verify_file(&fs::read(&args[2])?)?,
         Some("receipt") => receipt_cmd::run(&args[2..])?,
+        #[cfg(feature = "seed0b-test-signing")]
+        Some("negative-corpus") if args.len() == 3 => corpus::write_corpus(Path::new(&args[2]))?,
         _ => return Err(usage().into()),
     }
     Ok(())
