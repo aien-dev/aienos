@@ -560,6 +560,9 @@ mod usb_keyboard;
 #[cfg(feature = "nvme-read")]
 mod nvme_read;
 
+#[cfg(feature = "store-qual")]
+mod store_qual;
+
 /// Commit this image was built from; `scripts/stage_one_time_boot.sh` sets it.
 const COMMIT: &str = match option_env!("AIENOS_COMMIT") {
     Some(commit) => commit,

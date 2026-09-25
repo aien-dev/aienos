@@ -24,6 +24,9 @@ nvme-read = ["handoff"]
 # P3 candidate: native NVMe write + flush qualification on top of nvme-read.
 # Only scripts/qemu_nvme_rw_test.sh enables it; hardware staging never does.
 nvme-write = ["nvme-read"]
+# P3 candidate: Store-over-NVMe qualification (test-only). QEMU only.
+# scripts/qemu_store_crash_test.sh enables it; hardware staging never does.
+store-qual = ["nvme-write"]
 # SEED-0B qualification build (ADR 0014 §6): the kernel trusts the public,
 # TEST ONLY RFC 8032 qualification key in addition to the (empty) production
 # set, and every report says so. Without it, every artifact candidate is
