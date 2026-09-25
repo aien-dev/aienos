@@ -130,8 +130,9 @@ impl OperatorAuth {
         constant_time_eq(&expected, response)
     }
 
-    /// The response a holder of `derived_key` must present for `challenge`.
-    fn expected_response(derived_key: &[u8; 32], challenge: &[u8; 32]) -> [u8; 32] {
+    /// The response a holder of `derived_key` must present for `challenge`
+    /// (used by operator-side tooling to answer a challenge).
+    pub fn expected_response(derived_key: &[u8; 32], challenge: &[u8; 32]) -> [u8; 32] {
         let mut mac = HmacSha256::new(derived_key);
         mac.update(OPERATOR_AUTH_DOMAIN);
         mac.update(challenge);
