@@ -1,0 +1,11 @@
+[package]
+name = "aienos-crypto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared no_std cryptographic primitives for AIENOS"
+
+[lib]
+path = "src/lib.rs"

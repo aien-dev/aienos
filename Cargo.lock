@@ -28,6 +28,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aienos-artifact"
+version = "0.1.0"
+dependencies = [
+ "aienos-crypto",
+]
+
+[[package]]
 name = "aienos-boot"
 version = "0.1.0"
 dependencies = [
@@ -56,6 +63,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "aienos-crypto"
+version = "0.1.0"
+
+[[package]]
 name = "aienos-evidence"
 version = "0.1.0"
 dependencies = [
@@ -68,6 +79,7 @@ name = "aienos-kernel"
 version = "0.1.0"
 dependencies = [
  "aienos-accel",
+ "aienos-crypto",
 ]
 
 [[package]]
