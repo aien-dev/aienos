@@ -175,6 +175,95 @@ fn provisioning_is_operator_only_and_only_on_an_unprovisioned_store() {
 }
 
 #[test]
+fn identity_lost_in_the_newest_root_never_looks_unprovisioned() {
+    // Found by the QEMU campaign: provision (generation 2) then corrupt the
+    // agent root. The graph-broken generation-2 root makes the Store mount
+    // degraded on generation 1 (genesis, no identity). That must not read as
+    // "unprovisioned", even to an operator holding a valid key.
+    let mut store = Store::open(formatted()).unwrap();
+    continuity::provision(&mut store, AGENT, UUID, ProvisionSource::Qualification).unwrap();
+    let mut dev = store.into_device();
+    let root_unit = Store::open(dev.clone())
+        .unwrap()
+        .catalog()
+        .entries
+        .iter()
+        .find(|e| e.kind == continuity::KIND_AGENT_ROOT)
+        .unwrap()
+        .first_unit;
+    dev.units[root_unit as usize][20] ^= 0xff;
+
+    let record = inspect(&mut dev);
+    assert_eq!(
+        record.reason,
+        Some(EntryReason::Degraded(PeerCondition::GraphBadNewer))
+    );
+    assert_eq!(record.applicable(), None);
+
+    // A response that is genuinely valid for this exact state still cannot
+    // provision or repair: the refusal is the preservation rule, not the key.
+    let before = dev.clone();
+    for action in [Action::ProvisionIdentity, Action::RepairDegradedPeer] {
+        let valid = respond(&record, action, &OPERATOR);
+        let result = match action {
+            Action::ProvisionIdentity => {
+                provision_identity(&mut dev, &OPERATOR, &valid, [0x22; 32]).map(|_| ())
+            }
+            Action::RepairDegradedPeer => {
+                repair_degraded_peer(&mut dev, &OPERATOR, &valid).map(|_| ())
+            }
+        };
+        assert_eq!(result, Err(RecoveryError::NotApplicable), "{action:?}");
+    }
+    assert!(dev == before, "nothing was written");
+}
+
+#[test]
+fn malformed_peer_without_a_resolvable_identity_is_not_repaired() {
+    // Garbage in slot B of a formatted store that never had an identity: the
+    // valid root resolves no identity, so repair is not offered either.
+    let mut dev = formatted();
+    dev.units[1] = [0xa5; STORE_UNIT_BYTES];
+    let record = inspect(&mut dev);
+    assert_eq!(
+        record.reason,
+        Some(EntryReason::Degraded(PeerCondition::Malformed))
+    );
+    assert_eq!(record.applicable(), None);
+}
+
+#[test]
+fn orphaned_continuity_objects_are_corrupt_not_unprovisioned() {
+    // A manifest without its agent root means the identity was lost.
+    let mut store = Store::open(formatted()).unwrap();
+    let orphan = continuity::Manifest {
+        root: crate::store::v1::ObjectId([0x77; 32]),
+        previous: None,
+        sequence: 1,
+        incarnation: 1,
+        agent_state: None,
+        cortex_wal: Vec::new(),
+    }
+    .encode()
+    .unwrap();
+    store
+        .transact(&[crate::store::engine::ObjectInput {
+            kind: continuity::KIND_MANIFEST,
+            version: continuity::STORE_OBJECT_VERSION,
+            bytes: &orphan,
+        }])
+        .unwrap();
+    let mut dev = store.into_device();
+    let record = inspect(&mut dev);
+    assert!(
+        matches!(record.reason, Some(EntryReason::ContinuityCorrupt(_))),
+        "{:?}",
+        record.reason
+    );
+    assert_eq!(record.applicable(), None);
+}
+
+#[test]
 fn identity_loss_through_corruption_offers_no_action_that_mints() {
     // Corrupt the agent root object's bytes: the Store graph no longer
     // validates, so the Recovery Core must stop, not provision.

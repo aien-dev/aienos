@@ -68,12 +68,23 @@ pub struct SystemRecord {
 
 impl SystemRecord {
     /// The action this state admits, if any.
+    /// Failure semantics fail toward preservation (ADR 0007):
+    /// - repair only a *malformed* peer, and only when the valid root still
+    ///   resolves the identity, so the repair cannot lose it;
+    /// - never discard a CRC-valid newer root whose graph is broken: that
+    ///   would roll back committed state, so it is an out-of-band decision;
+    /// - provision only on a healthy (`Valid`) mount with no continuity
+    ///   objects at all. A degraded mount is never treated as unprovisioned,
+    ///   because the identity may live in the root that did not validate.
     pub fn applicable(&self) -> Option<Action> {
+        let (mount, _, _) = self.mount?;
         match self.reason? {
-            EntryReason::Degraded(PeerCondition::Malformed | PeerCondition::GraphBadNewer) => {
+            EntryReason::Degraded(PeerCondition::Malformed) if self.continuity.is_some() => {
                 Some(Action::RepairDegradedPeer)
             }
-            EntryReason::Unprovisioned => Some(Action::ProvisionIdentity),
+            EntryReason::Unprovisioned if mount == MountState::Valid => {
+                Some(Action::ProvisionIdentity)
+            }
             _ => None,
         }
     }
@@ -157,18 +168,21 @@ pub fn inspect<D: StoreDevice>(device: &mut D) -> SystemRecord {
         .count();
     record.catalog = Some((roots, manifests, entries.len() - roots - manifests));
 
-    match continuity::resolve(&mut store) {
-        Ok(c) => record.continuity = Some(c),
-        Err(ContinuityError::Unprovisioned) => record.reason = Some(EntryReason::Unprovisioned),
-        Err(ContinuityError::Conflict) => record.reason = Some(EntryReason::Conflict),
-        Err(ContinuityError::Corrupt(why)) => {
-            record.reason = Some(EntryReason::ContinuityCorrupt(why))
+    let resolved = continuity::resolve(&mut store);
+    record.reason = if store.mount_state() == MountState::DegradedRecovery {
+        // Degraded takes precedence: what the valid (older) root says about
+        // continuity is not the whole story.
+        Some(EntryReason::Degraded(store.peer_condition()))
+    } else {
+        match &resolved {
+            Ok(_) => None,
+            Err(ContinuityError::Unprovisioned) => Some(EntryReason::Unprovisioned),
+            Err(ContinuityError::Conflict) => Some(EntryReason::Conflict),
+            Err(ContinuityError::Corrupt(why)) => Some(EntryReason::ContinuityCorrupt(why)),
+            Err(_) => Some(EntryReason::ContinuityCorrupt("continuity unreadable")),
         }
-        Err(_) => record.reason = Some(EntryReason::ContinuityCorrupt("continuity unreadable")),
-    }
-    if store.mount_state() == MountState::DegradedRecovery && record.reason.is_none() {
-        record.reason = Some(EntryReason::Degraded(store.peer_condition()));
-    }
+    };
+    record.continuity = resolved.ok();
     record
 }
 
