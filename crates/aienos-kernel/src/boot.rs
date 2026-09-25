@@ -39,6 +39,32 @@ pub fn release_early_frames(batch: FrameBatch) -> bool {
         .is_some_and(|allocator| allocator.release_batch(batch))
 }
 
+/// Reserve a physically contiguous run of early frames (artifact staging).
+pub fn reserve_early_contiguous(count: usize) -> Option<PhysAddr> {
+    EARLY_ALLOCATOR.lock().as_mut()?.allocate_contiguous(count)
+}
+
+/// Release a run obtained from [`reserve_early_contiguous`].
+pub fn release_early_contiguous(start: PhysAddr, count: usize) -> bool {
+    let mut guard = EARLY_ALLOCATOR.lock();
+    let Some(allocator) = guard.as_mut() else {
+        return false;
+    };
+    let mut complete = true;
+    for index in 0..count {
+        complete &= allocator.deallocate_frame(start.offset(index * PAGE_SIZE));
+    }
+    complete
+}
+
+/// Free frames remaining in the early allocator (0 before initialisation).
+pub fn early_free_frames() -> usize {
+    EARLY_ALLOCATOR
+        .lock()
+        .as_ref()
+        .map_or(0, |allocator| allocator.free_count())
+}
+
 fn initialize_early_allocator(region: BootMemoryRegion) -> Option<(usize, PhysAddr)> {
     let mut allocator = EARLY_ALLOCATOR.lock();
     if allocator.is_some() {

@@ -89,6 +89,11 @@ impl<const N: usize> CapTable<N> {
         self.id
     }
 
+    /// Occupied slots, including tombstones kept for revocation.
+    pub fn live_count(&self) -> usize {
+        self.slots.iter().filter(|slot| slot.is_some()).count()
+    }
+
     pub fn insert(&mut self, resource: u32, rights: Rights) -> Result<Handle, CapError> {
         self.allocate(resource, rights, None)
     }
