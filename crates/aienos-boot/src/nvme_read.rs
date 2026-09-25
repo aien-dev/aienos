@@ -895,6 +895,18 @@ fn run_store_phase(screen: &mut Option<Screen>, mut controller: QualController, 
         return;
     }
 
+    #[cfg(feature = "recovery-qual")]
+    if crate::store_qual::is_recovery_mode(mode) {
+        if is_512_qual {
+            qualify_fail(screen, "recovery qualification runs at 4096-byte LBA");
+            return;
+        }
+        let mut response = [0u8; 32];
+        response.copy_from_slice(&cfg[16..48]);
+        recovery_phase(screen, adapter, mode, &response);
+        return;
+    }
+
     if mode == MODE_VERIFY || mode == MODE_VERIFY_512B {
         verify_reopen(screen, adapter, settle, is_512_qual);
         return;
@@ -1248,4 +1260,133 @@ fn continuity_phase(screen: &mut Option<Screen>, mut adapter: QualAdapter, mode:
             Err(e) => stop(screen, e),
         }
     }
+}
+
+/// Recovery Core qualification (ADR 0006) with the TEST ONLY operator key.
+/// Mode 9 inspects and prints the challenge for the applicable action;
+/// modes 10/11 verify the operator response in control-block bytes 16..48
+/// and perform the action only if it verifies for exactly this state.
+#[cfg(feature = "recovery-qual")]
+fn recovery_phase(
+    screen: &mut Option<Screen>,
+    mut adapter: QualAdapter,
+    mode: u8,
+    response: &[u8; 32],
+) {
+    use crate::store_qual::{
+        MODE_RECOVERY_PROVISION, MODE_RECOVERY_REPAIR, TEST_ONLY_OPERATOR_KEY,
+    };
+    use aienos_kernel::recovery_core::{self, Action, SlotView};
+
+    fn hex_into(l: &mut aienos_kernel::report::ReportBuf<256>, bytes: &[u8]) {
+        for b in bytes {
+            let _ = write!(l, "{b:02x}");
+        }
+    }
+
+    say(screen, "RECOVERY_OPERATOR_KEY: TEST-ONLY\n");
+    let record = recovery_core::inspect(&mut adapter);
+
+    let mut l = aienos_kernel::report::ReportBuf::<256>::new();
+    let _ = write!(l, "RECOVERY_RECORD:");
+    for (i, slot) in record.slots.iter().enumerate() {
+        match slot {
+            SlotView::Zero => {
+                let _ = write!(l, " slot{i}=zero");
+            }
+            SlotView::Superblock { generation } => {
+                let _ = write!(l, " slot{i}=gen{generation}");
+            }
+            SlotView::Undecodable(e) => {
+                let _ = write!(l, " slot{i}=undecodable({e:?})");
+            }
+            SlotView::ReadError => {
+                let _ = write!(l, " slot{i}=read-error");
+            }
+        }
+    }
+    if let Some((m, p, g)) = record.mount {
+        let _ = write!(l, " mount={m:?} peer={p:?} generation={g}");
+    }
+    if let Some((roots, manifests, other)) = record.catalog {
+        let _ = write!(l, " roots={roots} manifests={manifests} other={other}");
+    }
+    let _ = write!(l, " agent=");
+    match &record.continuity {
+        Some(c) => hex_into(&mut l, &c.root.agent_id),
+        None => {
+            let _ = write!(l, "none");
+        }
+    }
+    let _ = writeln!(l);
+    say(screen, l.as_str());
+
+    let mut l = aienos_kernel::report::ReportBuf::<256>::new();
+    match record.reason {
+        Some(reason) => {
+            let _ = writeln!(l, "RECOVERY_CORE: ENTERED reason={reason:?}");
+        }
+        None => {
+            let _ = writeln!(l, "RECOVERY_CORE: NOT_NEEDED");
+        }
+    }
+    say(screen, l.as_str());
+
+    if let Some(action) = record.applicable() {
+        if let Some(challenge) = record.challenge(action) {
+            let mut l = aienos_kernel::report::ReportBuf::<256>::new();
+            let _ = write!(l, "RECOVERY_CHALLENGE: action={} challenge=", action.name());
+            hex_into(&mut l, &challenge);
+            let _ = writeln!(l);
+            say(screen, l.as_str());
+        }
+    }
+
+    let outcome = if mode == MODE_RECOVERY_REPAIR {
+        Some(
+            recovery_core::repair_degraded_peer(&mut adapter, &TEST_ONLY_OPERATOR_KEY, response)
+                .map(|_| (Action::RepairDegradedPeer, None)),
+        )
+    } else if mode == MODE_RECOVERY_PROVISION {
+        let mut agent = [0u8; 32];
+        for chunk in agent.as_chunks_mut::<8>().0 {
+            match aienos_kernel::arch::aarch64::rndr() {
+                Some(v) => chunk.copy_from_slice(&v.to_le_bytes()),
+                None => {
+                    say(screen, "RECOVERY_REFUSED (NoEntropy)\n");
+                    return;
+                }
+            }
+        }
+        Some(
+            recovery_core::provision_identity(
+                &mut adapter,
+                &TEST_ONLY_OPERATOR_KEY,
+                response,
+                agent,
+            )
+            .map(|c| (Action::ProvisionIdentity, Some(c.root.agent_id))),
+        )
+    } else {
+        None
+    };
+
+    let Some(outcome) = outcome else {
+        return;
+    };
+    let mut l = aienos_kernel::report::ReportBuf::<256>::new();
+    match outcome {
+        Ok((action, agent)) => {
+            let _ = write!(l, "RECOVERY_ACTION: {} DONE", action.name());
+            if let Some(agent) = agent {
+                let _ = write!(l, " agent=");
+                hex_into(&mut l, &agent);
+            }
+            let _ = writeln!(l);
+        }
+        Err(e) => {
+            let _ = writeln!(l, "RECOVERY_REFUSED ({e:?})");
+        }
+    }
+    say(screen, l.as_str());
 }

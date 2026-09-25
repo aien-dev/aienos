@@ -637,6 +637,16 @@ fn read_kind<D: StoreDevice>(store: &mut Store<D>, id: ObjectId, kind: u16) -> R
 pub fn resolve<D: StoreDevice>(store: &mut Store<D>) -> Result<Continuity> {
     let roots = ids_of_kind(store, KIND_AGENT_ROOT);
     let root_id = match roots.as_slice() {
+        // Continuity objects without their root mean the identity was lost,
+        // not that the store was never provisioned: fail toward preservation.
+        [] if [KIND_MANIFEST, KIND_AGENT_STATE, KIND_CORTEX_WAL]
+            .iter()
+            .any(|kind| !ids_of_kind(store, *kind).is_empty()) =>
+        {
+            return Err(ContinuityError::Corrupt(
+                "continuity objects without an agent root",
+            ))
+        }
         [] => return Err(ContinuityError::Unprovisioned),
         [one] => *one,
         _ => return Err(ContinuityError::Conflict),

@@ -36,6 +36,7 @@ pub mod nvme;
 pub mod pci;
 pub mod pe;
 pub mod recovery;
+pub mod recovery_core;
 pub mod report;
 pub mod scheduler;
 pub mod shell;

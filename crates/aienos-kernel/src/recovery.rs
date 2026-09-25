@@ -5,7 +5,7 @@
 //! - Transactional A/B boot slot rollback
 //! - Deterministic WAL truncation upon corruption without AI dependencies
 
-use crate::crypto::sha256;
+use crate::crypto::{constant_time_eq, sha256, HmacSha256};
 
 /// Boot slot identifier for transactional updates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,22 +95,48 @@ impl Default for SlotManager {
 /// resist offline brute-force and dictionary attacks.
 pub struct OperatorAuth;
 
+/// Domain-separation prefix for the offline operator challenge-response MAC.
+///
+/// It is prepended to the challenge inside the HMAC input so a tag produced for this
+/// credential check can never be confused with any other HMAC use of the same key. The
+/// trailing NUL terminates the label; the challenge that follows is always 32 bytes.
+pub const OPERATOR_AUTH_DOMAIN: &[u8] = b"AIENOS-RECOVERY-OPERATOR-AUTH-v1\0";
+
 impl OperatorAuth {
-    /// Verify an operator authorization token against a high-entropy root key / derived credential.
+    /// Verify an operator's response to an offline challenge.
     ///
-    /// The `derived_key_hash` must represent either a hardware-sealed key (e.g. FIDO/YubiKey)
-    /// or a high-entropy root key derived from a human passphrase via Argon2id.
-    /// Bare SHA-256 password verification is strictly prohibited.
+    /// Computes exactly:
+    ///
+    /// ```text
+    /// expected = HMAC-SHA256(key     = derived_key,
+    ///                        message = OPERATOR_AUTH_DOMAIN || challenge)
+    /// ```
+    ///
+    /// where `OPERATOR_AUTH_DOMAIN` is `b"AIENOS-RECOVERY-OPERATOR-AUTH-v1\0"` (33 bytes),
+    /// and accepts only if `expected` equals `response`, compared with
+    /// [`constant_time_eq`] so the check does not exit early on the first differing byte.
+    ///
+    /// `derived_key` is treated as an opaque 32-byte high-entropy secret. Where it comes
+    /// from (Argon2id over a human passphrase, a FIDO/hardware-sealed key, or something
+    /// else) is out of scope for this function and not yet decided; ADR 0006 only forbids
+    /// deriving it with a fast hash of a human password. Challenge freshness (nonce
+    /// generation, single use, replay protection) is the caller's responsibility.
     pub fn verify_offline_credentials(
-        derived_key_hash: &[u8; 32],
+        derived_key: &[u8; 32],
         challenge: &[u8; 32],
-        signature: &[u8; 32],
+        response: &[u8; 32],
     ) -> bool {
-        let mut hasher = sha256::Sha256::new();
-        hasher.update(derived_key_hash);
-        hasher.update(challenge);
-        let expected = hasher.finalize();
-        &expected == signature
+        let expected = Self::expected_response(derived_key, challenge);
+        constant_time_eq(&expected, response)
+    }
+
+    /// The response a holder of `derived_key` must present for `challenge`
+    /// (used by operator-side tooling to answer a challenge).
+    pub fn expected_response(derived_key: &[u8; 32], challenge: &[u8; 32]) -> [u8; 32] {
+        let mut mac = HmacSha256::new(derived_key);
+        mac.update(OPERATOR_AUTH_DOMAIN);
+        mac.update(challenge);
+        mac.finalize()
     }
 }
 
@@ -180,6 +206,124 @@ impl WalRecovery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::hmac_sha256;
+
+    const KEY: [u8; 32] = {
+        let mut k = [0u8; 32];
+        let mut i = 0;
+        while i < 32 {
+            k[i] = i as u8; // 00..1f
+            i += 1;
+        }
+        k
+    };
+    const CHALLENGE: [u8; 32] = {
+        let mut c = [0u8; 32];
+        let mut i = 0;
+        while i < 32 {
+            c[i] = 0xa0 + i as u8; // a0..bf
+            i += 1;
+        }
+        c
+    };
+    /// HMAC-SHA256(key = 00..1f, "AIENOS-RECOVERY-OPERATOR-AUTH-v1\0" || a0..bf), computed
+    /// independently with `openssl dgst -sha256 -mac HMAC -macopt hexkey:<KEY>`.
+    const KAT_RESPONSE: [u8; 32] = [
+        0xf6, 0x16, 0x2d, 0xa5, 0xf8, 0x79, 0xe9, 0xbd, 0x4d, 0xef, 0xc7, 0x10, 0x8c, 0x46, 0x3b,
+        0x5d, 0x16, 0x4f, 0x4d, 0xb6, 0x8a, 0xe9, 0x91, 0x78, 0x1b, 0xf7, 0x98, 0xfc, 0x14, 0x90,
+        0x7a, 0xaa,
+    ];
+
+    #[test]
+    fn hmac_primitive_rfc4231_case_2() {
+        let tag = hmac_sha256(b"Jefe", b"what do ya want for nothing?");
+        assert_eq!(
+            tag,
+            [
+                0x5b, 0xdc, 0xc1, 0x46, 0xbf, 0x60, 0x75, 0x4e, 0x6a, 0x04, 0x24, 0x26, 0x08, 0x95,
+                0x75, 0xc7, 0x5a, 0x00, 0x3f, 0x08, 0x9d, 0x27, 0x39, 0x83, 0x9d, 0xec, 0x58, 0xb9,
+                0x64, 0xec, 0x38, 0x43,
+            ]
+        );
+    }
+
+    #[test]
+    fn operator_auth_known_answer_accepted() {
+        assert_eq!(OPERATOR_AUTH_DOMAIN.len(), 33);
+        assert_eq!(
+            OperatorAuth::expected_response(&KEY, &CHALLENGE),
+            KAT_RESPONSE
+        );
+        let mut msg = [0u8; 65];
+        msg[..33].copy_from_slice(OPERATOR_AUTH_DOMAIN);
+        msg[33..].copy_from_slice(&CHALLENGE);
+        assert_eq!(hmac_sha256(&KEY, &msg), KAT_RESPONSE);
+        assert!(OperatorAuth::verify_offline_credentials(
+            &KEY,
+            &CHALLENGE,
+            &KAT_RESPONSE
+        ));
+    }
+
+    #[test]
+    fn operator_auth_rejects_any_single_bit_flip() {
+        for byte in 0..32 {
+            for bit in 0..8 {
+                let mask = 1u8 << bit;
+
+                let mut response = KAT_RESPONSE;
+                response[byte] ^= mask;
+                assert!(
+                    !OperatorAuth::verify_offline_credentials(&KEY, &CHALLENGE, &response),
+                    "response flip byte {byte} bit {bit} accepted"
+                );
+
+                let mut challenge = CHALLENGE;
+                challenge[byte] ^= mask;
+                assert!(
+                    !OperatorAuth::verify_offline_credentials(&KEY, &challenge, &KAT_RESPONSE),
+                    "challenge flip byte {byte} bit {bit} accepted"
+                );
+
+                let mut key = KEY;
+                key[byte] ^= mask;
+                assert!(
+                    !OperatorAuth::verify_offline_credentials(&key, &CHALLENGE, &KAT_RESPONSE),
+                    "key flip byte {byte} bit {bit} accepted"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn operator_auth_rejects_legacy_bare_sha256_response() {
+        let mut hasher = sha256::Sha256::new();
+        hasher.update(&KEY);
+        hasher.update(&CHALLENGE);
+        let legacy = hasher.finalize();
+        assert_ne!(legacy, KAT_RESPONSE);
+        assert!(!OperatorAuth::verify_offline_credentials(
+            &KEY, &CHALLENGE, &legacy
+        ));
+    }
+
+    #[test]
+    fn operator_auth_rejects_undomained_hmac_and_zero_response() {
+        // Plain HMAC over the challenge without the domain prefix must not verify.
+        let undomained = hmac_sha256(&KEY, &CHALLENGE);
+        assert!(!OperatorAuth::verify_offline_credentials(
+            &KEY,
+            &CHALLENGE,
+            &undomained
+        ));
+        assert!(!OperatorAuth::verify_offline_credentials(
+            &KEY, &CHALLENGE, &[0u8; 32]
+        ));
+        // All-zero key and challenge still require the real MAC, not zeros.
+        assert!(!OperatorAuth::verify_offline_credentials(
+            &[0u8; 32], &[0u8; 32], &[0u8; 32]
+        ));
+    }
 
     #[test]
     fn test_slot_rollback_on_failure() {

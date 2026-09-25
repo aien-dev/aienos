@@ -38,6 +38,30 @@ pub const MODE_CONT_REMEMBER: u8 = 7;
 #[cfg(feature = "continuity-qual")]
 pub const MODE_CONT_CRASH: u8 = 8;
 
+/// Recovery Core qualification modes (ADR 0006). The operator response, when
+/// needed, is control-block bytes 16..48.
+#[cfg(feature = "recovery-qual")]
+pub const MODE_RECOVERY_INSPECT: u8 = 9;
+#[cfg(feature = "recovery-qual")]
+pub const MODE_RECOVERY_REPAIR: u8 = 10;
+#[cfg(feature = "recovery-qual")]
+pub const MODE_RECOVERY_PROVISION: u8 = 11;
+
+#[cfg(feature = "recovery-qual")]
+pub const fn is_recovery_mode(mode: u8) -> bool {
+    matches!(
+        mode,
+        MODE_RECOVERY_INSPECT | MODE_RECOVERY_REPAIR | MODE_RECOVERY_PROVISION
+    )
+}
+
+/// TEST ONLY operator key for the QEMU Recovery Core qualification. It is
+/// public in this source tree and proves nothing about a real operator; the
+/// real credential scheme (ADR 0006 / M5) is not decided. Every boot that uses
+/// it prints `RECOVERY_OPERATOR_KEY: TEST-ONLY`.
+#[cfg(feature = "recovery-qual")]
+pub const TEST_ONLY_OPERATOR_KEY: [u8; 32] = [0x0f; 32];
+
 #[cfg(feature = "continuity-qual")]
 pub const fn is_continuity_mode(mode: u8) -> bool {
     matches!(

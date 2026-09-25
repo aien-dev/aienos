@@ -67,7 +67,7 @@ echo ""
 echo "--- [Clippy Verification: AArch64 targets, -D warnings] ---"
 cargo clippy -p aienos-kernel --target aarch64-unknown-none --no-default-features -- -D warnings
 cargo clippy -p aienos-kernel --target aarch64-unknown-none --no-default-features --features seed0b-test-anchor -- -D warnings
-for features in firmware handoff seed0b-qualification usb-keyboard nvme-read nvme-write store-qual continuity-qual; do
+for features in firmware handoff seed0b-qualification usb-keyboard nvme-read nvme-write store-qual continuity-qual recovery-qual; do
     cargo clippy -p aienos-boot --target aarch64-unknown-uefi --features "${features}" --bins -- -D warnings
 done
 echo "PASS  clippy: aarch64-unknown-none kernel and aarch64-unknown-uefi images, zero warnings"
@@ -157,7 +157,8 @@ fi
 # Step 6e: P3 native NVMe driver and System Store v1 over NVMe (QEMU only).
 # Read and write/flush in both DMA modes (SMMU-confined, and fail-closed with
 # no SMMU), 4K root-write atomicity, the 4K Store crash/reboot campaign and the
-# 512-byte Store campaign, and the M4 continuity campaign (ADR 0016). Never an
+# 512-byte Store campaign, the M4 continuity campaign (ADR 0016) and the
+# Recovery Core campaign (ADR 0006, TEST-ONLY operator key). Never an
 # unsafe DMA bypass build here.
 echo ""
 echo "--- [P3 NVMe + System Store v1 in QEMU] ---"
@@ -171,6 +172,7 @@ if command -v qemu-system-aarch64 >/dev/null && [[ -r "${AAVMF_CODE:-/usr/share/
     ./scripts/qemu_store_crash_test.sh
     ./scripts/qemu_store_512b_crash_test.sh
     ./scripts/qemu_continuity_test.sh
+    ./scripts/qemu_recovery_test.sh
 else
     skipped "qemu-system-aarch64 or AAVMF firmware not present on host."
 fi
