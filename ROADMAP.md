@@ -102,9 +102,13 @@ can be built and tested in QEMU on any machine. Good places to start:
   small, self-contained changes.
 - [`help wanted`](https://github.com/aien-dev/aienos/labels/help%20wanted):
   kernel, boot, evidence and tooling work that is ready for a contributor.
-- Phase 2 executable identity (Binary Artifact v0, admission receipts,
-  SEED-0B loader) is the next large body of work, and the QEMU parts run
-  in the emulator. M3 kernel isolation is done; see the M3 row above.
+- Phase 2 executable identity: Binary Artifact v0, Ed25519 trust, admission
+  policy and the P2-5 loader (signed artifact -> exact-byte W^X EL0 task,
+  full rollback) are done in QEMU; see
+  [evidence/p2_5_artifact_loader_qemu_2026-09-25.md](evidence/p2_5_artifact_loader_qemu_2026-09-25.md).
+  Next: admission receipts, the first SEED-0B capability artifact (P2-6),
+  and the hostile-input matrix (P2-7). M3 kernel isolation is done; see the
+  M3 row above.
 
 Work labelled [`needs-hardware`](https://github.com/aien-dev/aienos/labels/needs-hardware)
 runs on Machine 1; maintainers execute it and publish the evidence. Read
