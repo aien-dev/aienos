@@ -40,6 +40,13 @@ const UNSAFE_NVME_BANNER: &str =
 pub const SENTINEL_MAGIC: &[u8; 16] = b"AIENOS-NVME-SENT";
 pub const SENTINEL_LBA: u64 = 2048;
 
+/// Write/durability target: a deterministic read-write LBA distinct from the
+/// read-only sentinel, and the 512-byte pattern written and verified there.
+#[cfg(feature = "nvme-write")]
+const RW_LBA: u64 = 4096;
+#[cfg(feature = "nvme-write")]
+const RW_MAGIC: &[u8; 16] = b"AIENOS-NVME-RW01";
+
 const ARENA_BYTES: usize = 128 * 1024;
 
 #[repr(C, align(4096))]
@@ -563,7 +570,124 @@ pub fn run(
     }
     say(screen, error_line.as_str());
 
+    #[cfg(feature = "nvme-write")]
+    run_write_phase(screen, &mut controller, block_count);
+
     revoke_dma(screen, &mut ecam, &at);
+}
+
+/// Write + flush qualification, exercised only in `nvme-write` builds.
+///
+/// Read-only callers never reach this. The phase proves: a write past the end
+/// is rejected before any command; a known pattern is written, flushed, and
+/// read back byte-for-byte; a later boot that already holds the pattern
+/// reports cross-restart durability; and an explicit invalid-namespace write
+/// surfaces a device error rather than being swallowed.
+#[cfg(feature = "nvme-write")]
+fn run_write_phase<R: Registers, D: DmaMemory, T: Delay>(
+    screen: &mut Option<Screen>,
+    controller: &mut NvmeController<R, D, T>,
+    block_count: u64,
+) {
+    use aienos_kernel::block::BlockError;
+
+    let mut new = [0u8; 512];
+    for chunk in new.as_chunks_mut::<16>().0 {
+        chunk.copy_from_slice(RW_MAGIC);
+    }
+    let new_digest = aienos_kernel::crypto::sha256::hash(&new);
+
+    // A write past the namespace end must be rejected before any command.
+    let mut bounds = aienos_kernel::report::ReportBuf::<256>::new();
+    match controller.write_blocks(block_count, &new) {
+        Err(BlockError::OutOfRange) => {
+            let _ = writeln!(
+                bounds,
+                "NVME_WRITE_BOUNDS_QEMU: PASS (lba={block_count} rejected OutOfRange no_command)"
+            );
+        }
+        other => {
+            let _ = writeln!(bounds, "NVME_WRITE_BOUNDS_QEMU: FAIL (got {other:?})");
+        }
+    }
+    say(screen, bounds.as_str());
+
+    // If the target already holds the expected bytes, this boot is a restart
+    // after a prior successful write: report durability across the restart.
+    let mut readback = [0u8; 512];
+    let persisted = controller.read_blocks(RW_LBA, &mut readback).is_ok() && readback == new;
+    if persisted {
+        let mut line = aienos_kernel::report::ReportBuf::<320>::new();
+        let _ = write!(
+            line,
+            "NVME_DURABILITY_QEMU: PASS (persisted lba={RW_LBA} blocks=1 bytes=512 sha256="
+        );
+        hex_digest(&mut line, &new_digest);
+        let _ = writeln!(line, ")");
+        say(screen, line.as_str());
+    } else {
+        let mut write_line = aienos_kernel::report::ReportBuf::<320>::new();
+        match controller.write_blocks(RW_LBA, &new) {
+            Ok(()) => {
+                let _ = write!(
+                    write_line,
+                    "NVME_WRITE_QEMU: PASS (lba={RW_LBA} blocks=1 bytes=512 sha256="
+                );
+                hex_digest(&mut write_line, &new_digest);
+                let _ = writeln!(write_line, ")");
+            }
+            Err(error) => {
+                let _ = writeln!(write_line, "NVME_WRITE_QEMU: FAIL (write {error:?})");
+            }
+        }
+        say(screen, write_line.as_str());
+
+        let mut flush_line = aienos_kernel::report::ReportBuf::<160>::new();
+        match controller.flush() {
+            Ok(()) => {
+                let _ = writeln!(flush_line, "NVME_FLUSH_QEMU: PASS (nsid=1)");
+            }
+            Err(error) => {
+                let _ = writeln!(flush_line, "NVME_FLUSH_QEMU: FAIL (flush {error:?})");
+            }
+        }
+        say(screen, flush_line.as_str());
+
+        let mut durability = aienos_kernel::report::ReportBuf::<320>::new();
+        let mut readback = [0u8; 512];
+        match controller.read_blocks(RW_LBA, &mut readback) {
+            Ok(()) if readback == new => {
+                let _ = write!(
+                    durability,
+                    "NVME_DURABILITY_QEMU: PASS (lba={RW_LBA} blocks=1 bytes=512 sha256="
+                );
+                hex_digest(&mut durability, &new_digest);
+                let _ = writeln!(durability, ")");
+            }
+            Ok(()) => {
+                let _ = writeln!(durability, "NVME_DURABILITY_QEMU: FAIL (readback mismatch)");
+            }
+            Err(error) => {
+                let _ = writeln!(durability, "NVME_DURABILITY_QEMU: FAIL (read {error:?})");
+            }
+        }
+        say(screen, durability.as_str());
+    }
+
+    // An explicit invalid namespace write must surface a device error.
+    let mut error_line = aienos_kernel::report::ReportBuf::<256>::new();
+    match controller.write_blocks_nsid(0xffff_ffff, RW_LBA, &new) {
+        Err(BlockError::DeviceError) => {
+            let _ = writeln!(
+                error_line,
+                "NVME_WRITE_ERROR_QEMU: PASS (write nsid=0xffffffff rejected status=nonzero)"
+            );
+        }
+        other => {
+            let _ = writeln!(error_line, "NVME_WRITE_ERROR_QEMU: FAIL (got {other:?})");
+        }
+    }
+    say(screen, error_line.as_str());
 }
 
 fn report_smmu_fault(

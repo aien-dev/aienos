@@ -21,6 +21,9 @@ usb-keyboard = ["handoff"]
 # P3 candidate: polled native NVMe read after firmware exit. Only
 # scripts/qemu_nvme_test.sh enables it; hardware staging never does.
 nvme-read = ["handoff"]
+# P3 candidate: native NVMe write + flush qualification on top of nvme-read.
+# Only scripts/qemu_nvme_rw_test.sh enables it; hardware staging never does.
+nvme-write = ["nvme-read"]
 # SEED-0B qualification build (ADR 0014 §6): the kernel trusts the public,
 # TEST ONLY RFC 8032 qualification key in addition to the (empty) production
 # set, and every report says so. Without it, every artifact candidate is
