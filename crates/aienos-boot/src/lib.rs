@@ -20,3 +20,17 @@ compile_error!(
 
 /// Whether this build carries the unsafe, QEMU-only DMA bypass.
 pub const UNSAFE_DMA_BYPASS: bool = cfg!(feature = "unsafe-debug-dma-without-smmu");
+
+// The same rule for the NVMe read candidate: unconfined DMA must never be
+// part of an image staged on Machine 1.
+#[cfg(all(
+    feature = "unsafe-debug-nvme-dma-without-smmu",
+    feature = "hardware-staging"
+))]
+compile_error!(
+    "feature `unsafe-debug-nvme-dma-without-smmu` (unconfined DMA, QEMU debug only) \
+     cannot be combined with `hardware-staging`: no SMMU confinement means no DMA"
+);
+
+/// Whether this build carries the unsafe, QEMU-only NVMe DMA bypass.
+pub const UNSAFE_NVME_DMA_BYPASS: bool = cfg!(feature = "unsafe-debug-nvme-dma-without-smmu");
