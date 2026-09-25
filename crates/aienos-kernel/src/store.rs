@@ -10,6 +10,7 @@
 pub mod checkpoint;
 pub mod device;
 pub mod engine;
+pub mod genesis;
 /// Canonical System Store v1 format and bounded Store-unit mount/transaction engine.
 pub mod v1;
 pub use checkpoint::{Checkpoint, CheckpointHook, NullCheckpointHook};
