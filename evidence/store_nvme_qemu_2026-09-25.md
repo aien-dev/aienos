@@ -43,6 +43,10 @@ reopens through the real NVMe path):
 
 Recovery is N before the inactive-superblock write and N+1 after it; every
 recovered root is a fully valid generation with its application object intact.
+The host asserts the strict per-checkpoint boundary (N before the superblock
+write, {N,N+1} at `after_superblock_write`, N+1 at `after_final_flush`) and
+requires the guest's `STORE_REOPEN_QEMU: PASS` / `STORE_SLOT_REUSE_QEMU: PASS`
+markers before scoring a row OK.
 `settle=3` cycles both Superblock slots A -> B -> A -> B.
 
 ## Markers

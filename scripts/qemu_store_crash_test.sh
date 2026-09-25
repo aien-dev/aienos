@@ -105,6 +105,18 @@ run_qemu "STORE_REOPEN_QEMU:"
 if grep -q "STORE_REOPEN_QEMU: PASS" "${serial}"; then echo "PASS  reopen smoke"; else echo "FAIL  reopen smoke"; fail=1; fi
 
 # --- crash campaign --------------------------------------------------------
+# Per-checkpoint expectation from the implementation: the inactive-superblock
+# write is the durable commit point. Before it, recovery must be N; at it the
+# Store contract permits N or N+1 (emulator durability); after the final flush
+# it must be N+1.
+expect_for() { # checkpoint settle
+    case "$1" in
+        after_superblock_write) echo "N_NP1" ;;
+        after_final_flush)      echo "NP1" ;;
+        *)                      echo "N" ;;
+    esac
+}
+
 for settle in 0 3; do
     N=$(( 1 + settle )); NP1=$(( 2 + settle ))
     for cp in "${checkpoints[@]}"; do
@@ -113,12 +125,24 @@ for settle in 0 3; do
         saw_cp=0; grep -q -- "CHECKPOINT: ${cp}" "${serial}" && saw_cp=1
         write_cfg 2 "${settle}"
         run_qemu "STORE_REOPEN_QEMU:"
+        guest_reopen=0; grep -q "STORE_REOPEN_QEMU: PASS" "${serial}" && guest_reopen=1
+        guest_slot=1
+        if [[ "${settle}" -ge 3 ]]; then
+            guest_slot=0; grep -q "STORE_SLOT_REUSE_QEMU: PASS" "${serial}" && guest_slot=1
+        fi
         gen="$(grep -oE "STORE_REOPEN_QEMU: generation=[0-9]+" "${serial}" | tail -1 | grep -oE '[0-9]+$')"
         st="$(grep -oE "STORE_REOPEN_QEMU: generation=[0-9]+ state=[A-Za-z]+" "${serial}" | tail -1 | sed 's/.*state=//')"
+        exp="$(expect_for "${cp}")"
+        gen_ok=0
+        case "${exp}" in
+            N)     [[ "${gen}" == "${N}" ]] && gen_ok=1 ;;
+            NP1)   [[ "${gen}" == "${NP1}" ]] && gen_ok=1 ;;
+            N_NP1) [[ "${gen}" == "${N}" || "${gen}" == "${NP1}" ]] && gen_ok=1 ;;
+        esac
         ok=0
-        if [[ "${saw_cp}" == "1" && ( "${gen}" == "${N}" || "${gen}" == "${NP1}" ) ]]; then ok=1; fi
-        printf 'settle=%s cp=%-18s saw=%s recovered=%s state=%s expected={%s,%s} -> %s\n' \
-            "${settle}" "${cp}" "${saw_cp}" "${gen:-none}" "${st:-none}" "${N}" "${NP1}" \
+        if [[ "${saw_cp}" == "1" && "${gen_ok}" == "1" && "${guest_reopen}" == "1" && "${guest_slot}" == "1" ]]; then ok=1; fi
+        printf 'settle=%s cp=%-18s saw=%s guest_reopen=%s guest_slot=%s recovered=%s state=%s expect=%s -> %s\n' \
+            "${settle}" "${cp}" "${saw_cp}" "${guest_reopen}" "${guest_slot}" "${gen:-none}" "${st:-none}" "${exp}" \
             "$([ "${ok}" = 1 ] && echo OK || echo BAD)" >> "${work}/results.txt"
         if [[ "${ok}" != "1" ]]; then fail=1; fi
     done
@@ -126,8 +150,8 @@ done
 
 crash_pass=1; reopen_pass=1; slot_pass=1
 grep -q ' -> BAD' "${work}/results.txt" && { crash_pass=0; reopen_pass=0; }
-grep -q 'settle=3 .*recovered=3 ' "${work}/results.txt" && slot_pass=0  # must never recover below N=4 at settle 3
-grep -qE 'settle=3 .*recovered=([0-9]+) ' "${work}/results.txt" || slot_pass=0
+grep -qE '^settle=3 .* -> OK$' "${work}/results.txt" || slot_pass=0
+grep -q ' BAD$' "${work}/results.txt" && slot_pass=0
 
 echo "---- crash campaign results ----"
 cat "${work}/results.txt"
