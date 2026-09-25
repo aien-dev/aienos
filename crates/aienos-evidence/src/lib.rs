@@ -9,6 +9,7 @@ pub mod canon;
 pub mod capture;
 pub mod http;
 pub mod pe;
+pub mod rollback;
 pub mod time;
 pub mod verify;
 

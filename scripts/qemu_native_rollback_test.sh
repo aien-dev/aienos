@@ -88,14 +88,17 @@ run_qemu_boot "${SUB1_DIR}/esp" "${SUB1_DIR}/vars.fd" "${SUB1_DIR}/boot2_candida
 run_qemu_boot "${SUB1_DIR}/esp" "${SUB1_DIR}/vars.fd" "${SUB1_DIR}/boot3_default.log" 20 || true
 
 # Check NVRAM binary contains BootNext, BootOrder, Boot0000, Boot0001 after staging
-python3 -c "
-with open('${SUB1_DIR}/vars.fd', 'rb') as f:
-    data = f.read()
-assert 'BootNext'.encode('utf-16le') in data, 'BootNext not in vars.fd after stage'
-assert 'BootOrder'.encode('utf-16le') in data, 'BootOrder not in vars.fd after stage'
-assert 'Boot0000'.encode('utf-16le') in data, 'Boot0000 not in vars.fd after stage'
-assert 'Boot0001'.encode('utf-16le') in data, 'Boot0001 not in vars.fd after stage'
-"
+# (UEFI variable names are stored as UTF-16LE: each ASCII byte followed by NUL.)
+for var_name in BootNext BootOrder Boot0000 Boot0001; do
+    utf16le_pattern=""
+    for ((i = 0; i < ${#var_name}; i++)); do
+        utf16le_pattern+="${var_name:i:1}\\x00"
+    done
+    if ! LC_ALL=C grep -qaP "${utf16le_pattern}" "${SUB1_DIR}/vars.fd"; then
+        echo "${var_name} not in vars.fd after stage" >&2
+        exit 1
+    fi
+done
 
 if grep -q "PASS  M0_ROLLBACK_STAGED: boot_order=0001 boot_next=0000" "${SUB1_DIR}/boot1_stage.log" && \
    grep -q 'BdsDxe: starting Boot0000 "AIENOS Candidate"' "${SUB1_DIR}/boot2_candidate.log" && \

@@ -101,7 +101,7 @@ EOF
 verify_observations() {
     local pre_file="$1"
     local post_file="$2"
-    local candidate_img="${3:-}"
+    # $3 (--candidate) is accepted for the record; the verdict does not use it.
 
     if [[ ! -f "${pre_file}" || ! -f "${post_file}" ]]; then
         echo "ERROR: Capture file(s) missing or unreadable"
@@ -109,107 +109,23 @@ verify_observations() {
         exit 1
     fi
 
-    # Read fields using python3 JSON parser
-    python3 - <<PYEOF
-import json, sys
+    # The comparison, report and verdict live in Rust: `aienos-evidence
+    # verify-rollback` exits 0 PASS, 1 FAIL, 3 BLOCKED, 2 unparseable capture.
+    local repo_root evidence_bin
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    evidence_bin="${repo_root}/target/release/aienos-evidence"
+    if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" ]]; then
+        # Under sudo, build as the invoking user: their toolchain is on their
+        # PATH (not sudo's secure_path) and target/ stays owned by them.
+        sudo -u "${SUDO_USER}" -H bash -lc \
+            'cd "$1" && cargo build --quiet --release -p aienos-evidence' _ "${repo_root}" \
+            || { echo "ERROR: Could not build aienos-evidence"; echo "VERDICT: INCOMP"; exit 1; }
+    else
+        (cd "${repo_root}" && cargo build --quiet --release -p aienos-evidence) \
+            || { echo "ERROR: Could not build aienos-evidence"; echo "VERDICT: INCOMP"; exit 1; }
+    fi
 
-def load_json(path):
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"ERROR: Cannot parse {path}: {e}")
-        sys.exit(2)
-
-pre = load_json("${pre_file}")
-post = load_json("${post_file}")
-candidate = "${candidate_img}"
-
-errors = []
-blocked_reasons = []
-
-# 1. Secure Boot checks
-sb_pre = pre.get("secure_boot", "").lower()
-sb_post = post.get("secure_boot", "").lower()
-
-if sb_pre != "enabled":
-    blocked_reasons.append(f"Pre-boot Secure Boot is not enabled: {sb_pre}")
-if sb_post != "enabled":
-    blocked_reasons.append(f"Post-boot Secure Boot is not enabled: {sb_post}")
-if sb_pre != sb_post:
-    errors.append(f"Secure Boot state changed from '{sb_pre}' to '{sb_post}'")
-
-# 2. BootOrder preservation
-bo_pre = [x.strip() for x in pre.get("boot_order", "").split(",") if x.strip()]
-bo_post = [x.strip() for x in post.get("boot_order", "").split(",") if x.strip()]
-
-if not bo_pre:
-    errors.append("Pre-boot BootOrder is empty")
-if not bo_post:
-    errors.append("Post-boot BootOrder is empty")
-
-# Check that the default entry (first in pre-order) is still the first in post-order
-if bo_pre and bo_post:
-    if bo_pre[0] != bo_post[0]:
-        errors.append(f"Permanent default boot entry altered: pre was {bo_pre[0]}, post is {bo_post[0]}")
-    # All original pre-entries must be present and preserve relative order
-    common_post = [x for x in bo_post if x in bo_pre]
-    if common_post != bo_pre:
-        errors.append(f"BootOrder sequence changed: pre={bo_pre}, filtered_post={common_post}")
-
-# 3. Return to default OS (BootCurrent == default)
-cur_post = post.get("boot_current", "").strip()
-if bo_pre and cur_post != bo_pre[0]:
-    errors.append(f"Post-boot did not return to default entry: expected {bo_pre[0]}, got {cur_post}")
-
-# 4. BootNext consumption
-next_post = post.get("boot_next", "").strip()
-if next_post:
-    errors.append(f"BootNext was not consumed by firmware: still set to {next_post}")
-
-# 5. Root filesystem invariants
-root_pre = pre.get("root", {})
-root_post = post.get("root", {})
-if root_pre.get("uuid") and root_pre.get("uuid") != root_post.get("uuid"):
-    errors.append(f"Root UUID changed: pre={root_pre.get('uuid')}, post={root_post.get('uuid')}")
-if "rw" not in root_post.get("options", "").split(","):
-    errors.append(f"Root filesystem not mounted rw after return: {root_post.get('options')}")
-
-# 6. ESP filesystem invariants
-esp_pre = pre.get("esp", {})
-esp_post = post.get("esp", {})
-if esp_pre.get("uuid") and esp_pre.get("uuid") != esp_post.get("uuid"):
-    errors.append(f"ESP UUID changed: pre={esp_pre.get('uuid')}, post={esp_post.get('uuid')}")
-
-# Output summary
-print("=== NATIVE BOOT ROLLBACK VERIFICATION REPORT ===")
-print(f"Pre-capture:  {pre.get('captured_utc')} on {pre.get('host')}")
-print(f"Post-capture: {post.get('captured_utc')} on {post.get('host')}")
-print(f"Secure Boot:  before={sb_pre}, after={sb_post}")
-print(f"BootOrder:    before={bo_pre}, after={bo_post}")
-print(f"BootCurrent:  after={cur_post} (expected={bo_pre[0] if bo_pre else 'unknown'})")
-print(f"BootNext:     after={'<empty>' if not next_post else next_post}")
-print(f"Root UUID:    {root_post.get('uuid')} (matched={root_pre.get('uuid') == root_post.get('uuid')})")
-print(f"ESP UUID:     {esp_post.get('uuid')} (matched={esp_pre.get('uuid') == esp_post.get('uuid')})")
-
-if blocked_reasons:
-    print("\n--- BLOCKED REASONS ---")
-    for b in blocked_reasons:
-        print(f"* {b}")
-    print("\nVERDICT: BLOCKED")
-    sys.exit(3)
-
-if errors:
-    print("\n--- VIOLATIONS ---")
-    for err in errors:
-        print(f"* FAIL: {err}")
-    print("\nVERDICT: FAIL")
-    sys.exit(1)
-
-print("\nAll rollback assertions verified.")
-print("VERDICT: PASS")
-sys.exit(0)
-PYEOF
+    exec "${evidence_bin}" verify-rollback "${pre_file}" "${post_file}"
 }
 
 action=""

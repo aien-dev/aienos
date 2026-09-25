@@ -5,9 +5,10 @@
 //!                           [--prompt TEXT] [--out PATH] [--allow-dirty]
 //!   aienos-evidence verify [BUNDLE]
 //!   aienos-evidence verify-efi IMAGE...
+//!   aienos-evidence verify-rollback PRE.json POST.json
 //!   aienos-evidence models [--endpoint URL]
 
-use aienos_evidence::{capture, http, pe, verify};
+use aienos_evidence::{capture, http, pe, rollback, verify};
 use std::path::PathBuf;
 use std::process::exit;
 
@@ -18,6 +19,7 @@ const USAGE: &str = "usage:
                           [--warmup N] [--max-tokens N] [--prompt TEXT] [--out PATH] [--allow-dirty]
   aienos-evidence verify [BUNDLE]
   aienos-evidence verify-efi IMAGE...
+  aienos-evidence verify-rollback PRE.json POST.json
   aienos-evidence models [--endpoint URL]";
 
 fn fail(msg: impl std::fmt::Display) -> ! {
@@ -181,6 +183,26 @@ fn cmd_verify_efi(args: &[String]) {
     }
 }
 
+/// Native-boot rollback verdict. Exits 0 PASS, 1 FAIL, 3 BLOCKED, 2 when a
+/// capture cannot be read or parsed (stdout, as the former verifier printed).
+fn cmd_verify_rollback(args: &[String]) {
+    // Usage errors exit 2, never 1, so they cannot be mistaken for a FAIL verdict.
+    let [pre, post] = args else {
+        eprintln!("{USAGE}");
+        exit(rollback::EXIT_UNPARSEABLE)
+    };
+    let load = |path: &str| {
+        rollback::load(path).unwrap_or_else(|e| {
+            println!("ERROR: Cannot parse {path}: {e}");
+            exit(rollback::EXIT_UNPARSEABLE)
+        })
+    };
+    let (pre, post) = (load(pre), load(post));
+    let (report, verdict) = rollback::verify(&pre, &post);
+    print!("{report}");
+    exit(verdict.exit_code());
+}
+
 fn cmd_models(args: &[String]) {
     let a = parse(args, &[]);
     let url = a.get("--endpoint").unwrap_or(DEFAULT_ENDPOINT);
@@ -197,6 +219,7 @@ fn main() {
         Some("capture") => cmd_capture(rest),
         Some("verify") => cmd_verify(rest),
         Some("verify-efi") => cmd_verify_efi(rest),
+        Some("verify-rollback") => cmd_verify_rollback(rest),
         Some("models") => cmd_models(rest),
         _ => fail(USAGE),
     }
