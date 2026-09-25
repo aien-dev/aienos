@@ -24,6 +24,28 @@ pub const STORE_BASE_LBA_512: u64 = 512;
 pub const STORE_REGION_BLOCKS_512: u64 = 2048;
 pub const CONFIG_LBA_512: u64 = 256;
 
+/// M4 continuity qualification modes (ADR 0016), 4096-byte LBA only.
+/// Provision: format if blank, then create the one identity from RNDR.
+#[cfg(feature = "continuity-qual")]
+pub const MODE_CONT_PROVISION: u8 = 5;
+/// Resume: locate and verify the identity, commit incarnation + 1. Never mints.
+#[cfg(feature = "continuity-qual")]
+pub const MODE_CONT_RESUME: u8 = 6;
+/// Resume, then commit one Cortex fact and one branch fork.
+#[cfg(feature = "continuity-qual")]
+pub const MODE_CONT_REMEMBER: u8 = 7;
+/// Resume, then commit one Cortex fact while emitting Store checkpoints.
+#[cfg(feature = "continuity-qual")]
+pub const MODE_CONT_CRASH: u8 = 8;
+
+#[cfg(feature = "continuity-qual")]
+pub const fn is_continuity_mode(mode: u8) -> bool {
+    matches!(
+        mode,
+        MODE_CONT_PROVISION | MODE_CONT_RESUME | MODE_CONT_REMEMBER | MODE_CONT_CRASH
+    )
+}
+
 /// Adds a fixed LBA offset and rejects accesses past the bounded region.
 pub struct BoundedNvme<R: Registers, D: DmaMemory, T: Delay> {
     inner: NvmeController<R, D, T>,
@@ -81,58 +103,8 @@ pub const STORE_UNIT_BYTES: usize = 4096;
 /// the first transaction exercises the "inactive slot initially zero" case),
 /// an empty catalog at unit 2, and the CommitRecord at unit 3.
 pub fn genesis_units(region_units: u64) -> [[u8; STORE_UNIT_BYTES]; 4] {
-    use aienos_kernel::store::v1::{
-        object_unit_count, Catalog, CommitRecord, ObjectId, Superblock, OBJECT_KIND_CATALOG,
-        OBJECT_VERSION_V1,
-    };
-
-    let catalog = Catalog {
-        entries: alloc::vec::Vec::new(),
-    };
-    let catalog_bytes = catalog.encode().expect("catalog encode");
-    let catalog_id = ObjectId::calculate(OBJECT_KIND_CATALOG, OBJECT_VERSION_V1, &catalog_bytes)
-        .expect("catalog id");
-    let catalog_units = object_unit_count(catalog_bytes.len() as u64).expect("catalog units");
-    let catalog_first = 2u64;
-    let commit_unit = catalog_first + u64::from(catalog_units);
-    let high_water = commit_unit + 1;
-    let uuid = [0x5Au8; 16];
-
-    let commit = CommitRecord {
-        store_uuid: uuid,
-        region_units,
-        generation: 1,
-        previous_generation: 0,
-        previous_commit_id: ObjectId([0u8; 32]),
-        previous_catalog_id: ObjectId([0u8; 32]),
-        catalog_id,
-        catalog_first_unit: catalog_first,
-        catalog_byte_length: catalog_bytes.len() as u64,
-        catalog_unit_count: catalog_units,
-        catalog_entry_count: 0,
-        committed_high_water: high_water,
-    };
-    let commit_bytes = commit.encode().expect("commit encode");
-    let commit_id = commit.object_id().expect("commit id");
-
-    let superblock = Superblock {
-        store_uuid: uuid,
-        slot_id: 0,
-        region_units,
-        generation: 1,
-        commit_record_id: commit_id,
-        commit_record_unit: commit_unit,
-        catalog_id,
-        catalog_first_unit: catalog_first,
-        catalog_byte_length: catalog_bytes.len() as u64,
-        catalog_unit_count: catalog_units,
-        catalog_entry_count: 0,
-        committed_high_water: high_water,
-    };
-
-    let mut out = [[0u8; STORE_UNIT_BYTES]; 4];
-    out[0].copy_from_slice(&superblock.encode().expect("superblock encode"));
-    out[2][..catalog_bytes.len()].copy_from_slice(&catalog_bytes);
-    out[3][..commit_bytes.len()].copy_from_slice(&commit_bytes);
-    out
+    aienos_kernel::store::genesis::genesis_units(QUAL_STORE_UUID, region_units)
 }
+
+/// Fixed test-only Store UUID used by the qualification images.
+pub const QUAL_STORE_UUID: [u8; 16] = [0x5A; 16];

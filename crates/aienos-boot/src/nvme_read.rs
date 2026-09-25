@@ -885,6 +885,16 @@ fn run_store_phase(screen: &mut Option<Screen>, mut controller: QualController, 
     };
     let region_units = adapter.region_units();
 
+    #[cfg(feature = "continuity-qual")]
+    if crate::store_qual::is_continuity_mode(mode) {
+        if is_512_qual {
+            qualify_fail(screen, "continuity qualification runs at 4096-byte LBA");
+            return;
+        }
+        continuity_phase(screen, adapter, mode);
+        return;
+    }
+
     if mode == MODE_VERIFY || mode == MODE_VERIFY_512B {
         verify_reopen(screen, adapter, settle, is_512_qual);
         return;
@@ -1071,4 +1081,171 @@ fn verify_reopen(screen: &mut Option<Screen>, adapter: QualAdapter, settle: u8, 
         if valid { "PASS" } else { "FAIL" }
     );
     say(screen, done.as_str());
+}
+
+/// M4 continuity qualification (ADR 0016). One summary line per boot:
+/// `CONTINUITY: <WORD> agent=<64 hex> incarnation=N sequence=S cortex=K
+/// branches=B memory=<16 hex>` or `CONTINUITY: <STOP-WORD> ...`. Every STOP
+/// path returns before any Store write.
+#[cfg(feature = "continuity-qual")]
+fn continuity_phase(screen: &mut Option<Screen>, mut adapter: QualAdapter, mode: u8) {
+    use crate::store_qual::{
+        genesis_units, MODE_CONT_CRASH, MODE_CONT_PROVISION, MODE_CONT_REMEMBER, QUAL_STORE_UUID,
+    };
+    use aienos_kernel::continuity::{
+        self, Continuity, ContinuityError, CortexRecord, Epistemic, ProvisionSource, Update,
+    };
+    use aienos_kernel::store::engine::Store;
+
+    fn line(screen: &mut Option<Screen>, args: core::fmt::Arguments<'_>) {
+        let mut l = aienos_kernel::report::ReportBuf::<256>::new();
+        let _ = l.write_fmt(args);
+        let _ = writeln!(l);
+        say(screen, l.as_str());
+    }
+    fn summary(screen: &mut Option<Screen>, word: &str, c: &Continuity) {
+        let mut memory = aienos_kernel::crypto::sha256::Sha256::new();
+        for rec in &c.cortex {
+            memory.update(&(rec.statement.len() as u32).to_le_bytes());
+            memory.update(&rec.statement);
+        }
+        let memory = memory.finalize();
+        let mut l = aienos_kernel::report::ReportBuf::<256>::new();
+        let _ = write!(l, "CONTINUITY: {word} agent=");
+        for b in &c.root.agent_id {
+            let _ = write!(l, "{b:02x}");
+        }
+        let _ = write!(
+            l,
+            " incarnation={} sequence={} cortex={} branches={} memory=",
+            c.manifest.incarnation,
+            c.manifest.sequence,
+            c.cortex.len(),
+            c.state.branches.len()
+        );
+        for b in &memory[..8] {
+            let _ = write!(l, "{b:02x}");
+        }
+        let _ = writeln!(l);
+        say(screen, l.as_str());
+    }
+    fn stop(screen: &mut Option<Screen>, e: ContinuityError) {
+        match e {
+            ContinuityError::Unprovisioned => {
+                line(screen, format_args!("CONTINUITY: UNPROVISIONED"))
+            }
+            ContinuityError::Conflict => line(screen, format_args!("CONTINUITY: CONFLICT")),
+            ContinuityError::Corrupt(why) => {
+                line(screen, format_args!("CONTINUITY: CORRUPT ({why})"))
+            }
+            other => line(screen, format_args!("CONTINUITY: STOP ({other:?})")),
+        }
+    }
+
+    if mode == MODE_CONT_PROVISION {
+        let mut probe = [0u8; 4096];
+        let blank = adapter.read_unit(0, &mut probe).is_ok() && probe.iter().all(|b| *b == 0);
+        if blank {
+            let units = genesis_units(adapter.region_units());
+            for (i, unit) in units.iter().enumerate() {
+                if adapter.write_unit(i as u64, unit).is_err() {
+                    line(screen, format_args!("CONTINUITY: STOP (genesis write)"));
+                    return;
+                }
+            }
+            if adapter.flush().is_err() {
+                line(screen, format_args!("CONTINUITY: STOP (genesis flush)"));
+                return;
+            }
+        }
+    }
+
+    let mut store = match Store::open(adapter) {
+        Ok(s) => s,
+        Err(e) => {
+            line(screen, format_args!("CONTINUITY: STOP (store {e:?})"));
+            return;
+        }
+    };
+
+    if mode == MODE_CONT_PROVISION {
+        let mut agent = [0u8; 32];
+        for chunk in agent.as_chunks_mut::<8>().0 {
+            match aienos_kernel::arch::aarch64::rndr() {
+                Some(v) => chunk.copy_from_slice(&v.to_le_bytes()),
+                None => {
+                    line(screen, format_args!("CONTINUITY: NO_ENTROPY"));
+                    return;
+                }
+            }
+        }
+        match continuity::provision(
+            &mut store,
+            agent,
+            QUAL_STORE_UUID,
+            ProvisionSource::Qualification,
+        ) {
+            Ok(c) => summary(screen, "PROVISIONED", &c),
+            Err(e) => stop(screen, e),
+        }
+        return;
+    }
+
+    let current = match continuity::resume(&mut store) {
+        Ok((c, true)) => {
+            summary(screen, "RESUMED", &c);
+            c
+        }
+        Ok((c, false)) => {
+            summary(screen, "RESUMED_READONLY", &c);
+            return;
+        }
+        Err(e) => {
+            stop(screen, e);
+            return;
+        }
+    };
+
+    let fact = |text: &[u8]| CortexRecord {
+        status: Epistemic::DirectObservation,
+        evidence_hash: [0; 32],
+        statement: text.to_vec(),
+    };
+    if mode == MODE_CONT_REMEMBER {
+        let mut state = current.state.clone();
+        if state.fork(&current.root.root_branch).is_err() {
+            line(screen, format_args!("CONTINUITY: STOP (fork)"));
+            return;
+        }
+        let update = Update {
+            state: Some(state),
+            cortex: alloc::vec![fact(b"qemu: the operator asked AIEN to remember this")],
+        };
+        match continuity::commit(&mut store, &current, update, false) {
+            Ok(c) => summary(screen, "REMEMBERED", &c),
+            Err(e) => stop(screen, e),
+        }
+    } else if mode == MODE_CONT_CRASH {
+        let hook = |cp: aienos_kernel::store::checkpoint::Checkpoint| {
+            let mut l = aienos_kernel::report::ReportBuf::<64>::new();
+            let _ = writeln!(l, "CHECKPOINT: {}", cp.as_str());
+            say(screen, l.as_str());
+            // Observation hold only: no flush, no write, no ordering change.
+            let hz = counter_frequency_hz();
+            if hz > 0 {
+                let start = counter_ticks();
+                while counter_ticks().wrapping_sub(start) < hz / 2 {
+                    core::hint::spin_loop();
+                }
+            }
+        };
+        let update = Update {
+            state: None,
+            cortex: alloc::vec![fact(b"qemu: committed across a crash")],
+        };
+        match continuity::commit_with_hook(&mut store, &current, update, false, hook) {
+            Ok(c) => summary(screen, "COMMITTED", &c),
+            Err(e) => stop(screen, e),
+        }
+    }
 }

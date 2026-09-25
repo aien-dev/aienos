@@ -27,6 +27,10 @@ nvme-write = ["nvme-read"]
 # P3 candidate: Store-over-NVMe qualification (test-only). QEMU only.
 # scripts/qemu_store_crash_test.sh enables it; hardware staging never does.
 store-qual = ["nvme-write"]
+# M4 continuity qualification (ADR 0016, test-only, QEMU only): provision /
+# resume / remember / crash modes over the Store-over-NVMe path.
+# scripts/qemu_continuity_test.sh enables it; hardware staging never does.
+continuity-qual = ["store-qual"]
 # SEED-0B qualification build (ADR 0014 §6): the kernel trusts the public,
 # TEST ONLY RFC 8032 qualification key in addition to the (empty) production
 # set, and every report says so. Without it, every artifact candidate is

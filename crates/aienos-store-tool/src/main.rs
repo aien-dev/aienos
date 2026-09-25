@@ -10,7 +10,7 @@
 //!   tear-closure OLD NEW STORE_BYTE_OFFSET SECTOR_BYTES
 //!       Prove that every sector-granular tear of the one superblock write that
 //!       separates OLD from NEW leaves either the old or the new slot bytes.
-//!   inject IMAGE STORE_BYTE_OFFSET SLOT CASE [SOURCE]
+//!   inject IMAGE STORE_BYTE_OFFSET SLOT|inactive CASE [SOURCE]
 //!       Overwrite superblock SLOT with one deterministic defect (see `CASES`).
 
 use std::env;
@@ -225,6 +225,27 @@ fn tear_outcomes(old: &Unit, new: &Unit, sector: usize) -> Result<(u32, u32), u3
     Ok((as_old, as_new))
 }
 
+/// The slot the engine would overwrite next: the zero slot, else the valid
+/// superblock with the lower generation. Refuses anything ambiguous.
+fn inactive_slot(image: &str, store_offset: u64) -> Result<u32, String> {
+    let mut generation = [None; 2];
+    for slot in 0..2u32 {
+        let unit = read_unit_at(
+            image,
+            store_offset + u64::from(slot) * STORE_UNIT_BYTES as u64,
+        )?;
+        if unit.iter().all(|b| *b == 0) {
+            return Ok(slot);
+        }
+        generation[slot as usize] = Superblock::decode(&unit, slot).ok().map(|sb| sb.generation);
+    }
+    match generation {
+        [Some(a), Some(b)] if a < b => Ok(0),
+        [Some(a), Some(b)] if b < a => Ok(1),
+        _ => Err("cannot determine the inactive slot (both slots valid at one generation, or one undecodable)".into()),
+    }
+}
+
 /// xorshift64 stream with a fixed seed: the same 4096 bytes on every run.
 fn seeded_garbage() -> Unit {
     let mut state: u64 = 0x4149_454E_4F53_0136;
@@ -242,9 +263,13 @@ fn inject(args: &[String]) -> Result<String, String> {
     arity(args, 4, 5)?;
     let image = &args[0];
     let store_offset = num(&args[1], "store offset")?;
-    let slot = u32::try_from(num(&args[2], "slot")?).map_err(|e| e.to_string())?;
+    let slot = if args[2] == "inactive" {
+        inactive_slot(image, store_offset)?
+    } else {
+        u32::try_from(num(&args[2], "slot")?).map_err(|e| e.to_string())?
+    };
     if slot > 1 {
-        return Err("slot must be 0 or 1".into());
+        return Err("slot must be 0, 1 or inactive".into());
     }
     let case = args[3].as_str();
     let slot_offset = store_offset + u64::from(slot) * STORE_UNIT_BYTES as u64;

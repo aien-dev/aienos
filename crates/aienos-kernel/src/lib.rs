@@ -20,6 +20,7 @@ pub mod boot;
 pub mod budget;
 pub mod caps;
 pub mod console;
+pub mod continuity;
 pub mod crypto;
 pub mod device;
 pub mod display;
