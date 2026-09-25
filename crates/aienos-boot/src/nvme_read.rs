@@ -23,6 +23,7 @@ use aienos_kernel::block::BlockDevice;
 use aienos_kernel::console::EarlyConsole;
 use aienos_kernel::display::Screen;
 use aienos_kernel::dma_gate::{self, BusMasterSweep, DmaGrant, PciConfig, PCI_COMMAND};
+use aienos_kernel::nvme::atomicity::AtomicityDecision;
 use aienos_kernel::nvme::driver::{Delay, DmaMemory, DmaRegion, NvmeController, NvmeError};
 use aienos_kernel::nvme::Registers;
 use core::fmt::Write;
@@ -374,6 +375,21 @@ fn hex_digest(out: &mut impl Write, digest: &[u8; 32]) {
 
 /// Post-exit: bring up the controller, read the sentinel LBA, and report.
 #[allow(clippy::too_many_arguments)]
+/// Render a power-fail atomicity decision into a report line.
+fn describe_atomicity(buf: &mut aienos_kernel::report::ReportBuf<512>, d: AtomicityDecision) {
+    match d {
+        AtomicityDecision::Atomic { effective_blocks } => {
+            let _ = write!(buf, "atomic(effective={effective_blocks})");
+        }
+        AtomicityDecision::NotAtomic(reason) => {
+            let _ = write!(buf, "not_atomic({reason:?})");
+        }
+        AtomicityDecision::Unknown(reason) => {
+            let _ = write!(buf, "unknown({reason:?})");
+        }
+    }
+}
+
 pub fn run(
     nvme: Option<NvmeLocation>,
     takeover: Option<DmaTakeover>,
@@ -498,6 +514,42 @@ pub fn run(
         "NVME_GEOMETRY_QEMU: PASS (nsid=1 block_count={block_count} block_size={block_size})"
     );
     say(screen, geometry.as_str());
+
+    // NVMe 1.4 power-fail atomicity observation and System Store root-write
+    // eligibility. The acceptance marker is emitted only when both Store
+    // superblock slots satisfy the complete predicate.
+    if let Some(a) = controller.atomicity() {
+        let mut fields = aienos_kernel::report::ReportBuf::<512>::new();
+        let _ = writeln!(
+            fields,
+            "NVME_ATOMICITY_IDENTIFY_QEMU: block_size={} lbads={} awupf_raw={} nawupf_raw={} nabspf_raw={} nabo_blocks={} effective_pf_blocks={} boundary_blocks={}",
+            a.lba_bytes,
+            a.lba_bytes.trailing_zeros(),
+            a.awupf_raw.map_or(-1, i32::from),
+            a.nawupf_raw.map_or(-1, i32::from),
+            a.nabspf_raw.map_or(-1, i32::from),
+            a.nabo_blocks,
+            a.effective_power_fail_blocks().map_or(-1, |v| v as i64),
+            a.boundary_blocks().map_or(-1, |v| v as i64),
+        );
+        say(screen, fields.as_str());
+
+        let slot0 = a.store_root_decision(0);
+        let slot1 = a.store_root_decision(1);
+        let both_atomic = matches!(slot0, AtomicityDecision::Atomic { .. })
+            && matches!(slot1, AtomicityDecision::Atomic { .. });
+        let mut decision = aienos_kernel::report::ReportBuf::<512>::new();
+        let _ = write!(
+            decision,
+            "NVME_STORE_ROOT_ATOMICITY_QEMU: {} (slot0=",
+            if both_atomic { "PASS" } else { "FAIL" }
+        );
+        describe_atomicity(&mut decision, slot0);
+        let _ = write!(decision, " slot1=");
+        describe_atomicity(&mut decision, slot1);
+        let _ = writeln!(decision, ")");
+        say(screen, decision.as_str());
+    }
 
     if let Err(error) = controller.create_io_queues(4) {
         let mut msg = aienos_kernel::report::ReportBuf::<256>::new();

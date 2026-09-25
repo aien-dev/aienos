@@ -9,6 +9,8 @@ use super::{
     CSTS_CFS, CSTS_RDY, REG_ACQ, REG_AQA, REG_ASQ, REG_CC, REG_CSTS,
 };
 
+use super::atomicity::{self, AtomicityFields};
+
 pub const PAGE_SIZE: usize = 4096;
 pub const ADMIN_DEPTH: usize = 8;
 /// Admin commands complete quickly; bound the wait in real time.
@@ -106,6 +108,10 @@ pub struct NvmeController<R: Registers, D: DmaMemory, T: Delay> {
     io_queue: Option<IoQueueState>,
     mdts: u8,
     namespace: Option<NamespaceInfo>,
+    awupf_raw: Option<u16>,
+    nawupf_raw: Option<u16>,
+    nabspf_raw: Option<u16>,
+    nabo_blocks: u16,
 }
 
 impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
@@ -153,6 +159,10 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
             io_queue: None,
             mdts: 0,
             namespace: None,
+            awupf_raw: None,
+            nawupf_raw: None,
+            nabspf_raw: None,
+            nabo_blocks: 0,
         };
         controller.identify_controller()?;
         controller.identify_namespace(1)?;
@@ -160,7 +170,11 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
     }
 
     pub fn identify_controller(&mut self) -> Result<(), NvmeError> {
-        self.mdts = self.submit_identify(0, 1)?[77];
+        let bytes = self.submit_identify(0, 1)?;
+        self.mdts = bytes[77];
+        // NVMe 1.4 Identify Controller: AWUPF is a 0-based power-fail atomic
+        // write unit in logical blocks.
+        self.awupf_raw = atomicity::read_u16_le(&bytes, atomicity::ID_CTRL_AWUPF_OFFSET);
         Ok(())
     }
 
@@ -182,7 +196,27 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
             block_size: 1u32 << lbads,
         };
         self.namespace = Some(info);
+        // NVMe 1.4 Identify Namespace: NAWUPF/NABO/NABSPF, all little-endian.
+        // NAWUPF 0h means the controller AWUPF applies; NABSPF 0h means no
+        // atomic boundary.
+        self.nawupf_raw = atomicity::read_u16_le(&bytes, atomicity::ID_NS_NAWUPF_OFFSET);
+        self.nabo_blocks =
+            atomicity::read_u16_le(&bytes, atomicity::ID_NS_NABO_OFFSET).unwrap_or(0);
+        self.nabspf_raw = atomicity::read_u16_le(&bytes, atomicity::ID_NS_NABSPF_OFFSET);
         Ok(info)
+    }
+
+    /// The effective power-fail atomicity contract for the identified
+    /// namespace, or `None` before a namespace has been identified.
+    pub fn atomicity(&self) -> Option<AtomicityFields> {
+        let namespace = self.namespace?;
+        Some(AtomicityFields {
+            lba_bytes: namespace.block_size,
+            awupf_raw: self.awupf_raw,
+            nawupf_raw: self.nawupf_raw,
+            nabspf_raw: self.nabspf_raw,
+            nabo_blocks: self.nabo_blocks,
+        })
     }
 
     /// Create polled I/O completion and submission queues, both with QID 1.
@@ -561,6 +595,10 @@ mod tests {
         cap_high: u32,
         /// LBA data size (lbads) the fake reports for namespace 1.
         lbads: u8,
+        awupf: u16,
+        nawupf: u16,
+        nabspf: u16,
+        nabo: u16,
     }
     impl Registers for FakeRegs {
         fn read32(&mut self, offset: u32) -> u32 {
@@ -643,6 +681,11 @@ mod tests {
                             data[0..8].copy_from_slice(&self.namespace_size.to_le_bytes());
                             data[26] = 0;
                             data[130] = self.lbads;
+                            data[36..38].copy_from_slice(&self.nawupf.to_le_bytes());
+                            data[42..44].copy_from_slice(&self.nabo.to_le_bytes());
+                            data[44..46].copy_from_slice(&self.nabspf.to_le_bytes());
+                        } else if cns == 1 {
+                            data[528..530].copy_from_slice(&self.awupf.to_le_bytes());
                         }
                     }
                     0x05 => {
@@ -817,6 +860,10 @@ mod tests {
                 io_phase: true,
                 cap_high: 0,
                 lbads: 9,
+                awupf: 0,
+                nawupf: 0,
+                nabspf: 0,
+                nabo: 0,
             },
             FakeDma {
                 shared,
@@ -857,6 +904,29 @@ mod tests {
         );
         assert_eq!(delay.waited_us, 501_000);
         let _ = dma;
+    }
+
+    #[test]
+    fn parses_power_fail_atomicity_fields() {
+        use super::atomicity::AtomicityDecision;
+        let (mut regs, dma) = fixture();
+        regs.awupf = 7; // 8 blocks
+        regs.nawupf = 3; // 4 blocks: namespace overrides
+        regs.nabspf = 7; // boundary size 8 blocks
+        regs.nabo = 0;
+        let controller = NvmeController::init(regs, dma, CountingDelay::default()).unwrap();
+        let a = controller.atomicity().expect("atomicity after identify");
+        assert_eq!(a.lba_bytes, 512);
+        assert_eq!(a.awupf_raw, Some(7));
+        assert_eq!(a.nawupf_raw, Some(3));
+        assert_eq!(a.nabspf_raw, Some(7));
+        assert_eq!(a.nabo_blocks, 0);
+        assert_eq!(a.effective_power_fail_blocks(), Some(4));
+        assert_eq!(a.store_unit_lba(1), Some((8, 8)));
+        assert!(matches!(
+            a.store_root_decision(0),
+            AtomicityDecision::NotAtomic(_)
+        ));
     }
 
     #[test]
