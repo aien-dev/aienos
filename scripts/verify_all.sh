@@ -72,6 +72,19 @@ for features in firmware handoff seed0b-qualification usb-keyboard; do
 done
 echo "PASS  clippy: aarch64-unknown-none kernel and aarch64-unknown-uefi images, zero warnings"
 
+# Step 3c: TEST-ONLY SEED-0B qualification code paths are feature-gated and
+# so absent from the default runs above; test and lint them explicitly.
+echo ""
+echo "--- [SEED-0B qualification features: tests and clippy] ---"
+cargo test -p aienos-artifact --features seed0b-test-anchor
+cargo test -p aienos-artifact-tool --features seed0b-test-signing
+cargo clippy -p aienos-artifact-tool --all-targets --features seed0b-test-signing -- -D warnings
+if cargo build --release -p aienos-artifact-tool --features seed0b-test-signing >/dev/null 2>&1; then
+    echo "FAIL  release build accepted the TEST-ONLY SEED-0B signing identity" >&2
+    exit 1
+fi
+echo "PASS  SEED-0B qualification features tested and linted; release build refuses the test signing identity"
+
 # Step 4: Bare-metal library compilation check (not a boot test)
 echo ""
 echo "--- [Bare-Metal Target Compilation Check] ---"

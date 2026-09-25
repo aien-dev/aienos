@@ -365,7 +365,8 @@ Stage codes: `1` received, `2` staged, `3` verified, `4` authorized,
 installed.
 
 Reason codes `1..=19` are the `ArtifactError` values of §4 in declaration
-order (`BadMagic` = 1 … `RightsEscalation` = 19). Loader reasons:
+order (`BadMagic` = 1 … `RightsEscalation` = 19); `MalformedReceipt` (20)
+is a receipt-decoding error and never a candidate reason. Loader reasons:
 `0x101` no frames, `0x102` staging too large, `0x103` mapping, `0x104`
 mapped digest mismatch, `0x105` W^X audit, `0x106` capability install,
 `0x107` scheduler full, `0x108` executed digest mismatch, `0x109` reclaim,

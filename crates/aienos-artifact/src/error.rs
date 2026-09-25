@@ -21,4 +21,6 @@ pub enum ArtifactError {
     UntrustedSigner = 17,
     BadSignature = 18,
     RightsEscalation = 19,
+    /// Admission Receipt v0 record violates §7 (never a candidate reason).
+    MalformedReceipt = 20,
 }

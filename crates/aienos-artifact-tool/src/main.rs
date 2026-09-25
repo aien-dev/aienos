@@ -27,6 +27,8 @@ use serde::Deserialize;
 #[cfg(all(feature = "seed0b-test-signing", not(debug_assertions)))]
 compile_error!("the SEED-0B test signing identity is unavailable to release builds");
 
+mod receipt_cmd;
+
 const PAGE_SIZE: u32 = 4096;
 const SIGNATURE_OFFSET_HEADER: usize = 64;
 const SIGNATURE_LENGTH_HEADER: usize = 68;
@@ -93,13 +95,17 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
         Some("sign") if args.len() == 4 => sign_file(Path::new(&args[2]), Path::new(&args[3]))?,
         Some("verify") if args.len() == 3 => verify_file(&fs::read(&args[2])?)?,
+        Some("receipt") => receipt_cmd::run(&args[2..])?,
         _ => return Err(usage().into()),
     }
     Ok(())
 }
 
-fn usage() -> &'static str {
-    "usage: aienos-artifact-tool pack MANIFEST.json CODE.bin DATA.bin OUTPUT.aien | inspect FILE.aien | id FILE.aien | sign INPUT.aien OUTPUT.aien | verify FILE.aien"
+fn usage() -> String {
+    format!(
+        "usage: aienos-artifact-tool pack MANIFEST.json CODE.bin DATA.bin OUTPUT.aien | inspect FILE.aien | id FILE.aien | sign INPUT.aien OUTPUT.aien | verify FILE.aien | {}",
+        receipt_cmd::USAGE
+    )
 }
 
 fn pack_bytes(manifest: &Manifest, code: &[u8], data: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
@@ -264,7 +270,7 @@ fn sign_file(input: &Path, output: &Path) -> Result<(), Box<dyn Error>> {
         fs::write(output, bytes)?;
         println!("SIGN: TEST ONLY SEED-0B QUALIFICATION IDENTITY");
         println!("SIGNER_FINGERPRINT: {}", hex(&fingerprint));
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(feature = "seed0b-test-signing"))]
     {
@@ -291,7 +297,7 @@ fn verify_file(bytes: &[u8]) -> Result<(), Box<dyn Error>> {
         );
         println!("SIGNER_FINGERPRINT: {}", hex(verified.signer_fingerprint()));
         println!("TRUST_TIER: SEED-0B-QUALIFICATION-TEST-ONLY");
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(feature = "seed0b-test-signing"))]
     {

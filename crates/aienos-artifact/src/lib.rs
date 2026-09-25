@@ -28,3 +28,6 @@ pub use signature::{
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod receipt_tests;
