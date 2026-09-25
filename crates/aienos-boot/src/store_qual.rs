@@ -17,6 +17,13 @@ pub const CONFIG_LBA: u64 = 32;
 
 pub const MODE_VERIFY: u8 = 2;
 
+/// 512-byte LBA qualification constants.
+pub const MODE_RUN_512B: u8 = 3;
+pub const MODE_VERIFY_512B: u8 = 4;
+pub const STORE_BASE_LBA_512: u64 = 512;
+pub const STORE_REGION_BLOCKS_512: u64 = 2048;
+pub const CONFIG_LBA_512: u64 = 256;
+
 /// Adds a fixed LBA offset and rejects accesses past the bounded region.
 pub struct BoundedNvme<R: Registers, D: DmaMemory, T: Delay> {
     inner: NvmeController<R, D, T>,

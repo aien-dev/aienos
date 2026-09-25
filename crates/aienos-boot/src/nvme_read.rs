@@ -17,7 +17,9 @@
 
 #[cfg(feature = "store-qual")]
 use crate::store_qual::{
-    genesis_units, BoundedNvme, CONFIG_LBA, MODE_VERIFY, STORE_BASE_LBA, STORE_REGION_BLOCKS,
+    genesis_units, BoundedNvme, CONFIG_LBA, CONFIG_LBA_512, MODE_RUN_512B, MODE_VERIFY,
+    MODE_VERIFY_512B, STORE_BASE_LBA, STORE_BASE_LBA_512, STORE_REGION_BLOCKS,
+    STORE_REGION_BLOCKS_512,
 };
 use aienos_kernel::acpi::{self, EcamWindow};
 use aienos_kernel::arch::aarch64::{
@@ -52,7 +54,7 @@ const RW_LBA: u64 = 4096;
 #[cfg(feature = "nvme-write")]
 const RW_MAGIC: &[u8; 16] = b"AIENOS-NVME-RW01";
 
-const ARENA_BYTES: usize = 128 * 1024;
+const ARENA_BYTES: usize = 512 * 1024;
 
 #[repr(C, align(4096))]
 struct DmaArena([u8; ARENA_BYTES]);
@@ -812,41 +814,66 @@ fn run_store_phase(screen: &mut Option<Screen>, mut controller: QualController, 
     use aienos_kernel::store::checkpoint::Checkpoint;
     use aienos_kernel::store::engine::{ObjectInput, Store};
 
-    // Qualified geometry: the 4096-byte Store unit must be one logical block.
-    if controller.block_size() != 4096 {
-        qualify_fail(screen, "geometry is not 4096-byte LBA");
+    let block_size = controller.block_size();
+    if block_size != 512 && block_size != 4096 {
+        qualify_fail(screen, "unsupported block size");
         return;
     }
 
-    // Atomic-root predicate must PASS, else fail closed.
-    let atomic = |d| matches!(d, AtomicityDecision::Atomic { .. });
-    let ok = controller
-        .atomicity()
-        .map(|a| atomic(a.store_root_decision(0)) && atomic(a.store_root_decision(1)))
-        .unwrap_or(false);
-    if !ok {
-        qualify_fail(screen, "atomic-root predicate");
-        return;
-    }
+    let cfg_lba = if block_size == 512 {
+        CONFIG_LBA_512
+    } else {
+        CONFIG_LBA
+    };
 
     // Control block.
     let mut cfg = [0u8; 4096];
-    if controller.read_blocks(CONFIG_LBA, &mut cfg).is_err() {
+    if controller.read_blocks(cfg_lba, &mut cfg).is_err() {
         qualify_fail(screen, "control block read");
         return;
     }
     let mode = cfg[0];
     let settle = cfg[1];
 
-    if STORE_BASE_LBA
-        .checked_add(STORE_REGION_BLOCKS)
+    let is_512_qual = mode == MODE_RUN_512B || mode == MODE_VERIFY_512B;
+    if is_512_qual {
+        if block_size != 512 {
+            qualify_fail(screen, "512b qual requires 512-byte LBA");
+            return;
+        }
+        say(screen, "STORE_512B_NONATOMIC_QUALIFICATION: ACTIVE\n");
+    } else {
+        if block_size != 4096 {
+            qualify_fail(screen, "geometry is not 4096-byte LBA");
+            return;
+        }
+        // Atomic-root predicate must PASS, else fail closed.
+        let atomic = |d| matches!(d, AtomicityDecision::Atomic { .. });
+        let ok = controller
+            .atomicity()
+            .map(|a| atomic(a.store_root_decision(0)) && atomic(a.store_root_decision(1)))
+            .unwrap_or(false);
+        if !ok {
+            qualify_fail(screen, "atomic-root predicate");
+            return;
+        }
+    }
+
+    let (base_lba, region_blocks) = if is_512_qual {
+        (STORE_BASE_LBA_512, STORE_REGION_BLOCKS_512)
+    } else {
+        (STORE_BASE_LBA, STORE_REGION_BLOCKS)
+    };
+
+    if base_lba
+        .checked_add(region_blocks)
         .is_none_or(|end| end > block_count)
     {
         qualify_fail(screen, "region outside namespace");
         return;
     }
 
-    let bounded = BoundedNvme::new(controller, STORE_BASE_LBA, STORE_REGION_BLOCKS);
+    let bounded = BoundedNvme::new(controller, base_lba, region_blocks);
     let mut adapter = match aienos_kernel::store::device::StoreDeviceAdapter::new(bounded) {
         Ok(a) => a,
         Err(e) => {
@@ -858,8 +885,8 @@ fn run_store_phase(screen: &mut Option<Screen>, mut controller: QualController, 
     };
     let region_units = adapter.region_units();
 
-    if mode == MODE_VERIFY {
-        verify_reopen(screen, adapter, settle);
+    if mode == MODE_VERIFY || mode == MODE_VERIFY_512B {
+        verify_reopen(screen, adapter, settle, is_512_qual);
         return;
     }
 
@@ -961,22 +988,111 @@ fn run_store_phase(screen: &mut Option<Screen>, mut controller: QualController, 
 }
 
 #[cfg(feature = "store-qual")]
-fn verify_reopen(screen: &mut Option<Screen>, adapter: QualAdapter, settle: u8) {
-    use aienos_kernel::store::engine::Store;
-    use aienos_kernel::store::v1::ObjectId;
+fn verify_reopen(screen: &mut Option<Screen>, mut adapter: QualAdapter, settle: u8, is_512: bool) {
+    use aienos_kernel::store::engine::{MountState, ObjectInput, Store, StoreError};
+    use aienos_kernel::store::v1::{crc32c, ObjectId, Superblock, SUPERBLOCK_CRC_OFFSET};
 
     let upper = u64::from(settle) + 2;
+
+    // Read both superblock slots before opening.
+    let mut raw0 = [0u8; 4096];
+    let mut raw1 = [0u8; 4096];
+    let r0 = adapter.read_unit(0, &mut raw0);
+    let r1 = adapter.read_unit(1, &mut raw1);
+    let region_units = adapter.region_units();
+
     let mut store = match Store::open(adapter) {
         Ok(s) => s,
         Err(e) => {
             let mut l = aienos_kernel::report::ReportBuf::<192>::new();
             let _ = writeln!(l, "STORE_REOPEN_QEMU: FAIL (open {e:?})");
             say(screen, l.as_str());
+            if is_512 {
+                let mut l2 = aienos_kernel::report::ReportBuf::<192>::new();
+                let _ = writeln!(l2, "STORE_REOPEN_512B_QEMU: FAIL (open {e:?})");
+                say(screen, l2.as_str());
+            }
             return;
         }
     };
     let generation = store.generation();
     let state = store.mount_state();
+
+    if is_512 {
+        let active_slot = store.active_slot();
+        let peer_slot = 1 - active_slot;
+        let peer_raw = if peer_slot == 0 { &raw0 } else { &raw1 };
+        let peer_read_ok = if peer_slot == 0 {
+            r0.is_ok()
+        } else {
+            r1.is_ok()
+        };
+        let peer_class = if !peer_read_ok {
+            "IoError"
+        } else if peer_raw.iter().all(|b| *b == 0) {
+            "Zero"
+        } else {
+            let has_magic = &peer_raw[..8] == b"AIENSTR1";
+            let stored_crc = u32::from_le_bytes(
+                peer_raw[SUPERBLOCK_CRC_OFFSET..SUPERBLOCK_CRC_OFFSET + 4]
+                    .try_into()
+                    .unwrap_or([0; 4]),
+            );
+            let mut canonical = *peer_raw;
+            canonical[SUPERBLOCK_CRC_OFFSET..SUPERBLOCK_CRC_OFFSET + 4].fill(0);
+            let crc_ok = crc32c(&canonical) == stored_crc;
+
+            if has_magic && crc_ok {
+                let major = u16::from_le_bytes([peer_raw[8], peer_raw[9]]);
+                let minor = u16::from_le_bytes([peer_raw[10], peer_raw[11]]);
+                let reserved_nonzero = peer_raw[12..28].iter().any(|b| *b != 0);
+                if major != 1 || minor != 0 || reserved_nonzero {
+                    "Unsupported"
+                } else {
+                    match Superblock::decode(peer_raw, peer_slot) {
+                        Ok(sb) if sb.region_units == region_units => {
+                            if state == MountState::DegradedRecovery {
+                                "GraphBad"
+                            } else {
+                                "Valid"
+                            }
+                        }
+                        _ => "Malformed",
+                    }
+                }
+            } else {
+                "Malformed"
+            }
+        };
+
+        let mut l512 = aienos_kernel::report::ReportBuf::<192>::new();
+        let _ = writeln!(
+            l512,
+            "STORE_REOPEN_512B_QEMU: generation={} state={:?} peer_classification={}",
+            generation, state, peer_class
+        );
+        say(screen, l512.as_str());
+
+        if state == MountState::DegradedRecovery {
+            let dummy = [0u8; 8];
+            let obj = ObjectInput {
+                kind: 3,
+                version: 1,
+                bytes: &dummy,
+            };
+            let mut r = aienos_kernel::report::ReportBuf::<128>::new();
+            match store.transact(&[obj]) {
+                Err(StoreError::ReadOnlyDegraded) => {
+                    let _ = writeln!(r, "STORE_DEGRADED_READONLY_QEMU: PASS");
+                }
+                other => {
+                    let _ = writeln!(r, "STORE_DEGRADED_READONLY_QEMU: FAIL ({other:?})");
+                }
+            }
+            say(screen, r.as_str());
+        }
+    }
+
     let mut l = aienos_kernel::report::ReportBuf::<192>::new();
     let _ = writeln!(
         l,
