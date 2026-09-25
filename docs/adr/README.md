@@ -20,6 +20,7 @@ This directory documents the key architectural decisions and formal technical sp
 | [ADR 0012](0012-self-construction-capability-growth-and-generations.md) | Self-Construction, Capability Growth, and Reversible System Generations | Accepted | 2026-09-24 | [ADR 0002](0002-incumbent-os-as-migration-environment.md); [ADR 0006](0006-deterministic-recovery-core-and-offline-operator-authority.md); [ADR 0007](0007-continuous-existence-provisioning-once.md); [`ROADMAP.md`](../../ROADMAP.md) (SEED-0A, SEED-0B) |
 | [ADR 0013](0013-aienos-abi-v1.md) | AIENOS ABI v1 | Proposed | 2026-09-24 | [ADR 0012](0012-self-construction-capability-growth-and-generations.md); [ADR 0004](0004-reversibility-definition-and-network-effect-boundary.md); [issue #30](https://github.com/aien-dev/aienos/issues/30); [PR #106](https://github.com/aien-dev/aienos/pull/106); [`abi.rs`](../../crates/aienos-kernel/src/abi.rs) |
 | [ADR 0014](0014-binary-artifact-v0-and-native-admission.md) | Binary Artifact v0 and Native Admission | Proposed | 2026-09-25 | [ADR 0012](0012-self-construction-capability-growth-and-generations.md); [ADR 0013](0013-aienos-abi-v1.md); SEED-0B qualification |
+| [ADR 0015](0015-system-store-v1-format.md) | AIENOS System Store v1 Format | Accepted for P3-1 format freeze | 2026-09-25 | [ADR 0003](0003-bootstrap-firmware-handoff-and-minimal-object-store.md); P3 Native Persistence & Continuity |
 
 ---
 
