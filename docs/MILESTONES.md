@@ -55,8 +55,8 @@ QEMU, or on hardware (Machine 1). A QEMU result is never a hardware result.
 | | Store root-write power-fail atomicity | done in QEMU at 4096-byte LBA; Machine 1 SSD does not meet it | PR #133; `QEMU_NVME_ATOMICITY_4K: PASS`; read-only Identify of the Machine 1 SSD gives `NATIVE_GB10_STORE_ROOT_ATOMICITY: FAIL` (512-byte LBA, one-block guarantee) ([evidence](../evidence/p3_nvme_atomicity_2026-09-25.md)) |
 | | System Store v1 format and engine | done, host-tested | PR #130 format frozen in [ADR 0015](adr/0015-system-store-v1-format.md) with canonical vectors; PR #131 mount and transaction engine; PR #135 malformed-peer amendment (`STORE_MALFORMED_PEER_RECOVERY: PASS`, read-only `DegradedRecovery`) |
 | | Store v1 over NVMe, crash and reboot | done in QEMU | PR #134; `STORE_V1_QEMU: PASS` at 4096-byte LBA ([evidence](../evidence/store_nvme_qemu_2026-09-25.md)); PR #136; `STORE_512B_CRASH_RECOVERY_QEMU: PASS` at 512-byte LBA ([evidence](../evidence/store_512b_qemu_2026-09-25.md)). `P3_STORE_QEMU` and `P3_STORE_NATIVE` are not claimed. PR #137 gates the NVMe read, write/flush, 4K atomicity and both Store-over-NVMe QEMU runs in `scripts/verify_all.sh` step 6e |
-| | Continuity objects over Store v1 (Generation, agent identity and state, Cortex checkpoint/WAL, artifact references) | pending | Host crates exist (`aienos-agent-state`, `aienos-cortex`); not yet persisted over Store v1 |
-| | Recovery Core ([ADR 0006](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md)) | pending | Host-tested kernel module `recovery` exists; the deterministic scenarios (including identity-loss refusal) are not qualified |
+| | Continuity objects over Store v1 (Generation, agent identity and state, Cortex checkpoint/WAL, artifact references) | done in QEMU | PR #142 (continuity objects over Store v1, commit-before-observation, cold restart proof, `CONTINUITY_QEMU: PASS`, [evidence](../evidence/continuity_qemu_2026-09-25.md)); PR #143 (fail-closed checkpoint restore validation, preserves branch identity) |
+| | Recovery Core ([ADR 0006](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md)) | done in QEMU (TEST-ONLY keys) | PR #144; constant-time HMAC offline operator auth, deterministic inspection, authorized peer repair, authorized provisioning, identity-loss refusal (`RECOVERY_CORE_QEMU: PASS`, [evidence](../evidence/recovery_core_qemu_2026-09-25.md)) |
 | | Storage on Machine 1 | pending | Waits for TRUST-1 and a decision on the 512-byte-LBA SSD |
 | **M5** Encryption and identity | | pending | |
 | **M6** Minimal wired networking | DHCP/static IP, ARP/NDP, IP, UDP/TCP, secure control transport | pending | Before the self-maintaining agent; Wi-Fi and Bluetooth later |
@@ -72,26 +72,21 @@ M2                     PASS         first native Spark boot
 Machine 1 core         PASS         core operational baseline recorded (PR #41)
 M3                     PASS (QEMU)  kernel isolation, PRs #103-#115, evidence/m3_canonical_receipt.md; not run on Machine 1
 SEED-0B (Phase 2)      PASS (QEMU)  SEED_0B_QEMU: PASS, TEST-ONLY keys (evidence/seed0b_qemu_2026-09-25.md); P2-9 Machine 1 prepared, not run, blocked on TRUST-1
-M4                     PARTIAL      QEMU: QEMU_NVME, QEMU_NVME_RW, QEMU_NVME_ATOMICITY_4K, STORE_V1_QEMU, STORE_512B_CRASH_RECOVERY_QEMU all PASS (PRs #129, #132-#134, #136; gated by verify_all step 6e, PR #137); continuity objects, Recovery Core and Machine 1 storage pending
+M4                     PASS (QEMU)  QEMU: QEMU_NVME, QEMU_NVME_RW, QEMU_NVME_ATOMICITY_4K, STORE_V1_QEMU, STORE_512B_CRASH_RECOVERY_QEMU, CONTINUITY_QEMU, RECOVERY_CORE_QEMU all PASS (PRs #129, #132-#134, #136, #142-#144; gated by verify_all step 6e); Machine 1 storage pending (waits on TRUST-1)
 GB10 lane              LINUX ONLY   read-only characterization on Machine 1 (PR #125); no native AIENOS GB10 observation
 TRUST-1 Gate 0         DECLARED     baseline recorded (PR #46); independent key access pending attended proof
 TRUST-1 Gate 1         PARTIAL      stick boots on Machine 1 with Secure Boot on, inspects SB/PCRs/disks, returns (items 1-5, 7, 8, 15, 16 PASS; 6 partial); repair tooling added ([procedure](RECOVERY_MEDIA_MACHINE1.md)); items 9-14 + artifact round trip pending
 TRUST-1 Gate 4         TOOLING PASS swTPM + soak + fault injection (PR #48); 100-boot campaign pending
 TRUST-1 path:          Gate 0 key proof (decrypt on MacBook) + Gate 1 items 9-14 -> Gate 2 TPM campaign -> Gate 3 owner keys (runs in parallel with the plan below)
-NEXT:                  M4 continuity objects over Store v1 (plan item 1)
+NEXT:                  M5 key hierarchy and encrypted-store format design (plan item 2)
 ```
 
 **Adopted forward plan, in order:**
 
-1. **M4 continuity:** Generation, LogicalAgentId and agent state, Cortex
-   checkpoint/WAL and artifact references over System Store v1, proven by a
-   QEMU cold restart that returns the same identity and memory.
-2. **Recovery Core:** the deterministic scenarios of
-   [ADR 0006](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md),
-   including refusal on identity loss.
-3. **M5 encryption and identity:** the key hierarchy and encrypted-store format
+1. **M4 continuity & recovery:** COMPLETE in QEMU (PRs #142-#144). Same identity, memory, and lineage survive cold restarts and commit checkpoints; deterministic Recovery Core handles degraded stores, offline operator repair/provisioning, and halts on identity loss without minting.
+2. **M5 encryption and identity:** the key hierarchy and encrypted-store format
    are decided with the operator before implementation.
-4. **Minimal M7 CPU inference:** one model, correct and acceptable;
+3. **Minimal M7 CPU inference:** one model, correct and acceptable;
    optimization waits until after M8.
 5. **M8 persistent agent in QEMU.** M6 networking runs in parallel.
 6. **TRUST-1 Gates 0–9** run in parallel (operator-attended hardware steps).
