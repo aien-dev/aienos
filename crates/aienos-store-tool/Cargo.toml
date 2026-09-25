@@ -1,0 +1,11 @@
+[package]
+name = "aienos-store-tool"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Host tooling for System Store v1 qualification images (test-only)"
+
+[dependencies]
+aienos-kernel = { path = "../aienos-kernel" }
