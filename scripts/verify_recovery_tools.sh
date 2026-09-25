@@ -71,6 +71,8 @@ echo ""
 echo "-- required tools for boot-entry restore --"
 check "efibootmgr present (boot entries)" "$(have_file bin/efibootmgr)"
 check "chroot present" "$(have_file bin/chroot)"
+check "findmnt present for attended evidence collector" "$(have_file bin/findmnt)"
+check "attended evidence collector packaged on media" "$(have_file usr/local/sbin/collect_recovery_boot_evidence)"
 
 echo ""
 echo "-- init hooks --"

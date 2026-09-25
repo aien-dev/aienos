@@ -34,6 +34,7 @@ BINARIES=(
     /usr/bin/age
     /usr/bin/tpm2_pcrread
     /usr/bin/efibootmgr
+    /usr/bin/findmnt
     /sbin/cryptsetup
     # Repair tools for issue #17: repair /boot/efi (fsck.vfat, mkfs.vfat),
     # check the NVMe root filesystem (fsck.ext4), and chroot into it to
@@ -61,6 +62,12 @@ for bin in "${BINARIES[@]}"; do
         exit 1
     fi
 done
+
+# The attended collector must travel on the recovery media itself; it cannot
+# depend on a repository checkout being present in the RAM rescue shell.
+mkdir -p "$WORK_DIR/usr/local/sbin"
+install -m 0755 "$(dirname "$0")/collect_recovery_boot_evidence.sh" \
+    "$WORK_DIR/usr/local/sbin/collect_recovery_boot_evidence"
 
 # Copy gocryptfs if available
 GOCRYPTFS_BIN=$(which gocryptfs 2>/dev/null || echo "/home/atlas/atlas-forgejo-setup-20260904/runtime/usr/bin/gocryptfs")

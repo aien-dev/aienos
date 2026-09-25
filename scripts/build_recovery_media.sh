@@ -59,6 +59,7 @@ if echo "${CHILD_IDS}" | grep -qE "ATLAS_RECOV|${KNOWN_ATLAS_RECOV_UUID}|${KNOWN
 fi
 
 MOUNT_POINT="/mnt/aienos-recovery"
+INITRD_TMP=""
 echo "Building AIENOS standalone recovery media on ${TARGET_DEV}..."
 
 sudo mkdir -p "${MOUNT_POINT}"
@@ -67,6 +68,9 @@ sudo mount "${TARGET_DEV}" "${MOUNT_POINT}"
 cleanup() {
     sudo umount "${MOUNT_POINT}" 2>/dev/null || true
     sudo rmdir "${MOUNT_POINT}" 2>/dev/null || true
+    if [[ -n "${INITRD_TMP}" ]]; then
+        rm -f "${INITRD_TMP}"
+    fi
 }
 trap cleanup EXIT
 
@@ -85,13 +89,12 @@ echo "Copying signed production kernel: ${PROD_VMLINUZ}"
 sudo cp "${PROD_VMLINUZ}" "${MOUNT_POINT}/aienos-recovery/vmlinuz"
 
 # Build and copy standalone RAM-only recovery initrd (zero NVMe root dependencies)
-INITRD_TMP="/tmp/aienos-recovery-standalone-initrd.img"
+INITRD_TMP="$(mktemp --suffix=.img /tmp/aienos-recovery-standalone-initrd.XXXXXX)"
 echo "Building standalone RAM recovery initrd..."
 bash "$(dirname "$0")/build_standalone_recovery_initrd.sh" "${INITRD_TMP}"
 
 echo "Copying standalone recovery initrd to media..."
 sudo cp "${INITRD_TMP}" "${MOUNT_POINT}/aienos-recovery/initrd.img"
-rm -f "${INITRD_TMP}"
 
 # Create standalone recovery GRUB config that boots directly to RAM maintenance shell.
 # The last console= is /dev/console, where the shell runs: tty0 (the screen),

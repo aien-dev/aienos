@@ -11,9 +11,10 @@ bar moves as issues close. This file is updated at every gate.
 M0  PARTIAL  Reference freeze
     reference snapshot        PASS
     benchmark evidence        PASS   54.2 tokens/s CPU decode baseline
-    native-boot rollback      PASS
-    bootable recovery media   boots on hardware (#53); repair-tool rebuild
-                              + attended repair boot pending (docs/RECOVERY_MEDIA_MACHINE1.md)
+    native-boot rollback      pending (separate from recovery USB exercise)
+    bootable recovery media   PASS: attended USB boot, read-only root/ESP
+                              inspection, tools present, return to Linux
+                              (issue #17; evidence/recovery_boot_machine1.md)
 
 M1  PASS  Emulator boot
     automated QEMU boot       PASS   CI automation (#44)
@@ -32,8 +33,7 @@ M3  PASS  Kernel isolation (2026-09-24)
     verify_all green on main              PASS (6ef8dde)
 
 NEXT:
-attended recovery boot evidence -> Phase 2 Binary Artifact v0 ADR ->
-SEED-0B native capability admission
+Phase 2 Binary Artifact v0 ADR -> SEED-0B native capability admission
 ```
 
 The first native boot on the NVIDIA DGX Spark ("Machine 1") passed on
@@ -71,7 +71,7 @@ local agent, power off, power on, and it remembers.
 
 | Gate | Milestone (live progress) | Open work | Done so far |
 | --- | --- | --- | --- |
-| M0 Reference freeze | [M0](https://github.com/aien-dev/aienos/milestone/1) | bootable media done (#53); attended repair boot pending ([procedure](docs/RECOVERY_MEDIA_MACHINE1.md)) | [#12](https://github.com/aien-dev/aienos/pull/12) Rust evidence tooling and clean snapshot ([9bd233d](https://github.com/aien-dev/aienos/commit/9bd233d)) |
+| M0 Reference freeze | [M0](https://github.com/aien-dev/aienos/milestone/1) | native boot rollback test remains open; recovery media is PASS and issue #17 is closed with attended evidence ([procedure](docs/RECOVERY_MEDIA_MACHINE1.md), [evidence](evidence/recovery_boot_machine1.md)) | [#12](https://github.com/aien-dev/aienos/pull/12) Rust evidence tooling and clean snapshot ([9bd233d](https://github.com/aien-dev/aienos/commit/9bd233d)) |
 | M1 Emulator boot | [M1](https://github.com/aien-dev/aienos/milestone/2) | [#18](https://github.com/aien-dev/aienos/issues/18) QEMU boot, [#19](https://github.com/aien-dev/aienos/issues/19) CI | QEMU 8.2 and AAVMF chosen as the emulator |
 | M2 Spark bring-up | [M2](https://github.com/aien-dev/aienos/milestone/3) | [#20](https://github.com/aien-dev/aienos/issues/20) pre-exit file, [#21](https://github.com/aien-dev/aienos/issues/21) screen evidence, [#22](https://github.com/aien-dev/aienos/issues/22) UART via SPCR, [#23](https://github.com/aien-dev/aienos/issues/23) GB10 discovery, [#24](https://github.com/aien-dev/aienos/issues/24) USB keyboard, [#25](https://github.com/aien-dev/aienos/issues/25) test rig ([design](docs/HARDWARE_TEST_RIG.md)) | Gate passed: [#10](https://github.com/aien-dev/aienos/pull/10) memory handoff, [#11](https://github.com/aien-dev/aienos/pull/11) GB10 identity, [#13](https://github.com/aien-dev/aienos/pull/13) visible report ([a22b1d8](https://github.com/aien-dev/aienos/commit/a22b1d8)), [#14](https://github.com/aien-dev/aienos/pull/14) CPU topology ([44fcba7](https://github.com/aien-dev/aienos/commit/44fcba7)), [#15](https://github.com/aien-dev/aienos/pull/15) first-boot image ([52109bc](https://github.com/aien-dev/aienos/commit/52109bc)), [#16](https://github.com/aien-dev/aienos/pull/16) evidence ([f376589](https://github.com/aien-dev/aienos/commit/f376589)) |
 | M3 Kernel isolation | [M3](https://github.com/aien-dev/aienos/milestone/4) | none; #26 vectors, #27 MMU, #28 timer and GIC, #29 scheduler, #30 IPC and capabilities all closed | Frame allocator, bounded UART, fault capture used on the first boot; M3 merged as #103 SMMU, #104 EL0, #105 preemption, #106 IPC, #107 ABI freeze plus ADR 0013, #108 MMU and timer reconcile, #109 ABI unification, #110 fail-closed DMA, #111 and #114 device authority, #112 PCI ECAM, #113 strict verify, #115 ABI conformance; receipts in evidence/m3_canonical_receipt.md; verify_all green at 6ef8dde |
