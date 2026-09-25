@@ -87,11 +87,24 @@ run_qemu_boot "${SUB1_DIR}/esp" "${SUB1_DIR}/vars.fd" "${SUB1_DIR}/boot2_candida
 # Boot 3: Firmware runs BootOrder[0]=0001 (Default). Default verifies return
 run_qemu_boot "${SUB1_DIR}/esp" "${SUB1_DIR}/vars.fd" "${SUB1_DIR}/boot3_default.log" 20 || true
 
+# Check NVRAM binary contains BootNext, BootOrder, Boot0000, Boot0001 after staging
+python3 -c "
+with open('${SUB1_DIR}/vars.fd', 'rb') as f:
+    data = f.read()
+assert 'BootNext'.encode('utf-16le') in data, 'BootNext not in vars.fd after stage'
+assert 'BootOrder'.encode('utf-16le') in data, 'BootOrder not in vars.fd after stage'
+assert 'Boot0000'.encode('utf-16le') in data, 'Boot0000 not in vars.fd after stage'
+assert 'Boot0001'.encode('utf-16le') in data, 'Boot0001 not in vars.fd after stage'
+"
+
 if grep -q "PASS  M0_ROLLBACK_STAGED: boot_order=0001 boot_next=0000" "${SUB1_DIR}/boot1_stage.log" && \
+   grep -q 'BdsDxe: starting Boot0000 "AIENOS Candidate"' "${SUB1_DIR}/boot2_candidate.log" && \
    grep -q "AIENOS_CANDIDATE: NORMAL_TERMINATION_REQUESTED" "${SUB1_DIR}/boot2_candidate.log" && \
+   grep -q 'BdsDxe: starting Boot0001 "Default Linux OS"' "${SUB1_DIR}/boot3_default.log" && \
    grep -q "DEFAULT_OS: BOOT_CURRENT=0001" "${SUB1_DIR}/boot3_default.log" && \
    grep -q "DEFAULT_OS: BOOT_NEXT=CONSUMED_PASS" "${SUB1_DIR}/boot3_default.log"; then
-    pass "Normal candidate exit consumed BootNext and returned to Default (BootCurrent 0001)"
+    pass "AAVMF BdsDxe firmware one-shot BootNext dispatch & NVRAM persistence verified (Boot0000 -> Boot0001)"
+    echo "AAVMF_BOOTNEXT_NVRAM: PASS"
     echo "NATIVE_ROLLBACK_NORMAL: PASS"
 else
     fail "Normal candidate rollback failed"
@@ -118,10 +131,12 @@ run_qemu_boot "${SUB2_DIR}/esp" "${SUB2_DIR}/vars.fd" "${SUB2_DIR}/boot2_candida
 # Boot 3: Default OS recovers
 run_qemu_boot "${SUB2_DIR}/esp" "${SUB2_DIR}/vars.fd" "${SUB2_DIR}/boot3_default.log" 20 || true
 
-if grep -q "AIENOS_CANDIDATE: INDUCED_FAULT_PANIC" "${SUB2_DIR}/boot2_candidate.log" && \
+if grep -q 'BdsDxe: starting Boot0000 "AIENOS Candidate"' "${SUB2_DIR}/boot2_candidate.log" && \
+   grep -q "AIENOS_CANDIDATE: INDUCED_FAULT_PANIC" "${SUB2_DIR}/boot2_candidate.log" && \
+   grep -q 'BdsDxe: starting Boot0001 "Default Linux OS"' "${SUB2_DIR}/boot3_default.log" && \
    grep -q "DEFAULT_OS: BOOT_CURRENT=0001" "${SUB2_DIR}/boot3_default.log" && \
    grep -q "DEFAULT_OS: BOOT_NEXT=CONSUMED_PASS" "${SUB2_DIR}/boot3_default.log"; then
-    pass "Faulted candidate consumed BootNext and returned to Default"
+    pass "Faulted candidate consumed BootNext and returned to Default via AAVMF BootOrder"
     echo "NATIVE_ROLLBACK_FAULT: PASS"
 else
     fail "Faulted candidate rollback failed"
@@ -177,9 +192,11 @@ fi
 run_qemu_boot "${SUB3_DIR}/esp" "${SUB3_DIR}/vars.fd" "${SUB3_DIR}/boot3_default.log" 20 || true
 
 if [[ "${hung}" -eq 1 ]] && \
+   grep -q 'BdsDxe: starting Boot0000 "AIENOS Candidate"' "${SUB3_DIR}/boot2_candidate.log" && \
+   grep -q 'BdsDxe: starting Boot0001 "Default Linux OS"' "${SUB3_DIR}/boot3_default.log" && \
    grep -q "DEFAULT_OS: BOOT_CURRENT=0001" "${SUB3_DIR}/boot3_default.log" && \
    grep -q "DEFAULT_OS: BOOT_NEXT=CONSUMED_PASS" "${SUB3_DIR}/boot3_default.log"; then
-    pass "Hung candidate reset consumed BootNext and returned to Default"
+    pass "Hung candidate reset consumed BootNext and returned to Default via AAVMF BootOrder"
     echo "NATIVE_ROLLBACK_TIMEOUT: PASS"
 else
     fail "Hung candidate timeout rollback failed"
@@ -206,9 +223,10 @@ run_qemu_boot "${SUB4_DIR}/esp" "${SUB4_DIR}/vars.fd" "${SUB4_DIR}/boot1_stage.l
 run_qemu_boot "${SUB4_DIR}/esp" "${SUB4_DIR}/vars.fd" "${SUB4_DIR}/boot2_fallback.log" 20 || true
 
 if grep -q "failed to load Boot0000" "${SUB4_DIR}/boot2_fallback.log" && \
+   grep -q 'BdsDxe: starting Boot0001 "Default Linux OS"' "${SUB4_DIR}/boot2_fallback.log" && \
    grep -q "DEFAULT_OS: BOOT_CURRENT=0001" "${SUB4_DIR}/boot2_fallback.log" && \
    grep -q "DEFAULT_OS: BOOT_NEXT=CONSUMED_PASS" "${SUB4_DIR}/boot2_fallback.log"; then
-    pass "Malformed image rejected by firmware with fallback to Default"
+    pass "Malformed image rejected by AAVMF firmware with fallback to Default via BootOrder"
     echo "NATIVE_ROLLBACK_REJECTED: PASS"
 else
     fail "Malformed image fallback failed"
@@ -234,9 +252,10 @@ run_qemu_boot "${SUB5_DIR}/esp" "${SUB5_DIR}/vars.fd" "${SUB5_DIR}/boot1_stage.l
 run_qemu_boot "${SUB5_DIR}/esp" "${SUB5_DIR}/vars.fd" "${SUB5_DIR}/boot2_fallback.log" 20 || true
 
 if grep -q "failed to load Boot0000" "${SUB5_DIR}/boot2_fallback.log" && \
+   grep -q 'BdsDxe: starting Boot0001 "Default Linux OS"' "${SUB5_DIR}/boot2_fallback.log" && \
    grep -q "DEFAULT_OS: BOOT_CURRENT=0001" "${SUB5_DIR}/boot2_fallback.log" && \
    grep -q "DEFAULT_OS: BOOT_NEXT=CONSUMED_PASS" "${SUB5_DIR}/boot2_fallback.log"; then
-    pass "Absent candidate image handled cleanly with fallback to Default"
+    pass "Absent candidate image handled cleanly with fallback to Default via BootOrder"
 else
     fail "Absent candidate image fallback failed"
 fi
@@ -263,10 +282,12 @@ run_qemu_boot "${SUB6_DIR}/esp" "${SUB6_DIR}/vars.fd" "${SUB6_DIR}/boot3_default
 # Boot 4: Second consecutive boot of Default OS (proves system stays on Default, no loops)
 run_qemu_boot "${SUB6_DIR}/esp" "${SUB6_DIR}/vars.fd" "${SUB6_DIR}/boot4_default2.log" 20 || true
 
-if grep -q "DEFAULT_OS: BOOT_CURRENT=0001" "${SUB6_DIR}/boot4_default2.log" && \
+if grep -q 'BdsDxe: starting Boot0001 "Default Linux OS"' "${SUB6_DIR}/boot3_default1.log" && \
+   grep -q 'BdsDxe: starting Boot0001 "Default Linux OS"' "${SUB6_DIR}/boot4_default2.log" && \
+   grep -q "DEFAULT_OS: BOOT_CURRENT=0001" "${SUB6_DIR}/boot4_default2.log" && \
    grep -q "DEFAULT_OS: BOOT_NEXT=CONSUMED_PASS" "${SUB6_DIR}/boot4_default2.log" && \
    grep -q "PASS  NATIVE_ROLLBACK_REPEAT_BOOT" "${SUB6_DIR}/boot4_default2.log"; then
-    pass "Subsequent reboot stayed on Default OS without re-executing candidate"
+    pass "Subsequent reboot stayed on Default OS via AAVMF BootOrder without re-executing candidate"
     echo "NATIVE_ROLLBACK_BOOTNEXT_CONSUMED: PASS"
     echo "NATIVE_ROLLBACK_DEFAULT_UNCHANGED: PASS"
 else
@@ -278,15 +299,18 @@ fi
 echo ""
 echo "============================================================"
 if [[ "${failed}" == 0 ]]; then
+    echo "AAVMF_BOOTNEXT_NVRAM: PASS"
     echo "NATIVE_ROLLBACK_NORMAL: PASS"
     echo "NATIVE_ROLLBACK_FAULT: PASS"
     echo "NATIVE_ROLLBACK_TIMEOUT: PASS"
     echo "NATIVE_ROLLBACK_REJECTED: PASS"
     echo "NATIVE_ROLLBACK_BOOTNEXT_CONSUMED: PASS"
     echo "NATIVE_ROLLBACK_DEFAULT_UNCHANGED: PASS"
+    echo "M0_NATIVE_ROLLBACK_QEMU: PASS"
     echo "M0_ROLLBACK_QEMU: PASS"
     exit 0
 else
+    echo "M0_NATIVE_ROLLBACK_QEMU: FAIL"
     echo "M0_ROLLBACK_QEMU: FAIL"
     exit 1
 fi
