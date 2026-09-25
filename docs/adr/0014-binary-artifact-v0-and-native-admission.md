@@ -433,6 +433,19 @@ The acceptance invariant is:
 identified bytes = verified bytes = admitted bytes = mapped bytes = executed bytes
 ```
 
+Qualification harness: `scripts/qemu_artifact_test.sh` (run by
+`verify_all.sh`) boots the TEST ONLY qualification image with the SEED-0B
+artifact (`P26SEED`), the P2-5 probes and the H01–H29 negative matrix from
+`aienos-artifact-tool negative-corpus`, then an ordinary build that must
+refuse everything. Every candidate's unsigned receipt is checked against the
+supplied artifact, signed with the TEST ONLY receipt key and verified. Each
+canonical marker (`ARTIFACT_*`, `SEED0B_*`, `ADMISSION_RECEIPT`,
+`HOSTILE_MATRIX`) passes only if every check tagged with it passed;
+`SEED_0B_QEMU` requires all of them. The same script verifies a captured
+Machine 1 console log against byte-identical staged inputs
+([SEED0B_MACHINE1_QUALIFICATION.md](../SEED0B_MACHINE1_QUALIFICATION.md)),
+yielding `SEED_0B_MACHINE1`.
+
 Phase 2 is complete only after the same qualified artifact is admitted,
 executed with attenuated authority, denied an unauthorized write, reclaimed,
 and covered by a valid receipt in QEMU and then on Machine 1.

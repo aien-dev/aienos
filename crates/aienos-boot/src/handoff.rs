@@ -1102,7 +1102,7 @@ fn save_report_file(text: &str) -> uefi::Result {
 }
 
 /// Most signed-artifact candidates firmware reads from `\EFI\AIENOS\ARTIFACTS`.
-const MAX_ARTIFACT_CANDIDATES: usize = 32;
+const MAX_ARTIFACT_CANDIDATES: usize = 48;
 /// Largest candidate firmware will read. Bigger files are refused unread.
 const MAX_ARTIFACT_FILE_BYTES: u64 = 640 * 1024;
 const ARTIFACT_NAME_BYTES: usize = 32;
@@ -1298,6 +1298,10 @@ fn run_artifact_candidates(candidates: &ArtifactCandidates, kernel_root: usize) 
     for byte in context.verifier_identity {
         let _ = write!(record, "{byte:02x}");
     }
+    let _ = write!(record, "\nartifact_policy_digest: ");
+    for byte in loader::boot_policy_digest() {
+        let _ = write!(record, "{byte:02x}");
+    }
     let _ = writeln!(record);
     let _ = writeln!(
         record,
@@ -1322,6 +1326,7 @@ fn run_artifact_candidates(candidates: &ArtifactCandidates, kernel_root: usize) 
         }
         let mut out = ReportBuf::<2048>::new();
         loader::write_candidate_line(&mut out, name, &report);
+        loader::write_grant_lines(&mut out, name, &report);
         match loader::boot_receipt(&report, &context) {
             (sequence, Some(bytes)) => loader::write_receipt_line(&mut out, name, sequence, &bytes),
             (sequence, None) => {

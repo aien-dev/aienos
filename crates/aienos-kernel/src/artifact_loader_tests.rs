@@ -1544,3 +1544,47 @@ fn receipt_line_carries_digest_and_full_record() {
         format!("receipt: X.AIEN seq=9 digest={digest} record={hex}\n")
     );
 }
+
+#[test]
+fn instruction_aborts_outside_code_are_exec_nx_faults() {
+    let mut r = admitted_report(ExecutionStatus::Fault {
+        esr: 0x8200_000f, // EC 0x20: instruction abort from EL0, permission
+        far: 0x80_0000_4000,
+        elr: 0x80_0000_4000,
+    });
+    assert!(line(&r).contains(" exec=fault:exec-nx "), "{}", line(&r));
+    r.outcome.status = ExecutionStatus::Fault {
+        esr: 0x8200_000f,
+        far: r.code_base,
+        elr: r.code_base,
+    };
+    assert!(line(&r).contains(" exec=fault:other "), "{}", line(&r));
+}
+
+#[test]
+fn grant_lines_list_exactly_the_installed_grants() {
+    let bytes = pack_signed(&spec(), &TEST_SEED);
+    let a = anchors();
+    let mut run = Run::new(KernelMap::Block1G);
+    let report = run.candidate(&bytes, &verifier(&a), &policy(), &mut exits_zero(), 31);
+    run.assert_clean(&report);
+    let mut out = String::new();
+    write_grant_lines(&mut out, "S.AIEN", &report);
+    assert_eq!(out.lines().count(), report.caps_installed);
+    assert!(
+        out.starts_with("grant: S.AIEN[0] kind=object id=1 rights=0x1 "),
+        "{out}"
+    );
+    let mut empty = String::new();
+    write_grant_lines(&mut empty, "R.AIEN", &empty_report(0));
+    assert!(empty.is_empty());
+}
+
+#[test]
+fn boot_policy_digest_is_the_policy_the_loader_uses() {
+    assert_eq!(
+        boot_policy_digest(),
+        boot_policy(&boot_signers()).unwrap().digest()
+    );
+    assert_ne!(boot_policy_digest(), [0; 32]);
+}
