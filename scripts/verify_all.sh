@@ -61,6 +61,17 @@ echo "--- [Clippy Verification: -D warnings] ---"
 cargo clippy --workspace --all-targets -- -D warnings
 echo "PASS  clippy: zero warnings with -D warnings"
 
+# Step 3b: target-only code (bare-metal kernel, UEFI images) is invisible to
+# the host clippy run above, so lint each shipped target/feature set too.
+echo ""
+echo "--- [Clippy Verification: AArch64 targets, -D warnings] ---"
+cargo clippy -p aienos-kernel --target aarch64-unknown-none --no-default-features -- -D warnings
+cargo clippy -p aienos-kernel --target aarch64-unknown-none --no-default-features --features seed0b-test-anchor -- -D warnings
+for features in firmware handoff seed0b-qualification usb-keyboard; do
+    cargo clippy -p aienos-boot --target aarch64-unknown-uefi --features "${features}" --bins -- -D warnings
+done
+echo "PASS  clippy: aarch64-unknown-none kernel and aarch64-unknown-uefi images, zero warnings"
+
 # Step 4: Bare-metal library compilation check (not a boot test)
 echo ""
 echo "--- [Bare-Metal Target Compilation Check] ---"

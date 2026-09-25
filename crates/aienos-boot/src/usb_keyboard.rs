@@ -241,6 +241,7 @@ fn revoke_dma(screen: &mut Option<Screen>, ecam: &mut Ecam, at: &XhciLocation) {
 }
 
 /// Post-exit: bring up the keyboard and echo keys until Enter or timeout.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     xhci: Option<XhciLocation>,
     takeover: Option<DmaTakeover>,
@@ -410,11 +411,7 @@ pub fn run(
                 say(screen, "keyboard: done (enter)\n");
                 let elapsed = counter_ticks().wrapping_sub(start);
                 let hz = counter_frequency_hz();
-                let uptime_ms = if hz == 0 {
-                    0
-                } else {
-                    elapsed.saturating_mul(1000) / hz
-                };
+                let uptime_ms = elapsed.saturating_mul(1000).checked_div(hz).unwrap_or(0);
                 let input = core::str::from_utf8(&line[..length]).unwrap_or("");
                 let parsed = aienos_kernel::shell::parse_line(input);
                 let output = aienos_kernel::shell::dispatch(

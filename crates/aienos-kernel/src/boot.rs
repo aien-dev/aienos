@@ -532,6 +532,10 @@ mod tests {
 }
 
 /// Canonical bare-metal entry point when compiling for `#![no_std]` targets.
+///
+/// # Safety
+/// Only the boot loader may call this, once, on the boot CPU at EL1 with a
+/// valid stack; it never returns.
 #[cfg(all(target_os = "none", not(feature = "std"), not(test)))]
 #[no_mangle]
 pub unsafe extern "C" fn _start() -> ! {
