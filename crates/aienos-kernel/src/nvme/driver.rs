@@ -290,7 +290,13 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
         }
     }
 
-    fn transfer(&mut self, write: bool, lba: u64, data: &mut [u8]) -> Result<(), BlockError> {
+    fn transfer(
+        &mut self,
+        nsid: u32,
+        write: bool,
+        lba: u64,
+        data: &mut [u8],
+    ) -> Result<(), BlockError> {
         let info = self.ensure_namespace()?;
         let block_size = info.block_size as usize;
         if data.is_empty() || !data.len().is_multiple_of(block_size) {
@@ -347,9 +353,21 @@ impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
                     .map_err(map_error)?;
             }
             self.submit_io(if write {
-                Submission::write(1, lba + (offset / block_size) as u64, count as u16, p1, p2)
+                Submission::write(
+                    nsid,
+                    lba + (offset / block_size) as u64,
+                    count as u16,
+                    p1,
+                    p2,
+                )
             } else {
-                Submission::read(1, lba + (offset / block_size) as u64, count as u16, p1, p2)
+                Submission::read(
+                    nsid,
+                    lba + (offset / block_size) as u64,
+                    count as u16,
+                    p1,
+                    p2,
+                )
             })?;
             if !write {
                 self.dma
@@ -423,11 +441,11 @@ impl<R: Registers, D: DmaMemory, T: Delay> crate::block::BlockDevice for NvmeCon
         self.namespace.map_or(0, |n| n.block_count)
     }
     fn read_blocks(&mut self, lba: u64, buffer: &mut [u8]) -> Result<(), BlockError> {
-        self.transfer(false, lba, buffer)
+        self.transfer(1, false, lba, buffer)
     }
     fn write_blocks(&mut self, lba: u64, buffer: &[u8]) -> Result<(), BlockError> {
         let mut owned = buffer.to_vec();
-        self.transfer(true, lba, &mut owned)
+        self.transfer(1, true, lba, &mut owned)
     }
     fn flush(&mut self) -> Result<(), BlockError> {
         self.submit_io({
@@ -436,6 +454,32 @@ impl<R: Registers, D: DmaMemory, T: Delay> crate::block::BlockDevice for NvmeCon
             c.set_u32(1, 1);
             c
         })
+    }
+}
+
+impl<R: Registers, D: DmaMemory, T: Delay> NvmeController<R, D, T> {
+    /// Read `buffer` from an explicit namespace id. The `BlockDevice` trait
+    /// path fixes NSID 1; this exists so a caller (and the qualification
+    /// phase) can exercise the invalid-namespace error path and any future
+    /// multi-namespace use without special-casing the driver.
+    pub fn read_blocks_nsid(
+        &mut self,
+        nsid: u32,
+        lba: u64,
+        buffer: &mut [u8],
+    ) -> Result<(), BlockError> {
+        self.transfer(nsid, false, lba, buffer)
+    }
+
+    /// Write `buffer` to an explicit namespace id. See `read_blocks_nsid`.
+    pub fn write_blocks_nsid(
+        &mut self,
+        nsid: u32,
+        lba: u64,
+        buffer: &[u8],
+    ) -> Result<(), BlockError> {
+        let mut owned = buffer.to_vec();
+        self.transfer(nsid, true, lba, &mut owned)
     }
 }
 
@@ -1029,5 +1073,22 @@ mod tests {
             NvmeController::init(regs, dma, CountingDelay::default()).err(),
             Some(NvmeError::InvalidIdentify)
         );
+    }
+
+    #[test]
+    fn explicit_namespace_write_surfaces_device_error() {
+        let (regs, dma) = fixture();
+        let mut controller = NvmeController::init(regs, dma, CountingDelay::default()).unwrap();
+        controller.create_io_queues(4).unwrap();
+        // The simulator rejects any NSID other than 1 with a completion error.
+        assert_eq!(
+            controller.write_blocks_nsid(0xffff_ffff, 0, &[0xAB; 512]),
+            Err(BlockError::DeviceError)
+        );
+        // A valid explicit namespace write still round-trips.
+        controller.write_blocks_nsid(1, 0, &[0xCD; 512]).unwrap();
+        let mut out = [0u8; 512];
+        controller.read_blocks_nsid(1, 0, &mut out).unwrap();
+        assert_eq!(out, [0xCD; 512]);
     }
 }
