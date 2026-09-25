@@ -275,7 +275,7 @@ impl TaskLayout {
             || !fits(code_len, layout.code_pages)
             || data_len > data_memory_len
             || !fits(data_memory_len, layout.data_pages)
-            || layout.entry_offset % 4 != 0
+            || !layout.entry_offset.is_multiple_of(4)
             || layout.entry_offset + 4 > code_len as u64
             || layout.window_pages() > ENTRIES
         {
