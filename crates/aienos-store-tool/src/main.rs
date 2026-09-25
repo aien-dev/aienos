@@ -5,11 +5,15 @@
 //! implementation of the format.
 //!
 //! Commands:
-//!   cfg IMAGE BYTE_OFFSET MODE SETTLE
+//!   cfg IMAGE BYTE_OFFSET MODE SETTLE [RESPONSE_HEX]
 //!       Write the 4096-byte qualification control block.
 //!   tear-closure OLD NEW STORE_BYTE_OFFSET SECTOR_BYTES
 //!       Prove that every sector-granular tear of the one superblock write that
 //!       separates OLD from NEW leaves either the old or the new slot bytes.
+//!   operator-respond KEY_HEX CHALLENGE_HEX
+//!       Recovery Core operator response (HMAC-SHA256, kernel OperatorAuth).
+//!   corrupt-kind IMAGE STORE_BYTE_OFFSET REGION_UNITS KIND
+//!       Flip one byte in the first object of KIND (identity-loss tests).
 //!   inject IMAGE STORE_BYTE_OFFSET SLOT|inactive CASE [SOURCE]
 //!       Overwrite superblock SLOT with one deterministic defect (see `CASES`).
 
@@ -43,8 +47,10 @@ fn main() -> ExitCode {
         Some("cfg") => cfg(&args[1..]),
         Some("tear-closure") => tear_closure(&args[1..]),
         Some("inject") => inject(&args[1..]),
+        Some("operator-respond") => operator_respond(&args[1..]),
+        Some("corrupt-kind") => corrupt_kind(&args[1..]),
         _ => Err(format!(
-            "usage: aienos-store-tool cfg|tear-closure|inject ... (cases: {})",
+            "usage: aienos-store-tool cfg|tear-closure|inject|operator-respond|corrupt-kind ... (cases: {})",
             CASES.join(",")
         )),
     };
@@ -100,15 +106,115 @@ fn rechecksum(unit: &mut Unit) {
 }
 
 fn cfg(args: &[String]) -> Result<String, String> {
-    arity(args, 4, 4)?;
+    arity(args, 4, 5)?;
     let offset = num(&args[1], "byte offset")?;
     let mode = u8::try_from(num(&args[2], "mode")?).map_err(|_| "mode > 255")?;
     let settle = u8::try_from(num(&args[3], "settle")?).map_err(|_| "settle > 255")?;
     let mut block = [0u8; STORE_UNIT_BYTES];
     block[0] = mode;
     block[1] = settle;
+    // Optional 32-byte operator response for Recovery Core actions.
+    if let Some(hex) = args.get(4) {
+        block[16..48].copy_from_slice(&hex32(hex)?);
+    }
     write_at(&args[0], offset, &block)?;
     Ok(format!("cfg mode={mode} settle={settle}"))
+}
+
+fn hex32(s: &str) -> Result<[u8; 32], String> {
+    if s.len() != 64 {
+        return Err(format!("expected 64 hex digits, got {}", s.len()));
+    }
+    let mut out = [0u8; 32];
+    for (i, b) in out.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).map_err(|_| format!("bad hex: {s}"))?;
+    }
+    Ok(out)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Operator side of the Recovery Core challenge: HMAC response for KEY.
+fn operator_respond(args: &[String]) -> Result<String, String> {
+    arity(args, 2, 2)?;
+    let key = hex32(&args[0])?;
+    let challenge = hex32(&args[1])?;
+    Ok(hex(
+        &aienos_kernel::recovery::OperatorAuth::expected_response(&key, &challenge),
+    ))
+}
+
+/// A Store region inside an image file, as a StoreDevice.
+struct FileDevice {
+    file: fs::File,
+    base: u64,
+    units: u64,
+}
+
+impl aienos_kernel::store::engine::StoreDevice for FileDevice {
+    type Error = std::io::Error;
+    fn region_units(&self) -> u64 {
+        self.units
+    }
+    fn read_unit(&mut self, unit: u64, out: &mut Unit) -> std::io::Result<()> {
+        self.file
+            .seek(SeekFrom::Start(self.base + unit * STORE_UNIT_BYTES as u64))?;
+        self.file.read_exact(out)
+    }
+    fn write_unit(&mut self, unit: u64, bytes: &Unit) -> std::io::Result<()> {
+        self.file
+            .seek(SeekFrom::Start(self.base + unit * STORE_UNIT_BYTES as u64))?;
+        self.file.write_all(bytes)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.sync_all()
+    }
+}
+
+/// Flips one byte in the first unit of the first catalog object of KIND.
+fn corrupt_kind(args: &[String]) -> Result<String, String> {
+    arity(args, 4, 4)?;
+    let offset = num(&args[1], "store offset")?;
+    let units = num(&args[2], "region units")?;
+    let kind = u16::try_from(num(&args[3], "kind")?).map_err(|e| e.to_string())?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&args[0])
+        .map_err(|e| format!("{}: {e}", args[0]))?;
+    let dev = FileDevice {
+        file,
+        base: offset,
+        units,
+    };
+    let store = aienos_kernel::store::engine::Store::open(dev)
+        .map_err(|e| format!("store does not mount: {e:?}"))?;
+    let entry = store
+        .catalog()
+        .entries
+        .iter()
+        .find(|e| e.kind == kind)
+        .copied()
+        .ok_or(format!("no catalog object of kind {kind}"))?;
+    let at = offset + entry.first_unit * STORE_UNIT_BYTES as u64 + 20;
+    let mut dev = store.into_device();
+    dev.file
+        .seek(SeekFrom::Start(at))
+        .map_err(|e| e.to_string())?;
+    let mut byte = [0u8; 1];
+    dev.file.read_exact(&mut byte).map_err(|e| e.to_string())?;
+    byte[0] ^= 0xff;
+    dev.file
+        .seek(SeekFrom::Start(at))
+        .map_err(|e| e.to_string())?;
+    dev.file.write_all(&byte).map_err(|e| e.to_string())?;
+    dev.file.sync_all().map_err(|e| e.to_string())?;
+    Ok(format!(
+        "corrupt kind={kind} unit={} byte=20",
+        entry.first_unit
+    ))
 }
 
 /// Describes a superblock slot's bytes for reports.

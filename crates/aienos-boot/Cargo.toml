@@ -31,6 +31,11 @@ store-qual = ["nvme-write"]
 # resume / remember / crash modes over the Store-over-NVMe path.
 # scripts/qemu_continuity_test.sh enables it; hardware staging never does.
 continuity-qual = ["store-qual"]
+# Recovery Core qualification (ADR 0006, test-only, QEMU only): inspect /
+# operator-authorised repair / operator-authorised provisioning, with a
+# TEST-ONLY operator key. scripts/qemu_recovery_test.sh enables it; hardware
+# staging never does.
+recovery-qual = ["continuity-qual"]
 # SEED-0B qualification build (ADR 0014 §6): the kernel trusts the public,
 # TEST ONLY RFC 8032 qualification key in addition to the (empty) production
 # set, and every report says so. Without it, every artifact candidate is
