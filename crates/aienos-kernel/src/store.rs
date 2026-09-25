@@ -6,6 +6,10 @@
 //! Content-addressed extents (`model/<hash>`, `cortex/wal`, `agent/<id>`)
 //! rather than a general-purpose POSIX filesystem.
 
+/// Canonical System Store v1 byte format. This module does not provide a
+/// persistent transaction or mount implementation.
+pub mod v1;
+
 use crate::block::{BlockDevice, BlockError};
 use crate::crypto::sha256;
 
