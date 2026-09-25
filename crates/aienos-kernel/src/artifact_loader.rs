@@ -522,10 +522,7 @@ where
     V: ArtifactVerifier,
 {
     // ---- Verified + Authorized: pure decisions over the staged bytes.
-    let free_slots = (0..LOADED_TASK_SLOTS as u32)
-        .filter(|_| true)
-        .count()
-        .saturating_sub(occupied_slots(scheduler));
+    let free_slots = LOADED_TASK_SLOTS.saturating_sub(occupied_slots(scheduler));
     let (admission, code_src, data_src, code_len, data_len, data_memory_len) = {
         let bytes = platform.bytes(staged_pa, staged_len);
         let verified = verifier
