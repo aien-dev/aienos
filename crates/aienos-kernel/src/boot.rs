@@ -7,7 +7,7 @@ use crate::arch::aarch64::{
     counter_ticks, current_el, disable_interrupts, dsb, halt, isb, midr_el1, midr_part, EarlyUart,
     SPARK_16550_UART_BASE,
 };
-use crate::mem::{BitmapFrameAllocator, PhysAddr, PAGE_SIZE};
+use crate::mem::{BitmapFrameAllocator, FrameBatch, PhysAddr, PAGE_SIZE};
 use crate::report::ReportBuf;
 use crate::sync::spinlock::SpinLock;
 use core::fmt::Write;
@@ -20,6 +20,23 @@ static EARLY_ALLOCATOR: SpinLock<Option<BitmapFrameAllocator<EARLY_BITMAP_WORDS>
 /// Allocate a frame from the first conventional-memory region after handoff.
 pub fn allocate_early_frame() -> Option<PhysAddr> {
     EARLY_ALLOCATOR.lock().as_mut()?.allocate_frame()
+}
+
+/// Atomically reserve every frame required by a candidate while holding the
+/// early allocator lock once. The loader computes and checks the count before
+/// calling; an allocation failure leaves the allocator unchanged.
+pub fn reserve_early_frames(count: usize) -> Option<FrameBatch> {
+    EARLY_ALLOCATOR.lock().as_mut()?.allocate_batch(count)
+}
+
+/// Release a prior candidate reservation after teardown or construction
+/// failure. Capability revocation is the caller's responsibility and must
+/// happen before this function is called.
+pub fn release_early_frames(batch: FrameBatch) -> bool {
+    EARLY_ALLOCATOR
+        .lock()
+        .as_mut()
+        .is_some_and(|allocator| allocator.release_batch(batch))
 }
 
 fn initialize_early_allocator(region: BootMemoryRegion) -> Option<(usize, PhysAddr)> {
