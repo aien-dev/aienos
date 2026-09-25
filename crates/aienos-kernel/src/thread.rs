@@ -250,6 +250,13 @@ unsafe fn irq_dispatcher_inner(frame: *mut TrapFrame) -> *mut TrapFrame {
         return frame;
     }
 
+    // A loaded artifact task interrupted at EL0: enforce its time budget,
+    // possibly rewriting the frame to terminate it.
+    if crate::task_runtime::is_active() {
+        crate::task_runtime::on_timer_tick(&mut *frame);
+        return frame;
+    }
+
     if !PREEMPT_DEMO_ACTIVE.load(Ordering::SeqCst) {
         return frame;
     }
