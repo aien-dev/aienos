@@ -31,6 +31,13 @@
 
 use aienos_artifact::capability::{CapabilityRequest, MAX_CAPABILITIES, RESOURCE_KIND_OBJECT};
 use aienos_artifact::error::ArtifactError;
+pub use aienos_artifact::receipt::QualificationTier;
+use aienos_artifact::receipt::{
+    receipt_digest, receipt_nonce, validate as validate_receipt, ExecutionStatusCode, Receipt,
+    ReceiptDecision, RECEIPT_SIZE, RESULT_CANARY_PASSED, RESULT_EXECUTED_BYTES_MATCH,
+    RESULT_FORGED_DENIED, RESULT_MAPPED_BYTES_MATCH, RESULT_READ_OK, RESULT_RECLAIMED,
+    RESULT_WRITE_DENIED, RESULT_WX_SEALED,
+};
 use aienos_artifact::resource::{
     ResourceEnvelope, MAX_CODE_PAGES, MAX_CPU_TICKS, MAX_DATA_PAGES, MAX_ELAPSED_TICKS,
     MAX_STACK_PAGES, MAX_SYSCALLS,
@@ -100,6 +107,64 @@ pub enum LoadError {
     SchedulerFull,
     ExecutedDigestMismatch,
     Reclaim,
+    /// Firmware could not provide the candidate's bytes (handoff-level).
+    FirmwareRead,
+}
+
+impl LoadError {
+    /// Stable ADR 0014 §7.3 reason code.
+    pub const fn reason_code(self) -> u16 {
+        match self {
+            Self::Artifact(e) => e as u16,
+            Self::NoFrames => 0x101,
+            Self::StagingTooLarge => 0x102,
+            Self::Mapping => 0x103,
+            Self::MappedDigestMismatch => 0x104,
+            Self::WxAudit => 0x105,
+            Self::CapabilityInstall => 0x106,
+            Self::SchedulerFull => 0x107,
+            Self::ExecutedDigestMismatch => 0x108,
+            Self::Reclaim => 0x109,
+            Self::FirmwareRead => 0x10a,
+        }
+    }
+}
+
+impl CandidateState {
+    /// Stable ADR 0014 §7.3 stage code; `0` for states that are not a
+    /// rejection point.
+    pub const fn stage_code(self) -> u16 {
+        match self {
+            Self::Received => 1,
+            Self::Staged => 2,
+            Self::Verified => 3,
+            Self::Authorized => 4,
+            Self::Reserved => 5,
+            Self::Mapped => 6,
+            Self::Hashed => 7,
+            Self::Sealed => 8,
+            Self::CapsInstalled => 9,
+            _ => 0,
+        }
+    }
+}
+
+/// Identity and check results the loader actually computed, recorded as
+/// each stage passes. A field stays zero/false unless its stage completed,
+/// so a rejection receipt never carries a value the kernel did not derive.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ReceiptBindings {
+    pub artifact_id: Digest,
+    pub payload_digest: Digest,
+    pub artifact_signer_fingerprint: Digest,
+    pub policy_digest: Digest,
+    pub requested_capability_digest: Digest,
+    pub granted_capability_digest: Digest,
+    pub resource_envelope_digest: Digest,
+    /// SHA-256 of the bytes read back from private pages == admitted digest.
+    pub mapped_bytes_matched: bool,
+    /// `audit_wx` passed on the sealed task root.
+    pub wx_sealed: bool,
 }
 
 impl From<ArtifactError> for LoadError {
@@ -133,6 +198,7 @@ pub struct CandidateReport {
     pub outcome: TaskOutcome,
     pub code_base: u64,
     pub code_end: u64,
+    pub bindings: ReceiptBindings,
 }
 
 impl CandidateReport {
@@ -521,17 +587,62 @@ where
     P: LoaderPlatform,
     V: ArtifactVerifier,
 {
+    let mut bindings = ReceiptBindings::default();
+    load_bound(
+        platform,
+        staged_pa,
+        staged_len,
+        verifier,
+        policy,
+        scheduler,
+        task_id,
+        &mut bindings,
+    )
+}
+
+/// [`load`], also recording in `bindings` what each completed stage derived.
+#[allow(clippy::too_many_arguments)]
+pub fn load_bound<P, V>(
+    platform: &mut P,
+    staged_pa: u64,
+    staged_len: usize,
+    verifier: &V,
+    policy: &AdmissionPolicy,
+    scheduler: &mut LoaderScheduler,
+    task_id: u32,
+    bindings: &mut ReceiptBindings,
+) -> Result<LoadedTask, Failure>
+where
+    P: LoaderPlatform,
+    V: ArtifactVerifier,
+{
+    bindings.policy_digest = policy.digest();
     // ---- Verified + Authorized: pure decisions over the staged bytes.
     let free_slots = LOADED_TASK_SLOTS.saturating_sub(occupied_slots(scheduler));
     let (admission, code_src, data_src, code_len, data_len, data_memory_len) = {
         let bytes = platform.bytes(staged_pa, staged_len);
+        // Identity is derivable from structure alone, before authentication.
+        if let Ok(identified) = aienos_artifact::verify::parse_and_identify(bytes) {
+            bindings.artifact_id = *identified.artifact_id.as_bytes();
+            bindings.payload_digest = identified.payload_digest;
+            bindings.requested_capability_digest =
+                aienos_artifact::canonical::requested_capability_digest(
+                    identified.artifact.capability_request_bytes,
+                );
+            bindings.resource_envelope_digest =
+                aienos_artifact::canonical::resource_envelope_digest(
+                    identified.artifact.resource_envelope_bytes,
+                );
+        }
         let verified = verifier
             .verify(bytes)
             .map_err(|e| (CandidateState::Verified, e.into()))?;
+        bindings.artifact_signer_fingerprint = *verified.signer_fingerprint();
         let available = available_resources(platform.free_frames(), free_slots);
         let admission = policy
             .evaluate(&verified, available)
             .map_err(|e| (CandidateState::Authorized, e.into()))?;
+        bindings.granted_capability_digest = admission.granted_capability_digest;
         let identified = verified.identified();
         if admission.artifact_id != identified.artifact_id
             || admission.payload_digest != identified.payload_digest
@@ -640,6 +751,7 @@ where
     if payload != admission.payload_digest {
         fail!(CandidateState::Hashed, LoadError::MappedDigestMismatch);
     }
+    bindings.mapped_bytes_matched = true;
 
     // ---- Sealed: code becomes EL0 RX; its EL1 alias read-only in this root.
     for frame in code_frames {
@@ -668,6 +780,7 @@ where
     if !audit_wx(platform, &address_space) {
         fail!(CandidateState::Sealed, LoadError::WxAudit);
     }
+    bindings.wx_sealed = true;
 
     // ---- CapsInstalled: exactly the policy grants, in grant order.
     let mut capabilities = CapTable::new(0x5441_0000 | (task_id & 0xffff));
@@ -963,13 +1076,7 @@ where
     P: LoaderPlatform,
     E: TaskExecutor<P>,
 {
-    let not_run = TaskOutcome {
-        status: ExecutionStatus::NotRun,
-        syscalls: 0,
-        object_reads_ok: 0,
-        denials: 0,
-        elapsed_ticks: 0,
-    };
+    let not_run = TaskOutcome::not_run();
     if scheduler.tick(0) != Ok(Some(task.scheduler_id)) {
         return not_run;
     }
@@ -1060,7 +1167,7 @@ where
     platform
         .bytes_mut(staged, bytes.len())
         .copy_from_slice(bytes);
-    let loaded = load(
+    let loaded = load_bound(
         platform,
         staged,
         bytes.len(),
@@ -1068,6 +1175,7 @@ where
         policy,
         scheduler,
         task_id,
+        &mut report.bindings,
     );
     // The task owns its own copy; staging is scrubbed and returned now.
     platform.bytes_mut(staged, pages * PAGE).fill(0);
@@ -1089,11 +1197,11 @@ where
     report.caps_installed = task.grant_count;
     report.code_base = task.address_space.layout.code_base();
     report.code_end = task.address_space.layout.code_end();
-    report.wx_enforced = true;
+    report.wx_enforced = report.bindings.wx_sealed;
     report.outcome = run_task(&mut task, platform, scheduler, executor);
     let teardown = destroy(task, platform, scheduler);
     report.decision = Decision::Admitted;
-    report.byte_chain = teardown.executed_bytes_match;
+    report.byte_chain = report.bindings.mapped_bytes_matched && teardown.executed_bytes_match;
     report.caps_live_after = teardown.caps_live_after;
     report.frames_free_after = platform.free_frames();
     if !teardown.executed_bytes_match {
@@ -1118,15 +1226,10 @@ fn empty_report(free_before: usize) -> CandidateReport {
         caps_live_after: 0,
         byte_chain: false,
         wx_enforced: false,
-        outcome: TaskOutcome {
-            status: ExecutionStatus::NotRun,
-            syscalls: 0,
-            object_reads_ok: 0,
-            denials: 0,
-            elapsed_ticks: 0,
-        },
+        outcome: TaskOutcome::not_run(),
         code_base: 0,
         code_end: 0,
+        bindings: ReceiptBindings::default(),
     }
 }
 
@@ -1221,6 +1324,67 @@ static BOOT_SCHEDULER: crate::sync::spinlock::SpinLock<LoaderScheduler> =
     crate::sync::spinlock::SpinLock::new(Scheduler::new([0]));
 static NEXT_TASK_ID: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(1);
 
+static NEXT_RECEIPT_SEQUENCE: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(1);
+
+/// A candidate refused by the boot handoff before the kernel saw its bytes.
+pub fn firmware_rejection(error: LoadError) -> CandidateReport {
+    let free = crate::boot::early_free_frames();
+    let mut report = empty_report(free);
+    report.failed_stage = Some(CandidateState::Received);
+    report.error = Some(error);
+    report.bindings.policy_digest = match boot_policy(&boot_signers()) {
+        Ok(policy) => policy.digest(),
+        Err(_) => [0; 32],
+    };
+    report
+}
+
+/// Next boot-scoped receipt sequence (from 1) and the candidate's unsigned
+/// canonical receipt. `None` only if the report violates §7, which would be
+/// a loader bug; callers report it rather than emit a malformed record.
+pub fn boot_receipt(
+    report: &CandidateReport,
+    context: &ReceiptContext,
+) -> (u64, Option<[u8; RECEIPT_SIZE]>) {
+    let sequence = NEXT_RECEIPT_SEQUENCE.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    let record = build_receipt(report, context, sequence)
+        .ok()
+        .map(|receipt| aienos_artifact::receipt::encode(&receipt));
+    (sequence, record)
+}
+
+/// Verifier identity digest for this build (ADR 0014 §7.1).
+pub fn boot_verifier_identity(commit: &str) -> Digest {
+    let feature = u8::from(cfg!(feature = "seed0b-test-anchor"));
+    match aienos_artifact::receipt::verifier_identity_bytes(
+        commit.as_bytes(),
+        aienos_artifact::format::TARGET_AARCH64_LE,
+        aienos_artifact::format::ABI_V1,
+        feature,
+    ) {
+        Some(bytes) => aienos_artifact::canonical::verifier_identity_digest(&bytes),
+        None => aienos_artifact::canonical::verifier_identity_digest(b"unpinned-build"),
+    }
+}
+
+fn boot_signers() -> [Digest; BOOT_SIGNERS] {
+    #[cfg(feature = "seed0b-test-anchor")]
+    {
+        [aienos_artifact::signature::signer_fingerprint(
+            &aienos_artifact::signature::seed0b_test_anchor::PUBLIC_KEY,
+        )]
+    }
+    #[cfg(not(feature = "seed0b-test-anchor"))]
+    {
+        []
+    }
+}
+
+#[cfg(feature = "seed0b-test-anchor")]
+const BOOT_SIGNERS: usize = 1;
+#[cfg(not(feature = "seed0b-test-anchor"))]
+const BOOT_SIGNERS: usize = 0;
+
 /// Stage, verify, admit, load, run and destroy one candidate.
 ///
 /// # Safety
@@ -1228,16 +1392,10 @@ static NEXT_TASK_ID: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU
 /// allocator and after exception vectors, GIC and timer are set up.
 pub unsafe fn run_boot_candidate(bytes: &[u8], kernel_root: usize) -> CandidateReport {
     #[cfg(feature = "seed0b-test-anchor")]
-    let (anchors, signers) = {
-        use aienos_artifact::signature::seed0b_test_anchor::{Seed0bTestAnchorSet, PUBLIC_KEY};
-        (
-            Seed0bTestAnchorSet,
-            [aienos_artifact::signature::signer_fingerprint(&PUBLIC_KEY)],
-        )
-    };
+    let anchors = aienos_artifact::signature::seed0b_test_anchor::Seed0bTestAnchorSet;
     #[cfg(not(feature = "seed0b-test-anchor"))]
-    let (anchors, signers): (aienos_artifact::ProductionTrustAnchorSet, [Digest; 0]) =
-        (aienos_artifact::ProductionTrustAnchorSet::default(), []);
+    let anchors = aienos_artifact::ProductionTrustAnchorSet::default();
+    let signers = boot_signers();
     let verifier = aienos_artifact::ConfiguredArtifactVerifier::new(
         &anchors,
         aienos_artifact::Ed25519Verifier,
@@ -1263,6 +1421,123 @@ pub unsafe fn run_boot_candidate(bytes: &[u8], kernel_root: usize) -> CandidateR
         &mut executor,
         task_id,
     )
+}
+
+// ---------------------------------------------------------------------------
+// Admission Receipt v0 emission (ADR 0014 §7)
+// ---------------------------------------------------------------------------
+
+/// Verifier-context facts a receipt binds that the loader does not derive.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReceiptContext {
+    pub verifier_identity: Digest,
+    pub tier: QualificationTier,
+}
+
+/// Build the unsigned canonical receipt for one candidate from what the
+/// loader and runtime observed. Every record passes the strict §7 rules
+/// before it is returned; nothing is filled from expectations.
+pub fn build_receipt(
+    report: &CandidateReport,
+    context: &ReceiptContext,
+    sequence: u64,
+) -> Result<Receipt, ArtifactError> {
+    let b = &report.bindings;
+    let admitted = report.decision == Decision::Admitted;
+    let o = &report.outcome;
+    let (execution_status, exit_status) = if admitted {
+        match o.status {
+            ExecutionStatus::NotRun => (ExecutionStatusCode::NotRun, 0),
+            ExecutionStatus::Exited(code) => (ExecutionStatusCode::Exited, code as u32 as i32),
+            ExecutionStatus::Timeout => (ExecutionStatusCode::Timeout, 0),
+            ExecutionStatus::Fault { .. } => (ExecutionStatusCode::Fault, 0),
+            ExecutionStatus::BadSyscall(_) => (ExecutionStatusCode::BadSyscall, 0),
+            ExecutionStatus::ResourceOverrun => (ExecutionStatusCode::ResourceOverrun, 0),
+        }
+    } else {
+        (ExecutionStatusCode::NotRun, 0)
+    };
+    let mut result_flags = 0;
+    let mut set = |on: bool, flag: u32| {
+        if on {
+            result_flags |= flag;
+        }
+    };
+    set(report.reclaimed(), RESULT_RECLAIMED);
+    if admitted {
+        set(o.object_reads_ok > 0, RESULT_READ_OK);
+        set(o.write_denials > 0, RESULT_WRITE_DENIED);
+        set(o.invalid_handle_denials > 0, RESULT_FORGED_DENIED);
+        set(
+            execution_status == ExecutionStatusCode::Exited && exit_status == 0,
+            RESULT_CANARY_PASSED,
+        );
+        set(b.mapped_bytes_matched, RESULT_MAPPED_BYTES_MATCH);
+        set(report.byte_chain, RESULT_EXECUTED_BYTES_MATCH);
+        set(b.wx_sealed, RESULT_WX_SEALED);
+    }
+    let (rejection_stage, rejection_reason) = if admitted {
+        (0, 0)
+    } else {
+        (
+            report.failed_stage.map_or(0, CandidateState::stage_code),
+            report.error.map_or(0, LoadError::reason_code),
+        )
+    };
+    let counter = |v: u32| if admitted { v } else { 0 };
+    let receipt = Receipt {
+        flags: 0,
+        decision: if admitted {
+            ReceiptDecision::Admitted
+        } else {
+            ReceiptDecision::Rejected
+        },
+        tier: context.tier,
+        sequence,
+        nonce: receipt_nonce(&context.verifier_identity, sequence),
+        observed_time_ns: 0,
+        execution_status,
+        exit_status,
+        result_flags,
+        rejection_stage,
+        rejection_reason,
+        syscalls: counter(o.syscalls),
+        object_reads_ok: counter(o.object_reads_ok),
+        denials: counter(o.denials),
+        frames_reserved: u32::try_from(report.frames_reserved).unwrap_or(u32::MAX),
+        artifact_id: b.artifact_id,
+        payload_digest: b.payload_digest,
+        artifact_signer_fingerprint: b.artifact_signer_fingerprint,
+        policy_digest: b.policy_digest,
+        requested_capability_digest: b.requested_capability_digest,
+        granted_capability_digest: b.granted_capability_digest,
+        resource_envelope_digest: b.resource_envelope_digest,
+        verifier_identity: context.verifier_identity,
+        machine_id_digest: [0; 32],
+        generation: 0,
+        context_id: 0,
+    };
+    validate_receipt(&receipt)?;
+    Ok(receipt)
+}
+
+/// `receipt: NAME seq=N digest=HEX64 record=HEX1024` — the unsigned record
+/// the host qualification harness checks, signs and verifies.
+pub fn write_receipt_line(
+    out: &mut impl core::fmt::Write,
+    name: &str,
+    sequence: u64,
+    record: &[u8; RECEIPT_SIZE],
+) {
+    let _ = write!(out, "receipt: {name} seq={sequence} digest=");
+    for byte in receipt_digest(record) {
+        let _ = write!(out, "{byte:02x}");
+    }
+    let _ = write!(out, " record=");
+    for byte in record {
+        let _ = write!(out, "{byte:02x}");
+    }
+    let _ = writeln!(out);
 }
 
 /// One stable report line per candidate. Formats (QEMU checks grep these):

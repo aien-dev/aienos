@@ -71,7 +71,39 @@ pub struct TaskOutcome {
     pub syscalls: u32,
     pub object_reads_ok: u32,
     pub denials: u32,
+    /// Denied `SYS_OBJECT_WRITE` calls (subset of `denials`).
+    pub write_denials: u32,
+    /// Denials because the handle did not resolve in the task's table:
+    /// forged, never-issued, stale, or zero (subset of `denials`).
+    pub invalid_handle_denials: u32,
     pub elapsed_ticks: u64,
+}
+
+impl TaskOutcome {
+    pub const fn not_run() -> Self {
+        Self {
+            status: ExecutionStatus::NotRun,
+            syscalls: 0,
+            object_reads_ok: 0,
+            denials: 0,
+            write_denials: 0,
+            invalid_handle_denials: 0,
+            elapsed_ticks: 0,
+        }
+    }
+}
+
+/// Why one object access was refused.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Denial {
+    /// The handle does not resolve in this task's capability table.
+    InvalidHandle,
+    /// The handle resolves but lacks the right, or names another resource.
+    Authority,
+    /// Offset, alignment, grant range, or object size.
+    Bounds,
+    /// The grant's operation or byte budget is spent.
+    Budget,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -139,6 +171,8 @@ pub struct RuntimeState {
     pub syscalls: u32,
     pub object_reads_ok: u32,
     pub denials: u32,
+    pub write_denials: u32,
+    pub invalid_handle_denials: u32,
     pub usage: [GrantUsage; TASK_CAPABILITIES],
     pub object: [u64; 4],
 }
@@ -151,6 +185,8 @@ impl RuntimeState {
             syscalls: 0,
             object_reads_ok: 0,
             denials: 0,
+            write_denials: 0,
+            invalid_handle_denials: 0,
             usage: [GrantUsage {
                 operations: 0,
                 bytes: 0,
@@ -188,28 +224,34 @@ impl RuntimeState {
             SYS_EXIT => SyscallAction::Terminate(ExecutionStatus::Exited(args[0])),
             SYS_OBJECT_READ => {
                 match self.object_access(caps, grants, args[0], Rights::READ, args[1]) {
-                    Some(word) => {
+                    Ok(word) => {
                         self.object_reads_ok = self.object_reads_ok.saturating_add(1);
                         SyscallAction::Return(self.object[word])
                     }
-                    None => self.deny(),
+                    Err(why) => self.deny(why, false),
                 }
             }
             SYS_OBJECT_WRITE => {
                 match self.object_access(caps, grants, args[0], Rights::WRITE, args[1]) {
-                    Some(word) => {
+                    Ok(word) => {
                         self.object[word] = args[2];
                         SyscallAction::Return(0)
                     }
-                    None => self.deny(),
+                    Err(why) => self.deny(why, true),
                 }
             }
             other => SyscallAction::Terminate(ExecutionStatus::BadSyscall(other)),
         }
     }
 
-    fn deny(&mut self) -> SyscallAction {
+    fn deny(&mut self, why: Denial, write: bool) -> SyscallAction {
         self.denials = self.denials.saturating_add(1);
+        if write {
+            self.write_denials = self.write_denials.saturating_add(1);
+        }
+        if why == Denial::InvalidHandle {
+            self.invalid_handle_denials = self.invalid_handle_denials.saturating_add(1);
+        }
         SyscallAction::Return(SYSCALL_DENIED)
     }
 
@@ -223,36 +265,45 @@ impl RuntimeState {
         raw_handle: u64,
         right: Rights,
         offset: u64,
-    ) -> Option<usize> {
-        let handle = Handle::from_raw(raw_handle).ok()?;
-        let index = caps.lookup(handle, right).ok()? as usize;
-        let grant = grants.get(index).copied().flatten()?;
+    ) -> Result<usize, Denial> {
+        let handle = Handle::from_raw(raw_handle).map_err(|_| Denial::InvalidHandle)?;
+        let index = match caps.lookup(handle, right) {
+            Ok(index) => index as usize,
+            Err(crate::caps::CapError::MissingRights) => return Err(Denial::Authority),
+            Err(_) => return Err(Denial::InvalidHandle),
+        };
+        let grant = grants
+            .get(index)
+            .copied()
+            .flatten()
+            .ok_or(Denial::Authority)?;
         if grant.resource.kind() != ResourceKind::Object
             || grant.resource.id() != SEED_OBJECT_ID
             || !grant.rights.contains(right)
         {
-            return None;
+            return Err(Denial::Authority);
         }
-        let end = offset.checked_add(8)?;
+        let end = offset.checked_add(8).ok_or(Denial::Bounds)?;
         let grant_end = grant
             .bounds
             .byte_offset
-            .checked_add(grant.bounds.byte_length)?;
+            .checked_add(grant.bounds.byte_length)
+            .ok_or(Denial::Bounds)?;
         if offset & 7 != 0
             || offset < grant.bounds.byte_offset
             || end > grant_end
             || end > SEED_OBJECT_BYTES
         {
-            return None;
+            return Err(Denial::Bounds);
         }
-        let usage = self.usage.get_mut(index)?;
-        let bytes = usage.bytes.checked_add(8)?;
+        let usage = self.usage.get_mut(index).ok_or(Denial::Authority)?;
+        let bytes = usage.bytes.checked_add(8).ok_or(Denial::Budget)?;
         if usage.operations >= grant.bounds.max_operations || bytes > grant.bounds.max_bytes {
-            return None;
+            return Err(Denial::Budget);
         }
         usage.operations += 1;
         usage.bytes = bytes;
-        Some((offset / 8) as usize)
+        Ok((offset / 8) as usize)
     }
 
     fn outcome(&self, status: ExecutionStatus, now: u64) -> TaskOutcome {
@@ -261,6 +312,8 @@ impl RuntimeState {
             syscalls: self.syscalls,
             object_reads_ok: self.object_reads_ok,
             denials: self.denials,
+            write_denials: self.write_denials,
+            invalid_handle_denials: self.invalid_handle_denials,
             elapsed_ticks: elapsed_since(self.start, now),
         }
     }
@@ -385,13 +438,7 @@ pub unsafe fn run(task: TaskContext<'_>, kernel_root: usize) -> TaskOutcome {
     #[cfg(not(target_arch = "aarch64"))]
     {
         let _ = (task, kernel_root);
-        TaskOutcome {
-            status: ExecutionStatus::NotRun,
-            syscalls: 0,
-            object_reads_ok: 0,
-            denials: 0,
-            elapsed_ticks: 0,
-        }
+        TaskOutcome::not_run()
     }
 }
 
@@ -430,13 +477,7 @@ unsafe fn run_inner(task: TaskContext<'_>, kernel_root: usize) -> TaskOutcome {
     let active = unsafe { (*core::ptr::addr_of_mut!(ACTIVE)).take() };
     match active {
         Some(active) => active.state.outcome(active.status, now),
-        None => TaskOutcome {
-            status: ExecutionStatus::NotRun,
-            syscalls: 0,
-            object_reads_ok: 0,
-            denials: 0,
-            elapsed_ticks: 0,
-        },
+        None => TaskOutcome::not_run(),
     }
 }
 
@@ -595,6 +636,62 @@ mod tests {
         let mut caps = CapTable::new(0x5441_534b);
         let handle = caps.insert(0, g.rights).unwrap();
         (caps, [Some(g)], handle.to_raw())
+    }
+
+    #[test]
+    fn denials_are_classified_from_observed_lookups() {
+        let (caps, grants, h) = setup(grant(Rights::READ, 0, 32, 8, 64));
+        let budget = TaskBudget {
+            syscalls: 32,
+            ..BUDGET
+        };
+        let mut st = RuntimeState::new(budget, 0);
+        let call = |st: &mut RuntimeState, number: u64, args: [u64; 3]| {
+            st.syscall(&caps, &grants, 0, number, args, 1)
+        };
+        // Authorized READ.
+        assert_eq!(
+            call(&mut st, SYS_OBJECT_READ, [h, 0, 0]),
+            SyscallAction::Return(SEED_OBJECT_WORDS[0])
+        );
+        // WRITE through a READ-only handle: denied for authority, not handle.
+        assert_eq!(
+            call(&mut st, SYS_OBJECT_WRITE, [h, 0, 7]),
+            SyscallAction::Return(SYSCALL_DENIED)
+        );
+        assert_eq!((st.write_denials, st.invalid_handle_denials), (1, 0));
+        assert_eq!(st.object, SEED_OBJECT_WORDS, "denied write changed nothing");
+        // Forged generation, never-issued slot, zero handle: invalid handles.
+        for forged in [h ^ (1 << 32), (1u64 << 32) | 1, 0] {
+            assert_eq!(
+                call(&mut st, SYS_OBJECT_READ, [forged, 0, 0]),
+                SyscallAction::Return(SYSCALL_DENIED)
+            );
+        }
+        assert_eq!(st.invalid_handle_denials, 3);
+        // Out of the grant's range: a bounds denial, not an invalid handle.
+        assert_eq!(
+            call(&mut st, SYS_OBJECT_READ, [h, 32, 0]),
+            SyscallAction::Return(SYSCALL_DENIED)
+        );
+        assert_eq!(
+            (
+                st.denials,
+                st.write_denials,
+                st.invalid_handle_denials,
+                st.object_reads_ok
+            ),
+            (5, 1, 3, 1)
+        );
+        let outcome = st.outcome(ExecutionStatus::Exited(0), 5);
+        assert_eq!(
+            (
+                outcome.denials,
+                outcome.write_denials,
+                outcome.invalid_handle_denials
+            ),
+            (5, 1, 3)
+        );
     }
 
     fn read(
