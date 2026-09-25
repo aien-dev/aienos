@@ -1100,6 +1100,218 @@ fn save_report_file(text: &str) -> uefi::Result {
     file.flush()
 }
 
+/// Most signed-artifact candidates firmware reads from `\EFI\AIENOS\ARTIFACTS`.
+const MAX_ARTIFACT_CANDIDATES: usize = 8;
+/// Largest candidate firmware will read. Bigger files are refused unread.
+const MAX_ARTIFACT_FILE_BYTES: u64 = 640 * 1024;
+const ARTIFACT_NAME_BYTES: usize = 32;
+
+/// One candidate file: a name plus the firmware-allocated bytes holding it.
+/// Firmware is only a byte provider (ADR 0014 §1); it never parses or judges
+/// the contents. The kernel copies these bytes to staging before parsing.
+#[derive(Clone, Copy)]
+struct ArtifactCandidate {
+    name: [u8; ARTIFACT_NAME_BYTES],
+    name_len: usize,
+    size: u64,
+    /// Physical (identity) address of the LOADER_DATA copy; 0 when unread.
+    base: usize,
+    len: usize,
+}
+
+impl ArtifactCandidate {
+    const EMPTY: Self = Self {
+        name: [0; ARTIFACT_NAME_BYTES],
+        name_len: 0,
+        size: 0,
+        base: 0,
+        len: 0,
+    };
+
+    fn name(&self) -> &str {
+        core::str::from_utf8(&self.name[..self.name_len]).unwrap_or("?")
+    }
+
+    fn oversize(&self) -> bool {
+        self.size > MAX_ARTIFACT_FILE_BYTES
+    }
+
+    /// The bytes firmware read, or `None` if the file was refused or failed.
+    fn bytes(&self) -> Option<&'static [u8]> {
+        (self.base != 0 && self.len as u64 == self.size)
+            .then(|| unsafe { core::slice::from_raw_parts(self.base as *const u8, self.len) })
+    }
+}
+
+struct ArtifactCandidates {
+    entries: [ArtifactCandidate; MAX_ARTIFACT_CANDIDATES],
+    count: usize,
+    /// `.AIEN` files beyond the bound, not read.
+    ignored: usize,
+}
+
+/// ASCII name of a directory entry, if printable and within the bound.
+fn artifact_name(name: &CStr16) -> Option<([u8; ARTIFACT_NAME_BYTES], usize)> {
+    let mut out = [0u8; ARTIFACT_NAME_BYTES];
+    let mut len = 0;
+    for c in name.iter() {
+        let unit = u16::from(*c);
+        if !(0x21..=0x7e).contains(&unit) || len == ARTIFACT_NAME_BYTES {
+            return None;
+        }
+        out[len] = unit as u8;
+        len += 1;
+    }
+    let suffix = b".aien";
+    (len > suffix.len() && out[len - suffix.len()..len].eq_ignore_ascii_case(suffix))
+        .then_some((out, len))
+}
+
+/// Read every `.AIEN` file in `\EFI\AIENOS\ARTIFACTS` (at most eight, sorted
+/// by name bytes) into its own LOADER_DATA pages before firmware exit. A
+/// missing directory means no candidates. Must run while boot services live.
+fn read_artifact_candidates() -> ArtifactCandidates {
+    let mut out = ArtifactCandidates {
+        entries: [ArtifactCandidate::EMPTY; MAX_ARTIFACT_CANDIDATES],
+        count: 0,
+        ignored: 0,
+    };
+    let Ok(mut fs) = uefi::boot::get_image_file_system(uefi::boot::image_handle()) else {
+        return out;
+    };
+    let Ok(mut root) = fs.open_volume() else {
+        return out;
+    };
+    let Some(mut dir) = root
+        .open(
+            cstr16!("\\EFI\\AIENOS\\ARTIFACTS"),
+            FileMode::Read,
+            FileAttribute::empty(),
+        )
+        .ok()
+        .and_then(|handle| handle.into_directory())
+    else {
+        return out;
+    };
+    while let Ok(Some(info)) = dir.read_entry_boxed() {
+        if info.is_directory() {
+            continue;
+        }
+        let Some((name, name_len)) = artifact_name(info.file_name()) else {
+            continue;
+        };
+        let entry = ArtifactCandidate {
+            name,
+            name_len,
+            size: info.file_size(),
+            ..ArtifactCandidate::EMPTY
+        };
+        // Keep the eight smallest names in sorted order.
+        let key = &entry.name[..entry.name_len];
+        let at = out.entries[..out.count]
+            .iter()
+            .position(|e| key < &e.name[..e.name_len])
+            .unwrap_or(out.count);
+        if at == MAX_ARTIFACT_CANDIDATES {
+            out.ignored += 1;
+            continue;
+        }
+        if out.count == MAX_ARTIFACT_CANDIDATES {
+            out.ignored += 1;
+        } else {
+            out.count += 1;
+        }
+        for index in (at + 1..out.count).rev() {
+            out.entries[index] = out.entries[index - 1];
+        }
+        out.entries[at] = entry;
+    }
+    for entry in out.entries[..out.count].iter_mut() {
+        if entry.oversize() || entry.size == 0 {
+            continue;
+        }
+        let Ok(name) = core::str::from_utf8(&entry.name[..entry.name_len]) else {
+            continue;
+        };
+        let mut wide = [0u16; ARTIFACT_NAME_BYTES + 1];
+        let Ok(path) = CStr16::from_str_with_buf(name, &mut wide) else {
+            continue;
+        };
+        let Some(mut file) = dir
+            .open(path, FileMode::Read, FileAttribute::empty())
+            .ok()
+            .and_then(|handle| handle.into_regular_file())
+        else {
+            continue;
+        };
+        let size = entry.size as usize;
+        let Ok(pages) = uefi::boot::allocate_pages(
+            uefi::boot::AllocateType::AnyPages,
+            MemoryType::LOADER_DATA,
+            size.div_ceil(4096),
+        ) else {
+            continue;
+        };
+        let buffer = unsafe { core::slice::from_raw_parts_mut(pages.as_ptr(), size) };
+        let mut read = 0;
+        while read < size {
+            match file.read(&mut buffer[read..]) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => read += n,
+            }
+        }
+        entry.base = pages.as_ptr() as usize;
+        entry.len = read;
+    }
+    out
+}
+
+/// Hand each candidate to the kernel loader, then send one `artifacts`
+/// record with a line per candidate to the console. Returns the number of
+/// admitted and rejected candidates.
+fn run_artifact_candidates(candidates: &ArtifactCandidates, kernel_root: usize) -> (usize, usize) {
+    let mut record = Report::new();
+    header(&mut record, "artifacts");
+    #[cfg(feature = "seed0b-qualification")]
+    let _ = writeln!(
+        record,
+        "artifact_trust: seed0b-test qualification build — TEST ONLY"
+    );
+    let _ = writeln!(record, "artifact_candidates: {}", candidates.count);
+    let (mut admitted, mut rejected) = (0, 0);
+    for candidate in &candidates.entries[..candidates.count] {
+        let name = candidate.name();
+        if candidate.oversize() {
+            rejected += 1;
+            let _ = writeln!(
+                record,
+                "artifact: {name} rejected stage=received reason=StagingTooLarge reclaimed=yes"
+            );
+            continue;
+        }
+        let Some(bytes) = candidate.bytes() else {
+            rejected += 1;
+            let _ = writeln!(
+                record,
+                "artifact: {name} rejected stage=received reason=FirmwareRead reclaimed=yes"
+            );
+            continue;
+        };
+        let result =
+            unsafe { aienos_kernel::artifact_loader::run_boot_candidate(bytes, kernel_root) };
+        match result.decision {
+            aienos_kernel::artifact_loader::Decision::Admitted => admitted += 1,
+            aienos_kernel::artifact_loader::Decision::Rejected => rejected += 1,
+        }
+        aienos_kernel::artifact_loader::write_candidate_line(&mut record, name, &result);
+    }
+    if record.truncated() {
+        let _ = writeln!(record, "truncated: yes");
+    }
+    send_to_console(record.as_str());
+    (admitted, rejected)
+}
+
 fn wait_seconds(seconds: u64) {
     let frequency_hz = FREQUENCY_HZ.load(Ordering::SeqCst);
     let start = counter_ticks();
@@ -1300,6 +1512,9 @@ fn main() -> Status {
     .expect("post-exit heap allocation failed")
     .as_ptr() as usize;
     POST_EXIT_HEAP.store(post_exit_heap as u64, Ordering::Release);
+    // Candidate artifact bytes must be read while boot services still live;
+    // they are judged only by the kernel after firmware exit.
+    let artifact_candidates = read_artifact_candidates();
     #[cfg(feature = "usb-keyboard")]
     let xhci = usb_keyboard::find_xhci();
 
@@ -1349,6 +1564,16 @@ fn main() -> Status {
             let _ = writeln!(pre, "framebuffer: unavailable");
         }
     }
+    let _ = writeln!(
+        pre,
+        "artifact_candidates: {}{}",
+        artifact_candidates.count,
+        if artifact_candidates.ignored == 0 {
+            ""
+        } else {
+            " (more ignored)"
+        }
+    );
     let _ = writeln!(pre, "exiting firmware boot services");
     uefi::println!("{}", pre.as_str());
     let pre_file = save_report_file(pre.as_str()).map_err(|e| e.status());
@@ -1592,6 +1817,20 @@ fn main() -> Status {
         } else {
             "accepted"
         },
+    );
+    // P2-5: every firmware-provided candidate goes through the kernel's one
+    // admission path. The per-candidate lines are their own record so they
+    // never push the bounded final report past its NVRAM size.
+    let (admitted, rejected) = run_artifact_candidates(&artifact_candidates, kernel_root);
+    #[cfg(feature = "seed0b-qualification")]
+    let _ = writeln!(
+        report,
+        "artifact_trust: seed0b-test qualification build — TEST ONLY"
+    );
+    let _ = writeln!(
+        report,
+        "artifacts: candidates={} admitted={admitted} rejected={rejected}",
+        artifact_candidates.count
     );
     let _ = writeln!(
         report,
