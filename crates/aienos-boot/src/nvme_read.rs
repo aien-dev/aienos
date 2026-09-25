@@ -522,8 +522,9 @@ pub fn run(
         let mut fields = aienos_kernel::report::ReportBuf::<512>::new();
         let _ = writeln!(
             fields,
-            "NVME_ATOMICITY_IDENTIFY_QEMU: block_size={} awupf_raw={} nawupf_raw={} nabspf_raw={} nabo_blocks={} effective_pf_blocks={} boundary_blocks={}",
+            "NVME_ATOMICITY_IDENTIFY_QEMU: block_size={} lbads={} awupf_raw={} nawupf_raw={} nabspf_raw={} nabo_blocks={} effective_pf_blocks={} boundary_blocks={}",
             a.lba_bytes,
+            a.lba_bytes.trailing_zeros(),
             a.awupf_raw.map_or(-1, i32::from),
             a.nawupf_raw.map_or(-1, i32::from),
             a.nabspf_raw.map_or(-1, i32::from),
