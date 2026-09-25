@@ -102,11 +102,20 @@ AIENOS_SEED0B_EVIDENCE=evidence/seed0b_machine1_<date>.md \
 ```
 
 This mode boots nothing. It proves the staged inputs are byte-identical to a
-fresh deterministic pack, applies every qualification-boot check to the
-captured log (P26SEED allow/deny results, the matrix, frame accounting), and
-checks, signs with the TEST ONLY receipt key, and verifies every receipt.
-It requires the `SEED-0B-MACHINE1` tier, so a QEMU log cannot pass. The
-step passes only on `SEED_0B_MACHINE1: PASS`.
+fresh deterministic pack and to their `MANIFEST.sha256` (no unlisted file),
+that the manifest commit, the log's `aienos_commit` and this clean checkout's
+HEAD are one commit, and that the log shows Machine 1's CPU identity (20 cores,
+Cortex-A725/X925 boot core). It then applies every qualification-boot check to
+the captured log (P26SEED allow/deny results, the matrix, frame accounting),
+and checks, signs with the TEST ONLY receipt key, and verifies every receipt.
+
+The `SEED-0B-MACHINE1` tier label alone does not prove hardware: it is a build
+feature (`hardware-staging`), so the same image booted in QEMU prints it too.
+The CPU-identity check is what rejects a QEMU log. A captured log remains
+operator-attested; TRUST-1 measured boot is what will bind it
+cryptographically. When TRUST-1 signs `BOOTAA64.EFI`, record the signed
+image's SHA-256 alongside the manifest rather than replacing the prepared file,
+or the manifest check fails. The step passes only on `SEED_0B_MACHINE1: PASS`.
 
 ## 6. Publish
 
