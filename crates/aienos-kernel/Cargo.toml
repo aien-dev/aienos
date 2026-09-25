@@ -19,3 +19,4 @@ aienos-crypto = { path = "../aienos-crypto" }
 
 [dev-dependencies]
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["fast"] }
+serde_json = { workspace = true, features = ["std"] }
