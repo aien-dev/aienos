@@ -102,13 +102,16 @@ can be built and tested in QEMU on any machine. Good places to start:
   small, self-contained changes.
 - [`help wanted`](https://github.com/aien-dev/aienos/labels/help%20wanted):
   kernel, boot, evidence and tooling work that is ready for a contributor.
-- Phase 2 executable identity: Binary Artifact v0, Ed25519 trust, admission
-  policy and the P2-5 loader (signed artifact -> exact-byte W^X EL0 task,
-  full rollback) are done in QEMU; see
-  [evidence/p2_5_artifact_loader_qemu_2026-09-25.md](evidence/p2_5_artifact_loader_qemu_2026-09-25.md).
-  Next: admission receipts, the first SEED-0B capability artifact (P2-6),
-  and the hostile-input matrix (P2-7). M3 kernel isolation is done; see the
-  M3 row above.
+- Phase 2 executable identity: SEED-0B is qualified in QEMU
+  (`SEED_0B_QEMU: PASS`): Binary Artifact v0, Ed25519 trust, admission
+  policy, the P2-5 loader, Admission Receipt v0 (P2-6A), the first SEED-0B
+  capability artifact with kernel receipts (P2-6B) and the negative matrix
+  (P2-7); see
+  [evidence/seed0b_qemu_2026-09-25.md](evidence/seed0b_qemu_2026-09-25.md).
+  Machine 1 qualification (P2-9) is prepared, not run, and blocked on the
+  TRUST-1 owner-signed boot chain
+  ([procedure](docs/SEED0B_MACHINE1_QUALIFICATION.md)). M3 kernel
+  isolation is done; see the M3 row above.
 
 Work labelled [`needs-hardware`](https://github.com/aien-dev/aienos/labels/needs-hardware)
 runs on Machine 1; maintainers execute it and publish the evidence. Read
