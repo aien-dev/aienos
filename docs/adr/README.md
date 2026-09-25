@@ -19,6 +19,7 @@ This directory documents the key architectural decisions and formal technical sp
 | [ADR 0011](0011-machine-1-hardware-test-rig.md) | Machine 1 Hardware Test Rig (Power, Capture, Input) | Proposed | 2026-09-24 | [`MILESTONES.md` section 0, gate M2C](../MILESTONES.md); [`HARDWARE_TEST_RIG.md`](../HARDWARE_TEST_RIG.md); [`NATIVE_BOOT_ONE_TIME.md`](../NATIVE_BOOT_ONE_TIME.md) |
 | [ADR 0012](0012-self-construction-capability-growth-and-generations.md) | Self-Construction, Capability Growth, and Reversible System Generations | Accepted | 2026-09-24 | [ADR 0002](0002-incumbent-os-as-migration-environment.md); [ADR 0006](0006-deterministic-recovery-core-and-offline-operator-authority.md); [ADR 0007](0007-continuous-existence-provisioning-once.md); [`ROADMAP.md`](../../ROADMAP.md) (SEED-0A, SEED-0B) |
 | [ADR 0013](0013-aienos-abi-v1.md) | AIENOS ABI v1 | Proposed | 2026-09-24 | [ADR 0012](0012-self-construction-capability-growth-and-generations.md); [ADR 0004](0004-reversibility-definition-and-network-effect-boundary.md); [issue #30](https://github.com/aien-dev/aienos/issues/30); [PR #106](https://github.com/aien-dev/aienos/pull/106); [`abi.rs`](../../crates/aienos-kernel/src/abi.rs) |
+| [ADR 0014](0014-binary-artifact-v0-and-native-admission.md) | Binary Artifact v0 and Native Admission | Proposed | 2026-09-25 | [ADR 0012](0012-self-construction-capability-growth-and-generations.md); [ADR 0013](0013-aienos-abi-v1.md); SEED-0B qualification |
 
 ---
 
