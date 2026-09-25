@@ -15,6 +15,10 @@
 //! any SMMU or driver setup, and [`run`] sets it again only when
 //! [`dma_gate::dma_grant`] allows it.
 
+#[cfg(feature = "store-qual")]
+use crate::store_qual::{
+    genesis_units, BoundedNvme, CONFIG_LBA, MODE_VERIFY, STORE_BASE_LBA, STORE_REGION_BLOCKS,
+};
 use aienos_kernel::acpi::{self, EcamWindow};
 use aienos_kernel::arch::aarch64::{
     clean_dcache_range, clean_invalidate_dcache_range, counter_frequency_hz, counter_ticks, MmioReg,
@@ -625,6 +629,9 @@ pub fn run(
     #[cfg(feature = "nvme-write")]
     run_write_phase(screen, &mut controller, block_count);
 
+    #[cfg(feature = "store-qual")]
+    run_store_phase(screen, controller, block_count);
+
     revoke_dma(screen, &mut ecam, &at);
 }
 
@@ -774,4 +781,228 @@ fn report_smmu_fault(
         );
         say(screen, entry.as_str());
     }
+}
+
+// ---------------------------------------------------------------------------
+// Store-over-NVMe qualification (test-only, `store-qual`).
+//
+// Chain: NvmeController -> BoundedNvme -> StoreDeviceAdapter -> Store.
+// Requires the atomic-root predicate to PASS for the 4096-byte geometry.
+// Mode is selected by a control block at STORE region CONFIG_LBA.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "store-qual")]
+type QualController = NvmeController<NativeRegisters, NativeDma, NativeDelay>;
+
+#[cfg(feature = "store-qual")]
+type QualAdapter = aienos_kernel::store::device::StoreDeviceAdapter<
+    BoundedNvme<NativeRegisters, NativeDma, NativeDelay>,
+>;
+
+#[cfg(feature = "store-qual")]
+fn qualify_fail(screen: &mut Option<Screen>, reason: &str) {
+    let mut l = aienos_kernel::report::ReportBuf::<192>::new();
+    let _ = writeln!(l, "STORE_NVME_INTEGRATION_QEMU: FAIL ({reason})");
+    say(screen, l.as_str());
+}
+
+#[cfg(feature = "store-qual")]
+fn run_store_phase(screen: &mut Option<Screen>, mut controller: QualController, block_count: u64) {
+    use aienos_kernel::nvme::atomicity::AtomicityDecision;
+    use aienos_kernel::store::checkpoint::Checkpoint;
+    use aienos_kernel::store::engine::{ObjectInput, Store};
+
+    // Qualified geometry: the 4096-byte Store unit must be one logical block.
+    if controller.block_size() != 4096 {
+        qualify_fail(screen, "geometry is not 4096-byte LBA");
+        return;
+    }
+
+    // Atomic-root predicate must PASS, else fail closed.
+    let atomic = |d| matches!(d, AtomicityDecision::Atomic { .. });
+    let ok = controller
+        .atomicity()
+        .map(|a| atomic(a.store_root_decision(0)) && atomic(a.store_root_decision(1)))
+        .unwrap_or(false);
+    if !ok {
+        qualify_fail(screen, "atomic-root predicate");
+        return;
+    }
+
+    // Control block.
+    let mut cfg = [0u8; 4096];
+    if controller.read_blocks(CONFIG_LBA, &mut cfg).is_err() {
+        qualify_fail(screen, "control block read");
+        return;
+    }
+    let mode = cfg[0];
+    let settle = cfg[1];
+
+    if STORE_BASE_LBA
+        .checked_add(STORE_REGION_BLOCKS)
+        .is_none_or(|end| end > block_count)
+    {
+        qualify_fail(screen, "region outside namespace");
+        return;
+    }
+
+    let bounded = BoundedNvme::new(controller, STORE_BASE_LBA, STORE_REGION_BLOCKS);
+    let mut adapter = match aienos_kernel::store::device::StoreDeviceAdapter::new(bounded) {
+        Ok(a) => a,
+        Err(e) => {
+            let mut l = aienos_kernel::report::ReportBuf::<192>::new();
+            let _ = writeln!(l, "STORE_NVME_INTEGRATION_QEMU: FAIL (adapter {e:?})");
+            say(screen, l.as_str());
+            return;
+        }
+    };
+    let region_units = adapter.region_units();
+
+    if mode == MODE_VERIFY {
+        verify_reopen(screen, adapter, settle);
+        return;
+    }
+
+    // Provision canonical genesis if the region is unformatted.
+    let mut probe = [0u8; 4096];
+    let provisioned = adapter.read_unit(0, &mut probe).is_ok() && probe.iter().any(|b| *b != 0);
+    if !provisioned {
+        let units = genesis_units(region_units);
+        for (i, unit) in units.iter().enumerate() {
+            if let Err(e) = adapter.write_unit(i as u64, unit) {
+                let mut l = aienos_kernel::report::ReportBuf::<192>::new();
+                let _ = writeln!(l, "STORE_NVME_INTEGRATION_QEMU: FAIL (genesis write {e:?})");
+                say(screen, l.as_str());
+                return;
+            }
+        }
+        if let Err(e) = adapter.flush() {
+            let mut l = aienos_kernel::report::ReportBuf::<192>::new();
+            let _ = writeln!(l, "STORE_NVME_INTEGRATION_QEMU: FAIL (genesis flush {e:?})");
+            say(screen, l.as_str());
+            return;
+        }
+    }
+
+    let mut store = match Store::open(adapter) {
+        Ok(s) => s,
+        Err(e) => {
+            let mut l = aienos_kernel::report::ReportBuf::<192>::new();
+            let _ = writeln!(l, "STORE_NVME_INTEGRATION_QEMU: FAIL (open {e:?})");
+            say(screen, l.as_str());
+            return;
+        }
+    };
+
+    let mut integration = aienos_kernel::report::ReportBuf::<256>::new();
+    let _ = writeln!(
+        integration,
+        "STORE_NVME_INTEGRATION_QEMU: PASS (generation={} state={:?} region_units={})",
+        store.generation(),
+        store.mount_state(),
+        region_units
+    );
+    say(screen, integration.as_str());
+
+    // Settle transactions to advance committed generations (slot reuse).
+    for _ in 0..settle {
+        let bytes = (store.generation() + 1).to_le_bytes();
+        let obj = ObjectInput {
+            kind: 3,
+            version: 1,
+            bytes: &bytes,
+        };
+        if let Err(e) = store.transact(&[obj]) {
+            let mut l = aienos_kernel::report::ReportBuf::<192>::new();
+            let _ = writeln!(l, "STORE_NVME_INTEGRATION_QEMU: FAIL (settle {e:?})");
+            say(screen, l.as_str());
+            return;
+        }
+    }
+
+    // Target transaction: emit CHECKPOINT lines; the host may kill us at one.
+    let bytes = (store.generation() + 1).to_le_bytes();
+    let obj = ObjectInput {
+        kind: 3,
+        version: 1,
+        bytes: &bytes,
+    };
+    let hook = |cp: Checkpoint| {
+        let mut l = aienos_kernel::report::ReportBuf::<64>::new();
+        let _ = writeln!(l, "CHECKPOINT: {}", cp.as_str());
+        say(screen, l.as_str());
+        // Observation hold only: give the host crash controller time to see the
+        // marker and kill the VM at this exact checkpoint. No flush, no write,
+        // no ordering change.
+        let hz = counter_frequency_hz();
+        if hz > 0 {
+            let start = counter_ticks();
+            while counter_ticks().wrapping_sub(start) < hz / 2 {
+                core::hint::spin_loop();
+            }
+        }
+    };
+    match store.transact_with_hook(&[obj], hook) {
+        Ok(()) => {
+            let mut l = aienos_kernel::report::ReportBuf::<128>::new();
+            let _ = writeln!(
+                l,
+                "STORE_CHECKPOINT_QEMU: PASS (generation={})",
+                store.generation()
+            );
+            say(screen, l.as_str());
+        }
+        Err(e) => {
+            let mut l = aienos_kernel::report::ReportBuf::<128>::new();
+            let _ = writeln!(l, "STORE_CHECKPOINT_QEMU: FAIL ({e:?})");
+            say(screen, l.as_str());
+        }
+    }
+}
+
+#[cfg(feature = "store-qual")]
+fn verify_reopen(screen: &mut Option<Screen>, adapter: QualAdapter, settle: u8) {
+    use aienos_kernel::store::engine::Store;
+    use aienos_kernel::store::v1::ObjectId;
+
+    let upper = u64::from(settle) + 2;
+    let mut store = match Store::open(adapter) {
+        Ok(s) => s,
+        Err(e) => {
+            let mut l = aienos_kernel::report::ReportBuf::<192>::new();
+            let _ = writeln!(l, "STORE_REOPEN_QEMU: FAIL (open {e:?})");
+            say(screen, l.as_str());
+            return;
+        }
+    };
+    let generation = store.generation();
+    let state = store.mount_state();
+    let mut l = aienos_kernel::report::ReportBuf::<192>::new();
+    let _ = writeln!(
+        l,
+        "STORE_REOPEN_QEMU: generation={} state={:?} upper={}",
+        generation, state, upper
+    );
+    say(screen, l.as_str());
+
+    let mut valid = (1..=upper).contains(&generation);
+    if valid && generation >= 2 {
+        let bytes = generation.to_le_bytes();
+        valid = match ObjectId::calculate(3, 1, &bytes) {
+            Ok(oid) => store.read_object(oid).map(|v| v == bytes).unwrap_or(false),
+            Err(_) => false,
+        };
+    }
+    if valid && settle >= 3 && generation >= 4 {
+        let mut r = aienos_kernel::report::ReportBuf::<96>::new();
+        let _ = writeln!(r, "STORE_SLOT_REUSE_QEMU: PASS (generation={generation})");
+        say(screen, r.as_str());
+    }
+    let mut done = aienos_kernel::report::ReportBuf::<160>::new();
+    let _ = writeln!(
+        done,
+        "STORE_REOPEN_QEMU: {} (generation={generation})",
+        if valid { "PASS" } else { "FAIL" }
+    );
+    say(screen, done.as_str());
 }
