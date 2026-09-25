@@ -78,9 +78,23 @@ impl SignatureVerifier for Ed25519Verifier {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct VerifiedArtifact<'a> {
-    pub identified: IdentifiedArtifact<'a>,
-    pub signer_fingerprint: Digest,
-    pub trust_tier: TrustTier,
+    identified: IdentifiedArtifact<'a>,
+    signer_fingerprint: Digest,
+    trust_tier: TrustTier,
+}
+
+impl<'a> VerifiedArtifact<'a> {
+    pub const fn identified(&self) -> &IdentifiedArtifact<'a> {
+        &self.identified
+    }
+
+    pub const fn signer_fingerprint(&self) -> &Digest {
+        &self.signer_fingerprint
+    }
+
+    pub const fn trust_tier(&self) -> TrustTier {
+        self.trust_tier
+    }
 }
 
 pub trait ArtifactVerifier {

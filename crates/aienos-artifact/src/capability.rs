@@ -68,6 +68,20 @@ impl CapabilityTable {
 }
 
 impl CapabilityRequest {
+    /// Canonical 48-byte little-endian encoding for policy and grant records.
+    pub fn to_bytes(self) -> [u8; CAPABILITY_RECORD_SIZE] {
+        let mut bytes = [0u8; CAPABILITY_RECORD_SIZE];
+        bytes[0..2].copy_from_slice(&self.resource_kind.to_le_bytes());
+        bytes[4..8].copy_from_slice(&self.resource_id.to_le_bytes());
+        bytes[8..12].copy_from_slice(&self.rights.to_le_bytes());
+        bytes[12..16].copy_from_slice(&self.bounds_kind.to_le_bytes());
+        bytes[16..20].copy_from_slice(&self.max_operations.to_le_bytes());
+        bytes[24..32].copy_from_slice(&self.max_bytes.to_le_bytes());
+        bytes[32..40].copy_from_slice(&self.byte_offset.to_le_bytes());
+        bytes[40..48].copy_from_slice(&self.byte_length.to_le_bytes());
+        bytes
+    }
+
     pub fn decode(bytes: &[u8]) -> Result<Self, ArtifactError> {
         if bytes.len() != CAPABILITY_RECORD_SIZE {
             return Err(if bytes.len() < CAPABILITY_RECORD_SIZE {
