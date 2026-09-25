@@ -105,6 +105,15 @@ fn smmu_tables() -> *mut SmmuTables {
     raw.cast::<SmmuTables>()
 }
 
+/// Pointer to the shared event queue ring, reached by byte offset so no typed
+/// pointer dereference is needed.
+#[cfg(any(feature = "usb-keyboard", feature = "nvme-read"))]
+fn smmu_event_queue_ptr() -> *const [[u64; 4]; SMMU_QUEUE_ENTRIES as usize] {
+    let base = smmu_tables() as *mut u8;
+    base.wrapping_add(core::mem::offset_of!(SmmuTables, event_queue))
+        .cast()
+}
+
 struct BootHeap;
 unsafe impl GlobalAlloc for BootHeap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -319,20 +328,23 @@ fn configure_smmu_for_nvme(
     let table_frames = policy.page_table.frames_used().unwrap_or(0);
     clean_table_pool(next, table_frames * 4096);
 
-    let tables = smmu_tables();
+    let base = smmu_tables() as *mut u8;
     assert!(stream_id < STREAM_ENTRIES, "SID outside the stream table");
+    // Field addresses are reached by byte offset from the allocation base, so
+    // no typed pointer dereference happens here.
+    let field = |offset: usize| base.wrapping_add(offset);
     // Safety: as in configure_smmu_for_xhci, the tables are one live,
     // identity-mapped, 256 KiB-aligned allocation owned by the SMMU; the
     // register aperture is identity mapped by enter_kernel_mmu.
     let linear = unsafe {
         aienos_kernel::smmu::LinearTables::new(
-            core::ptr::addr_of_mut!((*tables).stream_table).cast(),
+            field(core::mem::offset_of!(SmmuTables, stream_table)).cast::<[u64; 8]>(),
             STREAM_ENTRIES,
-            core::ptr::addr_of_mut!((*tables).command_queue).cast(),
+            field(core::mem::offset_of!(SmmuTables, command_queue)).cast::<[u64; 2]>(),
             SMMU_QUEUE_ENTRIES,
-            core::ptr::addr_of_mut!((*tables).event_queue).cast(),
+            field(core::mem::offset_of!(SmmuTables, event_queue)).cast::<[u64; 4]>(),
             SMMU_QUEUE_ENTRIES,
-            core::ptr::addr_of_mut!((*tables).context),
+            field(core::mem::offset_of!(SmmuTables, context)).cast::<[u64; 8]>(),
         )?
     };
     let mut regs = unsafe { aienos_kernel::smmu::MmioRegisters::new(iort.base as usize) };
@@ -2093,7 +2105,7 @@ fn main() -> Status {
         smmu_result.is_ok(),
         acpi_facts.iort.as_ref().map(|s| s.base),
         smmu_result.ok(),
-        unsafe { core::ptr::addr_of_mut!((*smmu_tables()).event_queue).cast_const() },
+        smmu_event_queue_ptr(),
     );
     #[cfg(feature = "nvme-read")]
     nvme_read::run(
@@ -2103,7 +2115,7 @@ fn main() -> Status {
         nvme_smmu_result.is_ok(),
         acpi_facts.iort.as_ref().map(|s| s.base),
         nvme_smmu_result.ok(),
-        unsafe { core::ptr::addr_of_mut!((*smmu_tables()).event_queue).cast_const() },
+        smmu_event_queue_ptr(),
     );
     finish(screen)
 }
