@@ -35,6 +35,7 @@ pub enum StateError {
     SerializationError(String),
     DeserializationError(String),
     ChecksumMismatch,
+    InvalidCheckpoint(&'static str),
     ReconstructionFailed(String),
 }
 
@@ -49,6 +50,7 @@ impl fmt::Display for StateError {
             Self::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
             Self::DeserializationError(msg) => write!(f, "Deserialization error: {}", msg),
             Self::ChecksumMismatch => write!(f, "Checkpoint checksum mismatch"),
+            Self::InvalidCheckpoint(reason) => write!(f, "Invalid checkpoint: {reason}"),
             Self::ReconstructionFailed(msg) => write!(f, "Physical reconstruction failed: {}", msg),
         }
     }

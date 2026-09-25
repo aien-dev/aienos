@@ -5,7 +5,7 @@ use crate::id::{LogicalAgentId, LogicalBranchId};
 use crate::incarnation::{ComputeState, ExecutionIncarnation, LogicalBranch, SequenceId};
 use aienos_kernel::crypto::sha256;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::RwLock;
 
@@ -62,7 +62,14 @@ impl AgentStateManager {
     /// Register a new agent and instantiate its root branch.
     pub fn register_agent(&self, agent_id: LogicalAgentId, timestamp: u64) -> LogicalBranchId {
         let mut inner = self.inner.write().unwrap();
-        if !inner.agents.contains(&agent_id) {
+        let root_id = LogicalBranchId::root_branch(agent_id);
+        if inner.agents.contains(&agent_id) {
+            // Provisioning is not restart. Re-registering a durable identity
+            // must not replace its root branch and discard committed history.
+            if inner.branches.contains_key(&root_id) {
+                return root_id;
+            }
+        } else {
             inner.agents.push(agent_id);
         }
 
@@ -140,12 +147,13 @@ impl AgentStateManager {
             return Err(StateError::AgentNotFound(agent_id));
         }
 
-        let agent_branches: Vec<LogicalBranch> = inner
+        let mut agent_branches: Vec<LogicalBranch> = inner
             .branches
             .values()
             .filter(|b| b.agent_id == agent_id)
             .cloned()
             .collect();
+        agent_branches.sort_unstable_by_key(|branch| branch.branch_id);
 
         let snapshot = AgentSnapshot {
             agents: vec![agent_id],
@@ -184,20 +192,106 @@ impl AgentStateManager {
         let snapshot: AgentSnapshot = serde_json::from_str(&envelope.payload_json)
             .map_err(|e| StateError::DeserializationError(e.to_string()))?;
 
+        // Ordered maps keep validation (which reason is reported first) and
+        // the re-instantiated incarnation sequence ids deterministic.
+        let mut branches = BTreeMap::<LogicalBranchId, LogicalBranch>::new();
+        let mut child_counts = BTreeMap::<LogicalBranchId, u64>::new();
+        if snapshot.agents.is_empty() {
+            return Err(StateError::InvalidCheckpoint("no durable agent identity"));
+        }
+        for (index, agent_id) in snapshot.agents.iter().enumerate() {
+            if snapshot.agents[..index].contains(agent_id) {
+                return Err(StateError::InvalidCheckpoint("duplicate agent identity"));
+            }
+        }
+        for branch in snapshot.branches {
+            if !snapshot.agents.contains(&branch.agent_id) {
+                return Err(StateError::InvalidCheckpoint(
+                    "branch refers to an absent agent identity",
+                ));
+            }
+            let branch_id = branch.branch_id;
+            let parent = branch.parent_branch_id;
+            if branches.insert(branch_id, branch).is_some() {
+                return Err(StateError::InvalidCheckpoint("duplicate branch identity"));
+            }
+            if let Some(parent) = parent {
+                // Bounded by the number of decoded branches; cannot overflow.
+                *child_counts.entry(parent).or_insert(0) += 1;
+            }
+        }
+
+        // A valid snapshot has exactly one deterministic root branch per
+        // agent, and every child points to an existing branch of that agent.
+        for agent_id in &snapshot.agents {
+            let root_id = LogicalBranchId::root_branch(*agent_id);
+            let root = branches
+                .get(&root_id)
+                .ok_or(StateError::InvalidCheckpoint("root branch is missing"))?;
+            if root.agent_id != *agent_id
+                || root.parent_branch_id.is_some()
+                || root.lineage.root_agent != *agent_id
+                || root.lineage.depth != 0
+                || !root.lineage.ancestor_branches.is_empty()
+            {
+                return Err(StateError::InvalidCheckpoint("root branch is inconsistent"));
+            }
+        }
+        for branch in branches.values() {
+            let Some(parent_id) = branch.parent_branch_id else {
+                if branch.branch_id != LogicalBranchId::root_branch(branch.agent_id) {
+                    return Err(StateError::InvalidCheckpoint("unexpected root branch"));
+                }
+                continue;
+            };
+            let parent = branches
+                .get(&parent_id)
+                .ok_or(StateError::InvalidCheckpoint("parent branch is missing"))?;
+            let expected_depth = parent.lineage.depth.checked_add(1);
+            let mut expected_ancestors = parent.lineage.ancestor_branches.clone();
+            expected_ancestors.push(branch.branch_id);
+            if parent.agent_id != branch.agent_id
+                || branch.lineage.root_agent != parent.lineage.root_agent
+                || Some(branch.lineage.depth) != expected_depth
+                || branch.lineage.ancestor_branches != expected_ancestors
+            {
+                return Err(StateError::InvalidCheckpoint(
+                    "branch lineage is inconsistent",
+                ));
+            }
+        }
+
+        // Fork indexes are implicit in the current snapshot schema. Existing
+        // branches are append-only, so each parent's child count is its next
+        // fork index. Validate the contiguous deterministic IDs before using
+        // that count; otherwise fail closed instead of risking an overwrite.
+        for (parent_id, count) in &child_counts {
+            for child_index in 0..*count {
+                let child_id = LogicalBranchId::derive(*parent_id, child_index);
+                if !branches
+                    .get(&child_id)
+                    .is_some_and(|child| child.parent_branch_id == Some(*parent_id))
+                {
+                    return Err(StateError::InvalidCheckpoint(
+                        "branch fork indexes are not contiguous",
+                    ));
+                }
+            }
+        }
+
         let manager = Self::new(new_incarnation_id);
         {
             let mut inner = manager.inner.write().unwrap();
             inner.agents = snapshot.agents;
-            for branch in snapshot.branches {
-                let branch_id = branch.branch_id;
-                inner.branches.insert(branch_id, branch);
-
+            inner.branch_child_counters = child_counts.into_iter().collect();
+            for branch_id in branches.keys().copied() {
                 // Re-instantiate ephemeral incarnation with EVICTED physical state
                 let seq = manager.next_sequence_id.fetch_add(1, Ordering::SeqCst);
                 let mut inc = ExecutionIncarnation::new(new_incarnation_id, seq);
                 inc.evict();
                 inner.incarnations.insert(branch_id, inc);
             }
+            inner.branches = branches.into_iter().collect();
         }
 
         Ok(manager)
@@ -302,6 +396,12 @@ impl AgentStateAbi for AgentStateManager {
 mod tests {
     use super::*;
 
+    fn sealed_snapshot(snapshot: &AgentSnapshot) -> Vec<u8> {
+        let payload_json = serde_json::to_string(snapshot).unwrap();
+        let hash = sha256::hash(payload_json.as_bytes());
+        serde_json::to_vec(&CheckpointEnvelope { hash, payload_json }).unwrap()
+    }
+
     #[test]
     fn test_checkpoint_reboot_and_reconstruction() {
         let manager = AgentStateManager::new(1);
@@ -357,6 +457,392 @@ mod tests {
         );
         assert_eq!(inc_reconstructed.physical_state.allocated_tokens_in_kv, 52);
         assert!(inc_reconstructed.physical_state.kv_page_table_ref.is_some());
+    }
+
+    #[test]
+    fn restore_rebuilds_fork_counters_without_reusing_branch_ids() {
+        let manager = AgentStateManager::new(1);
+        let agent_id = LogicalAgentId::from_seed("fork-counter-reboot-test");
+        let root = manager.register_agent(agent_id, 100);
+        let child0 = manager.fork_branch(root).unwrap();
+        manager.append_tokens(child0, &[11, 12]).unwrap();
+        let child1 = manager.fork_branch(root).unwrap();
+
+        let checkpoint = manager.export_checkpoint(agent_id).unwrap();
+        let restored = AgentStateManager::restore_from_checkpoint(&checkpoint, 2).unwrap();
+        let child2 = restored.fork_branch(root).unwrap();
+        assert_ne!(child2, child0);
+        assert_ne!(child2, child1);
+        assert_eq!(restored.get_branch(&child0).unwrap().token_history.len(), 2);
+
+        let checkpoint_after_fork = restored.export_checkpoint(agent_id).unwrap();
+        let restored_again =
+            AgentStateManager::restore_from_checkpoint(&checkpoint_after_fork, 3).unwrap();
+        let child3 = restored_again.fork_branch(root).unwrap();
+        assert_ne!(child3, child0);
+        assert_ne!(child3, child1);
+        assert_ne!(child3, child2);
+        assert_eq!(
+            restored_again.get_branch(&child2).unwrap().parent_branch_id,
+            Some(root)
+        );
+    }
+
+    #[test]
+    fn checkpoint_bytes_are_stable_across_restore() {
+        let manager = AgentStateManager::new(7);
+        let agent_id = LogicalAgentId::from_seed("canonical-checkpoint-test");
+        let root = manager.register_agent(agent_id, 100);
+        for token in 0..24 {
+            let child = manager.fork_branch(root).unwrap();
+            manager.append_tokens(child, &[token]).unwrap();
+        }
+
+        let first = manager.export_checkpoint(agent_id).unwrap();
+        let restored = AgentStateManager::restore_from_checkpoint(&first, 7).unwrap();
+        let second = restored.export_checkpoint(agent_id).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn restore_refuses_checkpoint_without_durable_identity() {
+        let snapshot = AgentSnapshot {
+            agents: Vec::new(),
+            branches: Vec::new(),
+            snapshot_incarnation: 5,
+        };
+        let checkpoint = sealed_snapshot(&snapshot);
+        assert_eq!(
+            AgentStateManager::restore_from_checkpoint(&checkpoint, 6).err(),
+            Some(StateError::InvalidCheckpoint("no durable agent identity"))
+        );
+    }
+
+    #[test]
+    fn restore_rejects_noncontiguous_persisted_fork_indexes() {
+        let manager = AgentStateManager::new(1);
+        let agent_id = LogicalAgentId::from_seed("fork-gap-test");
+        let root = manager.register_agent(agent_id, 100);
+        let child0 = manager.fork_branch(root).unwrap();
+        let _child1 = manager.fork_branch(root).unwrap();
+
+        let checkpoint = manager.export_checkpoint(agent_id).unwrap();
+        let envelope: CheckpointEnvelope = serde_json::from_slice(&checkpoint).unwrap();
+        let mut snapshot: AgentSnapshot = serde_json::from_str(&envelope.payload_json).unwrap();
+        snapshot
+            .branches
+            .retain(|branch| branch.branch_id != child0);
+        let inconsistent_checkpoint = sealed_snapshot(&snapshot);
+
+        assert_eq!(
+            AgentStateManager::restore_from_checkpoint(&inconsistent_checkpoint, 2).err(),
+            Some(StateError::InvalidCheckpoint(
+                "branch fork indexes are not contiguous"
+            ))
+        );
+    }
+
+    #[test]
+    fn re_registering_an_existing_identity_does_not_reset_its_root_branch() {
+        let manager = AgentStateManager::new(1);
+        let agent_id = LogicalAgentId::from_seed("idempotent-provisioning-test");
+        let root = manager.register_agent(agent_id, 100);
+        manager
+            .append_tokens(root, &[4, 8, 15, 16, 23, 42])
+            .unwrap();
+
+        assert_eq!(manager.register_agent(agent_id, 999), root);
+        let branch = manager.get_branch(&root).unwrap();
+        assert_eq!(branch.created_at_utc, 100);
+        assert_eq!(branch.token_history.tokens(), [4, 8, 15, 16, 23, 42]);
+    }
+
+    /// Branch tree used by the round-trip and fail-closed tests:
+    /// root -> {child0 -> {grandchild}, child1}.
+    struct Tree {
+        agent_id: LogicalAgentId,
+        root: LogicalBranchId,
+        child0: LogicalBranchId,
+        child1: LogicalBranchId,
+        grandchild: LogicalBranchId,
+    }
+
+    fn build_tree(manager: &AgentStateManager, seed: &str) -> Tree {
+        let agent_id = LogicalAgentId::from_seed(seed);
+        let root = manager.register_agent(agent_id, 100);
+        manager.append_tokens(root, &[1, 2, 3]).unwrap();
+        let child0 = manager.fork_branch(root).unwrap();
+        manager.append_tokens(child0, &[4]).unwrap();
+        manager.add_epistemic_ref(child0, [9u8; 16]).unwrap();
+        let child1 = manager.fork_branch(root).unwrap();
+        let grandchild = manager.fork_branch(child0).unwrap();
+        manager.append_tokens(grandchild, &[5, 6]).unwrap();
+        Tree {
+            agent_id,
+            root,
+            child0,
+            child1,
+            grandchild,
+        }
+    }
+
+    fn decode_snapshot(checkpoint: &[u8]) -> AgentSnapshot {
+        let envelope: CheckpointEnvelope = serde_json::from_slice(checkpoint).unwrap();
+        serde_json::from_str(&envelope.payload_json).unwrap()
+    }
+
+    fn branch_mut(snapshot: &mut AgentSnapshot, id: LogicalBranchId) -> &mut LogicalBranch {
+        snapshot
+            .branches
+            .iter_mut()
+            .find(|branch| branch.branch_id == id)
+            .unwrap()
+    }
+
+    /// Export a valid tree, let `tamper` corrupt the decoded snapshot, reseal
+    /// it with a correct hash, and return the restore error.
+    fn restore_tampered(tamper: impl FnOnce(&Tree, &mut AgentSnapshot)) -> StateError {
+        let manager = AgentStateManager::new(1);
+        let tree = build_tree(&manager, "fail-closed-restore-test");
+        let checkpoint = manager.export_checkpoint(tree.agent_id).unwrap();
+        // Sanity: the untampered checkpoint is accepted.
+        assert!(AgentStateManager::restore_from_checkpoint(&checkpoint, 2).is_ok());
+        let mut snapshot = decode_snapshot(&checkpoint);
+        tamper(&tree, &mut snapshot);
+        match AgentStateManager::restore_from_checkpoint(&sealed_snapshot(&snapshot), 2) {
+            Ok(_) => panic!("tampered checkpoint was accepted"),
+            Err(error) => error,
+        }
+    }
+
+    #[test]
+    fn restore_round_trips_branches_and_next_fork_indexes_exactly() {
+        let manager = AgentStateManager::new(1);
+        let tree = build_tree(&manager, "exact-round-trip-test");
+        let checkpoint = manager.export_checkpoint(tree.agent_id).unwrap();
+        let restored = AgentStateManager::restore_from_checkpoint(&checkpoint, 2).unwrap();
+
+        let original = decode_snapshot(&checkpoint);
+        assert_eq!(original.branches.len(), 4);
+        for branch in &original.branches {
+            assert_eq!(
+                restored.get_branch(&branch.branch_id).as_ref(),
+                Some(branch)
+            );
+            let inc = restored.get_incarnation(&branch.branch_id).unwrap();
+            assert_eq!(inc.incarnation_id, 2);
+            assert_eq!(inc.physical_state.compute_state, ComputeState::Evicted);
+        }
+        let grandchild = restored.get_branch(&tree.grandchild).unwrap();
+        assert_eq!(grandchild.parent_branch_id, Some(tree.child0));
+        assert_eq!(
+            grandchild.lineage.ancestor_branches,
+            [tree.child0, tree.grandchild]
+        );
+        assert_eq!(grandchild.lineage.depth, 2);
+
+        // Each parent's next fork continues exactly where the original left off,
+        // and matches what the never-restarted manager would allocate.
+        for (parent, next_index) in [(tree.root, 2), (tree.child0, 1), (tree.child1, 0)] {
+            let expected = LogicalBranchId::derive(parent, next_index);
+            assert_eq!(restored.fork_branch(parent).unwrap(), expected);
+            assert_eq!(manager.fork_branch(parent).unwrap(), expected);
+        }
+        // Fresh forks did not overwrite any restored branch.
+        for branch in &original.branches {
+            assert_eq!(
+                restored.get_branch(&branch.branch_id).as_ref(),
+                Some(branch)
+            );
+        }
+        assert_eq!(
+            restored.fork_branch(tree.grandchild).unwrap(),
+            LogicalBranchId::derive(tree.grandchild, 0)
+        );
+    }
+
+    #[test]
+    fn re_registering_keeps_forked_branches_and_fork_indexes() {
+        let manager = AgentStateManager::new(1);
+        let tree = build_tree(&manager, "re-register-keeps-forks-test");
+        let before = decode_snapshot(&manager.export_checkpoint(tree.agent_id).unwrap());
+
+        assert_eq!(manager.register_agent(tree.agent_id, 999), tree.root);
+        let after = decode_snapshot(&manager.export_checkpoint(tree.agent_id).unwrap());
+        assert_eq!(before.branches, after.branches);
+        assert_eq!(
+            manager.fork_branch(tree.root).unwrap(),
+            LogicalBranchId::derive(tree.root, 2)
+        );
+
+        // Re-provisioning after a restart is also a no-op on committed history.
+        let checkpoint = manager.export_checkpoint(tree.agent_id).unwrap();
+        let restored = AgentStateManager::restore_from_checkpoint(&checkpoint, 2).unwrap();
+        assert_eq!(restored.register_agent(tree.agent_id, 1234), tree.root);
+        assert_eq!(
+            decode_snapshot(&restored.export_checkpoint(tree.agent_id).unwrap()).branches,
+            decode_snapshot(&checkpoint).branches
+        );
+        assert_eq!(
+            restored.fork_branch(tree.root).unwrap(),
+            LogicalBranchId::derive(tree.root, 3)
+        );
+    }
+
+    #[test]
+    fn restore_rejects_duplicate_agent_identity() {
+        let error = restore_tampered(|tree, snapshot| snapshot.agents.push(tree.agent_id));
+        assert_eq!(
+            error,
+            StateError::InvalidCheckpoint("duplicate agent identity")
+        );
+    }
+
+    #[test]
+    fn restore_rejects_branch_of_absent_agent() {
+        let error = restore_tampered(|_, snapshot| {
+            let stranger = LogicalAgentId::from_seed("absent-agent");
+            snapshot.branches.push(LogicalBranch::new_root(stranger, 1));
+        });
+        assert_eq!(
+            error,
+            StateError::InvalidCheckpoint("branch refers to an absent agent identity")
+        );
+    }
+
+    #[test]
+    fn restore_rejects_duplicate_branch_identity() {
+        let error = restore_tampered(|tree, snapshot| {
+            let copy = branch_mut(snapshot, tree.child1).clone();
+            snapshot.branches.push(copy);
+        });
+        assert_eq!(
+            error,
+            StateError::InvalidCheckpoint("duplicate branch identity")
+        );
+    }
+
+    #[test]
+    fn restore_rejects_missing_root_branch() {
+        let error = restore_tampered(|tree, snapshot| {
+            snapshot
+                .branches
+                .retain(|branch| branch.branch_id != tree.root);
+        });
+        assert_eq!(
+            error,
+            StateError::InvalidCheckpoint("root branch is missing")
+        );
+    }
+
+    #[test]
+    fn restore_rejects_inconsistent_root_branch() {
+        type Tamper = fn(&mut LogicalBranch);
+        let tampers: [Tamper; 4] = [
+            |root| root.lineage.depth = 1,
+            |root| root.lineage.ancestor_branches.push(root.branch_id),
+            |root| root.lineage.root_agent = LogicalAgentId::from_seed("other"),
+            |root| root.parent_branch_id = Some(root.branch_id),
+        ];
+        for tamper in tampers {
+            let error = restore_tampered(|tree, snapshot| tamper(branch_mut(snapshot, tree.root)));
+            assert_eq!(
+                error,
+                StateError::InvalidCheckpoint("root branch is inconsistent")
+            );
+        }
+
+        // Root branch id of agent A carrying agent B's identity.
+        let error = restore_tampered(|tree, snapshot| {
+            let other = LogicalAgentId::from_seed("other");
+            snapshot.agents.push(other);
+            snapshot.branches.push(LogicalBranch::new_root(other, 1));
+            branch_mut(snapshot, tree.root).agent_id = other;
+        });
+        assert_eq!(
+            error,
+            StateError::InvalidCheckpoint("root branch is inconsistent")
+        );
+    }
+
+    #[test]
+    fn restore_rejects_parentless_non_root_branch() {
+        let error = restore_tampered(|tree, snapshot| {
+            branch_mut(snapshot, tree.child1).parent_branch_id = None;
+        });
+        assert_eq!(
+            error,
+            StateError::InvalidCheckpoint("unexpected root branch")
+        );
+    }
+
+    #[test]
+    fn restore_rejects_branch_with_missing_parent() {
+        let error = restore_tampered(|tree, snapshot| {
+            snapshot
+                .branches
+                .retain(|branch| branch.branch_id != tree.child0);
+        });
+        assert_eq!(
+            error,
+            StateError::InvalidCheckpoint("parent branch is missing")
+        );
+    }
+
+    #[test]
+    fn restore_rejects_inconsistent_lineage() {
+        type Tamper = fn(&Tree, &mut AgentSnapshot);
+        let tampers: [Tamper; 4] = [
+            |tree, snapshot| branch_mut(snapshot, tree.grandchild).lineage.depth = 3,
+            |tree, snapshot| {
+                branch_mut(snapshot, tree.grandchild)
+                    .lineage
+                    .ancestor_branches
+                    .remove(0);
+            },
+            |tree, snapshot| {
+                branch_mut(snapshot, tree.grandchild).lineage.root_agent =
+                    LogicalAgentId::from_seed("other");
+            },
+            // Parent/child cycle: child0 <-> child1.
+            |tree, snapshot| {
+                branch_mut(snapshot, tree.child0).parent_branch_id = Some(tree.child1);
+                branch_mut(snapshot, tree.child1).parent_branch_id = Some(tree.child0);
+            },
+        ];
+        for tamper in tampers {
+            assert_eq!(
+                restore_tampered(tamper),
+                StateError::InvalidCheckpoint("branch lineage is inconsistent")
+            );
+        }
+
+        // Child of another agent's branch.
+        let error = restore_tampered(|tree, snapshot| {
+            let other = LogicalAgentId::from_seed("other");
+            snapshot.agents.push(other);
+            snapshot.branches.push(LogicalBranch::new_root(other, 1));
+            branch_mut(snapshot, tree.grandchild).agent_id = other;
+        });
+        assert_eq!(
+            error,
+            StateError::InvalidCheckpoint("branch lineage is inconsistent")
+        );
+    }
+
+    #[test]
+    fn restore_rejects_child_id_not_derived_from_fork_index() {
+        let error = restore_tampered(|tree, snapshot| {
+            // Consistent lineage, but child1 carries an id for fork index 7.
+            let bogus = LogicalBranchId::derive(tree.root, 7);
+            let child1 = branch_mut(snapshot, tree.child1);
+            child1.branch_id = bogus;
+            child1.lineage.ancestor_branches = vec![bogus];
+        });
+        assert_eq!(
+            error,
+            StateError::InvalidCheckpoint("branch fork indexes are not contiguous")
+        );
     }
 
     #[test]
