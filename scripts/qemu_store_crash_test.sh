@@ -33,6 +33,8 @@ commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 AIENOS_COMMIT="${commit}" AIENOS_RESTART_SECS=1 cargo build --quiet --release \
     -p aienos-boot --target aarch64-unknown-uefi --features store-qual --bin aienos-handoff \
     --target-dir "${target_dir}" || { echo "build failed"; exit 2; }
+cargo build --quiet --release -p aienos-store-tool || { echo "store tool build failed"; exit 2; }
+tool="target/release/aienos-store-tool"
 
 work="$(mktemp -d)"
 qemu_pid=""
@@ -44,13 +46,11 @@ cp "${target_dir}/aarch64-unknown-uefi/release/aienos-handoff.efi" "${work}/esp/
 
 image="${work}/nvme.img"
 serial="${work}/serial.log"
-cfgfile="${work}/cfg.bin"
 
 fresh_image() { rm -f "${image}"; truncate -s "${img_bytes}" "${image}"; }
 
 write_cfg() { # mode settle
-    python3 -c "open('${cfgfile}','wb').write(bytes([$1,$2]) + bytes(4094))"
-    dd if="${cfgfile}" of="${image}" bs="${lba_bytes}" seek="${cfg_lba}" conv=notrunc status=none
+    "${tool}" cfg "${image}" "$(( cfg_lba * lba_bytes ))" "$1" "$2" >/dev/null || { echo "cfg write failed"; exit 2; }
 }
 
 # run_qemu <marker> [kill]
