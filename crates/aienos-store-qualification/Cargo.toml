@@ -11,3 +11,4 @@ description = "Independent adversarial qualification oracle and test suite for A
 sha2 = "0.10"
 serde = { workspace = true }
 serde_json = { workspace = true }
+aienos-kernel = { path = "../aienos-kernel" }
