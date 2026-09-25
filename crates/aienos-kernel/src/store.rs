@@ -1,4 +1,4 @@
-//! Host-tested implementation of ADR 0003 storage semantics.
+//! Legacy ADR 0003 storage plus the canonical System Store v1 engine.
 //!
 //! Note: This module provides a host-tested implementation of ADR 0003 storage semantics,
 //! not yet native AIENOS storage on bare-metal block devices.
@@ -6,9 +6,15 @@
 //! Content-addressed extents (`model/<hash>`, `cortex/wal`, `agent/<id>`)
 //! rather than a general-purpose POSIX filesystem.
 
-/// Canonical System Store v1 byte format. This module does not provide a
-/// persistent transaction or mount implementation.
+#[allow(non_upper_case_globals)] // checkpoint exposes PascalCase interoperability aliases
+pub mod checkpoint;
+pub mod device;
+pub mod engine;
+/// Canonical System Store v1 format and bounded Store-unit mount/transaction engine.
 pub mod v1;
+pub use checkpoint::{Checkpoint, CheckpointHook, NullCheckpointHook};
+pub use device::{StoreDeviceAdapter, StoreDeviceError};
+pub use engine::{MountError, MountState, ObjectInput, Store, StoreDevice, StoreError};
 
 use crate::block::{BlockDevice, BlockError};
 use crate::crypto::sha256;
