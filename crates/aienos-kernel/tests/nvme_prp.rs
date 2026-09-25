@@ -57,10 +57,9 @@ fn offset_plus_length_overflow_is_invalid() {
 
 #[test]
 fn max_address_short_length_is_invalid_without_panic() {
-    // Contract: address = usize::MAX, length = 2 -> Invalid, no panic.
-    // The baseline does not validate the end address; `build_prps` computes
-    // pages == 2 and then overflows u64 in `second` (debug panic / release wrap),
-    // so this fails until the end-address overflow is checked.
+    // Regression test for the end-address overflow fix: address = usize::MAX,
+    // length = 2 computes pages == 2, and the second data page would overflow
+    // u64. It must be rejected as Invalid with no panic and no wrap.
     let outcome = std::panic::catch_unwind(|| {
         let mut list = [0u64; 0];
         build_prps(usize::MAX as u64, 2, P4K, 0, &mut list)
