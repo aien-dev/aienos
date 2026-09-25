@@ -1,16 +1,11 @@
 [package]
-name = "aienos-kernel"
+name = "aienos-artifact"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "AIENOS bare-metal no_std kernel substrate for aarch64"
-
-[features]
-default = ["std"]
-std = []
+description = "Canonical no_std parser and identity for AIENOS Binary Artifact v0"
 
 [dependencies]
-aienos-accel = { path = "../aienos-accel" }
 aienos-crypto = { path = "../aienos-crypto" }

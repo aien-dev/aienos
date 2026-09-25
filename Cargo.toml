@@ -8,6 +8,8 @@ members = [
     "crates/aienos-c1-tree",
     "crates/aienos-boot",
     "crates/aienos-accel",
+    "crates/aienos-crypto",
+    "crates/aienos-artifact",
     "crates/aienos-evidence",
 ]
 
@@ -19,6 +21,8 @@ license = "Apache-2.0 WITH LLVM-exception"
 repository = "https://github.com/aien-dev/aienos"
 
 [workspace.dependencies]
+aienos-crypto = { path = "crates/aienos-crypto" }
+aienos-artifact = { path = "crates/aienos-artifact" }
 aienos-kernel = { path = "crates/aienos-kernel" }
 aienos-agent-state = { path = "crates/aienos-agent-state" }
 aienos-cortex = { path = "crates/aienos-cortex" }
