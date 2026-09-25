@@ -149,6 +149,9 @@ are reserved before pages are installed. Failure releases every reservation.
 
 The public key is obtained only from the selected local trust-anchor set by
 fingerprint. The artifact never supplies a key that can make itself trusted.
+Ed25519 means the RFC 8032 pure Ed25519 operation over the exact domain-plus-ID
+message shown below; Ed25519ph and Ed25519ctx are not interchangeable v0
+encodings.
 
 ## 3. Canonical identity and signature
 
@@ -160,13 +163,13 @@ the signer fingerprint and signature bytes are not.
 
 ```text
 ArtifactId = SHA256(
-    "AIENOS-ARTIFACT-V1\\0"
+    "AIENOS-ARTIFACT-V1\0"
     || canonical_unsigned_artifact
 )
 
 signature = Ed25519.Sign(
     private_key,
-    "AIENOS-ARTIFACT-SIGNATURE-V1\\0" || ArtifactId
+    "AIENOS-ARTIFACT-SIGNATURE-V1\0" || ArtifactId
 )
 ```
 
@@ -220,7 +223,7 @@ u64, maximum elapsed ticks u64, maximum syscalls u32, and reserved u32 zero.
 Each record uses the same 48-byte field encoding as a capability request,
 but `rights`, `max_operations`, `max_bytes`, and object range fields describe
 the greatest grant policy allows for that resource. The digest is
-`SHA256("AIENOS-ADMISSION-POLICY-V1\\0" || exact_policy_bytes)`. A kernel may
+`SHA256("AIENOS-ADMISSION-POLICY-V1\0" || exact_policy_bytes)`. A kernel may
 apply stricter compiled-in hard maxima; these are part of its verifier/build
 identity and cannot be relaxed by artifact metadata.
 
@@ -254,11 +257,12 @@ elliptic-curve cryptography locally.
 
 The ordinary production trust-anchor set is empty and fails closed. A build
 feature named `seed0b-test-anchor` may add one known qualification public key;
-the boot report must visibly identify a SEED-0B qualification build. Any
-matching private test material is explicitly TEST ONLY, kept out of release
-builds, and cannot enroll Secure Boot keys or alter TPM state. No owner root
-or production receipt key is created in Phase 2; those ceremonies belong to
-M5.
+the boot report must visibly identify a SEED-0B qualification build. The
+matching private test key is explicitly TEST ONLY and exists only in the
+qualification signer/test fixture; it is never embedded in a kernel image,
+boot media, or ordinary/release tooling defaults. It cannot enroll Secure
+Boot keys or alter TPM state. No owner root or production receipt key is
+created in Phase 2; those ceremonies belong to M5.
 
 ## 7. Admission Receipt v0
 
@@ -295,7 +299,7 @@ presence flags, and nonzero absent optional fields are rejected.
 | 256 | 32 | granted_capability_digest | digest of canonical grants; zero if rejected before grants |
 | 288 | 32 | resource_envelope_digest | digest of the canonical 48-byte envelope |
 | 320 | 32 | verifier_identity | stable verifier/build identity digest |
-| 352 | 32 | machine_id | MachineId, or all zero when absent |
+| 352 | 32 | machine_id_digest | SHA-256 identity digest, or all zero when absent |
 | 384 | 16 | generation_context_id | generation u64 then context ID u64; both zero when absent |
 | 400 | 2 | receipt_signature_algorithm | `1` = Ed25519 |
 | 402 | 2 | reserved | zero |
@@ -307,16 +311,19 @@ All digests are SHA-256 outputs in their ordinary 32-byte order. Compute:
 
 ```text
 requested_capability_digest = SHA256(
-    "AIENOS-ARTIFACT-CAP-REQUESTS-V1\\0" || exact_sorted_request_records
+    "AIENOS-ARTIFACT-CAP-REQUESTS-V1\0" || exact_sorted_request_records
 )
 granted_capability_digest = SHA256(
-    "AIENOS-ADMISSION-CAP-GRANTS-V1\\0" || exact_sorted_grant_records
+    "AIENOS-ADMISSION-CAP-GRANTS-V1\0" || exact_sorted_grant_records
 )
 resource_envelope_digest = SHA256(
-    "AIENOS-ARTIFACT-RESOURCES-V1\\0" || exact_48_byte_resource_envelope
+    "AIENOS-ARTIFACT-RESOURCES-V1\0" || exact_48_byte_resource_envelope
 )
 verifier_identity = SHA256(
-    "AIENOS-VERIFIER-IDENTITY-V1\\0" || verifier_build_identity_bytes
+    "AIENOS-VERIFIER-IDENTITY-V1\0" || verifier_build_identity_bytes
+)
+machine_id_digest = SHA256(
+    "AIENOS-MACHINE-ID-V1\0" || canonical_provisioned_MachineId_bytes
 )
 ```
 
@@ -324,6 +331,9 @@ These use canonical byte encodings, never Rust memory. The verifier build
 identity bytes are the lowercase 40-byte Git commit ID, target and ABI as
 u16 little-endian values, and a one-byte qualification feature ID (zero for
 ordinary builds; one for `seed0b-test-anchor`).
+The machine ID slot contains this digest of the opaque provisioned MachineId,
+not hardware make/model data. If M5 has not provisioned a MachineId, the
+field is all zero and the presence flag is clear.
 
 ### 7.2 Receipt digest and signature
 
@@ -334,12 +344,12 @@ range.
 
 ```text
 ReceiptDigest = SHA256(
-    "AIENOS-ADMISSION-RECEIPT-V1\\0" || receipt_bytes[0..400]
+    "AIENOS-ADMISSION-RECEIPT-V1\0" || receipt_bytes[0..400]
 )
 
 receipt_signature = Ed25519.Sign(
     receipt_private_key,
-    "AIENOS-ADMISSION-RECEIPT-SIGNATURE-V1\\0" || ReceiptDigest
+    "AIENOS-ADMISSION-RECEIPT-SIGNATURE-V1\0" || ReceiptDigest
 )
 ```
 
