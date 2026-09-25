@@ -115,11 +115,11 @@ check "${qual}" "qualification build is labelled TEST ONLY" \
     "artifact_trust: seed0b-test qualification build — TEST ONLY"
 exec_id="$(id_prefix P25EXEC.AIEN)"
 check "${qual}" "P25EXEC admitted and executed its exact authenticated bytes, exit 0, caps revoked, reclaimed" \
-    "artifact: P25EXEC\.AIEN admitted id=${exec_id} tier=seed0b-test exec=exited:0x0 bytes=identified=verified=admitted=mapped=executed wx=enforced caps=1 revoked=yes reclaimed=yes"
+    "artifact: P25EXEC\.AIEN admitted id=${exec_id} tier=seed0b-test exec=exited:0x0 bytes=identified=verified=admitted=mapped=executed wx=enforced caps=1 revoked=yes reclaimed=yes frames=[0-9]+ syscalls=3 reads=1 denials=1$"
 check "${qual}" "P25WX admitted then killed by W^X fault on its code page, reclaimed" \
-    "artifact: P25WX\.AIEN admitted id=$(id_prefix P25WX.AIEN) tier=seed0b-test exec=fault:code-write .*wx=enforced .*reclaimed=yes"
+    "artifact: P25WX\.AIEN admitted id=$(id_prefix P25WX.AIEN) tier=seed0b-test exec=fault:code-write .*wx=enforced caps=0 revoked=yes reclaimed=yes frames=[0-9]+ syscalls=0 reads=0 denials=0$"
 check "${qual}" "P25SPIN admitted then killed at its time budget, reclaimed" \
-    "artifact: P25SPIN\.AIEN admitted id=$(id_prefix P25SPIN.AIEN) tier=seed0b-test exec=timeout .*reclaimed=yes"
+    "artifact: P25SPIN\.AIEN admitted id=$(id_prefix P25SPIN.AIEN) tier=seed0b-test exec=timeout .*wx=enforced caps=0 revoked=yes reclaimed=yes frames=[0-9]+ syscalls=0 reads=0 denials=0$"
 check "${qual}" "P25TAMP (payload byte flipped after signing) rejected BadSignature, reclaimed" \
     "artifact: P25TAMP\.AIEN rejected stage=(received|staged|verified) reason=BadSignature reclaimed=yes"
 check "${qual}" "final report summarises three admitted, one rejected" \
