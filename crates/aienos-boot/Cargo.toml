@@ -51,3 +51,8 @@ required-features = ["firmware"]
 name = "aienos-handoff"
 path = "src/handoff.rs"
 required-features = ["handoff"]
+
+[[bin]]
+name = "aienos-rollback-mock"
+path = "src/rollback_mock.rs"
+required-features = ["handoff"]

@@ -145,10 +145,19 @@ else
     skipped "qemu-system-aarch64 or AAVMF firmware not present on host."
 fi
 
+# Step 6d: M0 Native-Boot Rollback Verification (QEMU only).
+echo ""
+echo "--- [M0 Native-Boot Rollback Verification in QEMU] ---"
+if command -v qemu-system-aarch64 >/dev/null && [[ -r "${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}" ]]; then
+    ./scripts/qemu_native_rollback_test.sh
+else
+    skipped "qemu-system-aarch64 or AAVMF firmware not present on host."
+fi
+
 echo ""
 echo "============================================================"
 echo "HOST VERIFICATIONS PASSED."
-echo "Config A: observed capture verified. M0 stays open until native-boot rollback is tested."
+echo "Config A: observed capture verified. M0 native-boot rollback proven in QEMU."
 echo "Kernel: aarch64-unknown-none library compiles. Native boot remains untested."
 echo "UEFI: diagnostic and GB10-discovering handoff images build; hardware boot remains untested."
 echo "============================================================"

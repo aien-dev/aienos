@@ -1,114 +1,111 @@
-# First native boot on Machine 1: attended, one time
+# Machine 1 Native Boot Qualification Procedure: Attended, One-Time, Secure Boot ON
 
-This procedure boots the `aienos-handoff` first-boot evidence image on the DGX
-Spark exactly once and brings the machine back to Linux on its own. It is the
-M2 hardware gate and the rollback test that closes M0.
+This document defines the safe, operator-attended qualification procedure for one-time native candidate boots of AIENOS on NVIDIA DGX Spark ("Machine 1", `spark-b87b`).
 
-**Gate:** Machine 1 leaves firmware, enters native AIENOS code with no Linux
-underneath, produces independently recoverable evidence that it did so, and
-returns to the existing system without damaging it.
+---
 
-## What the image does
+## 1. Current Qualification Status
 
-1. **Before firmware exit:** discovers the GB10 (PCI identity, BAR0, PMC boot
-   registers), the CPU topology from the ACPI MADT (cores per efficiency class
-   and the boot core's class), and the firmware display mode. It prints this
-   pre-exit report on screen and saves it to `\EFI\AIENOS\BOOTREPORT.TXT`.
-2. **After firmware exit:** installs AIENOS exception vectors, writes an early
-   progress record, validates the firmware memory map, and enters the kernel.
-   The final report goes to the screen, the `AienosBootReportV1` firmware
-   variable ([ADR 0008](adr/0008-temporary-bring-up-firmware-report-exception.md))
-   and the Spark UART (bounded).
-3. **On a panic or CPU fault:** reports the last boot stage, the panic message
-   or the fault registers (ESR, ELR, FAR, SPSR) the same three ways.
-4. Counts down 30 seconds, then resets (PSCI first). BootNext is used up, so
-   the machine returns to Linux.
-
-The image does not touch the Linux installation, its partitions, or BootOrder.
-
-## Before you start (at the machine)
-
-1. **Recovery media:** plug in the `AIENOSRECOV` recovery USB stick, built
-   and proved per [RECOVERY_MEDIA_MACHINE1.md](RECOVERY_MEDIA_MACHINE1.md).
-   The internal fallbacks are also present: the `ubuntu` boot entry
-   (shim + GRUB), the firmware fallback loader `\EFI\BOOT\BOOTAA64.EFI`, and
-   three installed kernels.
-2. **Monitor and keyboard** attached to the Spark.
-3. **Everything on this Linux install stops** for each reboot: agents, model
-   servers, the aienos.com waitlist API, and remote access.
-
-> **Paused (operator decision 2026-09-24).** Do not run this procedure again
-> yet. Turning Secure Boot off changes TPM PCR 7, and Machine 1 seals its
-> private-storage key and vault credential to that state: on the first boot,
-> those secrets would not unseal, the encrypted storage stayed locked, and
-> dependent services failed. Secure Boot is back on. Real-hardware AIENOS
-> boots resume only after the owner-controlled boot chain exists: operator
-> signing key, signed AIENOS loader and kernel, a defined TPM PCR policy, an
-> independent recovery key, a tested recovery path, and secrets re-sealed to
-> that policy. Until then, develop and test in QEMU.
-
-## Step 1: turn Secure Boot off (operator decision 2026-09-24, since reversed)
-
-```bash
-sudo systemctl reboot --firmware-setup   # reboots straight into firmware setup
+```text
+HARDWARE_QUALIFICATION_BLOCKED_BY_TRUST_CHAIN
 ```
 
-In the setup screen, disable **Secure Boot** only. Change nothing else. Save,
-exit, and let Linux boot.
+> [!CAUTION]
+> **DO NOT DISABLE SECURE BOOT.**
+> On Machine 1, turning Secure Boot off alters TPM PCR 7. On the historical 2026-09-24 first-boot test, changing PCR 7 prevented the TPM from unsealing the volume encryption keys for `atlas-private-storage` and `atlas-forgejo-storage`, locking the filesystem and causing severe service restart loops (`evidence/machine1_core_baseline_2026-09-24.md`). Secure Boot was restored and must remain **ENABLED** at all times.
+>
+> The native AIENOS boot images (`aienos-handoff.efi`, `aienos-boot.efi`) are not currently signed by a key enrolled in Machine 1's UEFI database (`db`). Direct execution under Secure Boot will fail with `Secure Boot Violation` (`evidence/gate1_machine1_selftest_2026-09-24.md`).
+>
+> Physical hardware native boots remain **BLOCKED** until the owner-controlled boot trust chain (ADR 0007 / TRUST-1 implementation) is enrolled in firmware. **Do not attempt to bypass this boundary by turning Secure Boot off.** All rollback semantics must be validated in QEMU (`scripts/qemu_native_rollback_test.sh`).
 
-## Step 2: stage one boot
+---
 
+## 2. Hard Invariants & Safety Constraints
+
+1. **Secure Boot Enforced:** Machine 1 must report `SecureBoot enabled` (`/sys/firmware/efi/efivars/SecureBoot-*` byte 4 == 1). Any tool or procedure attempting to disable Secure Boot fails closed.
+2. **Permanent BootOrder Immutable:** `BootOrder` must not be modified. Linux (Ubuntu GRUB/shim, `Boot0001`) remains the permanent, unchallengeable default.
+3. **One-Time Staging Only:** Candidates are invoked strictly via UEFI `BootNext`. Firmware deletes `BootNext` upon boot.
+4. **Zero Persistent Storage Mutation:** Candidate execution must not write to Linux root (`/dev/nvme0n1p2`) or alter the EFI System Partition (`/dev/nvme0n1p1`) outside of the staging scratch directory `\EFI\AIENOS`.
+5. **Attended Execution Only:** No autonomous or unattended physical hardware reboots are permitted. Operator must be present at physical console with recovery media attached.
+
+---
+
+## 3. Preparation & Pre-Flight Verification
+
+Ensure the operator is present at the physical machine with:
+1. **Recovery Media:** Dedicated `AIENOSRECOV` USB stick inserted into Machine 1 (`Boot0004`), tested and proved per `docs/RECOVERY_MEDIA_MACHINE1.md`.
+2. **Physical Display & Keyboard:** Attached directly to DGX Spark console.
+3. **Service Quiescence:** Non-core services stopped per `evidence/machine1_core_baseline_2026-09-24.md`.
+
+---
+
+## 4. Execution Workflow (When Trust Chain is Enrolled)
+
+### Step 1: Pre-Boot Baseline Capture
+Capture the complete pre-boot state into `evidence/pre_boot_capture.json`:
 ```bash
-cd ~/workspace/hive-worktrees/aienos-main && git pull --ff-only
-bash scripts/stage_one_time_boot.sh            # dry run: commit, digest, plan
-sudo -v                                        # hold gives the command no stdin
-aien-proof hold --resource machine-1 --job stage-native-boot -- \
-    bash scripts/stage_one_time_boot.sh --apply
-sudo reboot
+sudo scripts/verify_native_rollback.sh --capture-pre evidence/pre_boot_capture.json
 ```
+This records:
+- Secure Boot status (`enabled`)
+- Active and permanent boot configuration (`BootCurrent`, `BootOrder`, no `BootNext`)
+- Partition UUIDs:
+  - Root: `d27bfd26-ff30-400e-9eca-9cdf73de9406` (ext4, mounted at `/`)
+  - ESP: `9DA2-3597` (vfat, mounted at `/boot/efi`)
+- Kernel release (`uname -r`)
 
-The script refuses a dirty checkout (the boot must map to one commit) and
-refuses while Secure Boot is on. It records `\EFI\AIENOS\STAGED.TXT`: commit,
-image sha256, who staged it, and the boot state before.
-
-Expect: the firmware logo, the pre-exit report, then a dark screen headed
-`AIENOS NATIVE BOOT REPORT` (or `AIENOS BOOT STOPPED` in red), and a countdown.
-**Photograph the screen** before the countdown ends; it is the only record of
-the post-exit screen.
-
-## Step 3: collect after Linux returns
-
+### Step 2: One-Time Candidate Staging
+Under lease hold (`aien-proof hold --resource machine-1`):
 ```bash
-aien-proof hold --resource machine-1 --job collect-native-boot -- \
-    bash scripts/collect_boot_report.sh
+# Verify working tree is clean and map to exact commit
+commit=$(git rev-parse HEAD)
+
+# Build signed native candidate (requires owner signing key)
+scripts/sign_efi_binary.sh target/aarch64-unknown-uefi/release/aienos-handoff.efi
+
+# Stage image to ESP and set BootNext
+sudo bash scripts/stage_one_time_boot.sh --apply
 ```
+The staging script:
+1. Copies the authenticated binary to `/boot/efi/EFI/AIENOS/aienos-handoff.efi`.
+2. Verifies that `BootOrder` is preserved unchanged.
+3. Creates/verifies non-default boot entry `Boot0000 "AIENOS handoff (one-time)"`.
+4. Sets `BootNext = 0000`.
 
-The full output becomes an `audit` event in the hardware-test ledger.
-`M2_GATE: PASS` requires every check below to pass.
+### Step 3: Candidate Boot & Observation
+1. Reboot the machine:
+   ```bash
+   sudo reboot
+   ```
+2. **Observe Physical Screen:**
+   - Firmware starts and evaluates `BootNext`.
+   - If firmware accepts signature: AIENOS banner, memory map validation, `kernel: alive` on screen.
+   - Candidate counts down 30 seconds and calls cold reset via PSCI.
+   - **If firmware reports `Secure Boot Violation`:** This is an expected STOP condition if keys are missing. Do not bypass. The machine will fall back to `BootOrder` (Linux).
+3. **If Machine Hangs:**
+   - Wait 60 seconds.
+   - Power-cycle using the chassis power button.
+   - Because firmware consumed `BootNext` prior to launching the image, the reset will boot Linux (`BootOrder[0] = 0001`).
 
-| Evidence asked for | Where it comes from |
-| --- | --- |
-| Exact AIENOS commit | `aienos_commit` in STAGED.TXT, the pre-exit report and the native report, all compared |
-| Exact boot image digest | `image_sha256` in STAGED.TXT, compared with the image on the ESP |
-| Machine 1 lease holder | `aien-proof hold` records the agent in both ledger events; `staged_by` in STAGED.TXT |
-| Firmware handoff data | Pre-exit report: firmware vendor/revision, counter frequency; kernel report: handoff timing |
-| Heterogeneous CPU counts, boot-core class | `cpu_efficiency_class_*`, `cpu_boot_core_class`, `boot_cpu_midr` |
-| Memory-map validation | `memory_map_descriptors`, `_conventional_regions`, `_rejected_regions`, `_largest_region` |
-| GB10 PCI identity and BAR | `gb10_pci`, `gb10_bar0_phys`, `gb10_pmc_boot_0`, `gb10_pmc_boot_42` |
-| Framebuffer/GOP observations | `framebuffer:` line pre-exit; the screen photo shows whether post-exit drawing worked |
-| Console/UART observations | `uart_report: sent / no response` on screen |
-| Last successful boot stage | `last_stage` in every report |
-| Panic/fault data | `report_kind: panic` or `fault` with message or ESR/ELR/FAR/SPSR |
-| Firmware-variable report contents | Printed in full; `nvram_write_index` shows which bounded write it was |
-| Complete test output | The ledger payload of both `hold` events |
-| Linux/recovery intact | BootNext consumed, BootOrder unchanged, same boot entry and kernel, root writable |
+### Step 4: Out-of-Band Fallback (If Linux Fails to Boot)
+If Linux does not automatically load:
+1. Press `F11` (or firmware BBS hotkey) during startup.
+2. Select `Boot0004` (`AIENOSRECOV` USB recovery stick).
+3. In the recovery environment, verify root and ESP integrity read-only per `docs/RECOVERY_MEDIA_MACHINE1.md`.
 
-## If something goes wrong
-
-- **Screen stays black or frozen:** hold the power button until the machine
-  turns off, then power on. BootNext was used up, so Linux boots. The pre-exit
-  file and any saved variable report remain readable; collect as in step 3.
-- **Firmware says the image is not allowed:** Secure Boot is still on.
-- **Linux does not come back:** choose `ubuntu` in the firmware boot menu, or
-  boot the recovery USB stick. The AIENOS entry is not in BootOrder, so it
-  never runs unless BootNext is set again.
+### Step 5: Post-Return Capture & Automated Verification
+Once returned to Linux:
+```bash
+sudo scripts/verify_native_rollback.sh \
+    --pre evidence/pre_boot_capture.json \
+    --post evidence/post_boot_capture.json \
+    --verify
+```
+The automated verifier evaluates all 10 invariants:
+- Secure Boot state: unchanged (`enabled`)
+- `BootOrder`: identical to pre-boot
+- `BootCurrent`: returns to `0001` (Linux)
+- `BootNext`: consumed / empty
+- Root partition UUID & mount (`/`, `rw`): unchanged
+- ESP partition UUID & mount (`/boot/efi`, `rw`): unchanged
+- No boot loop created
