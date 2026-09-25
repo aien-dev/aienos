@@ -364,8 +364,8 @@ fn qualification_anchor_authenticates_exact_artifact_identity() {
     let anchors = Seed0bTestAnchorSet;
     let verifier = ConfiguredArtifactVerifier::new(&anchors, Ed25519Verifier);
     let verified = verifier.verify(&bytes).unwrap();
-    assert_eq!(verified.identified.artifact_id, id);
-    assert_eq!(verified.trust_tier, TrustTier::Seed0bQualification);
+    assert_eq!(verified.identified().artifact_id, id);
+    assert_eq!(verified.trust_tier(), TrustTier::Seed0bQualification);
 
     let no_anchors = EmptyTrustAnchorSet;
     let production_verifier = ConfiguredArtifactVerifier::new(&no_anchors, Ed25519Verifier);

@@ -12,6 +12,7 @@ extern crate alloc;
 
 pub mod abi;
 pub mod acpi;
+pub mod admission;
 pub mod arch;
 pub mod block;
 pub mod boot;

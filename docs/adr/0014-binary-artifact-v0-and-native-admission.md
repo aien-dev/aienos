@@ -221,19 +221,22 @@ envelope, and policy digest. A request denied by policy receives no handle;
 if the task's required contract cannot be met, admission rejects the whole
 candidate.
 
-For a deterministic `policy_digest`, the v0 canonical local policy is a
-64-byte header followed by zero or more 48-byte policy records sorted by
-`(resource_kind, resource_id)`. The header is: magic `AIENPOL\0` (8 bytes),
-version u16=`0`, header size u16=`64`, record size u16=`48`, record count
-u16=`0..=16`, maximum code/data/stack pages u32 each, maximum capability
+For a deterministic `policy_digest`, the v0 canonical local policy starts
+with a 64-byte header, then zero or more 48-byte resource-policy records sorted
+by `(resource_kind, resource_id)`, then zero or more sorted 32-byte trusted
+signer fingerprints. The header is: magic `AIENPOL\0` (8 bytes), version
+u16=`0`, header size u16=`64`, resource-record size u16=`48`, resource-record
+count u16=`0..=16`, maximum code/data/stack pages u32 each, maximum capability
 count u32, maximum IPC messages u32, maximum IPC bytes u32, maximum CPU ticks
-u64, maximum elapsed ticks u64, maximum syscalls u32, and reserved u32 zero.
-Each record uses the same 48-byte field encoding as a capability request,
-but `rights`, `max_operations`, `max_bytes`, and object range fields describe
-the greatest grant policy allows for that resource. The digest is
-`SHA256("AIENOS-ADMISSION-POLICY-V1\0" || exact_policy_bytes)`. A kernel may
-apply stricter compiled-in hard maxima; these are part of its verifier/build
-identity and cannot be relaxed by artifact metadata.
+u64, maximum elapsed ticks u64, maximum syscalls u32, trusted-signer count u16
+`0..=8`, and reserved u16 zero. Each resource record uses the same 48-byte
+field encoding as a capability request, but `rights`, `max_operations`,
+`max_bytes`, and object range fields describe the greatest grant policy allows
+for that resource. Signer fingerprints are SHA-256 fingerprints of locally
+trusted artifact public keys; the artifact itself never supplies a trust key.
+The digest is `SHA256("AIENOS-ADMISSION-POLICY-V1\0" || exact_policy_bytes)`.
+A kernel may apply stricter compiled-in hard maxima; these are part of its
+verifier/build identity and cannot be relaxed by artifact metadata.
 
 The loader pipeline is fixed: receive bytes; parse; validate structure;
 compute ArtifactId; verify signature; run admission policy; reserve every

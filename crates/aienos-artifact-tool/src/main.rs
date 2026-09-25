@@ -283,13 +283,13 @@ fn verify_file(bytes: &[u8]) -> Result<(), Box<dyn Error>> {
         println!("VERIFY: PASS");
         println!(
             "ARTIFACT_ID: {}",
-            hex(verified.identified.artifact_id.as_bytes())
+            hex(verified.identified().artifact_id.as_bytes())
         );
         println!(
             "PAYLOAD_SHA256: {}",
-            hex(&verified.identified.payload_digest)
+            hex(&verified.identified().payload_digest)
         );
-        println!("SIGNER_FINGERPRINT: {}", hex(&verified.signer_fingerprint));
+        println!("SIGNER_FINGERPRINT: {}", hex(verified.signer_fingerprint()));
         println!("TRUST_TIER: SEED-0B-QUALIFICATION-TEST-ONLY");
         return Ok(());
     }
