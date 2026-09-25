@@ -3,6 +3,7 @@
 
 use core::convert::TryInto;
 
+pub mod atomicity;
 pub mod driver;
 
 pub const REG_CAP: u32 = 0x00;

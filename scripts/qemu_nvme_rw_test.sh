@@ -179,6 +179,14 @@ if [[ "${mode}" == "smmu" ]]; then
     check "ECAM discovery found the NVMe class device" "NVME_DISCOVERY_QEMU: PASS"
     check "controller and namespace identify completed" "NVME_IDENTIFY_QEMU: PASS"
     check "namespace geometry matches the image" "NVME_GEOMETRY_QEMU: PASS (nsid=1 block_count=${bounds_lba} block_size=${lba_bytes})"
+    check "NVMe power-fail atomicity fields observed" "NVME_ATOMICITY_IDENTIFY_QEMU:"
+    if grep -q -- "NVME_STORE_ROOT_ATOMICITY_QEMU: PASS" "${boot1}"; then
+        echo "PASS  Store root-write power-fail atomicity satisfied"
+    else
+        echo "INFO  Store root-write power-fail atomicity NOT proven on this namespace"
+        grep -o -- "NVME_ATOMICITY_IDENTIFY_QEMU:.*" "${boot1}" | head -1 | sed 's/^/INFO  /' || true
+        grep -o -- "NVME_STORE_ROOT_ATOMICITY_QEMU:.*" "${boot1}" | head -1 | sed 's/^/INFO  /' || true
+    fi
     check "read sentinel LBA returned exact bytes and SHA-256" "NVME_READ_QEMU: PASS (lba=${sentinel_lba} blocks=1 bytes=512 sha256=${sentinel_sha})"
     check "read past the namespace end is rejected" "NVME_BOUNDS_QEMU: PASS"
     check "device-reported read error is surfaced" "NVME_ERROR_QEMU: PASS"
