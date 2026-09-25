@@ -80,7 +80,8 @@ run_qemu() {
     qemu_pid=""
 }
 
-# boot_mode <mode>: cfg + cold boot until the guest resets.
+# boot_mode <mode>: cfg + cold boot until the guest resets. "Writes nothing"
+# checks hash the image after write_cfg, so only guest writes can change it.
 boot_mode() { write_cfg "$1"; run_qemu "AIENOS_NEVER_PRINTED_MARKER"; }
 
 # cont <WORD>: the last "CONTINUITY: WORD ..." line of this boot (empty if none).
@@ -89,7 +90,7 @@ field() { sed -nE "s/.* $1=([0-9a-f]+).*/\1/p" <<<"$2"; }
 
 echo "=== 1. Refusals: no boot path mints an identity ==="
 fresh_image
-before=$(digest); boot_mode 6; after=$(digest)
+write_cfg 6; before=$(digest); run_qemu "AIENOS_NEVER_PRINTED_MARKER"; after=$(digest)
 if [[ -n "$(cont 'STOP \(store Unformatted\)')" && "${before}" == "${after}" ]]; then
     pass "resume on blank media stops (store Unformatted) and writes nothing"
 else
@@ -99,7 +100,7 @@ fi
 fresh_image
 write_cfg 1; run_qemu "STORE_CHECKPOINT_QEMU"        # formatted Store with data, no identity
 grep -q "STORE_CHECKPOINT_QEMU: PASS" "${serial}" || bad "could not build a formatted, unprovisioned store"
-before=$(digest); boot_mode 6; after=$(digest)
+write_cfg 6; before=$(digest); run_qemu "AIENOS_NEVER_PRINTED_MARKER"; after=$(digest)
 if [[ -n "$(cont UNPROVISIONED)" && "${before}" == "${after}" ]]; then
     pass "resume on a formatted but unprovisioned store stops UNPROVISIONED and writes nothing"
 else
@@ -118,7 +119,7 @@ else
 fi
 provisioned_img="${work}/provisioned.img"; cp "${image}" "${provisioned_img}"
 
-before=$(digest); boot_mode 5; after=$(digest)
+write_cfg 5; before=$(digest); run_qemu "AIENOS_NEVER_PRINTED_MARKER"; after=$(digest)
 if [[ -n "$(cont 'STOP \(AlreadyProvisioned\)')" && "${before}" == "${after}" ]]; then
     pass "a second provisioning request is refused and writes nothing"
 else
@@ -195,7 +196,7 @@ done
 echo "=== 5. Degraded mount resumes read-only ==="
 cp "${base}" "${image}"
 "${tool}" inject "${image}" "${store_offset}" inactive seeded_garbage >/dev/null || bad "inject failed"
-before=$(digest); boot_mode 6; after=$(digest)
+write_cfg 6; before=$(digest); run_qemu "AIENOS_NEVER_PRINTED_MARKER"; after=$(digest)
 r=$(cont RESUMED_READONLY)
 if [[ "$(field agent "${r}")" == "${agent}" && "$(field memory "${r}")" == "${memory}" && "${before}" == "${after}" ]]; then
     pass "malformed peer superblock: same agent and memory, read-only, nothing written"
