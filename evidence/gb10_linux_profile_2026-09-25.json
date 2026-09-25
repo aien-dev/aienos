@@ -1,0 +1,441 @@
+{
+  "acpi_tables": [
+    {
+      "name": "MCFG",
+      "sha256": "a505684308aee98536d42300d0e120575d454328f5b6650cf945f1362e40812a",
+      "size_bytes": 300
+    },
+    {
+      "name": "IORT",
+      "sha256": "5e0096a2be83ce2025c5c6395455c6814c16e01ff433791e8057c245f4939cb1",
+      "size_bytes": 3904
+    },
+    {
+      "name": "PPTT",
+      "sha256": "27a03b81cb8fbe6a078a3d3c0d5d8b7e1c76d10a5e3057900d3057e8a9dd9044",
+      "size_bytes": 2232
+    },
+    {
+      "name": "SPCR",
+      "sha256": "18bb88b0d04ebb20d5c254acf63728c8c94cb3f4d49fe2b78bc8602fddd09c87",
+      "size_bytes": 80
+    },
+    {
+      "name": "GTDT",
+      "sha256": "83d3e5bf264d32e57847873f73847519485d6af09643cf0a3bfff837f601fb7f",
+      "size_bytes": 472
+    },
+    {
+      "name": "APIC",
+      "sha256": "5e902f4bc9235fbbff53850a191585bd4e089e5fdeb71be9e62dccfe924cabef",
+      "size_bytes": 1704
+    },
+    {
+      "name": "DSDT",
+      "sha256": "2871cbcb8992f7bd3915d6f19e7cfab577e068dcad58b6f00317a9f2d4e1b28e",
+      "size_bytes": 70143
+    },
+    {
+      "name": "TPM2",
+      "sha256": "7e461f53e5a29af53a42d322d811148c6577132f9f2ff0ec5e889a309d2c503b",
+      "size_bytes": 76
+    },
+    {
+      "name": "WSMT",
+      "sha256": "397ff541a0a051c219a6268237477db7cbcc65e9002a0280c0a593524b2a072e",
+      "size_bytes": 40
+    }
+  ],
+  "collector": {
+    "git_commit": "71cb1703484cbc9d56eabe43402a6f9bf62b1028",
+    "name": "scripts/gb10_profile.sh",
+    "read_only": true,
+    "sudo_used": true
+  },
+  "gb10_device_count": 1,
+  "gb10_devices": [
+    {
+      "bar_size_note": "kernel resource size; native AIENOS has not independently decoded it",
+      "bars": [
+        {
+          "base": 603979776,
+          "base_hex": "0x24000000",
+          "index": 0,
+          "is_64_bit": true,
+          "kind": "memory",
+          "linux_interpreted": true,
+          "method": "read resource (kernel-sized)",
+          "native_verified": false,
+          "prefetchable": true,
+          "size": 67108864,
+          "source": "linux-sysfs"
+        }
+      ],
+      "bdf": "000f:01:00.0",
+      "capabilities": [
+        {
+          "id": 1,
+          "offset": 64
+        },
+        {
+          "id": 5,
+          "offset": 72
+        },
+        {
+          "id": 16,
+          "offset": 96
+        },
+        {
+          "id": 9,
+          "offset": 156
+        },
+        {
+          "id": 17,
+          "offset": 176
+        }
+      ],
+      "capability_status": "decoded",
+      "class": {
+        "linux_interpreted": true,
+        "method": "read class",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": "0x030000"
+      },
+      "command": {
+        "linux_interpreted": false,
+        "method": "raw config dword at 0x04",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": 1031
+      },
+      "config_bytes_read": 256,
+      "current_link_speed": {
+        "linux_interpreted": true,
+        "method": "read current_link_speed",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": "2.5 GT/s PCIe"
+      },
+      "current_link_width": {
+        "linux_interpreted": true,
+        "method": "read current_link_width",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": "1"
+      },
+      "device_hex": "0x2e12",
+      "device_id": {
+        "linux_interpreted": true,
+        "method": "read device",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": 11794
+      },
+      "driver": {
+        "linux_interpreted": true,
+        "method": "readlink driver",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": "nvidia"
+      },
+      "firmware_node": {
+        "linux_interpreted": true,
+        "method": "readlink firmware_node",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": "/sys/devices/LNXSYSTM:00/LNXSYBUS:00/PNP0A08:0b/device:1b/device:1c"
+      },
+      "iommu_group": {
+        "linux_interpreted": true,
+        "method": "readlink iommu_group",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": 20
+      },
+      "irq": {
+        "linux_interpreted": true,
+        "method": "read irq",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": 427
+      },
+      "location": {
+        "bus": 1,
+        "device": 0,
+        "domain": 15,
+        "function": 0,
+        "linux_interpreted": true,
+        "method": "sysfs device path",
+        "source": "linux-sysfs"
+      },
+      "max_link_speed": {
+        "linux_interpreted": true,
+        "method": "read max_link_speed",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": "2.5 GT/s PCIe"
+      },
+      "max_link_width": {
+        "linux_interpreted": true,
+        "method": "read max_link_width",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": "16"
+      },
+      "msi": {
+        "capable_vectors": 16,
+        "enabled": 0,
+        "is_64_bit": 1,
+        "linux_interpreted": false,
+        "maskable": 1,
+        "method": "raw config capability decode",
+        "native_verified": false,
+        "present": true,
+        "source": "linux-sysfs"
+      },
+      "msi_irq_count": {
+        "linux_interpreted": true,
+        "method": "count msi_irqs",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": 8
+      },
+      "msix": {
+        "enabled": 1,
+        "function_masked": 0,
+        "linux_interpreted": false,
+        "method": "raw config capability decode",
+        "native_verified": false,
+        "pba_bir": 0,
+        "pba_offset": 12189696,
+        "present": true,
+        "source": "linux-sysfs",
+        "table_bir": 0,
+        "table_offset": 12124160,
+        "vectors": 9
+      },
+      "numa_node": {
+        "linux_interpreted": true,
+        "method": "read numa_node",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": -1
+      },
+      "pcie": {
+        "current_speed": "2.5 GT/s",
+        "current_width": 1,
+        "device_type": 0,
+        "linux_interpreted": false,
+        "max_payload_bytes": 256,
+        "max_speed": "2.5 GT/s",
+        "max_width": 16,
+        "method": "raw config capability decode",
+        "native_verified": false,
+        "present": true,
+        "source": "linux-sysfs",
+        "version": 2
+      },
+      "revision": {
+        "linux_interpreted": true,
+        "method": "read revision",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": 161
+      },
+      "status": {
+        "linux_interpreted": false,
+        "method": "raw config dword at 0x04",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": 16
+      },
+      "subsystem_id": {
+        "linux_interpreted": true,
+        "method": "read subsystem_device",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": 0
+      },
+      "subsystem_vendor_id": {
+        "linux_interpreted": true,
+        "method": "read subsystem_vendor",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": 4318
+      },
+      "vendor_hex": "0x10de",
+      "vendor_id": {
+        "linux_interpreted": true,
+        "method": "read vendor",
+        "native_verified": false,
+        "source": "linux-sysfs",
+        "value": 4318
+      }
+    }
+  ],
+  "generated_at_utc": "2026-09-25T11:58:06Z",
+  "iommu_kernel_parameters": [
+    "iommu.passthrough=0"
+  ],
+  "machine_identity_note": "Linux-observed facts only; not a native AIENOS proof.",
+  "mcfg_segments": [
+    {
+      "ecam_base": 1043677052928,
+      "ecam_base_hex": "0xf300000000",
+      "end_bus": 15,
+      "segment": 0,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1043945488384,
+      "ecam_base_hex": "0xf310000000",
+      "end_bus": 15,
+      "segment": 1,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1044213923840,
+      "ecam_base_hex": "0xf320000000",
+      "end_bus": 15,
+      "segment": 2,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1044482359296,
+      "ecam_base_hex": "0xf330000000",
+      "end_bus": 15,
+      "segment": 3,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1044750794752,
+      "ecam_base_hex": "0xf340000000",
+      "end_bus": 15,
+      "segment": 4,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1045019230208,
+      "ecam_base_hex": "0xf350000000",
+      "end_bus": 15,
+      "segment": 5,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1045287665664,
+      "ecam_base_hex": "0xf360000000",
+      "end_bus": 15,
+      "segment": 6,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1045556101120,
+      "ecam_base_hex": "0xf370000000",
+      "end_bus": 15,
+      "segment": 7,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1045824536576,
+      "ecam_base_hex": "0xf380000000",
+      "end_bus": 15,
+      "segment": 8,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1046092972032,
+      "ecam_base_hex": "0xf390000000",
+      "end_bus": 15,
+      "segment": 9,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1046361407488,
+      "ecam_base_hex": "0xf3a0000000",
+      "end_bus": 15,
+      "segment": 10,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1046629842944,
+      "ecam_base_hex": "0xf3b0000000",
+      "end_bus": 255,
+      "segment": 11,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1046898278400,
+      "ecam_base_hex": "0xf3c0000000",
+      "end_bus": 255,
+      "segment": 12,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1047166713856,
+      "ecam_base_hex": "0xf3d0000000",
+      "end_bus": 255,
+      "segment": 13,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 1047435149312,
+      "ecam_base_hex": "0xf3e0000000",
+      "end_bus": 255,
+      "segment": 14,
+      "start_bus": 0
+    },
+    {
+      "ecam_base": 687865856,
+      "ecam_base_hex": "0x29000000",
+      "end_bus": 1,
+      "segment": 15,
+      "start_bus": 0
+    }
+  ],
+  "pci_bridge_topology": [
+    {
+      "bdf": "0000:00:00.0",
+      "class": "0x060400",
+      "linux_interpreted": true,
+      "source": "linux-sysfs"
+    },
+    {
+      "bdf": "0002:00:00.0",
+      "class": "0x060400",
+      "linux_interpreted": true,
+      "source": "linux-sysfs"
+    },
+    {
+      "bdf": "0004:00:00.0",
+      "class": "0x060400",
+      "linux_interpreted": true,
+      "source": "linux-sysfs"
+    },
+    {
+      "bdf": "0007:00:00.0",
+      "class": "0x060400",
+      "linux_interpreted": true,
+      "source": "linux-sysfs"
+    },
+    {
+      "bdf": "0009:00:00.0",
+      "class": "0x060400",
+      "linux_interpreted": true,
+      "source": "linux-sysfs"
+    },
+    {
+      "bdf": "000f:00:00.0",
+      "class": "0x060400",
+      "linux_interpreted": true,
+      "source": "linux-sysfs"
+    }
+  ],
+  "platform": {
+    "linux_interpreted": true,
+    "product_name": "NVIDIA_DGX_Spark",
+    "source": "linux-sysfs",
+    "system_vendor": "NVIDIA"
+  },
+  "schema": "aienos.gb10.profile.v1"
+}
