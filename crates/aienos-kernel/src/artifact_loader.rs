@@ -198,6 +198,11 @@ pub struct CandidateReport {
     pub outcome: TaskOutcome,
     pub code_base: u64,
     pub code_end: u64,
+    /// Mapped RW+NX data and stack ranges, `[base, end)`, for fault classification.
+    pub data_base: u64,
+    pub data_end: u64,
+    pub stack_base: u64,
+    pub stack_end: u64,
     pub bindings: ReceiptBindings,
     /// Grants installed in the task's capability table, in grant order.
     pub granted: [Option<GrantedCapability>; MAX_CAPABILITIES],
@@ -378,6 +383,9 @@ impl TaskLayout {
     }
     pub const fn data_base(&self) -> u64 {
         self.base + (self.data_first() * PAGE) as u64
+    }
+    pub const fn data_end(&self) -> u64 {
+        self.data_base() + (self.data_pages * PAGE) as u64
     }
     pub const fn stack_base(&self) -> u64 {
         self.base + (self.stack_first() * PAGE) as u64
@@ -1200,6 +1208,10 @@ where
     report.granted = task.grants;
     report.code_base = task.address_space.layout.code_base();
     report.code_end = task.address_space.layout.code_end();
+    report.data_base = task.address_space.layout.data_base();
+    report.data_end = task.address_space.layout.data_end();
+    report.stack_base = task.address_space.layout.stack_base();
+    report.stack_end = task.address_space.layout.stack_top();
     report.wx_enforced = report.bindings.wx_sealed;
     report.outcome = run_task(&mut task, platform, scheduler, executor);
     let teardown = destroy(task, platform, scheduler);
@@ -1232,6 +1244,10 @@ fn empty_report(free_before: usize) -> CandidateReport {
         outcome: TaskOutcome::not_run(),
         code_base: 0,
         code_end: 0,
+        data_base: 0,
+        data_end: 0,
+        stack_base: 0,
+        stack_end: 0,
         bindings: ReceiptBindings::default(),
         granted: [None; MAX_CAPABILITIES],
     }
@@ -1569,13 +1585,38 @@ pub fn write_receipt_line(
     let _ = writeln!(out);
 }
 
+/// Names an EL0 fault from its ESR and FAR. A label that claims a W^X or NX
+/// property requires both the architectural fault kind and the address range
+/// that property is about, so a wild or unmapped access can never prove it.
+fn classify_fault(r: &CandidateReport, esr: u64, far: u64) -> &'static str {
+    let ec = (esr >> 26) & 0x3f;
+    // ISS[5:2] of the IFSC/DFSC: 0b0011 = permission fault, 0b0001 =
+    // translation fault (any level).
+    let status = (esr >> 2) & 0xf;
+    let permission = status == 0b0011;
+    let translation = status == 0b0001;
+    let within = |base: u64, end: u64| far >= base && far < end;
+    let in_data_or_stack = within(r.data_base, r.data_end) || within(r.stack_base, r.stack_end);
+    match ec {
+        // Data abort from EL0 with ISS.WnR set: a write.
+        0x24 if esr & (1 << 6) != 0 && permission && within(r.code_base, r.code_end) => {
+            "code-write"
+        }
+        // Instruction abort from EL0.
+        0x20 if permission && in_data_or_stack => "exec-nx",
+        0x20 if translation => "exec-unmapped",
+        _ => "other",
+    }
+}
+
 /// One stable report line per candidate. Formats (QEMU checks grep these):
 ///
 /// `artifact: NAME admitted id=HEX16 tier=seed0b-test exec=EXEC bytes=identified=verified=admitted=mapped=executed wx=enforced caps=N revoked=yes reclaimed=yes frames=N syscalls=N reads=N denials=N`
 /// `artifact: NAME rejected stage=STAGE reason=REASON reclaimed=yes`
 ///
-/// EXEC is `exited:0x..`, `timeout`, `fault:code-write`, `fault:other`,
-/// `bad-syscall:N`, `resource-overrun`, or `not-run`.
+/// EXEC is `exited:0x..`, `timeout`, `fault:code-write`, `fault:exec-nx`,
+/// `fault:exec-unmapped`, `fault:other`, `bad-syscall:N`, `resource-overrun`,
+/// or `not-run`.
 pub fn write_candidate_line(out: &mut impl core::fmt::Write, name: &str, r: &CandidateReport) {
     let yes_no = |b: bool| if b { "yes" } else { "no" };
     match r.decision {
@@ -1619,18 +1660,7 @@ pub fn write_candidate_line(out: &mut impl core::fmt::Write, name: &str, r: &Can
                     let _ = write!(out, "timeout");
                 }
                 ExecutionStatus::Fault { esr, far, .. } => {
-                    // EC 0x24 data abort from EL0, ISS.WnR (bit 6) set.
-                    let write_abort = (esr >> 26) & 0x3f == 0x24 && esr & (1 << 6) != 0;
-                    // EC 0x20: instruction abort from EL0, i.e. an attempt to
-                    // execute a page mapped non-executable (data or stack).
-                    let exec_abort = (esr >> 26) & 0x3f == 0x20;
-                    if write_abort && far >= r.code_base && far < r.code_end {
-                        let _ = write!(out, "fault:code-write");
-                    } else if exec_abort && (far < r.code_base || far >= r.code_end) {
-                        let _ = write!(out, "fault:exec-nx");
-                    } else {
-                        let _ = write!(out, "fault:other");
-                    }
+                    let _ = write!(out, "fault:{}", classify_fault(r, esr, far));
                 }
                 ExecutionStatus::BadSyscall(n) => {
                     let _ = write!(out, "bad-syscall:{n}");

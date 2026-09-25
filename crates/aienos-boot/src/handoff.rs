@@ -1418,16 +1418,39 @@ fn run_artifact_candidates(candidates: &ArtifactCandidates, kernel_root: usize) 
             loader::Decision::Admitted => admitted += 1,
             loader::Decision::Rejected => rejected += 1,
         }
-        let mut out = ReportBuf::<2048>::new();
-        loader::write_candidate_line(&mut out, name, &report);
-        loader::write_grant_lines(&mut out, name, &report);
-        match loader::boot_receipt(&report, &context) {
-            (sequence, Some(bytes)) => loader::write_receipt_line(&mut out, name, sequence, &bytes),
-            (sequence, None) => {
-                let _ = writeln!(out, "receipt: {name} seq={sequence} invalid");
+        // Each part gets its own buffer (16 grant lines alone can exceed
+        // 2 KiB), and a part that still overflows is reported, never dropped
+        // silently: the host fails any run that shows `report-truncated:`.
+        let emit = |part: &str, out: &ReportBuf<4096>| {
+            send_to_console(out.as_str());
+            if out.truncated() {
+                let mut note = ReportBuf::<192>::new();
+                let _ = writeln!(note, "report-truncated: {name} part={part}");
+                send_to_console(note.as_str());
             }
+        };
+        {
+            let mut out = ReportBuf::<4096>::new();
+            loader::write_candidate_line(&mut out, name, &report);
+            emit("candidate", &out);
         }
-        send_to_console(out.as_str());
+        {
+            let mut out = ReportBuf::<4096>::new();
+            loader::write_grant_lines(&mut out, name, &report);
+            emit("grants", &out);
+        }
+        {
+            let mut out = ReportBuf::<4096>::new();
+            match loader::boot_receipt(&report, &context) {
+                (sequence, Some(bytes)) => {
+                    loader::write_receipt_line(&mut out, name, sequence, &bytes)
+                }
+                (sequence, None) => {
+                    let _ = writeln!(out, "receipt: {name} seq={sequence} invalid");
+                }
+            }
+            emit("receipt", &out);
+        }
     }
     let mut tail = ReportBuf::<128>::new();
     let _ = writeln!(

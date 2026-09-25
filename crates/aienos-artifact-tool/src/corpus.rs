@@ -48,7 +48,9 @@ const MOV_X8_99: u32 = 0xd280_0c68;
 const SVC_0: u32 = 0xd400_0001;
 const B_SELF: u32 = 0x1400_0000;
 const BR_X2: u32 = 0xd61f_0040;
-const MOV_X9_SP: u32 = 0x9100_03e9;
+// SUB X9, SP, #16. SP starts at the stack top (the guard page) when no caps
+// are granted, so the target must be below it to land on a mapped stack page.
+const SUB_X9_SP_16: u32 = 0xd100_43e9;
 const BR_X9: u32 = 0xd61f_0120;
 
 // Canonical offsets (ADR 0014 §2).
@@ -329,7 +331,7 @@ pub fn corpus() -> Result<Vec<Case>, Box<dyn Error>> {
             what: "branches onto its own stack (mapped RW+NX)",
             bytes: signed(
                 &manifest(vec![], resources(1, 1, 1, 0, 4)),
-                &words(&[MOV_X9_SP, BR_X9]),
+                &words(&[SUB_X9_SP_16, BR_X9]),
                 b"STACKPAG",
             )?,
             expect: Expect::Admitted {

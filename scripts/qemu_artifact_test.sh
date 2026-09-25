@@ -32,8 +32,10 @@
 # Captured-log mode (P2-9, Machine 1): AIENOS_SEED0B_SERIAL=<console log>
 # with AIENOS_SEED0B_INPUTS=<dir from scripts/seed0b_machine1_prepare.sh>
 # skips both QEMU boots, proves the staged inputs are byte-identical to a
-# fresh deterministic pack, and applies the qualification-boot checks to the
-# captured log with the SEED-0B-MACHINE1 tier (marker SEED_0B_MACHINE1).
+# fresh deterministic pack and to their MANIFEST.sha256, that the inputs, the
+# log and this clean checkout share one commit, that the log shows Machine 1's
+# CPU identity, and applies the qualification-boot checks to the captured log
+# with the SEED-0B-MACHINE1 tier (marker SEED_0B_MACHINE1).
 #
 # Needs qemu-system-aarch64 and AAVMF (Ubuntu: qemu-system-arm qemu-efi-aarch64).
 set -euo pipefail
@@ -114,12 +116,17 @@ mv "${esp_art}/expected.txt" "${work}/expected.txt"
 touch "${work}/esp/EFI/AIENOS/BOOTREPORT.TXT"
 for f in "${esp_art}"/H*.AIEN; do
     n=$(basename "${f}")
-    grep -q "^${n} " "${work}/ids.txt" || echo "${n} $("${tool}" id "${f}" 2>/dev/null || echo none)" >>"${work}/ids.txt"
+    awk -v n="${n}" '$1 == n { found = 1 } END { exit !found }' "${work}/ids.txt" || echo "${n} $("${tool}" id "${f}" 2>/dev/null || echo none)" >>"${work}/ids.txt"
 done
 candidate_count=$(find "${esp_art}" -maxdepth 1 -name '*.AIEN' | wc -l)
 if [[ -n "${captured}" ]]; then
     cats="ARTIFACT_IDENTITY"
     staged="${AIENOS_SEED0B_INPUTS}/ARTIFACTS"
+    if [[ ! -d "${staged}" ]]; then
+        echo "FAIL  ${staged} is not a directory (AIENOS_SEED0B_INPUTS must be the prepared inputs root)"
+        echo "SEED_0B_MACHINE1: FAIL"
+        exit 1
+    fi
     staged_count=$(find "${staged}" -maxdepth 1 -name '*.AIEN' | wc -l)
     [[ "${staged_count}" == "${candidate_count}" ]] || fail "staged ${staged_count} candidates, expected ${candidate_count}"
     for f in "${esp_art}"/*.AIEN; do
@@ -130,6 +137,54 @@ if [[ -n "${captured}" ]]; then
             fail "staged ${n} differs from the deterministic pack"
         fi
     done
+
+    # Bind log -> inputs -> this checkout, and log -> Machine 1. A captured log
+    # is operator-attested (TRUST-1 adds measured boot); these checks stop the
+    # honest mix-ups: a log from another commit, other inputs, or QEMU.
+    manifest="${AIENOS_SEED0B_INPUTS}/MANIFEST.sha256"
+    inputs_commit=""
+    if [[ ! -r "${manifest}" ]]; then
+        fail "prepared inputs carry MANIFEST.sha256"
+    else
+        if (cd "${AIENOS_SEED0B_INPUTS}" && grep -v '^#' MANIFEST.sha256 | sha256sum --check --strict --quiet); then
+            pass "staged inputs match MANIFEST.sha256"
+        else
+            fail "staged inputs do not match MANIFEST.sha256"
+        fi
+        listed=$(grep -vc '^#' "${manifest}" || true)
+        present=$(cd "${AIENOS_SEED0B_INPUTS}" && find . -type f ! -name MANIFEST.sha256 | wc -l)
+        if [[ "${listed}" == "${present}" ]]; then
+            pass "MANIFEST.sha256 lists every staged file (${present})"
+        else
+            fail "MANIFEST.sha256 lists ${listed} files but ${present} are staged"
+        fi
+        inputs_commit=$(sed -n 's/^# commit \([0-9a-f]\{40\}\)$/\1/p' "${manifest}")
+    fi
+    head_commit=$(git rev-parse HEAD)
+    if [[ -n "${inputs_commit}" && "${inputs_commit}" == "${head_commit}" ]]; then
+        pass "inputs were prepared from this checkout's commit ${head_commit}"
+    else
+        fail "inputs commit '${inputs_commit}' is not this checkout's HEAD ${head_commit}"
+    fi
+    if [[ -z "$(git status --porcelain)" ]]; then
+        pass "checkout is clean"
+    else
+        fail "checkout has uncommitted changes"
+    fi
+    log_commit=$(tr -d '\r' <"${captured}" | sed -n 's/^aienos_commit: //p' | sort -u)
+    if [[ -n "${inputs_commit}" && "${log_commit}" == "${inputs_commit}" ]]; then
+        pass "captured log was produced by the prepared image's commit"
+    else
+        fail "captured log commit '${log_commit}' is not the inputs commit '${inputs_commit}'"
+    fi
+    # Machine 1 CPU identity (evidence/m2_first_boot_2026-09-24.md): 20 cores,
+    # boot core Cortex-A725 (part 0xd87) or Cortex-X925 (0xd85).
+    if tr -d '\r' <"${captured}" | grep -q '^cpu_cores: 20$' && \
+       tr -d '\r' <"${captured}" | grep -qE '^boot_cpu_midr: 0x[0-9a-f]+ \(part 0xd8[57]\)$'; then
+        pass "captured log shows Machine 1 CPU identity (20 cores, A725/X925 boot core)"
+    else
+        fail "captured log does not show Machine 1 CPU identity; a QEMU log cannot qualify Machine 1"
+    fi
     cats=""
 fi
 id_prefix() { # name -> first 16 hex digits of its ArtifactId
@@ -180,6 +235,11 @@ common_checks() { # serial
     check "$1" "M3 EL0 isolation proof unchanged" "el0: ok write=granted forged=denied fault=contained exit=0"
     check "$1" "M3 typed IPC proof unchanged" "ipc: ok message=delivered cap=delegated rights=attenuated forged=denied revoked=denied"
     check "$1" "firmware read all ${candidate_count} artifact candidates" "^artifact_candidates: ${candidate_count}$"
+    if grep -q "^report-truncated:" "$1"; then
+        fail "kernel report lines were truncated: $(grep "^report-truncated:" "$1" | tr '\n' ' ')"
+    else
+        pass "no kernel report line was truncated"
+    fi
     check "$1" "final report reached the console" "report_kind: final"
     if has "$1" "report_kind: (panic|fault)"; then fail "panic or fault reported"; fi
     if has "$1" "^receipt: [^ ]+ seq=[0-9]+ invalid$"; then fail "a candidate produced no valid receipt"; fi
@@ -200,7 +260,7 @@ common_checks() { # serial
 # the host recomputes, and sign/verify with the TEST ONLY receipt key.
 receipt_check() {
     local serial="$1" name="$2" want="$3" line record kdigest out
-    line=$(grep -E "^receipt: ${name} seq=[0-9]+ digest=[0-9a-f]{64} record=[0-9a-f]{1024}$" "${serial}" | tail -1 || true)
+    line=$(grep -E "^receipt: ${name//./\\.} seq=[0-9]+ digest=[0-9a-f]{64} record=[0-9a-f]{1024}$" "${serial}" | tail -1 || true)
     if [[ -z "${line}" ]]; then
         fail "${name} receipt emitted"
         return

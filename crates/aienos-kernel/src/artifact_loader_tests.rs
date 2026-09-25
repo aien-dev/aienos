@@ -1206,8 +1206,13 @@ fn admitted_report(status: ExecutionStatus) -> CandidateReport {
         invalid_handle_denials: 1,
         elapsed_ticks: 10,
     };
+    // Loader layout: code, guard, data, guard, stack, guard.
     r.code_base = 0x80_0000_1000;
     r.code_end = 0x80_0000_2000;
+    r.data_base = 0x80_0000_3000;
+    r.data_end = 0x80_0000_4000;
+    r.stack_base = 0x80_0000_5000;
+    r.stack_end = 0x80_0000_6000;
     r
 }
 
@@ -1546,18 +1551,38 @@ fn receipt_line_carries_digest_and_full_record() {
 }
 
 #[test]
-fn instruction_aborts_outside_code_are_exec_nx_faults() {
-    let mut r = admitted_report(ExecutionStatus::Fault {
-        esr: 0x8200_000f, // EC 0x20: instruction abort from EL0, permission
-        far: 0x80_0000_4000,
-        elr: 0x80_0000_4000,
+fn exec_nx_needs_a_permission_fault_inside_data_or_stack() {
+    // EC 0x20 (instruction abort from EL0), IL, IFSC level-3 permission / translation.
+    const PERM: u64 = 0x8200_000f;
+    const TRANSLATION: u64 = 0x8200_0007;
+    let cases: [(u64, u64, &str); 8] = [
+        (PERM, 0x80_0000_3000, "exec-nx"),              // first data byte
+        (PERM, 0x80_0000_3ff8, "exec-nx"),              // last data word
+        (PERM, 0x80_0000_5ff0, "exec-nx"),              // stack, below the top
+        (PERM, 0x80_0000_6000, "other"),                // stack top = guard page
+        (TRANSLATION, 0x80_0000_6000, "exec-unmapped"), // what H24 used to hit
+        (TRANSLATION, 0, "exec-unmapped"),              // wild branch to address 0
+        (PERM, 0x80_0000_1000, "other"),                // code is executable
+        (PERM, 0x80_0000_4000, "other"),                // data guard page
+    ];
+    for (esr, far, want) in cases {
+        let r = admitted_report(ExecutionStatus::Fault { esr, far, elr: far });
+        assert!(
+            line(&r).contains(&std::format!(" exec=fault:{want} ")),
+            "esr={esr:#x} far={far:#x}: {}",
+            line(&r)
+        );
+    }
+}
+
+#[test]
+fn code_write_needs_a_permission_fault() {
+    // EC 0x24, WnR, DFSC level-3 translation: not a W^X proof.
+    let r = admitted_report(ExecutionStatus::Fault {
+        esr: 0x9200_0047,
+        far: 0x80_0000_1008,
+        elr: 0x80_0000_1004,
     });
-    assert!(line(&r).contains(" exec=fault:exec-nx "), "{}", line(&r));
-    r.outcome.status = ExecutionStatus::Fault {
-        esr: 0x8200_000f,
-        far: r.code_base,
-        elr: r.code_base,
-    };
     assert!(line(&r).contains(" exec=fault:other "), "{}", line(&r));
 }
 

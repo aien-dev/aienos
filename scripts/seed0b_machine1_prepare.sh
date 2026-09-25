@@ -13,9 +13,23 @@
 #   MANIFEST.sha256  sha256 of every file above, plus the commit
 set -euo pipefail
 
+out_arg="${1:?usage: seed0b_machine1_prepare.sh OUT_DIR}"
+# Resolve OUT_DIR against the caller's directory, and start from an empty one
+# so no stale file can enter ARTIFACTS/ or MANIFEST.sha256.
+mkdir -p "${out_arg}"
+out="$(cd "${out_arg}" && pwd)"
+if [[ -n "$(ls -A "${out}")" ]]; then
+    echo "STOP: ${out} is not empty; prepare into a new or empty directory." >&2
+    exit 1
+fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
-out="${1:?usage: seed0b_machine1_prepare.sh OUT_DIR}"
+case "${out}/" in
+    "${repo_root}"/*)
+        echo "STOP: OUT_DIR ${out} is inside the repository." >&2
+        exit 1
+        ;;
+esac
 if [[ -n "$(git status --porcelain)" ]]; then
     echo "STOP: worktree has uncommitted changes; qualification inputs must come from a commit." >&2
     exit 1
