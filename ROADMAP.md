@@ -35,7 +35,7 @@ M3  PASS  Kernel isolation, in QEMU (2026-09-24; not run on Machine 1)
     verify_all green on main              PASS (6ef8dde)
 
 SEED-0B  PASS  Native capability admission, in QEMU (2026-09-25; TEST-ONLY keys)
-    SEED_0B_QEMU: PASS                    (#118-#122, #124, #127, #128;
+    SEED_0B_QEMU: PASS                    (#118-#122, #124, #127, #128, #138;
                                            evidence/seed0b_qemu_2026-09-25.md)
     P2-9 Machine 1 qualification          prepared, not run; blocked on
                                           TRUST-1 (docs/SEED0B_MACHINE1_QUALIFICATION.md)
