@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # collect_recovery_boot_evidence.sh: Record evidence that the AIENOS recovery
 # USB actually booted Machine 1 into a rescue environment that can mount the
 # NVMe root, repair /boot/efi, and restore boot entries (issue #17).
@@ -58,6 +58,11 @@ echo "nvme_root_device: ${root_dev}"
 check "nvme_root_is_internal" \
     "$(echo "${root_dev}" | grep -qE 'nvme|mapper' && echo 1 || echo 0)" \
     "source ${root_dev}"
+root_opts="$(findmnt -no OPTIONS "${ROOT_MNT}" 2>/dev/null || echo unknown)"
+echo "nvme_root_mount_options: ${root_opts}"
+check "nvme_root_mounted_readonly" \
+    "$(case ",${root_opts}," in *,ro,*) echo 1 ;; *) echo 0 ;; esac)" \
+    "mount options: ${root_opts}"
 
 echo "== /boot/efi access (read-only inspection; nothing is written here)"
 esp_ok=0
@@ -73,13 +78,11 @@ fi
 check "esp_fallback_bootloader_present" "${esp_fallback_present}" \
     "${ESP_MNT}/EFI/BOOT/BOOTAA64.EFI"
 
-esp_writable=0
-if [[ "${esp_ok}" == 1 ]]; then
-    esp_opts="$(findmnt -no OPTIONS "${ESP_MNT}" 2>/dev/null || echo "")"
-    [[ "${esp_opts}" == *"rw"* ]] && esp_writable=1
-fi
-check "esp_mounted_rw_capable" "${esp_writable}" \
-    "mount options: $(findmnt -no OPTIONS "${ESP_MNT}" 2>/dev/null || echo unknown) (repair capability observed, not exercised)"
+esp_opts="$(findmnt -no OPTIONS "${ESP_MNT}" 2>/dev/null || echo unknown)"
+echo "esp_mount_options: ${esp_opts}"
+check "esp_mounted_readonly" \
+    "$(case ",${esp_opts}," in *,ro,*) echo 1 ;; *) echo 0 ;; esac)" \
+    "mount options: ${esp_opts}"
 
 echo "== boot entry restore capability"
 efi_vars=0
