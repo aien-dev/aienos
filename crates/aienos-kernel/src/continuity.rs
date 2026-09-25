@@ -12,6 +12,7 @@
 use alloc::vec::Vec;
 
 use crate::crypto::sha256::Sha256;
+use crate::store::checkpoint::CheckpointHook;
 use crate::store::engine::{MountState, ObjectInput, Store, StoreDevice, StoreError};
 use crate::store::v1::ObjectId;
 
@@ -768,6 +769,17 @@ pub fn commit<D: StoreDevice>(
     update: Update,
     new_incarnation: bool,
 ) -> Result<Continuity> {
+    commit_with_hook(store, current, update, new_incarnation, |_| {})
+}
+
+/// [`commit`] with a Store checkpoint hook (qualification crash campaigns).
+pub fn commit_with_hook<D: StoreDevice, H: CheckpointHook>(
+    store: &mut Store<D>,
+    current: &Continuity,
+    update: Update,
+    new_incarnation: bool,
+    hook: H,
+) -> Result<Continuity> {
     writable(store)?;
     let sequence = current
         .manifest
@@ -830,7 +842,7 @@ pub fn commit<D: StoreDevice>(
             bytes,
         })
         .collect();
-    store.transact(&inputs)?;
+    store.transact_with_hook(&inputs, hook)?;
     resolve(store)
 }
 

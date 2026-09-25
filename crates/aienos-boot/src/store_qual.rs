@@ -24,6 +24,28 @@ pub const STORE_BASE_LBA_512: u64 = 512;
 pub const STORE_REGION_BLOCKS_512: u64 = 2048;
 pub const CONFIG_LBA_512: u64 = 256;
 
+/// M4 continuity qualification modes (ADR 0016), 4096-byte LBA only.
+/// Provision: format if blank, then create the one identity from RNDR.
+#[cfg(feature = "continuity-qual")]
+pub const MODE_CONT_PROVISION: u8 = 5;
+/// Resume: locate and verify the identity, commit incarnation + 1. Never mints.
+#[cfg(feature = "continuity-qual")]
+pub const MODE_CONT_RESUME: u8 = 6;
+/// Resume, then commit one Cortex fact and one branch fork.
+#[cfg(feature = "continuity-qual")]
+pub const MODE_CONT_REMEMBER: u8 = 7;
+/// Resume, then commit one Cortex fact while emitting Store checkpoints.
+#[cfg(feature = "continuity-qual")]
+pub const MODE_CONT_CRASH: u8 = 8;
+
+#[cfg(feature = "continuity-qual")]
+pub const fn is_continuity_mode(mode: u8) -> bool {
+    matches!(
+        mode,
+        MODE_CONT_PROVISION | MODE_CONT_RESUME | MODE_CONT_REMEMBER | MODE_CONT_CRASH
+    )
+}
+
 /// Adds a fixed LBA offset and rejects accesses past the bounded region.
 pub struct BoundedNvme<R: Registers, D: DmaMemory, T: Delay> {
     inner: NvmeController<R, D, T>,

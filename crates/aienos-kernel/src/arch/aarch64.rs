@@ -167,6 +167,43 @@ pub fn midr_el1() -> u64 {
     }
 }
 
+/// One 64-bit value from the architectural random number generator (FEAT_RNG
+/// `RNDR`), or `None` if the core does not implement it or it keeps failing.
+/// Callers that need entropy must fail closed on `None`; there is no fallback.
+pub fn rndr() -> Option<u64> {
+    #[cfg(target_arch = "aarch64")]
+    {
+        let isar0: u64;
+        unsafe {
+            core::arch::asm!("mrs {0}, id_aa64isar0_el1", out(reg) isar0, options(nomem, nostack, preserves_flags));
+        }
+        if (isar0 >> 60) & 0xf == 0 {
+            return None;
+        }
+        for _ in 0..16 {
+            let (value, nzcv): (u64, u64);
+            // RNDR is s3_3_c2_c4_0; a failed read returns 0 with PSTATE.Z = 1.
+            unsafe {
+                core::arch::asm!(
+                    "mrs {0}, s3_3_c2_c4_0",
+                    "mrs {1}, nzcv",
+                    out(reg) value,
+                    out(reg) nzcv,
+                    options(nomem, nostack),
+                );
+            }
+            if nzcv & (1 << 30) == 0 {
+                return Some(value);
+            }
+        }
+        None
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        None
+    }
+}
+
 /// Multiprocessor affinity of the executing core (matches MADT GICC MPIDR).
 #[inline(always)]
 pub fn mpidr_el1() -> u64 {
