@@ -39,6 +39,7 @@ pub mod recovery;
 pub mod recovery_core;
 pub mod report;
 pub mod scheduler;
+pub mod security;
 pub mod shell;
 pub mod smmu;
 pub mod store;
