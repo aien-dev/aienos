@@ -34,11 +34,12 @@ while this ADR is Proposed, and decoders reject any other value):
 
 | kind | name | written | content |
 |---|---|---|---|
-| 16 | `AgentRoot` | once, at provisioning | magic, `LogicalAgentId` (32 B), store UUID it was provisioned into, root `LogicalBranchId`, provisioning generation, provisioning source (operator / test) |
-| 17 | `ContinuityManifest` | every Class A commit | magic, `AgentRoot` ObjectId, previous manifest ObjectId (zero for the first), sequence (previous + 1), incarnation (boot counter), ObjectIds of: agent-state checkpoint, Cortex checkpoint, Cortex WAL segments (bounded list), admission receipts (bounded list) |
+| 16 | `AgentRoot` | once, at provisioning | magic, `LogicalAgentId` (32 B), `genesis_store_uuid` (16 B) it was provisioned into, root `LogicalBranchId`, provisioning generation, provisioning source (operator / test) |
+| 17 | `ContinuityManifest` | every Class A commit | magic, `AgentRoot` ObjectId, `previous_manifest_id` (zero for the first or migration boundary), `migration_parent_id` (zero normally; points to `MigrationManifest` on the first manifest of a migrated store), sequence (previous + 1), incarnation (boot counter), ObjectIds of: agent-state checkpoint, Cortex checkpoint, Cortex WAL segments (bounded list), admission receipts (bounded list) |
 | 18 | `AgentStateCheckpoint` | when branch state changes | canonical branch table: branch id, parent, agent id, depth, fork counter |
 | 19 | `CortexCheckpoint` | when Cortex compacts | canonical committed records |
 | 20 | `CortexWalSegment` | on each committed Cortex update | append-only records since the checkpoint |
+| 23 | `MigrationManifest` | once, on store migration | magic, `AgentRoot` ObjectId, `genesis_store_uuid`, `origin_store_uuid`, `target_store_uuid`, origin `SecurityManifest` and `ContinuityManifest` IDs, origin sequence/incarnation/epoch, origin rollback-anchor digest, migration sequence, offline owner authorization signature |
 
 Boot resolution (deterministic, no model, no network):
 
@@ -54,10 +55,12 @@ Boot resolution (deterministic, no model, no network):
    - more than 1: **stop** with `CONTINUITY: CONFLICT` (Recovery Core).
    - exactly 1: continue.
 3. The current manifest is the unique catalog manifest that no other manifest
-   names as previous, whose chain reaches the first manifest with strictly
-   consecutive sequence numbers and the same `AgentRoot` id. Anything else
-   (fork, gap, dangling reference, foreign root, undecodable object) stops
-   with `CONTINUITY: CORRUPT` (Recovery Core), never with a new identity.
+   names as previous, whose chain reaches either the genesis first manifest
+   (`previous_manifest_id = 0, migration_parent_id = 0`) or a validated migration
+   boundary (`previous_manifest_id = 0, migration_parent_id = MigrationManifest ID`)
+   with strictly consecutive sequence numbers and the same `AgentRoot` id.
+   Anything else (fork, gap, dangling reference, foreign root, undecodable object)
+   stops with `CONTINUITY: CORRUPT` (Recovery Core), never with a new identity.
 4. Resume: verify every object the manifest names decodes; commit a new
    manifest with `incarnation + 1` (commit-before-observation: the new
    incarnation is durable before AIEN acts on it); report
