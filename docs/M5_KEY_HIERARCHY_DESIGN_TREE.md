@@ -19,24 +19,55 @@ M5 governs the **confidentiality, integrity sealing, and cryptographic identity*
 
 ---
 
-## 2. Settled Decisions (Round 1)
+## 2. Settled Architecture (Rounds 1 & 2)
 
-| Question | Decision | Core Architectural Invariant |
+### 2.1 The M5 System Stack
+
+```text
+Store v1
+    Structural crash integrity (superblocks, dual slots, CRC32C, unmutated v1 format)
+        ↓
+KeySlotManifest (kind = 21, plaintext)
+    Unlock bootstrap (Slot 0: TPM PolicyAuthorize; Slot 1: Recovery KEK wrap)
+        ↓
+K_vol / Key Epochs
+    Independent 256-bit random master volume secret; subkeys derived via HKDF-SHA256
+        ↓
+AES-256-GCM-SIV Envelopes (64 KiB chunks)
+    Confidentiality + per-object streaming authentication
+        ↓
+SecurityManifest (kind = 22)
+    Keyed authentication of logical commit roots, catalogs, and epochs under K_root_auth
+        ↓
+AntiRollbackSource
+    Hardware off-disk replay boundary {store_uuid, epoch, security_root_digest}
+        ↓
+Recovery Core
+    Key recovery, authorization ceremony, migration, and failure authority
+```
+
+### 2.2 Settled Decisions Table
+
+| Decision | Verdict | Normative Architectural Specification |
 |---|---|---|
-| **Q1: Encryption Boundary** | **Option C′ (Object Envelopes + Keyed SecurityManifest)** | Store v1 superblocks, CommitRecords, Catalogs, CRC32C, and generation semantics remain 100% frozen and unmodified. Application objects are wrapped in authenticated AEAD envelopes. A keyed `SecurityManifest` / `RootAuth` object authenticates the commit graph. Unkeyed inspection works in Recovery Core. |
-| **Q2: Key Hierarchy** | **Option B′ (Independent `K_vol` + Multi-Slot Wrapping)** | `K_vol` is generated as an independent 256-bit random secret during provisioning. Slot 0 wraps `K_vol` via TPM 2.0 PCR authorization (owner-updatable via `PolicyAuthorize`). Slot 1 wraps `K_vol` via operator break-glass `K_recovery`. Domain-separated keys (`K_cortex`, `K_agent`, `K_artifact`, `K_root_auth`) derive from `K_vol` via HKDF-SHA256. `K_operator_auth` (ADR 0006 command authority), `K_recovery` (data decryption break-glass), and `K_vol` remain strictly separated. |
-| **Q3: Cipher Suite** | **Option D (AES-256-GCM-SIV, RFC 8452)** | Nonce-misuse-resistant AEAD across cold boots, power loss, retries, and branching. 256-bit keys, 96-bit random nonces, 128-bit authentication tags. Streaming chunked authenticated envelope to avoid buffering large payloads in kernel memory. Software baseline first; ARMv9.2-A AES/POLYVAL acceleration later. |
-| **Q4: Anti-Rollback** | **Option C′ (`AntiRollbackSource` Abstraction)** | Kernel introduces `trait AntiRollbackSource` with explicit `RollbackAnchor` semantics. Hardware-independent qualification in QEMU via mocks/swTPM. Physical NV / RPMB backend deferred until DGX Spark hardware characterization under TRUST-1. Rollback detection halts into `RecoveryRequired::RollbackDetected`, prohibiting normal agent continuation. |
+| **Q1: Boundary** | **Option C′** | Store v1 format (ADR 0015) superblocks, CommitRecords, Catalogs, CRC32C, and generation semantics remain 100% frozen. No authentication tags in superblocks. Application objects are wrapped in authenticated AEAD envelopes. Keyed `SecurityManifest` (kind = 22) authenticates commit graph. Unkeyed inspection works in Recovery Core. |
+| **Q2: Hierarchy** | **Option B′** | `K_vol` is an independent 256-bit random secret generated at genesis. Dual keyslots: Slot 0 (TPM `PolicyAuthorize` owner-updatable unseal), Slot 1 (Operator break-glass `K_recovery`). Domain-separated subkeys derived via HKDF-SHA256 (`K_cortex`, `K_agent`, `K_artifact`, `K_root_auth`). Strict independence between `K_operator_auth`, `K_recovery`, and `K_vol`. |
+| **Q3: Cipher Suite** | **Option D** | AES-256-GCM-SIV (RFC 8452). Nonce-misuse-resistant AEAD (256-bit key, 96-bit random nonce, 128-bit tag). Defense-in-depth across power loss, retries, cold boots, and branching. Target hardware: ARMv9.2-A Cortex-A725/X925 on DGX Spark. Software implementation first; assembly/POLYVAL backend later. |
+| **Q4: Rollback Abstraction** | **Option C′** | Kernel defines `trait AntiRollbackSource` with `RollbackAnchor { store_uuid, epoch, commit_record_id, security_root_digest }`. Hardware-independent qualification in QEMU via mocks/swTPM. Physical backend deferred until DGX Spark characterization under TRUST-1. Replay failure halts as `RecoveryRequired::RollbackDetected`. |
+| **Q5: Chunked Envelope** | **Modified 64 KiB** | 64-byte envelope header (`AIENENV1`, version=1, AES-256-GCM-SIV, chunk_size=65536, total_plaintext_len, 16B envelope_id, 8B nonce_prefix, key_epoch). Nonce: `nonce_prefix[8] \|\| chunk_index:u32le`. Per-chunk AAD: `"AIENOS-M5-CHUNK-V1\0" \|\| store_uuid \|\| kind:u16le \|\| version:u16le \|\| header_64B \|\| chunk_index:u32le \|\| chunk_len:u32le`. Store `ObjectId` is computed over the final ciphertext envelope. Invariant: scratch buffer authenticated before releasing plaintext to caller. |
+| **Q6: KeySlotManifest** | **Option A′** | Store v1 object `kind = 21: KeySlotManifest` (plaintext M5 bootstrap object). Contains deterministic lineage (`manifest_sequence`, `previous_keyslot_manifest_id`, `store_uuid`, `active_key_epoch`, `slot_count`, `slots[]`). Evaluated as untrusted-but-structurally-valid input until `K_vol` unwrapped and `SecurityManifest` verified. |
+| **Q7: Recovery KDF** | **Option C′** | Dual-mode: Direct high-entropy secret / WebAuthn PRF via HKDF-SHA256 (`AIENOS/M5/RECOVERY-KEK-V1`). Passphrases via Argon2id profile `KDF_ARGON2ID_V1` ($m=64\text{ MiB}, t=3, p=4$, 16B salt). Parameters encoded explicitly in keyslot with strict decoder bounds check. Reserved memory arena; zeroed immediately after derivation; no transparent fallback. |
+| **Q8: Security Epochs** | **Option B′** | A Security Epoch is the smallest group of Class-A commits permitted to become externally authoritative before their root is anchored outside replayable storage. Order: 1. Commit Store generation with {epoch E+1, digest H}; 2. Flush durably; 3. Advance `AntiRollbackSource`; 4. Release external effects. Replay check validates `{store_uuid, epoch, digest}`. |
+| **Q9: Key Rotation** | **Option C′** | Credential/policy rotation executes as $O(1)$ `KeySlotManifest` rewrap (no object re-encryption). `K_vol` compromise requires out-of-band store migration ceremony to fresh storage (decrypt validated live state, encrypt to fresh Store under fresh `K_vol'`, anchor new storage root). No in-place rekey can revoke historical ciphertext confidentiality. |
 
 ---
 
-## 3. The Active Frontier (Round 2)
+## 3. The Active Frontier (Round 3)
 
 ```text
-Round 2 Frontier
- ├── Q5: Chunked Authenticated Envelope Layout & Streaming AAD
- ├── Q6: Keyslot Object Representation in Store v1
- ├── Q7: KDF Parameterization for Operator Break-Glass (K_recovery)
- ├── Q8: Anti-Rollback Epoch Cadence & Anchor Granularity
- └── Q9: Key Re-wrapping vs. Full Re-encryption Semantics
+Round 3 Frontier
+ ├── Q10: Identity-Preserving Store Migration & AgentRoot Store-UUID Semantics (ADR 0016 amendment)
+ ├── Q11: SecurityManifest (kind = 22) Exact Structure & Keyed Authentication
+ ├── Q12: KeySlot Struct Layout inside KeySlotManifest (kind = 21)
+ └── Q13: TPM PolicyAuthorize Ceremony & Owner Root PCR Binding
 ```
