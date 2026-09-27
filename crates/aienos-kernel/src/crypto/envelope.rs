@@ -455,4 +455,35 @@ mod tests {
             Err(EnvelopeError::AuthenticationFailed)
         );
     }
+
+    #[test]
+    fn tampered_late_chunk_rejects_the_entire_plaintext() {
+        let key = [0x6au8; 32];
+        let store_uuid = [0x19u8; 16];
+        let envelope_id = [0x2bu8; 16];
+        let nonce_prefix = [0x3cu8; 8];
+        let plaintext = alloc::vec![0x5d; DEFAULT_CHUNK_SIZE as usize + 37];
+
+        let mut envelope = encrypt_envelope(
+            &key,
+            &store_uuid,
+            18,
+            1,
+            &envelope_id,
+            &nonce_prefix,
+            42,
+            &plaintext,
+        );
+        let header = EnvelopeHeader::decode(&envelope).unwrap();
+        assert_eq!(header.chunk_count(), 2);
+
+        // Corrupt the second chunk's tag, after the first chunk has verified.
+        *envelope.last_mut().unwrap() ^= 0x01;
+
+        assert_eq!(
+            decrypt_envelope(&key, &store_uuid, 18, 1, &envelope),
+            Err(EnvelopeError::AuthenticationFailed),
+            "a valid prefix must not be returned as a successful partial decrypt"
+        );
+    }
 }
