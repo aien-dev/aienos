@@ -1,0 +1,14 @@
+[package]
+name = "aienos-capability-ffi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Host C binding for the native AIENOS capability authority."
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+aienos-capability = { path = "../aienos-capability" }

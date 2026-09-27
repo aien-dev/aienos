@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/aienos-capability",
+    "crates/aienos-capability-ffi",
     "crates/aienos-kernel",
     "crates/aienos-agent-state",
     "crates/aienos-cortex",

@@ -13,6 +13,7 @@ std = []
 seed0b-test-anchor = ["aienos-artifact/seed0b-test-anchor"]
 
 [dependencies]
+aienos-capability = { path = "../aienos-capability" }
 aienos-accel = { path = "../aienos-accel" }
 aienos-artifact = { path = "../aienos-artifact" }
 aienos-crypto = { path = "../aienos-crypto" }
