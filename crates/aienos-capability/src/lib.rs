@@ -51,8 +51,12 @@ pub const RIGHT_REVOKE: u32 = 0x20;
 pub const RIGHT_RECLAIM: u32 = 0x40;
 pub const RIGHT_EPOCH: u32 = 0x80;
 pub const RIGHT_CLOCK: u32 = 0x100;
+/// Authorizes a lineage transition. Intelligence may propose the next
+/// generation. Only a holder of this right may promote it, and the right
+/// cannot be handed on.
+pub const RIGHT_PROMOTE: u32 = 0x200;
 pub const RIGHT_PRIVILEGED: u32 =
-    RIGHT_MINT | RIGHT_REVOKE | RIGHT_RECLAIM | RIGHT_EPOCH | RIGHT_CLOCK;
+    RIGHT_MINT | RIGHT_REVOKE | RIGHT_RECLAIM | RIGHT_EPOCH | RIGHT_CLOCK | RIGHT_PROMOTE;
 pub const RIGHT_KNOWN: u32 =
     RIGHT_READ | RIGHT_WRITE | RIGHT_EFFECT | RIGHT_DELEGATE | RIGHT_PRIVILEGED;
 
@@ -864,6 +868,31 @@ mod tests {
         assert!(state
             .validate(office(&state), 0, RES_AUTHORITY, RIGHT_MINT)
             .is_ok());
+    }
+
+    #[test]
+    fn promote_right_cannot_be_delegated() {
+        let mut state = boot();
+        let combined = root_mint(&mut state, 4, 0x905, RIGHT_PROMOTE | RIGHT_DELEGATE);
+        assert_eq!(combined.unwrap_err(), ERR_NOT_DELEGABLE);
+        let promoter = root_mint(&mut state, 4, 0x905, RIGHT_PROMOTE).unwrap();
+        let handed_on = state.mint(Mint {
+            issuer: 4,
+            subject: 5,
+            resource: 0x905,
+            rights: RIGHT_PROMOTE,
+            lease_ticks: 0,
+            parent: promoter,
+            authority: promoter,
+        });
+        assert_eq!(handed_on.unwrap_err(), ERR_NOT_DELEGABLE);
+        assert!(state.validate(promoter, 4, 0x905, RIGHT_PROMOTE).is_ok());
+        assert_eq!(
+            state
+                .validate(promoter, 9, 0x905, RIGHT_PROMOTE)
+                .unwrap_err(),
+            ERR_SUBJECT
+        );
     }
 
     #[test]
