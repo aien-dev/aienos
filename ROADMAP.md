@@ -1,11 +1,13 @@
 # AIENOS Roadmap
 
+> **Plan authority:** This is the current AIENOS component roadmap. Whole-system sequencing is owned by `aien-dev/aien-architecture/CURRENT_EXECUTION_PLAN.md`. See [docs/PLAN_AUTHORITY.md](docs/PLAN_AUTHORITY.md).
+
 AIENOS is an agent-native operating system built in the open. This file is the
 public map: where the project is, what is next, and where you can help.
 **Live progress** is on the GitHub milestone pages linked below: each progress
 bar moves as issues close. This file is updated at every gate.
 
-## Status (updated 2026-09-25)
+## Status (updated 2026-09-27)
 
 ```text
 M0  PARTIAL  Reference freeze
