@@ -1,10 +1,12 @@
 # AIENOS Systems Integration Sequence & Epistemic Calibration
 
-> **Status:** Governing Integration Framework
+> **HISTORICAL INTEGRATION SEQUENCE, SUPERSEDED AS EXECUTION ORDER.** Preserve this document for rationale and acceptance-history context. Current AIENOS sequencing is [../ROADMAP.md](../ROADMAP.md). Whole-system sequencing is owned by `aien-dev/aien-architecture/CURRENT_EXECUTION_PLAN.md`. See [PLAN_AUTHORITY.md](PLAN_AUTHORITY.md).
+
+> **Status:** Historical Integration Framework; execution order superseded by `../ROADMAP.md`
 > **Authority:** Operator Directive (2026-09-23)
 > **Amendment:** [Continuous-Existence Amendment](CONTINUOUS_EXISTENCE_AMENDMENT.md) ([ADR 0007](adr/0007-continuous-existence-provisioning-once.md)) — binding on all gate acceptance criteria; **gate order unchanged**
 > **Stage Transition:** Architecture-Definition → Systems-Integration
-> **Core Mandate:** *“You own the route; this document owns the destination.”*
+> **Historical mandate:** retained for provenance; it no longer owns current route or destination.
 
 ---
 
