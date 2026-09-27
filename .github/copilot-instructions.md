@@ -1,8 +1,6 @@
 # Instructions for coding agents working on AIENOS
 
-Read `CONTRIBUTING.md`, `CONTEXT.md` (domain language) and `docs/MILESTONES.md`
-(gate order and escalation triggers) before starting. They are binding. This
-file adds what agents most often get wrong here.
+Read `docs/PLAN_AUTHORITY.md`, `ROADMAP.md`, `CONTRIBUTING.md`, `CONTEXT.md` (domain language), and the relevant accepted ADRs before starting. `ROADMAP.md` owns the current AIENOS gate order. Historical/reference planning documents do not override it. Whole-system sequencing is owned by `aien-dev/aien-architecture/CURRENT_EXECUTION_PLAN.md`. This file adds what agents most often get wrong here.
 
 ## Finish line for every pull request
 
