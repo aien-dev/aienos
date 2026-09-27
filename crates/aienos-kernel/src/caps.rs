@@ -1,6 +1,22 @@
 //! Fixed-capacity capability handles with generation checks and revocation.
+//!
+//! The task table below is unchanged. The native authority, with subject,
+//! epoch, lease, a 64-bit resource, and an office that cognition cannot hold,
+//! is [`aienos_capability`] re-exported here.
 
 pub use crate::abi::Handle;
+
+pub use aienos_capability::{
+    add_u64 as authority_add_u64, generation_advance as authority_generation_advance,
+    narrow_resource, widen_resource, AuthorityAdmin, AuthorityState, AuthorityView, CapRef,
+    Entry as AuthorityEntry, Mint as AuthorityMint, CAP_MAX as AUTHORITY_CAP_MAX,
+    ERR_AMPLIFY as AUTHORITY_ERR_AMPLIFY, ERR_CHAIN as AUTHORITY_ERR_CHAIN,
+    ERR_EPOCH as AUTHORITY_ERR_EPOCH, ERR_EXHAUSTED as AUTHORITY_ERR_EXHAUSTED,
+    ERR_EXPIRED as AUTHORITY_ERR_EXPIRED, ERR_RESOURCE as AUTHORITY_ERR_RESOURCE,
+    ERR_STALE_GEN as AUTHORITY_ERR_STALE_GEN, ERR_SUBJECT as AUTHORITY_ERR_SUBJECT,
+    ERR_UNAUTHORIZED as AUTHORITY_ERR_UNAUTHORIZED, RES_AUTHORITY, RIGHT_DELEGATE,
+    RIGHT_PRIVILEGED,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rights(u8);
