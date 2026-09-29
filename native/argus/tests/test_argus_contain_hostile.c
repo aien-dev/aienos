@@ -36,6 +36,12 @@ static void setup(Rig *r) {
     r->machine[0]=0xA1;
     CHECK(argus_aegis_bridge_init(&r->bridge,r->bridge_mem,argus_aegis_bridge_footprint(),
           r->core,r->contain,&r->gate,r->view,r->machine)==ARGUS_OK);
+    ArgusEvent joined={0}; joined.version=ARGUS_ABI_VERSION; joined.class_=ARGUS_CLASS_SECURITY;
+    joined.kind=ARGUS_EV_MACHINE_JOINED; joined.outcome=ARGUS_OUTCOME_OK;
+    joined.flags=(uint16_t)((1u<<ARGUS_FLAG_STREAM_SHIFT)|ARGUS_FLAG_SYNTHETIC);
+    joined.sequence=1; joined.object_id=ARGUS_TRUST_OBSERVED; joined.cap_id=ARGUS_CAP_NONE;
+    memcpy(joined.machine_id,r->machine,sizeof joined.machine_id);
+    CHECK(argus_aegis_bridge_ingest(r->bridge,&joined)==ARGUS_OK);
     r->policy.verdict[AIENOS_CONTAIN_REVOKE_CAPABILITY]=AIENOS_CONTAIN_GRANT;
     AienosContainAuthorizer az={aienos_contain_table_decide,&r->policy};
     CHECK(aienos_cap_set_observer(r->admin,argus_aegis_bridge_observer,r->bridge)==AIENOS_CAP_OK);
@@ -71,6 +77,68 @@ static AienosContainRequest request(uint64_t id,uint32_t subject,AienosCapRef ta
 static int live(Rig *r,AienosCapRef c) {
     AienosCapEntry e;
     return aienos_cap_inspect(r->view,c,&e)==AIENOS_CAP_OK && e.state==AIENOS_CAP_STATE_LIVE;
+}
+
+static ArgusEvent receipt_event(Rig *r,uint16_t kind,uint64_t seq,
+                                const ArgusContainmentRequest *q,uint8_t status) {
+    ArgusEvent e={0}; e.version=ARGUS_ABI_VERSION; e.class_=ARGUS_CLASS_CRITICAL;
+    e.kind=kind; e.outcome=ARGUS_OUTCOME_OK; e.flags=(uint16_t)(2u<<ARGUS_FLAG_STREAM_SHIFT);
+    e.sequence=seq; e.cap_id=q?q->target.cap_id:ARGUS_CAP_NONE;
+    e.cap_generation=q?q->target.generation:0; e.principal=q?q->principal:0;
+    e.world_generation=q?q->request_id:999;
+    e.object_id=ARGUS_CONTAIN_PACK(q?q->containment:ARGUS_CONTAIN_REVOKE_CAPABILITY,
+                                    status,q?q->finding_code:ARGUS_F_STALE_GENERATION);
+    e.resource=kind==ARGUS_EV_CONTAINMENT_DECIDED?77:1;
+    memcpy(e.machine_id,r->machine,sizeof e.machine_id);
+    if(q) argus_contain_request_digest(q,e.evidence_digest);
+    return e;
+}
+
+static int take_code(Rig *r,uint16_t kind,uint64_t seq,
+                     const ArgusContainmentRequest *q,uint8_t status,uint16_t wanted) {
+    ArgusEvent e=receipt_event(r,kind,seq,q,status);
+    CHECK(argus_aegis_bridge_ingest(r->bridge,&e)==ARGUS_OK);
+    ArgusFinding f[16]; size_t n=argus_aegis_bridge_take_findings(r->bridge,f,16);
+    for(size_t i=0;i<n;i++) if(f[i].code==wanted) return 1;
+    return 0;
+}
+
+static ArgusContainmentRequest make_proposal(Rig *r,AienosCapRef target) {
+    ArgusFinding f={0}; f.code=ARGUS_F_STALE_GENERATION; f.severity=ARGUS_SEV_CRITICAL;
+    f.confidence=ARGUS_CONF_DETERMINISTIC; f.containment=ARGUS_CONTAIN_REVOKE_CAPABILITY;
+    f.sequence=2; f.principal=7; f.cap_id=target.cap_id; f.cap_generation=target.generation-1;
+    memcpy(f.machine_id,r->machine,sizeof f.machine_id);
+    ArgusEvent trigger={0}; trigger.sequence=2; trigger.kind=ARGUS_EV_STALE_GENERATION;
+    trigger.cap_id=target.cap_id; trigger.cap_generation=target.generation-1;
+    memcpy(trigger.machine_id,r->machine,sizeof trigger.machine_id);
+    ArgusContainmentRequest q={0}; ArgusEvent prop={0}; size_t n=0;
+    CHECK(argus_contain_propose(r->contain,r->core,&f,1,&trigger,&q,1,&prop,1,&n)==ARGUS_OK && n==1);
+    CHECK(argus_aegis_bridge_ingest(r->bridge,&prop)==ARGUS_OK);
+    return q;
+}
+
+static void hostile_receipt_transitions(void) {
+    Rig r; setup(&r); AienosCapRef c=mint(&r,7,AIENOS_CAP_RIGHT_READ);
+    CHECK(take_code(&r,ARGUS_EV_CONTAINMENT_DECIDED,1,NULL,ARGUS_CSTATUS_GRANT,
+                    ARGUS_F_CONTAINMENT_DECISION_UNMATCHED));
+    teardown(&r);
+
+    setup(&r); c=mint(&r,7,AIENOS_CAP_RIGHT_READ);
+    ArgusContainmentRequest q=make_proposal(&r,c);
+    CHECK(take_code(&r,ARGUS_EV_CONTAINMENT_EXECUTED,1,&q,ARGUS_CSTATUS_DONE,
+                    ARGUS_F_CONTAINMENT_EXECUTION_UNAUTHORIZED));
+    teardown(&r);
+
+    setup(&r); c=mint(&r,7,AIENOS_CAP_RIGHT_READ);
+    q=make_proposal(&r,c);
+    ArgusEvent grant=receipt_event(&r,ARGUS_EV_CONTAINMENT_DECIDED,1,&q,ARGUS_CSTATUS_GRANT);
+    CHECK(argus_aegis_bridge_ingest(r.bridge,&grant)==ARGUS_OK);
+    ArgusFinding scratch[8]; size_t nf=argus_aegis_bridge_take_findings(r.bridge,scratch,8);
+    CHECK(nf==0);
+    CHECK(take_code(&r,ARGUS_EV_CONTAINMENT_EXECUTED,2,&q,ARGUS_CSTATUS_DONE,
+                    ARGUS_F_CONTAINMENT_EXECUTION_UNCONFIRMED));
+    CHECK(live(&r,c));
+    teardown(&r);
 }
 
 static void hostile_digest_and_scope(void) {
@@ -142,6 +210,7 @@ int main(void) {
     hostile_digest_and_scope();
     hostile_single_execution_and_replay();
     hostile_protected_and_synthetic();
+    hostile_receipt_transitions();
     printf("ARGUS-1 hostile containment: %d checks, %d failures\n",checks,failures);
     return failures?1:0;
 }
