@@ -316,7 +316,7 @@ void argus_event_digest(const ArgusEvent *ev, uint8_t out[ARGUS_DIGEST_LEN]);
 void argus_chain_extend(uint8_t chain[ARGUS_DIGEST_LEN], const ArgusEvent *ev);   /* chain = H(chain || bytes) */
 void argus_finding_digest(const ArgusFinding *f, uint8_t out[ARGUS_DIGEST_LEN]);
 
-/* argus_ring.c (lane C): single-producer/single-consumer bounded ring of events. */
+/* argus_ring.c (lane B): single-producer/single-consumer bounded ring of events. */
 typedef struct ArgusRing ArgusRing;
 size_t argus_ring_footprint(uint32_t capacity_pow2);                       /* bytes needed for argus_ring_init */
 int    argus_ring_init(ArgusRing **ring, void *memory, size_t bytes, uint32_t capacity_pow2);
@@ -332,6 +332,8 @@ typedef struct {
 void   argus_ring_stats(const ArgusRing *ring, ArgusRingStats *out);
 /* Consumer-side: turn accumulated refusals into TELEMETRY_DROPPED events (flag CONSUMER); returns count written. */
 size_t argus_ring_drain_drops(ArgusRing *ring, ArgusEvent *out, size_t max, uint64_t *next_sequence);
+/* Ring depth at which pushes of class_ start being refused (0 if capacity invalid). */
+uint32_t argus_ring_saturation_point(uint32_t capacity_pow2, uint8_t class_);
 
 /* argus_detect.c (lane E): the hard-invariant detector table. */
 extern const ArgusDetector argus_hard_detectors[];
