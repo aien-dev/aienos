@@ -71,20 +71,20 @@ enum {
 /* Event kinds. Values are stable forever; append only, never renumber. */
 enum {
     ARGUS_EV_NONE                    = 0,
-    ARGUS_EV_CAPABILITY_GRANTED      = 1,
+    ARGUS_EV_CAPABILITY_GRANTED      = 1,   /* cap = NEW ref; object_id = rights; resource = resource; no parent ref in v1 */
     ARGUS_EV_CAPABILITY_USED         = 2,
     ARGUS_EV_CAPABILITY_DENIED       = 3,
     ARGUS_EV_CAPABILITY_REVOKED      = 4,
-    ARGUS_EV_CREDENTIAL_LEASE_CREATED = 10,
+    ARGUS_EV_CREDENTIAL_LEASE_CREATED = 10, /* object_id = lease id; resource = scope (USED: requested bits) */
     ARGUS_EV_CREDENTIAL_LEASE_USED   = 11,
     ARGUS_EV_CREDENTIAL_LEASE_REVOKED = 12,
-    ARGUS_EV_ARTIFACT_ADMITTED       = 20,
+    ARGUS_EV_ARTIFACT_ADMITTED       = 20,  /* evidence_digest = artifact digest (all ARTIFACT_*) */
     ARGUS_EV_ARTIFACT_REJECTED       = 21,
     ARGUS_EV_ARTIFACT_ACTIVATED      = 22,  /* an admitted artifact began executing */
-    ARGUS_EV_MACHINE_JOINED          = 30,
-    ARGUS_EV_MACHINE_TRUST_CHANGED   = 31,
+    ARGUS_EV_MACHINE_JOINED          = 30,  /* object_id = initial ARGUS_TRUST_* (1..6); 0 => OBSERVED */
+    ARGUS_EV_MACHINE_TRUST_CHANGED   = 31,  /* object_id = new ARGUS_TRUST_* (1..6); other values ignored */
     ARGUS_EV_MACHINE_REMOVED         = 32,
-    ARGUS_EV_PROVIDER_DISCOVERED     = 40,
+    ARGUS_EV_PROVIDER_DISCOVERED     = 40,  /* evidence_digest = provider id (all PROVIDER_*) */
     ARGUS_EV_PROVIDER_CHANGED        = 41,
     ARGUS_EV_PROVIDER_QUARANTINED    = 42,
     ARGUS_EV_PROVIDER_USED           = 43,
@@ -246,7 +246,7 @@ typedef struct {
 typedef struct {
     uint8_t  machine_id[ARGUS_MACHINE_ID_LEN];
     uint32_t trust;             /* ARGUS_TRUST_* */
-    uint64_t joined_sequence;
+    uint64_t joined_sequence;   /* 0 = not joined (REMOVED drops the entry) */
     uint64_t changed_sequence;
 } ArgusMachineShadow;
 
