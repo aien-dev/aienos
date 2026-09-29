@@ -19,6 +19,8 @@
 #include "stub_state.h"
 
 #include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdarg.h>
@@ -30,6 +32,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <time.h>
 
 /* Advance an snprintf append offset without ever passing the end of the buffer:
@@ -273,12 +276,20 @@ static int scan_tree(const char *dir, const char *word, const char *cap_len, int
         if (strcmp(dir, ".") == 0 && strcmp(de->d_name, "out") == 0) continue;
         char path[1024];
         snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
+        /* Open first, then fstat the descriptor (no check-then-use race).
+         * O_NOFOLLOW: a symlink fails with ELOOP and is skipped, as before;
+         * O_NONBLOCK: a FIFO cannot hang the scan (it is skipped below). */
+        int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+        if (fd < 0) {
+            if (errno == ELOOP || errno == ENXIO) continue;   /* symlink / socket: not scanned */
+            err = -1; continue;
+        }
         struct stat st;
-        if (lstat(path, &st) != 0) { err = -1; continue; }
-        if (S_ISDIR(st.st_mode)) { if (scan_tree(path, word, cap_len, files, hits, dirs)) err = -1; continue; }
-        if (!S_ISREG(st.st_mode)) continue;
-        FILE *fp = fopen(path, "r");
-        if (!fp) { err = -1; continue; }
+        if (fstat(fd, &st) != 0) { close(fd); err = -1; continue; }
+        if (S_ISDIR(st.st_mode)) { close(fd); if (scan_tree(path, word, cap_len, files, hits, dirs)) err = -1; continue; }
+        if (!S_ISREG(st.st_mode)) { close(fd); continue; }
+        FILE *fp = fdopen(fd, "r");
+        if (!fp) { close(fd); err = -1; continue; }
         (*files)++;
         char line[4096];
         int lineno = 0;

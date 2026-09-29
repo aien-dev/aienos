@@ -9,12 +9,15 @@
 #include "../capability/aienos_capability.h"
 
 #include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 /* ---- ABI layout: the header's documented offsets are the contract ---- */
 _Static_assert(sizeof(ArgusEvent) == ARGUS_EVENT_SIZE, "event is 128 bytes");
@@ -534,12 +537,20 @@ static void scan_tree(const char *dir, const char *word, const char *cap_len, in
         if (strcmp(dir, ".") == 0 && strcmp(de->d_name, "out") == 0) continue;   /* build output */
         char path[1024];
         snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
+        /* Open first, then fstat the descriptor (no check-then-use race).
+         * O_NOFOLLOW: a symlink fails with ELOOP and is skipped, as before;
+         * O_NONBLOCK: a FIFO cannot hang the scan (it is skipped below). */
+        int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+        if (fd < 0) {
+            if (errno == ELOOP || errno == ENXIO) continue;   /* symlink / socket: not scanned */
+            failures++; fprintf(stderr, "FAIL cannot stat %s\n", path); continue;
+        }
         struct stat st;
-        if (lstat(path, &st) != 0) { failures++; fprintf(stderr, "FAIL cannot stat %s\n", path); continue; }
-        if (S_ISDIR(st.st_mode)) { scan_tree(path, word, cap_len, files, hits); continue; }
-        if (!S_ISREG(st.st_mode)) continue;
-        FILE *fp = fopen(path, "r");
-        if (!fp) { failures++; fprintf(stderr, "FAIL cannot read %s\n", path); continue; }
+        if (fstat(fd, &st) != 0) { close(fd); failures++; fprintf(stderr, "FAIL cannot stat %s\n", path); continue; }
+        if (S_ISDIR(st.st_mode)) { close(fd); scan_tree(path, word, cap_len, files, hits); continue; }
+        if (!S_ISREG(st.st_mode)) { close(fd); continue; }
+        FILE *fp = fdopen(fd, "r");
+        if (!fp) { close(fd); failures++; fprintf(stderr, "FAIL cannot read %s\n", path); continue; }
         (*files)++;
         char line[4096];
         int lineno = 0;
