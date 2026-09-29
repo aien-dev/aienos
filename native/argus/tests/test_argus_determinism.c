@@ -74,7 +74,7 @@ static void gen(void)
         case ARGUS_EV_CREDENTIAL_LEASE_REVOKED: e->object_id = rn(90); e->resource = rn(16); break;
         case ARGUS_EV_ARTIFACT_ADMITTED: case ARGUS_EV_ARTIFACT_REJECTED:
         case ARGUS_EV_ARTIFACT_ACTIVATED: dg(e->evidence_digest, rn(90)); break;
-        case ARGUS_EV_MACHINE_TRUST_CHANGED: e->resource = rn(8); break;
+        case ARGUS_EV_MACHINE_TRUST_CHANGED: e->object_id = rn(8); break;
         case ARGUS_EV_PROVIDER_DISCOVERED: case ARGUS_EV_PROVIDER_CHANGED:
         case ARGUS_EV_PROVIDER_QUARANTINED: case ARGUS_EV_PROVIDER_USED: dg(e->evidence_digest, 1000 + rn(45)); break;
         case ARGUS_EV_WORLD_COMMITTED:

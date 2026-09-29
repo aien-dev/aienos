@@ -171,6 +171,8 @@ static void t_artifacts(void)
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->artifact(v, e.evidence_digest, &s) == ARGUS_OK && s.state == ARGUS_SHADOW_REJECTED && s.sequence == 4);
     e = ev_make(ARGUS_EV_ARTIFACT_REJECTED, 5); dg(e.evidence_digest, 3); e.outcome = ARGUS_OUTCOME_ERROR;
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->artifact(v, e.evidence_digest, &s) == ARGUS_ERR_STATE);
+    e = ev_make(ARGUS_EV_ARTIFACT_ADMITTED, 1); mid(e.machine_id, 9); dg(e.evidence_digest, 4); e.code = -3; /* OK but nonzero code: not admitted */
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->artifact(v, e.evidence_digest, &s) == ARGUS_ERR_STATE);
     e = ev_make(ARGUS_EV_ARTIFACT_ADMITTED, 6); /* zero digest = none */
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->artifact(v, e.evidence_digest, &s) == ARGUS_ERR_STATE);
     uint64_t seq = 7;
@@ -190,22 +192,28 @@ static void t_machines(void)
     ArgusEvent e = ev_make(ARGUS_EV_MACHINE_JOINED, 1); mid(e.machine_id, 1);
     CHECK(ing(c, &e, f, &n) == ARGUS_OK);
     CHECK(o->machine(v, e.machine_id, &s) == ARGUS_OK && s.trust == ARGUS_TRUST_OBSERVED && s.joined_sequence == 1 && s.changed_sequence == 1);
-    e = ev_make(ARGUS_EV_MACHINE_TRUST_CHANGED, 2); e.resource = ARGUS_TRUST_QUARANTINED;
+    e = ev_make(ARGUS_EV_MACHINE_TRUST_CHANGED, 2); e.object_id = ARGUS_TRUST_QUARANTINED; e.resource = ARGUS_TRUST_TRUSTED;
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->machine(v, e.machine_id, &s) == ARGUS_OK && s.trust == ARGUS_TRUST_QUARANTINED && s.changed_sequence == 2);
     e = ev_make(ARGUS_EV_MACHINE_JOINED, 3); /* rejoin: no laundering */
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->machine(v, e.machine_id, &s) == ARGUS_OK && s.trust == ARGUS_TRUST_QUARANTINED && s.joined_sequence == 1);
-    e = ev_make(ARGUS_EV_MACHINE_TRUST_CHANGED, 4); e.resource = 77; /* invalid trust ignored */
+    e = ev_make(ARGUS_EV_MACHINE_TRUST_CHANGED, 4); e.object_id = 77; /* invalid trust ignored */
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->machine(v, e.machine_id, &s) == ARGUS_OK && s.trust == ARGUS_TRUST_QUARANTINED);
+    e = ev_make(ARGUS_EV_MACHINE_TRUST_CHANGED, 40); e.object_id = 0; e.resource = ARGUS_TRUST_TRUSTED; /* 0 ignored */
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->machine(v, e.machine_id, &s) == ARGUS_OK && s.trust == ARGUS_TRUST_QUARANTINED);
     /* trust change for unknown machine creates it with joined 0 (its own producer stream) */
-    e = ev_make(ARGUS_EV_MACHINE_TRUST_CHANGED, 1); mid(e.machine_id, 2); e.resource = ARGUS_TRUST_TRUSTED;
+    e = ev_make(ARGUS_EV_MACHINE_TRUST_CHANGED, 1); mid(e.machine_id, 2); e.object_id = ARGUS_TRUST_TRUSTED;
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0 && o->machine(v, e.machine_id, &s) == ARGUS_OK && s.trust == ARGUS_TRUST_TRUSTED && s.joined_sequence == 0);
     /* remove machine 1; machine 2 stays */
-    e = ev_make(ARGUS_EV_MACHINE_REMOVED, 5); mid(e.machine_id, 1);
+    e = ev_make(ARGUS_EV_MACHINE_REMOVED, 50); mid(e.machine_id, 1);
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->machine(v, e.machine_id, &s) == ARGUS_ERR_STATE);
     mid(e.machine_id, 2);
     CHECK(o->machine(v, e.machine_id, &s) == ARGUS_OK && s.trust == ARGUS_TRUST_TRUSTED);
+    e = ev_make(ARGUS_EV_MACHINE_JOINED, 1); mid(e.machine_id, 3); e.object_id = ARGUS_TRUST_RESTRICTED;
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->machine(v, e.machine_id, &s) == ARGUS_OK && s.trust == ARGUS_TRUST_RESTRICTED && s.joined_sequence == 1);
+    e = ev_make(ARGUS_EV_MACHINE_JOINED, 1); mid(e.machine_id, 4); e.object_id = 9;
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->machine(v, e.machine_id, &s) == ARGUS_OK && s.trust == ARGUS_TRUST_OBSERVED);
     /* fill the machine table to 16, then one more is FULL */
-    for (uint32_t m = 100; m < 100 + ARGUS_CORE_MACHINES - 1; m++) {
+    for (uint32_t m = 100; m < 100 + ARGUS_CORE_MACHINES - 3; m++) {
         e = ev_make(ARGUS_EV_MACHINE_JOINED, 1); mid(e.machine_id, m);   /* own producer stream */
         CHECK(ing(c, &e, f, &n) == ARGUS_OK);
     }

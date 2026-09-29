@@ -41,9 +41,9 @@ check-core-symbols: $(CORE_OBJ)
 		echo "FAIL: argus_core.c references heap/io/clock"; exit 1; fi
 	@if grep -nwiE 'tok[e]n|AIENOS_CAP_TOK[E]N_LEN' argus_core.c argus_core.h tests/*_d.* tests/test_argus_core.c tests/test_argus_determinism.c lane_d.mk; then \
 		echo "FAIL: forbidden word in lane D files"; exit 1; fi
-	@bad=$$(nm -u $(CORE_OBJ) | awk '{print $$NF}' | sed 's/^_//' | grep -vxE '$(ALLOWED_UNDEF)' || true); \
+	@bad=$$(nm -u $(CORE_OBJ) | awk '{print $$NF}' | grep -vxE '_?($(ALLOWED_UNDEF))' || true); \
 	if [ -n "$$bad" ]; then echo "FAIL: argus_core.o imports: $$bad"; exit 1; fi
-	@echo "check-core-symbols: OK (no heap, no I/O, no clock; imports only: $$(nm -u $(CORE_OBJ) | awk '{print $$NF}' | sed 's/^_//' | tr '\n' ' '))"
+	@echo "check-core-symbols: OK (no heap, no I/O, no clock; imports only: $$(nm -u $(CORE_OBJ) | awk '{print $$NF}' | tr '\n' ' '))"
 
 test-core: $(OUT)/test_argus_core check-core-symbols
 	./$(OUT)/test_argus_core

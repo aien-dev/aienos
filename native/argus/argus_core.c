@@ -45,12 +45,14 @@
  *                        (created as REVOKED if unseen). A CREATED on a revoked
  *                        lease id does not revive it.
  *   ARTIFACT_*           keyed by evidence_digest (all-zero = none). ADMITTED:
- *                        LIVE. REJECTED: REJECTED. Rejection is sticky: a later
+ *                        LIVE only with outcome OK and code 0. REJECTED:
+ *                        REJECTED. Rejection is sticky: a later
  *                        ADMITTED does not un-reject.
- *   MACHINE_JOINED       keyed by machine_id; new -> trust OBSERVED. A rejoin
+ *   MACHINE_JOINED       keyed by machine_id; new -> trust = object_id if 1..6,
+ *                        else OBSERVED. A rejoin
  *                        of a known machine changes nothing (no trust laundering).
- *   MACHINE_TRUST_CHANGED resource = new ARGUS_TRUST_* (values above
- *                        REATTESTATION_REQUIRED are ignored); an unknown machine
+ *   MACHINE_TRUST_CHANGED object_id = new ARGUS_TRUST_* (1..6; other values
+ *                        are ignored); an unknown machine
  *                        is created with joined_sequence 0.
  *   MACHINE_REMOVED      deletes the entry (order-preserving).
  *   PROVIDER_*           keyed by evidence_digest. DISCOVERED: LIVE if new; a
@@ -468,7 +470,8 @@ static int apply_machine(struct ArgusStateView *v, const ArgusEvent *ev)
         }
         return ARGUS_OK;
     }
-    if (ev->kind == ARGUS_EV_MACHINE_TRUST_CHANGED && ev->resource > ARGUS_TRUST_REATTESTATION_REQUIRED)
+    int trust_ok = ev->object_id >= ARGUS_TRUST_TRUSTED && ev->object_id <= ARGUS_TRUST_REATTESTATION_REQUIRED;
+    if (ev->kind == ARGUS_EV_MACHINE_TRUST_CHANGED && !trust_ok)
         return ARGUS_OK;
     if (i < 0) {
         if (v->n_machines >= ARGUS_CORE_MACHINES)
@@ -478,7 +481,7 @@ static int apply_machine(struct ArgusStateView *v, const ArgusEvent *ev)
         memset(n, 0, sizeof *n);
         memcpy(n->machine_id, ev->machine_id, ARGUS_MACHINE_ID_LEN);
         if (ev->kind == ARGUS_EV_MACHINE_JOINED) {
-            n->trust = ARGUS_TRUST_OBSERVED;
+            n->trust = trust_ok ? ev->object_id : (uint32_t)ARGUS_TRUST_OBSERVED;
             n->joined_sequence = ev->sequence;
             n->changed_sequence = ev->sequence;
             return ARGUS_OK;
@@ -486,7 +489,7 @@ static int apply_machine(struct ArgusStateView *v, const ArgusEvent *ev)
     } else if (ev->kind == ARGUS_EV_MACHINE_JOINED) {
         return ARGUS_OK;                       /* rejoin never launders trust */
     }
-    v->machines[i].trust = (uint32_t)ev->resource;
+    v->machines[i].trust = ev->object_id;
     v->machines[i].changed_sequence = ev->sequence;
     return ARGUS_OK;
 }
@@ -524,7 +527,7 @@ static int apply_event(struct ArgusStateView *v, const ArgusEvent *ev)
     case ARGUS_EV_CREDENTIAL_LEASE_REVOKED:
         return ok ? apply_lease(v, ev, 1) : ARGUS_OK;
     case ARGUS_EV_ARTIFACT_ADMITTED:
-        return ok ? apply_artifact(v, ev, 0) : ARGUS_OK;
+        return (ok && ev->code == 0) ? apply_artifact(v, ev, 0) : ARGUS_OK;
     case ARGUS_EV_ARTIFACT_REJECTED:
         return (ok || ev->outcome == ARGUS_OUTCOME_DENIED) ? apply_artifact(v, ev, 1) : ARGUS_OK;
     case ARGUS_EV_MACHINE_JOINED:
