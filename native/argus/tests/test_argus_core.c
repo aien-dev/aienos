@@ -1,6 +1,7 @@
 /*
  * test_argus_core.c -- lane D unit tests: every table update, sequence
- * anomaly, table-full behaviour, telemetry loss, overflow, incidents, ops.
+ * anomaly, table-full behaviour, telemetry loss, overflow, incidents, ops;
+ * v1.2: containment kinds 90-93 (no detectors, no shadow change) and argus_core_incident.
  * Linked against tests/stub_lanes_d.c (lane B/E stand-ins).
  */
 #include "test_common_d.h"
@@ -881,6 +882,131 @@ static void t_v11_worlds(void)
 }
 
 
+/* ---- v1.2 (ARGUS-1): containment kinds 90-93 and argus_core_incident ------- */
+
+static ArgusEvent ev_contain(uint16_t kind, uint64_t seq, uint8_t status, uint8_t outcome)
+{
+    ArgusEvent e = ev_make(kind, seq);
+    e.class_ = ARGUS_CLASS_CRITICAL;
+    e.effect_class = ARGUS_EFFECT_NONE;
+    e.outcome = outcome;
+    e.flags = kind == ARGUS_EV_CONTAINMENT_PROPOSED ? ARGUS_FLAG_CONSUMER : (uint16_t)(1u << ARGUS_FLAG_STREAM_SHIFT);
+    e.principal = 7; e.cap_id = 5; e.cap_generation = 2;
+    e.object_id = kind == ARGUS_EV_AUTHORITY_ESCALATED ? 0u
+                  : ARGUS_CONTAIN_PACK(ARGUS_CONTAIN_REVOKE_CAPABILITY, status, ARGUS_F_STALE_GENERATION);
+    e.world_generation = kind == ARGUS_EV_AUTHORITY_ESCALATED ? 0u : 1u;
+    e.resource = kind == ARGUS_EV_CONTAINMENT_EXECUTED ? 1u : 3u;
+    dg(e.evidence_digest, 900);
+    return e;
+}
+
+static void t_v12_containment_kinds(void)
+{
+    ArgusCore *c = fresh();
+    ArgusFinding f[16]; size_t n; ArgusCoreHealth h0, h1;
+    ArgusEvent g = ev_make(ARGUS_EV_CAPABILITY_GRANTED, 1);
+    g.principal = 7; g.cap_id = 5; g.cap_generation = 2; g.object_id = 1;
+    CHECK(ing(c, &g, f, &n) == ARGUS_OK && n == 0);
+    ArgusCapShadow s0, s1;
+    argus_core_ops()->cap(argus_core_view(c), 5, &s0);
+
+    /* Every detector mode: 90-93 never reach argus_detect_run and raise nothing. Mode 2
+     * would fill every free slot with a finding if the detectors were called. */
+    const uint16_t kinds[4] = { ARGUS_EV_CONTAINMENT_PROPOSED, ARGUS_EV_CONTAINMENT_DECIDED,
+                                ARGUS_EV_CONTAINMENT_EXECUTED, ARGUS_EV_AUTHORITY_ESCALATED };
+    const uint8_t status[4] = { ARGUS_CSTATUS_PROPOSED, ARGUS_CSTATUS_GRANT, ARGUS_CSTATUS_DONE, 0 };
+    uint64_t seq = 1;
+    for (int mode = 0; mode <= 3; mode++) {
+        for (int k = 0; k < 4; k++) {
+            ArgusEvent e = ev_contain(kinds[k], seq++, status[k], ARGUS_OUTCOME_OK);
+            stub_detect_mode = mode;
+            uint64_t calls = stub_detect_calls;
+            uint8_t chain0[32];
+            argus_core_health(c, &h0); memcpy(chain0, h0.chain, 32);
+            CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0);
+            CHECK(stub_detect_calls == calls);
+            argus_core_health(c, &h1);
+            CHECK(h1.events_received == h0.events_received + 1 && h1.findings_emitted == h0.findings_emitted);
+            CHECK(h1.events_not_applied == h0.events_not_applied && h1.events_rejected == h0.events_rejected);
+            CHECK(memcmp(chain0, h1.chain, 32) != 0);                 /* chained */
+            argus_core_ops()->cap(argus_core_view(c), 5, &s1);
+            CHECK(memcmp(&s0, &s1, sizeof s0) == 0);                  /* no shadow change */
+        }
+    }
+    /* Non-OK outcomes (DENY / ESCALATE / FAILED) change nothing either. */
+    stub_detect_mode = 2;
+    ArgusEvent d = ev_contain(ARGUS_EV_CONTAINMENT_DECIDED, seq, ARGUS_CSTATUS_DENY, ARGUS_OUTCOME_DENIED);
+    CHECK(ing(c, &d, f, &n) == ARGUS_OK && n == 0);
+    d = ev_contain(ARGUS_EV_CONTAINMENT_EXECUTED, seq + 1, ARGUS_CSTATUS_FAILED, ARGUS_OUTCOME_ERROR);
+    CHECK(ing(c, &d, f, &n) == ARGUS_OK && n == 0);
+    argus_core_ops()->cap(argus_core_view(c), 5, &s1);
+    CHECK(memcmp(&s0, &s1, sizeof s0) == 0);
+
+    /* The sequence check still applies to their streams (core step 1, unchanged): a
+     * replayed 91 is a core SEQUENCE_ANOMALY; argus_contain adds code 17 on its side. */
+    stub_detect_mode = 1;
+    ArgusEvent r = ev_contain(ARGUS_EV_CONTAINMENT_DECIDED, 2, ARGUS_CSTATUS_GRANT, ARGUS_OUTCOME_OK);
+    CHECK(ing(c, &r, f, &n) == ARGUS_OK && n == 1 && f[0].code == ARGUS_F_SEQUENCE_ANOMALY);
+
+    /* A malformed 90-93 is still MALFORMED: code 16, not chained. */
+    ArgusEvent m = ev_contain(ARGUS_EV_CONTAINMENT_EXECUTED, 100, ARGUS_CSTATUS_DONE, ARGUS_OUTCOME_OK);
+    m.version = 0;
+    argus_core_health(c, &h0);
+    CHECK(ing(c, &m, f, &n) == ARGUS_ERR_MALFORMED && n == 1 && f[0].code == ARGUS_F_MALFORMED_EVENT);
+    argus_core_health(c, &h1);
+    CHECK(memcmp(h0.chain, h1.chain, 32) == 0 && h1.events_rejected == h0.events_rejected + 1);
+
+
+    /* The observer's kind 4 (bridged revoke) applies exactly as in ARGUS-0. */
+    ArgusEvent rv = ev_make(ARGUS_EV_CAPABILITY_REVOKED, 2);
+    rv.principal = 7; rv.cap_id = 5; rv.cap_generation = 2;
+    CHECK(ing(c, &rv, f, &n) == ARGUS_OK && n == 0);
+    argus_core_ops()->cap(argus_core_view(c), 5, &s1);
+    CHECK(s1.state == ARGUS_SHADOW_REVOKED && s1.revoked_sequence == 2);
+}
+
+static void t_v12_incident(void)
+{
+    ArgusCore *c = fresh();
+    ArgusFinding f[16]; size_t n; uint64_t first = 12345;
+    CHECK(argus_core_incident(NULL, 1, 1, &first) == ARGUS_ERR_ARG);
+    CHECK(argus_core_incident(c, 1, 1, NULL) == ARGUS_ERR_ARG);
+    CHECK(argus_core_incident(c, 1, ARGUS_F_FORGED_CAPABILITY, &first) == ARGUS_ERR_STATE && first == 12345);
+
+    /* HIGH/CRITICAL findings open an incident at the first sequence; later ones keep it. */
+    stub_detect_mode = 0;   /* forged use -> CRITICAL FORGED for principal */
+    for (uint64_t s = 1; s <= 3; s++) {
+        ArgusEvent e = ev_make(ARGUS_EV_CAPABILITY_USED, 10 + s); e.cap_id = 1; e.principal = 77;
+        CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 1);
+    }
+    CHECK(argus_core_incident(c, 77, ARGUS_F_FORGED_CAPABILITY, &first) == ARGUS_OK && first == 11);
+    CHECK(argus_core_incident(c, 77, ARGUS_F_STALE_GENERATION, &first) == ARGUS_ERR_STATE);
+    CHECK(argus_core_incident(c, 78, ARGUS_F_FORGED_CAPABILITY, &first) == ARGUS_ERR_STATE);
+
+    /* MEDIUM (code 16) never opens an incident. */
+    ArgusEvent m = ev_make(99, 1); m.principal = 55;
+    CHECK(ing(c, &m, f, &n) == ARGUS_ERR_MALFORMED && n == 1);
+    CHECK(argus_core_incident(c, 55, ARGUS_F_MALFORMED_EVENT, &first) == ARGUS_ERR_STATE);
+
+    /* Table full: untracked pairs are not found (ERR_STATE), tracked ones still are. */
+    for (uint32_t p = 0; p < ARGUS_CORE_INCIDENTS + 3; p++) {
+        ArgusEvent e = ev_make(ARGUS_EV_CAPABILITY_USED, 100 + p); e.cap_id = 1; e.principal = 2000 + p;
+        ing(c, &e, f, &n);
+    }
+    ArgusCoreHealth h; argus_core_health(c, &h);
+    CHECK(h.incidents_open == ARGUS_CORE_INCIDENTS && h.incidents_untracked > 0);
+    CHECK(argus_core_incident(c, 77, ARGUS_F_FORGED_CAPABILITY, &first) == ARGUS_OK && first == 11);
+    CHECK(argus_core_incident(c, 2000, ARGUS_F_FORGED_CAPABILITY, &first) == ARGUS_OK && first == 100);
+    CHECK(argus_core_incident(c, 2000 + ARGUS_CORE_INCIDENTS + 2, ARGUS_F_FORGED_CAPABILITY, &first) == ARGUS_ERR_STATE);
+
+    /* Replayable: a byte copy of the core answers identically (no pointers, no hidden state). */
+    static _Alignas(16) uint8_t copy[1 << 17];
+    memcpy(copy, mem, argus_core_footprint());
+    uint64_t f2 = 0;
+    CHECK(argus_core_incident((const ArgusCore *)(const void *)copy, 77, ARGUS_F_FORGED_CAPABILITY, &f2) == ARGUS_OK && f2 == 11);
+    stub_detect_mode = 1;
+}
+
 int main(void)
 {
     t_init();
@@ -902,6 +1028,8 @@ int main(void)
     t_v11_streams();
     t_v11_caps_summary();
     t_v11_worlds();
+    t_v12_containment_kinds();
+    t_v12_incident();
     printf("test_argus_core: %d passed, %d failed (footprint %zu bytes)\n", t_pass, t_fail, argus_core_footprint());
     return t_fail ? 1 : 0;
 }

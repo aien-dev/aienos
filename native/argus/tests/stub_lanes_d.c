@@ -53,6 +53,7 @@ static int kind_known(uint16_t k)
     case 1: case 2: case 3: case 4: case 10: case 11: case 12: case 20: case 21: case 22:
     case 30: case 31: case 32: case 40: case 41: case 42: case 43: case 50: case 51: case 52:
     case 60: case 61: case 62: case 63: case 70: case 71: case 72: case 80: case 81:
+    case 90: case 91: case 92: case 93:   /* v1.2 containment kinds (TEST-ONLY stand-in for lane B) */
         return 1;
     default:
         return 0;
@@ -69,6 +70,12 @@ int argus_event_validate(const ArgusEvent *ev)
     if (ev->outcome < ARGUS_OUTCOME_OK || ev->outcome > ARGUS_OUTCOME_MAX) return ARGUS_ERR_MALFORMED;
     if (ev->flags & (uint16_t)~ARGUS_FLAG_KNOWN) return ARGUS_ERR_MALFORMED;
     if (ev->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY && ev->outcome != ARGUS_OUTCOME_OK) return ARGUS_ERR_MALFORMED;   /* v1.1 */
+    /* v1.2 TEST-ONLY stand-in for lane B's validate (spec section 3), replace when argus_event.c
+     * lands: 90-93 class CRITICAL, effect NONE; CONSUMER flag on 90 always, never on 91-93. */
+    if (ev->kind >= ARGUS_EV_CONTAINMENT_PROPOSED && ev->kind <= ARGUS_EV_AUTHORITY_ESCALATED) {
+        if (ev->class_ != ARGUS_CLASS_CRITICAL || ev->effect_class != ARGUS_EFFECT_NONE) return ARGUS_ERR_MALFORMED;
+        if (((ev->flags & ARGUS_FLAG_CONSUMER) != 0) != (ev->kind == ARGUS_EV_CONTAINMENT_PROPOSED)) return ARGUS_ERR_MALFORMED;
+    }
     return ARGUS_OK;
 }
 
