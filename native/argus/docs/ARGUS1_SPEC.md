@@ -234,8 +234,10 @@ Validate / ring rules (lane B):
   UNAVAILABLE/FAILED_SCOPE<->ERROR); type in 1..10; request_id != 0. A 92 whose status is DONE
   for a non-RevokeCapability type without the SYNTHETIC flag is rejected MALFORMED (I2).
 - Ordering: the bridge pushes observer events (kinds 1/4) and 91/92 on ONE stream from ONE
-  thread, and pushes 92 only after `aienos_cap_revoke` returns. "kind 4 before 92" is a
-  deterministic stream order (I1.e).
+  thread, and pushes 92 only after `aienos_cap_revoke` returns. It uses reserved stream ID
+  `ARGUS_STREAM_BRIDGE` (16383); no ordinary producer may use that ID. This prevents the bridge's
+  echoed machine ID from sharing a sequence high-water mark with an ordinary producer. "kind 4
+  before 92" is a deterministic stream order (I1.e).
 
 Core (lane D): kinds 90-93 are validated, chained, counted, and apply no shadow change. The
 detectors ignore them. Kind 4 events from the observer apply exactly as in ARGUS-0.

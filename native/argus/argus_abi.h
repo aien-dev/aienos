@@ -207,6 +207,7 @@ enum {
 /* Every flag bit is now meaningful; "reserved bits" checks no longer apply in v1.1. */
 #define ARGUS_STREAM_OF(flags) ((uint16_t)(((flags) & ARGUS_FLAG_STREAM_MASK) >> ARGUS_FLAG_STREAM_SHIFT))
 #define ARGUS_STREAM_MAX       16384u
+#define ARGUS_STREAM_BRIDGE    16383u  /* reserved for the serialized ARGUS/AEGIS bridge producer */
 
 /* Layout-identical to AienosCapRef in native/capability/aienos_capability.h. */
 typedef struct {
