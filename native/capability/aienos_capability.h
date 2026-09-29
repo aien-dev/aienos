@@ -124,6 +124,61 @@ int aienos_cap_cognition_admin(const AienosCapView *view, uint32_t op, AienosCap
 int aienos_cap_force_generation(AienosCapAdmin *admin, uint32_t cap_id, uint64_t generation);
 int aienos_cap_generation_advance(uint64_t generation, uint64_t *out);
 
+/* Authority observer. The authority announces its own transitions, so a
+ * watcher sees a mint or revoke no matter which caller asked for it.
+ *
+ * The observer is set on the admin handle. The view has no path to it, and
+ * aienos_cap_validate never calls it.
+ *
+ * Calls, one per state change, with the entry as it is after the change:
+ *   MINT      new entry; a refused mint calls with entry NULL and its code
+ *   REVOKE    the target, then one call per descendant revoked with it,
+ *             each ancestor before its descendants
+ *   RECLAIM   the freed slot (state FREE, next generation)
+ *   EPOCH     the entry of the authority that bumped it (the new epoch is
+ *             not carried)
+ *   CLOCK     the entry of the authority that moved it (the new clock is
+ *             not carried; aienos_cap_clock reads it)
+ *   KILL      entry NULL
+ *   RESTART   the new office entry (slot 0, new boot generation)
+ * A refused admin operation calls with entry NULL and the refusal code,
+ * except a call refused for a NULL argument, and a restart that fails
+ * before it takes the lock (out of memory, or /dev/urandom unreadable):
+ * those are not announced.
+ * aienos_cap_force_generation (the test seam) is not announced.
+ * AIENOS_CAP_OBS_VALIDATE_DENIED is reserved and never sent: validate runs
+ * on the view, which holds no observer, and it has no slow path to put
+ * one on.
+ *
+ * The entry is a copy taken under the table lock. It never holds the office
+ * token: the token is kept outside the table and outside AienosCapEntry.
+ * The call is made after the table lock is released, so a slow observer
+ * does not hold up validate or other admin operations. The callback gets
+ * a const entry and no admin handle, so its arguments give it no way to
+ * change the table.
+ *
+ * Ordering: calls from one thread arrive in the order that thread's
+ * operations changed the table. When admin operations run on several
+ * threads at once, calls may arrive in a different order than the changes;
+ * a caller that needs strict order serializes its admin calls.
+ * After aienos_cap_set_observer(admin, NULL, NULL) returns, no new call
+ * starts; a call already under way on another thread may still finish.
+ *
+ * With no observer set, each admin operation pays one NULL check. */
+#define AIENOS_CAP_OBS_MINT 1u
+#define AIENOS_CAP_OBS_REVOKE 2u
+#define AIENOS_CAP_OBS_RECLAIM 3u
+#define AIENOS_CAP_OBS_EPOCH 4u
+#define AIENOS_CAP_OBS_CLOCK 5u
+#define AIENOS_CAP_OBS_KILL 6u
+#define AIENOS_CAP_OBS_RESTART 7u
+#define AIENOS_CAP_OBS_VALIDATE_DENIED 8u
+
+typedef void (*AienosCapObserver)(void *ctx, uint32_t op, const AienosCapEntry *entry,
+                                  int result);
+
+int aienos_cap_set_observer(AienosCapAdmin *admin, AienosCapObserver fn, void *ctx);
+
 /* Office token check, constant time. The token never enters the table.
  * Nothing in this library calls it: admin operations are gated by holding
  * the admin handle plus a live reference with the matching office right.
