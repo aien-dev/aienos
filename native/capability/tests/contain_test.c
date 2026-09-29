@@ -130,8 +130,8 @@ static Rig *rig_new(int feed, int create_gate) {
 }
 
 static void rig_free(Rig *r) {
-    if (r->gate) aienos_contain_destroy(r->gate);
     aienos_cap_set_observer(r->admin, NULL, NULL);
+    if (r->gate) aienos_contain_destroy(r->gate);
     aienos_cap_stop(r->admin, r->view);
     free(r);
 }

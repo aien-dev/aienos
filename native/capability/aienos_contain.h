@@ -250,8 +250,10 @@ int aienos_contain_create(AienosContain **g, void *mem, size_t bytes, AienosCapA
                           const AienosContainAuthorizer *authz);
 /* Clears the memory. Revokes nothing; the authority entry stays registered,
  * so a second create for the same authority is refused even after destroy.
- * The registry is bounded to AIENOS_CONTAIN_REGISTRY authority instances per
- * process; failed creates release their reservation. */
+ * Before destroy, the caller must detach the authority observer and ensure no
+ * gate calls or lineage_observe callbacks are in flight. The registry is
+ * bounded to AIENOS_CONTAIN_REGISTRY authority instances per process; failed
+ * creates release their reservation. */
 void aienos_contain_destroy(AienosContain *g);
 
 int aienos_contain_set_sink(AienosContain *g, AienosContainSink fn, void *ctx);
