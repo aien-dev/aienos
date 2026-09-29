@@ -1,6 +1,8 @@
 # AIENOS: Technical Specification & Contracts (Phases 3 – 5)
 
-> **Status:** Architecture Blueprint Extension
+> **REFERENCE TECHNICAL SPECIFICATION, NOT AN ACTIVE ROADMAP.** Current AIENOS sequencing is [../ROADMAP.md](../ROADMAP.md). Whole-system sequencing is owned by `aien-dev/aien-architecture/CURRENT_EXECUTION_PLAN.md`. See [PLAN_AUTHORITY.md](PLAN_AUTHORITY.md).
+
+> **Status:** Reference Architecture/Contract Snapshot
 > **Target:** Native Agent Wakeup, Epistemic Memory, Capability Enforcement, and C1 Branch-Native Compute
 > **Authority:** AIENOS Final Architectural Blueprint §§ 9–14, 17–19, 28
 

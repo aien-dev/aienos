@@ -2,11 +2,13 @@
 
 Status: confirmed by the operator on 2026-09-23. Changes to anything in this document that the operator listed as fundamental (see "Authority and escalation") require the operator's approval.
 
-For complete architectural specifications, execution milestones, and decision records, see:
-- [AIENOS Final Architectural Blueprint](BLUEPRINT.md) (Complete 37-section architectural foundation)
-- [AIENOS Architectural Milestones Matrix](MILESTONES.md) (8-phase execution roadmap, invariants, and contracts)
+> **Document precedence (2026-09-27):** this file governs AIENOS component architecture. `../ROADMAP.md` governs current AIENOS execution order. Whole-system sequencing is owned by `aien-dev/aien-architecture/CURRENT_EXECUTION_PLAN.md`. See [PLAN_AUTHORITY.md](PLAN_AUTHORITY.md).
+
+For supporting architectural references and decision records, see:
+- [AIENOS Architectural Blueprint](BLUEPRINT.md) (reference design snapshot; not current execution order)
+- [AIENOS Architectural Milestones Matrix](MILESTONES.md) (reference milestone/specification history; current order is `../ROADMAP.md`)
 - [AIENOS Technical Specification & Contracts (Phases 3–5)](PHASE_3_TO_5_SPECIFICATION.md) (Agent State ABI, Cortex, AEGIS & Worlds, and C1 CoW Prefix Tree)
-- [AIENOS Systems Integration Sequence & Epistemic Calibration](SYSTEMS_INTEGRATION_SEQUENCE.md) (10-step empirical verification sequence and host vs. native qualification)
+- [AIENOS Systems Integration Sequence & Epistemic Calibration](SYSTEMS_INTEGRATION_SEQUENCE.md) (historical integration sequence; current order is `../ROADMAP.md`)
 - [AIENOS Continuous-Existence Amendment](CONTINUOUS_EXISTENCE_AMENDMENT.md) (Governing lifecycle amendment: provisioning-once, power states, state classes, gate acceptance criteria)
 - [Architectural Decision Records](adr/README.md) (Accepted architectural decisions: [ADR 0001](adr/0001-native-boot-milestone-and-linux-island.md), [ADR 0002](adr/0002-incumbent-os-as-migration-environment.md), [ADR 0003](adr/0003-bootstrap-firmware-handoff-and-minimal-object-store.md), [ADR 0004](adr/0004-reversibility-definition-and-network-effect-boundary.md), [ADR 0005](adr/0005-unified-memory-c1-cow-and-reservation-accounting.md), [ADR 0006](adr/0006-deterministic-recovery-core-and-offline-operator-authority.md), [ADR 0007](adr/0007-continuous-existence-provisioning-once.md))
 

@@ -10,8 +10,8 @@ memory management, interrupts, scheduling, storage, networking and native
 inference are all open, and most of it can be developed and tested in QEMU on
 any machine: no special hardware needed.
 
-- **[ROADMAP.md](ROADMAP.md)**: where the project is, the gates ahead, and live
-  progress for each milestone.
+- **[ROADMAP.md](ROADMAP.md)**: the current AIENOS component execution order and live gate status.
+- **[docs/PLAN_AUTHORITY.md](docs/PLAN_AUTHORITY.md)**: how AIENOS plans relate to the one whole-system plan in `aien-dev/aien-architecture`.
 - **[Open issues](https://github.com/aien-dev/aienos/issues)**: start with
   [`good first issue`](https://github.com/aien-dev/aienos/labels/good%20first%20issue)
   or anything labelled
@@ -56,7 +56,7 @@ AEGIS currently checks capability scope and uses HMAC-SHA256 for capability toke
 - **Fastest thing possible:** close to the metal, measured, with evidence.
 - **Free inside reversible state; explicit authorization at irreversible boundaries.**
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for governing design, [docs/BLUEPRINT.md](docs/BLUEPRINT.md) for the 37-section blueprint, [docs/MILESTONES.md](docs/MILESTONES.md) for the phased milestone matrix, [docs/CONTINUOUS_EXISTENCE_AMENDMENT.md](docs/CONTINUOUS_EXISTENCE_AMENDMENT.md) for the continuous-existence amendment, and [docs/adr/README.md](docs/adr/README.md) for architectural decision records and technical specifications.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for current AIENOS design, [ROADMAP.md](ROADMAP.md) for current AIENOS execution order, [docs/adr/README.md](docs/adr/README.md) for accepted decisions, and [docs/PLAN_AUTHORITY.md](docs/PLAN_AUTHORITY.md) for document precedence. Older blueprint, milestone-matrix, and systems-integration documents are retained as design/reference history and do not override the current roadmap.
 
 ## License
 

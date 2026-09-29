@@ -1,3 +1,11 @@
+# Planning authority
+
+Before using any roadmap or architecture plan, read `docs/PLAN_AUTHORITY.md` and `ROADMAP.md`.
+
+Whole-system execution order is owned by `aien-dev/aien-architecture/CURRENT_EXECUTION_PLAN.md`. This repository does not own a competing AIEN master plan.
+
+---
+
 # AIEN OS Recovery Gate — Agent Directives & Architectural Invariants
 
 This document codifies mandatory architectural invariants, cryptographic boundaries, and coding standards for all agents modifying `aienos-recovery-gate`.
