@@ -16,9 +16,12 @@
  *   class_ <= argus_event_min_class(kind) (as strong as the kind requires, or stronger)
  *   effect_class in 0..ARGUS_EFFECT_MAX
  *   outcome in 1..ARGUS_OUTCOME_MAX
- *   flags a subset of ARGUS_FLAG_KNOWN
+ *   flags: any value (v1.1: bits 0-1 markers, bits 2-15 = producer stream id)
  *   ARGUS_FLAG_CONSUMER set if and only if kind == TELEMETRY_DROPPED
- *   cap_id < ARGUS_CAP_MAX
+ *   cap_id < ARGUS_CAP_MAX, or == ARGUS_CAP_NONE ("no capability"; cap_id 0 is
+ *     the authority OFFICE slot, a real capability)
+ *   CAPABILITY_USE_SUMMARY (81): outcome OK (a summary counts successful
+ *     validates only); any tick is accepted (producers write 0)
  *   sequence != 0 and sequence != UINT64_MAX
  *   EXTERNAL_EFFECT_REQUESTED/DENIED/COMMITTED carry effect_class EXTERNAL
  * Every one of the 128 bytes is carried by some field, so a buffer that
@@ -84,7 +87,7 @@ uint8_t argus_event_min_class(uint16_t kind)
     case ARGUS_EV_WORLD_COMMITTED:
         return ARGUS_CLASS_SECURITY;
     case ARGUS_EV_CAPABILITY_USED: case ARGUS_EV_CREDENTIAL_LEASE_USED:
-    case ARGUS_EV_PROVIDER_USED:
+    case ARGUS_EV_PROVIDER_USED: case ARGUS_EV_CAPABILITY_USE_SUMMARY:
         return ARGUS_CLASS_AUDIT;
     default:
         return 0;
@@ -101,11 +104,14 @@ int argus_event_validate(const ArgusEvent *ev)
     if (ev->class_ > min) return ARGUS_ERR_MALFORMED;               /* weaker than the kind allows */
     if (ev->effect_class > ARGUS_EFFECT_MAX) return ARGUS_ERR_MALFORMED;
     if (ev->outcome < ARGUS_OUTCOME_OK || ev->outcome > ARGUS_OUTCOME_MAX) return ARGUS_ERR_MALFORMED;
-    if (ev->flags & (uint16_t)~ARGUS_FLAG_KNOWN) return ARGUS_ERR_MALFORMED;
+    /* v1.1: every flag bit is defined (bits 2-15 = stream id), so no reserved-bit check. */
     /* CONSUMER is set exactly on TELEMETRY_DROPPED: only ARGUS reports its own losses. */
     if (((ev->flags & ARGUS_FLAG_CONSUMER) != 0) != (ev->kind == ARGUS_EV_TELEMETRY_DROPPED))
         return ARGUS_ERR_MALFORMED;
-    if (ev->cap_id >= ARGUS_CAP_MAX) return ARGUS_ERR_MALFORMED;    /* the authority cannot mint it */
+    if (ev->cap_id >= ARGUS_CAP_MAX && ev->cap_id != ARGUS_CAP_NONE)
+        return ARGUS_ERR_MALFORMED;                                 /* the authority cannot mint it */
+    if (ev->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY && ev->outcome != ARGUS_OUTCOME_OK)
+        return ARGUS_ERR_MALFORMED;                                 /* a summary counts successful validates only */
     if (ev->sequence == 0 || ev->sequence == UINT64_MAX) return ARGUS_ERR_MALFORMED;
     if ((ev->kind == ARGUS_EV_EXTERNAL_EFFECT_REQUESTED || ev->kind == ARGUS_EV_EXTERNAL_EFFECT_DENIED ||
          ev->kind == ARGUS_EV_EXTERNAL_EFFECT_COMMITTED) && ev->effect_class != ARGUS_EFFECT_EXTERNAL)

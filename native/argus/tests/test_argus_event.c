@@ -66,7 +66,7 @@ static const uint16_t all_kinds[] = {
     ARGUS_EV_EXTERNAL_EFFECT_REQUESTED, ARGUS_EV_EXTERNAL_EFFECT_DENIED, ARGUS_EV_EXTERNAL_EFFECT_COMMITTED,
     ARGUS_EV_INTEGRITY_VIOLATION, ARGUS_EV_SIGNATURE_FAILURE, ARGUS_EV_STALE_GENERATION, ARGUS_EV_FORGED_CAPABILITY,
     ARGUS_EV_WORLD_COMMITTED, ARGUS_EV_POLICY_CHANGED, ARGUS_EV_RUNTIME_BUILD_CHANGED,
-    ARGUS_EV_TELEMETRY_DROPPED,
+    ARGUS_EV_TELEMETRY_DROPPED, ARGUS_EV_CAPABILITY_USE_SUMMARY,
 };
 #define N_KINDS (sizeof all_kinds / sizeof all_kinds[0])
 
@@ -81,7 +81,7 @@ static unsigned floor_of(unsigned k)
 {
     static const uint16_t crit[] = { 60, 61, 62, 63, 80, 42, 31, 32, 71, 72, 4, 12, 21, 52 };
     static const uint16_t sec[]  = { 1, 3, 10, 20, 22, 30, 40, 41, 50, 51, 70 };
-    static const uint16_t aud[]  = { 2, 11, 43 };
+    static const uint16_t aud[]  = { 2, 11, 43, 81 };
     for (size_t i = 0; i < sizeof crit / sizeof crit[0]; i++) if (crit[i] == k) return 1;
     for (size_t i = 0; i < sizeof sec / sizeof sec[0]; i++) if (sec[i] == k) return 2;
     for (size_t i = 0; i < sizeof aud / sizeof aud[0]; i++) if (aud[i] == k) return 3;
@@ -97,9 +97,9 @@ static int oracle(const ArgusEvent *e)
     if (e->class_ > floor_of(e->kind)) return ARGUS_ERR_MALFORMED;
     if (e->effect_class > 3) return ARGUS_ERR_MALFORMED;
     if (e->outcome < 1 || e->outcome > 3) return ARGUS_ERR_MALFORMED;
-    if (e->flags & ~3u) return ARGUS_ERR_MALFORMED;
     if (((e->flags & 2u) != 0) != (e->kind == 80)) return ARGUS_ERR_MALFORMED;
-    if (e->cap_id >= 256) return ARGUS_ERR_MALFORMED;
+    if (e->cap_id >= 256 && e->cap_id != 0xFFFFFFFFu) return ARGUS_ERR_MALFORMED;   /* v1.1: CAP_NONE allowed */
+    if (e->kind == 81 && e->outcome != 1) return ARGUS_ERR_MALFORMED;               /* summary: outcome OK only */
     if (e->sequence == 0 || e->sequence == UINT64_MAX) return ARGUS_ERR_MALFORMED;
     if (e->kind >= 50 && e->kind <= 52 && e->effect_class != 3) return ARGUS_ERR_MALFORMED;
     return ARGUS_OK;
@@ -141,12 +141,14 @@ static ArgusEvent valid_event(void)
     return e;
 }
 
-/* Make e valid for its kind: class at the floor, CONSUMER iff TELEMETRY_DROPPED, EXTERNAL for effects. */
+/* Make e valid for its kind: class at the floor, CONSUMER iff TELEMETRY_DROPPED, EXTERNAL for effects,
+ * outcome OK for CAPABILITY_USE_SUMMARY. Stream bits (2-15) are kept. */
 static void fit_kind(ArgusEvent *e)
 {
     e->class_ = (uint8_t)floor_of(e->kind);
-    e->flags = (uint16_t)((e->flags & ARGUS_FLAG_SYNTHETIC) | (e->kind == ARGUS_EV_TELEMETRY_DROPPED ? ARGUS_FLAG_CONSUMER : 0));
+    e->flags = (uint16_t)((e->flags & (uint16_t)~ARGUS_FLAG_CONSUMER) | (e->kind == ARGUS_EV_TELEMETRY_DROPPED ? ARGUS_FLAG_CONSUMER : 0));
     if (e->kind >= 50 && e->kind <= 52) e->effect_class = ARGUS_EFFECT_EXTERNAL;
+    if (e->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY) e->outcome = ARGUS_OUTCOME_OK;
 }
 
 static ArgusFinding fixed_finding(void)
@@ -270,12 +272,12 @@ static void test_round_trip(void)
             e.kind = all_kinds[i];
             e.effect_class = (uint8_t)(i % 4);
             e.outcome = (uint8_t)(1 + i % 3);
-            e.flags = (uint16_t)(i % 2);
+            e.flags = (uint16_t)((i % 2) | ((i * 613u) << ARGUS_FLAG_STREAM_SHIFT));   /* v1.1 stream bits */
             fit_kind(&e);
             e.class_ = cls;
             e.sequence = 1 + i * 7 + cls;
             e.code = (int32_t)(0 - (int32_t)i);
-            e.cap_id = (uint32_t)(i * 9 % ARGUS_CAP_MAX);
+            e.cap_id = i % 5 == 4 ? ARGUS_CAP_NONE : (uint32_t)(i * 9 % ARGUS_CAP_MAX);
             CHECK(argus_event_validate(&e) == ARGUS_OK);
             CHECK(argus_event_encode(&e, b) == ARGUS_OK);
             memset(&d, 0x5A, sizeof d);
@@ -286,8 +288,8 @@ static void test_round_trip(void)
             n++;
         }
     }
-    CHECK(N_KINDS == 28);
-    CHECK(n == 14 * 1 + 11 * 2 + 3 * 3);
+    CHECK(N_KINDS == 29);
+    CHECK(n == 14 * 1 + 11 * 2 + 4 * 3);
     printf("round trip: %zu kinds x every class at or above the kind's floor = %zu events OK\n", N_KINDS, n);
 }
 
@@ -391,10 +393,12 @@ static void test_malformed(void)
         n++;
     }
     /* flags: every 16-bit value, on a producer kind and on TELEMETRY_DROPPED.
-     * Producer kind: only 0 and SYNTHETIC. TELEMETRY_DROPPED: only CONSUMER (+SYNTHETIC). */
+     * v1.1: bits 2-15 are the stream id, so no bit is reserved. Producer kind: OK iff
+     * CONSUMER is clear. TELEMETRY_DROPPED: OK iff CONSUMER is set. */
     for (unsigned v = 0; v < 65536; v++) {
-        int want_p = (v == 0 || v == ARGUS_FLAG_SYNTHETIC) ? ARGUS_OK : ARGUS_ERR_MALFORMED;
-        int want_t = (v == ARGUS_FLAG_CONSUMER || v == ARGUS_FLAG_KNOWN) ? ARGUS_OK : ARGUS_ERR_MALFORMED;
+        int want_p = (v & ARGUS_FLAG_CONSUMER) == 0 ? ARGUS_OK : ARGUS_ERR_MALFORMED;
+        int want_t = (v & ARGUS_FLAG_CONSUMER) != 0 ? ARGUS_OK : ARGUS_ERR_MALFORMED;
+        CHECK(ARGUS_STREAM_OF(v) == (v >> 2));
         ArgusEvent e = valid_event(); e.flags = (uint16_t)v;
         CHECK(oracle(&e) == want_p);
         expect_struct(e, want_p);
@@ -403,15 +407,17 @@ static void test_malformed(void)
         expect_struct(t, want_t);
         n += 2;
     }
-    CHECK(decode_mut(6, 0x04) == ARGUS_ERR_MALFORMED);
+    CHECK(decode_mut(6, 0x04) == ARGUS_OK);              /* stream 1 (v1.1; was reserved in v1) */
     CHECK(decode_mut(6, 0x03) == ARGUS_ERR_MALFORMED);   /* CONSUMER on a producer kind */
-    CHECK(decode_mut(7, 0x80) == ARGUS_ERR_MALFORMED);
-    /* cap_id: < ARGUS_CAP_MAX only; boundary and every high byte */
+    CHECK(decode_mut(7, 0x80) == ARGUS_OK);              /* stream 0x2000 */
+    CHECK(decode_mut(6, 0xFD) == ARGUS_OK && decode_mut(7, 0xFF) == ARGUS_OK);   /* stream 0x3FFF, the maximum */
+    /* cap_id: < ARGUS_CAP_MAX or == ARGUS_CAP_NONE (v1.1; 0 is the OFFICE slot, a real cap) */
     {
-        static const uint32_t ok_ids[] = { 0, 1, 255 };
-        static const uint32_t bad_ids[] = { 256, 257, 300, 0x10000, 0x7FFFFFFFu, 0xFFFFFFFFu };
-        for (size_t i = 0; i < 3; i++) { ArgusEvent e = valid_event(); e.cap_id = ok_ids[i]; expect_struct(e, ARGUS_OK); n++; }
+        static const uint32_t ok_ids[] = { 0, 1, 255, ARGUS_CAP_NONE };
+        static const uint32_t bad_ids[] = { 256, 257, 300, 0x10000, 0x7FFFFFFFu, 0xFFFFFFFEu };
+        for (size_t i = 0; i < 4; i++) { ArgusEvent e = valid_event(); e.cap_id = ok_ids[i]; expect_struct(e, ARGUS_OK); n++; }
         for (size_t i = 0; i < 6; i++) { ArgusEvent e = valid_event(); e.cap_id = bad_ids[i]; expect_struct(e, ARGUS_ERR_MALFORMED); n++; }
+        /* byte 33 of cap_id 0x34: 0x0000VV34 is never CAP_NONE, so only VV == 0 is valid */
         for (unsigned v = 0; v < 256; v++) {
             CHECK(decode_mut(33, (uint8_t)v) == (v == 0 ? ARGUS_OK : ARGUS_ERR_MALFORMED));
             n++;
@@ -429,7 +435,32 @@ static void test_malformed(void)
         CHECK(argus_event_decode(b, &out) == ARGUS_ERR_MALFORMED);
         n += 5;
     }
-    /* The ring's own drop report must be a valid event (CRITICAL, CONSUMER). */
+    /* v1.1 CAPABILITY_USE_SUMMARY: floor AUDIT, outcome OK only, any tick accepted,
+     * CONSUMER rejected, stream bits and CAP_NONE accepted. */
+    {
+        ArgusEvent s = valid_event(); s.kind = ARGUS_EV_CAPABILITY_USE_SUMMARY; fit_kind(&s);
+        s.tick = 0; s.resource = 4096; s.cap_generation = 9; s.object_id = 7; s.effect_class = ARGUS_EFFECT_NONE;
+        CHECK(argus_event_min_class(ARGUS_EV_CAPABILITY_USE_SUMMARY) == ARGUS_CLASS_AUDIT);
+        expect_struct(s, ARGUS_OK);
+        ArgusEvent t = s; t.tick = 12345; expect_struct(t, ARGUS_OK);          /* producer rule says 0; not enforced */
+        t = s; t.outcome = ARGUS_OUTCOME_DENIED; expect_struct(t, ARGUS_ERR_MALFORMED);
+        t = s; t.outcome = ARGUS_OUTCOME_ERROR; expect_struct(t, ARGUS_ERR_MALFORMED);
+        t = s; t.class_ = ARGUS_CLASS_INFORMATIONAL; expect_struct(t, ARGUS_ERR_MALFORMED);
+        t = s; t.class_ = ARGUS_CLASS_CRITICAL; expect_struct(t, ARGUS_OK);
+        t = s; t.flags |= ARGUS_FLAG_CONSUMER; expect_struct(t, ARGUS_ERR_MALFORMED);
+        t = s; t.flags = (uint16_t)(ARGUS_FLAG_SYNTHETIC | (0x3FFFu << ARGUS_FLAG_STREAM_SHIFT)); expect_struct(t, ARGUS_OK);
+        CHECK(ARGUS_STREAM_OF(t.flags) == 0x3FFFu);
+        t = s; t.cap_id = ARGUS_CAP_NONE; expect_struct(t, ARGUS_OK);
+        t = s; t.cap_id = 0; expect_struct(t, ARGUS_OK);
+        for (unsigned v = 0; v < 256; v++) {             /* outcome byte of an encoded summary */
+            uint8_t b[ARGUS_EVENT_SIZE]; ArgusEvent out;
+            argus_event_encode(&s, b); b[5] = (uint8_t)v;
+            CHECK(argus_event_decode(b, &out) == (v == ARGUS_OUTCOME_OK ? ARGUS_OK : ARGUS_ERR_MALFORMED));
+            n++;
+        }
+        n += 11;
+    }
+    /* The ring's own drop report must be a valid event (CRITICAL, CONSUMER, CAP_NONE). */
     {
         ArgusEvent t = { .version = 1, .class_ = ARGUS_CLASS_CRITICAL, .kind = ARGUS_EV_TELEMETRY_DROPPED,
                          .outcome = ARGUS_OUTCOME_ERROR, .flags = ARGUS_FLAG_CONSUMER, .sequence = 1,

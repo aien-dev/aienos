@@ -35,14 +35,16 @@ static uint32_t rn(uint32_t n) { return (uint32_t)(rnd() % n); }
 
 static const uint16_t kinds[] = {
     1, 2, 3, 4, 10, 11, 12, 20, 21, 22, 30, 31, 32, 40, 41, 42, 43,
-    50, 51, 52, 60, 61, 62, 63, 70, 71, 72, 80
+    50, 51, 52, 60, 61, 62, 63, 70, 71, 72, 80, 81
 };
+#define N_STREAMS 3u   /* v1.1: stream ids per machine */
+#define N_STORES 12u   /* v1.1: World stores; more than ARGUS_WORLD_STORES so the table fills */
 #define N_KINDS (sizeof kinds / sizeof kinds[0])
 
 static void gen(void)
 {
-    static uint64_t seqs[N_MACH][2];
-    uint64_t world = 0;
+    static uint64_t seqs[N_MACH][N_STREAMS][2];
+    static uint64_t world[N_STORES];
     for (uint32_t i = 0; i < N_EVENTS; i++) {
         ArgusEvent *e = &stream[i];
         memset(e, 0, sizeof *e);
@@ -55,18 +57,20 @@ static void gen(void)
         e->effect_class = (uint8_t)rn(4);
         uint32_t o = rn(100);
         e->outcome = o < 80 ? ARGUS_OUTCOME_OK : o < 95 ? ARGUS_OUTCOME_DENIED : ARGUS_OUTCOME_ERROR;
-        e->flags = (uint16_t)(ARGUS_FLAG_SYNTHETIC | (cons ? ARGUS_FLAG_CONSUMER : 0));
+        uint32_t st = rn(N_STREAMS);
+        e->flags = (uint16_t)(ARGUS_FLAG_SYNTHETIC | (cons ? ARGUS_FLAG_CONSUMER : 0) | (st << ARGUS_FLAG_STREAM_SHIFT));
+        uint64_t *sq = &seqs[m][st][cons];
         uint32_t r = rn(100);
-        if (r == 0 && seqs[m][cons] > 0)
-            e->sequence = seqs[m][cons];                /* replay */
-        else if (r == 1 && seqs[m][cons] > 1)
-            e->sequence = seqs[m][cons] - 1;            /* reorder */
+        if (r == 0 && *sq > 0)
+            e->sequence = *sq;                          /* replay */
+        else if (r == 1 && *sq > 1)
+            e->sequence = *sq - 1;                      /* reorder */
         else
-            e->sequence = ++seqs[m][cons];
+            e->sequence = ++*sq;
         e->tick = i;
         e->principal = 1 + rn(12);
         e->code = (int32_t)rn(3) - 1;
-        e->cap_id = rn(261);
+        e->cap_id = rn(50) == 0 ? ARGUS_CAP_NONE : rn(261);
         e->cap_generation = 1 + rn(4);
         mid(e->machine_id, m);
         switch (kind) {
@@ -78,9 +82,13 @@ static void gen(void)
         case ARGUS_EV_MACHINE_TRUST_CHANGED: e->object_id = rn(8); break;
         case ARGUS_EV_PROVIDER_DISCOVERED: case ARGUS_EV_PROVIDER_CHANGED:
         case ARGUS_EV_PROVIDER_QUARANTINED: case ARGUS_EV_PROVIDER_USED: dg(e->evidence_digest, 1000 + rn(45)); break;
-        case ARGUS_EV_WORLD_COMMITTED:
-            world = rn(10) == 0 && world > 2 ? world - 2 : world + 1;
-            e->world_generation = world; dg(e->evidence_digest, 5000 + (uint32_t)world); break;
+        case ARGUS_EV_WORLD_COMMITTED: {
+            uint32_t s = rn(10) < 8 ? rn(3) : rn(N_STORES);
+            world[s] = rn(10) == 0 && world[s] > 2 ? world[s] - 2 : world[s] + 1;
+            e->object_id = s;
+            e->world_generation = world[s]; dg(e->evidence_digest, 5000 + 100 * s + (uint32_t)world[s]); break;
+        }
+        case ARGUS_EV_CAPABILITY_USE_SUMMARY: e->resource = 1 + rn(4096); e->object_id = (uint32_t)e->cap_generation - rn(2); break;
         case ARGUS_EV_POLICY_CHANGED: case ARGUS_EV_RUNTIME_BUILD_CHANGED: dg(e->evidence_digest, 7000 + rn(5)); break;
         case ARGUS_EV_TELEMETRY_DROPPED: e->object_id = 1 + rn(4); e->resource = 1 + rn(50); break;
         default: break;
@@ -204,7 +212,7 @@ int main(void)
         if (i % 7 == 0) {
             uint8_t d[32]; ArgusCoreHealth h; ArgusWorldShadow w; ArgusCapShadow cs;
             argus_core_state_digest(C, d); argus_core_health(C, &h);
-            argus_core_ops()->world(argus_core_view(C), &w);
+            argus_core_ops()->world(argus_core_view(C), i % N_STORES, &w);
             argus_core_ops()->cap(argus_core_view(C), i % 256, &cs);
         }
     }

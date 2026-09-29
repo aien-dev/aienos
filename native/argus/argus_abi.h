@@ -201,7 +201,7 @@ typedef struct {
     uint64_t tick;               /* off 16  authority logical clock (aienos_cap_clock), 0 if unknown */
     uint32_t principal;          /* off 24  authority subject */
     int32_t  code;               /* off 28  authority/producer result code (AIENOS_CAP_*, RX_GEN_*, 0) */
-    uint32_t cap_id;             /* off 32  0 = none */
+    uint32_t cap_id;             /* off 32  0 = the authority office capability; ARGUS_CAP_NONE = none */
     uint32_t object_id;          /* off 36  RxGenObject id, lease id, or 0 */
     uint64_t cap_generation;     /* off 40 */
     uint64_t world_generation;   /* off 48  rx_generation World generation id (64-bit), 0 = unknown */

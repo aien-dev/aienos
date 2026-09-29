@@ -17,9 +17,14 @@
  *   - CAPABILITY_GRANTED: cap_id/cap_generation = the NEW reference,
  *     resource = authority resource, object_id = AIENOS_CAP_RIGHT_* mask,
  *     principal = authority subject, code = authority result code.
- *   - "Capability use" events: CAPABILITY_USED, EXTERNAL_EFFECT_REQUESTED,
- *     EXTERNAL_EFFECT_COMMITTED, CREDENTIAL_LEASE_USED, PROVIDER_USED, when
- *     they carry cap_id != 0 (is_cap_use below; one definition for all).
+ *   - "Capability use" events: CAPABILITY_USED, CAPABILITY_USE_SUMMARY (v1.1),
+ *     EXTERNAL_EFFECT_REQUESTED, EXTERNAL_EFFECT_COMMITTED, CREDENTIAL_LEASE_USED,
+ *     PROVIDER_USED, when they carry cap_id != ARGUS_CAP_NONE (is_cap_use below;
+ *     one definition for all). cap_id 0 is the authority OFFICE slot and is
+ *     checked like any other (v1.1).
+ *   - A USE_SUMMARY is a USED spanning generations: MAX in cap_generation, MIN in
+ *     object_id (use_gen_max/use_gen_min). Detector 1 checks the max, detector 2
+ *     the min, detector 3 the max (<= the revoked generation), 8 and 14 as a USED.
  *   - A machine is "joined" when machine() finds it AND joined_sequence != 0.
  *     MACHINE_REMOVED leaves a tombstone (joined_sequence 0, trust kept).
  *   - Machine trust rank (argus_trust_rank): TRUSTED < OBSERVED <
@@ -30,7 +35,8 @@
  *     requested resource bits (used), principal = subject. Lease ids are never
  *     reused (orchestrator ruling A).
  *   - ARTIFACT_*: evidence_digest = artifact digest.
- *   - world(): ARGUS_ERR_STATE is treated as "no World committed yet".
+ *   - world(store_id): ARGUS_ERR_STATE is treated as "no World committed yet" for
+ *     that store (WORLD_COMMITTED object_id = store id, v1.1).
  *   - policy_digest()/runtime_digest(): an all-zero digest means "none stored".
  *
  * Self-reports (G-2): kinds 60-63 are a producer's say-so, not evidence. A
@@ -74,10 +80,11 @@ static int bytes_zero(const uint8_t *a, size_t n)
 
 static int is_cap_use(const ArgusEvent *ev)
 {
-    if (ev->cap_id == 0)
+    if (ev->cap_id == ARGUS_CAP_NONE)
         return 0;
     switch (ev->kind) {
     case ARGUS_EV_CAPABILITY_USED:
+    case ARGUS_EV_CAPABILITY_USE_SUMMARY:
     case ARGUS_EV_EXTERNAL_EFFECT_REQUESTED:
     case ARGUS_EV_EXTERNAL_EFFECT_COMMITTED:
     case ARGUS_EV_CREDENTIAL_LEASE_USED:
@@ -91,6 +98,15 @@ static int is_cap_use(const ArgusEvent *ev)
 static int outcome_ok(const ArgusEvent *ev)
 {
     return ev->outcome == ARGUS_OUTCOME_OK;
+}
+
+/* Generation span of a use (v1.1). A USED carries one generation. A
+ * CAPABILITY_USE_SUMMARY carries the MAX generation seen in cap_generation and
+ * the MIN in object_id (u32; see the header note on generations above 2^32). */
+static uint64_t use_gen_max(const ArgusEvent *ev) { return ev->cap_generation; }
+static uint64_t use_gen_min(const ArgusEvent *ev)
+{
+    return ev->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY ? (uint64_t)ev->object_id : ev->cap_generation;
 }
 
 static int cap_lookup(const ArgusStateOps *ops, const ArgusStateView *v, uint32_t id, ArgusCapShadow *s)
@@ -146,8 +162,8 @@ static int emit(ArgusFinding *out, size_t cap, size_t *n, const ArgusEvent *ev,
  *           (b) a capability use with outcome OK whose slot ARGUS has never
  *           seen granted (shadow UNSEEN); or
  *           (c) a capability use with outcome OK at a generation ABOVE the
- *           shadow generation for a seen slot (a future generation was never
- *           minted, G-4); or
+ *           shadow generation for a seen slot (summary: its MAX generation;
+ *           a future generation was never minted, G-4); or
  *           (d) a capability use with outcome OK but code ERR_BOUNDS or
  *           ERR_CHAIN (the authority's own code contradicts the outcome).
  * Evidence: ev kind/outcome/code/cap_id/cap_generation; cap shadow.
@@ -163,7 +179,7 @@ static int det_forged_capability(const ArgusStateOps *ops, const ArgusStateView 
 {
     *n_out = 0;
     ArgusCapShadow s = {0};
-    int seen = ev->cap_id != 0 && cap_lookup(ops, v, ev->cap_id, &s);
+    int seen = ev->cap_id != ARGUS_CAP_NONE && cap_lookup(ops, v, ev->cap_id, &s);
     uint64_t prior = seen ? s.granted_sequence : 0;
     if (ev->kind == ARGUS_EV_FORGED_CAPABILITY) {
         int corroborated = seen && s.subject == ev->principal && ev->cap_generation > s.generation;
@@ -174,7 +190,7 @@ static int det_forged_capability(const ArgusStateOps *ops, const ArgusStateView 
     if (!is_cap_use(ev) || !outcome_ok(ev))
         return ARGUS_OK;
     int hit = ev->code == ARGUS_AUTH_ERR_BOUNDS || ev->code == ARGUS_AUTH_ERR_CHAIN || !seen ||
-              ev->cap_generation > s.generation;
+              use_gen_max(ev) > s.generation;
     if (!hit)
         return ARGUS_OK;
     return emit(out, cap, n_out, ev, ARGUS_F_FORGED_CAPABILITY, ARGUS_SEV_CRITICAL, 1,
@@ -187,8 +203,9 @@ static int det_forged_capability(const ArgusStateOps *ops, const ArgusStateView 
  *           at a newer generation). A normal authority refusal of an old
  *           reference is CAPABILITY_USED/DENIED code ERR_STALE_GEN, which does
  *           NOT trigger; or
- *           (b) a capability use with outcome OK and cap_generation lower than
- *           the shadow's current generation for that slot; or
+ *           (b) a capability use with outcome OK and cap_generation (summary:
+ *           its MIN generation, object_id) lower than the shadow's current
+ *           generation for that slot; or
  *           (c) a capability use with outcome OK but code ERR_STALE_GEN.
  * Evidence: ev cap_id/cap_generation/outcome/code; cap shadow generation.
  * Code ARGUS_F_STALE_GENERATION, HIGH, sync_allowed 1, containment
@@ -199,7 +216,7 @@ static int det_stale_generation(const ArgusStateOps *ops, const ArgusStateView *
 {
     *n_out = 0;
     ArgusCapShadow s = {0};
-    int seen = ev->cap_id != 0 && cap_lookup(ops, v, ev->cap_id, &s);
+    int seen = ev->cap_id != ARGUS_CAP_NONE && cap_lookup(ops, v, ev->cap_id, &s);
     uint64_t prior = seen ? s.granted_sequence : 0;
     if (ev->kind == ARGUS_EV_STALE_GENERATION) {
         int corroborated = seen && s.subject == ev->principal && ev->cap_generation < s.generation;
@@ -209,7 +226,7 @@ static int det_stale_generation(const ArgusStateOps *ops, const ArgusStateView *
     }
     if (!is_cap_use(ev) || !outcome_ok(ev))
         return ARGUS_OK;
-    int hit = ev->code == ARGUS_AUTH_ERR_STALE_GEN || (seen && ev->cap_generation < s.generation);
+    int hit = ev->code == ARGUS_AUTH_ERR_STALE_GEN || (seen && use_gen_min(ev) < s.generation);
     if (!hit)
         return ARGUS_OK;
     return emit(out, cap, n_out, ev, ARGUS_F_STALE_GENERATION, ARGUS_SEV_HIGH, 1,
@@ -218,7 +235,9 @@ static int det_stale_generation(const ArgusStateOps *ops, const ArgusStateView *
 
 /* ---- 3 REVOKED_CAPABILITY_USED ---------------------------------------------
  * Trigger:  a capability use with outcome OK where (a) the shadow says the
- *           slot is REVOKED, or (b) the code is ERR_REVOKED (contradiction).
+ *           slot is REVOKED and cap_generation (summary: MAX) <= the shadow
+ *           generation (v1.1: a use above it was never minted, detector 1), or
+ *           (b) the code is ERR_REVOKED (contradiction).
  *           A use with outcome DENIED and code ERR_REVOKED is the authority
  *           behaving correctly and never triggers.
  * Evidence: ev cap_id/outcome/code; cap shadow state + revoked_sequence.
@@ -232,7 +251,9 @@ static int det_revoked_capability_used(const ArgusStateOps *ops, const ArgusStat
     if (!is_cap_use(ev) || !outcome_ok(ev))
         return ARGUS_OK;
     ArgusCapShadow s = {0};
-    int revoked = cap_lookup(ops, v, ev->cap_id, &s) && s.state == ARGUS_SHADOW_REVOKED;
+    /* v1.1: a use ABOVE the revoked generation was never minted: detector 1, not 3. */
+    int revoked = cap_lookup(ops, v, ev->cap_id, &s) && s.state == ARGUS_SHADOW_REVOKED &&
+                  use_gen_max(ev) <= s.generation;
     if (!revoked && ev->code != ARGUS_AUTH_ERR_REVOKED)
         return ARGUS_OK;
     return emit(out, cap, n_out, ev, ARGUS_F_REVOKED_CAPABILITY_USED, ARGUS_SEV_CRITICAL, 1,
@@ -379,8 +400,8 @@ static int det_machine_identity_mismatch(const ArgusStateOps *ops, const ArgusSt
  * wrote in effect_class (G-24: the kind wins over the label), otherwise the
  * event's effect_class.
  * Trigger:  outcome OK and
- *           (a) cap_id == 0, effective class EXTERNAL, on EXTERNAL_EFFECT_* or
- *           CAPABILITY_USED (an irreversible effect with no capability); or
+ *           (a) cap_id == ARGUS_CAP_NONE, effective class EXTERNAL, on
+ *           EXTERNAL_EFFECT_* or CAPABILITY_USED (an irreversible effect with no capability); or
  *           (b) a capability use (is_cap_use) whose granted rights in the
  *           shadow lack AIENOS_CAP_RIGHT_EFFECT for effective class EXTERNAL,
  *           or lack AIENOS_CAP_RIGHT_WRITE for effective class EVIDENCE (a
@@ -407,7 +428,7 @@ static int det_effect_class_unauthorized(const ArgusStateOps *ops, const ArgusSt
         return ARGUS_OK;
     uint64_t prior = 0;
     int hit = 0;
-    if (ev->cap_id == 0) {
+    if (ev->cap_id == ARGUS_CAP_NONE) {
         hit = eff == ARGUS_EFFECT_EXTERNAL && (effect_kind || ev->kind == ARGUS_EV_CAPABILITY_USED);
     } else if (is_cap_use(ev)) {
         ArgusCapShadow s = {0};
@@ -424,7 +445,8 @@ static int det_effect_class_unauthorized(const ArgusStateOps *ops, const ArgusSt
 
 /* ---- 9 WORLD_PROVENANCE_INCONSISTENT ---------------------------------------
  * Trigger:  WORLD_COMMITTED with outcome OK, when a World has already been
- *           committed (shadow generation != 0), and either
+ *           committed FOR THE SAME STORE (object_id; world(v, store_id), v1.1;
+ *           shadow generation != 0), and either
  *           (a) world_generation == shadow generation with a different
  *           evidence_digest (two different Worlds claim one generation), or
  *           (b) world_generation != shadow generation + 1 otherwise (skip or
@@ -444,7 +466,7 @@ static int det_world_provenance_inconsistent(const ArgusStateOps *ops, const Arg
     if (ev->kind != ARGUS_EV_WORLD_COMMITTED || !outcome_ok(ev))
         return ARGUS_OK;
     ArgusWorldShadow w = {0};
-    if (ops->world(v, &w) != ARGUS_OK || w.generation == 0)
+    if (ops->world(v, ev->object_id, &w) != ARGUS_OK || w.generation == 0)   /* per store (v1.1) */
         return ARGUS_OK;
     int hit;
     if (ev->world_generation == w.generation)
