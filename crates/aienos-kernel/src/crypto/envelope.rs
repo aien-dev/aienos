@@ -29,6 +29,13 @@ pub const ENVELOPE_HEADER_LEN: usize = 64;
 pub const CHUNK_AAD_PREFIX: &[u8; 19] = b"AIENOS-M5-CHUNK-V1\0";
 /// Total length of per-chunk AAD: 19 + 16 + 2 + 2 + 64 + 4 + 4 = 111 bytes.
 pub const CHUNK_AAD_LEN: usize = 111;
+/// Largest plaintext a single envelope may carry: 64 MiB (67,108,864 bytes).
+///
+/// `total_plaintext_len` comes from the unauthenticated header, so decryption rejects
+/// anything above this before sizing or allocating from it. Callers of
+/// `encrypt_envelope` must keep plaintexts at or below this bound, or the resulting
+/// envelope will be rejected on decryption.
+pub const MAX_ENVELOPE_PLAINTEXT: u64 = 64 * 1024 * 1024;
 
 /// Error conditions encountered when inspecting or decrypting an envelope.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +58,10 @@ pub enum EnvelopeError {
     LengthMismatch,
     /// AEAD authentication verification failed for a chunk.
     AuthenticationFailed,
+    /// Header claims more plaintext than `MAX_ENVELOPE_PLAINTEXT`.
+    PlaintextTooLarge(u64),
+    /// Expected envelope length overflows the platform integer range.
+    LengthOverflow,
 }
 
 /// Fixed 64-byte authenticated envelope header.
@@ -161,9 +172,24 @@ impl EnvelopeHeader {
     }
 
     /// Calculate the expected total ciphertext envelope size (header + ciphertext + tags).
-    pub fn expected_envelope_len(&self) -> usize {
-        let chunks = self.chunk_count();
-        ENVELOPE_HEADER_LEN + (self.total_plaintext_len as usize) + (chunks * TAG_LEN)
+    ///
+    /// The header fields are unauthenticated at this point, so every step is checked
+    /// and an overflow returns `LengthOverflow` instead of wrapping or panicking.
+    pub fn expected_envelope_len(&self) -> Result<usize, EnvelopeError> {
+        if self.chunk_size == 0 {
+            return Err(EnvelopeError::InvalidChunkSize(0));
+        }
+        let chunks = if self.total_plaintext_len == 0 {
+            1
+        } else {
+            self.total_plaintext_len.div_ceil(self.chunk_size as u64)
+        };
+        let len = chunks
+            .checked_mul(TAG_LEN as u64)
+            .and_then(|tags| tags.checked_add(self.total_plaintext_len))
+            .and_then(|body| body.checked_add(ENVELOPE_HEADER_LEN as u64))
+            .ok_or(EnvelopeError::LengthOverflow)?;
+        usize::try_from(len).map_err(|_| EnvelopeError::LengthOverflow)
     }
 }
 
@@ -238,8 +264,11 @@ pub fn encrypt_envelope(
     };
 
     let header_bytes = header.encode();
-    let total_envelope_len = header.expected_envelope_len();
-    let mut out = Vec::with_capacity(total_envelope_len);
+    debug_assert!(plaintext.len() as u64 <= MAX_ENVELOPE_PLAINTEXT);
+    let capacity = header
+        .expected_envelope_len()
+        .unwrap_or(ENVELOPE_HEADER_LEN);
+    let mut out = Vec::with_capacity(capacity);
     out.extend_from_slice(&header_bytes);
 
     let chunk_size = header.chunk_size as usize;
@@ -269,7 +298,7 @@ pub fn encrypt_envelope(
         }
     }
 
-    debug_assert_eq!(out.len(), total_envelope_len);
+    debug_assert_eq!(header.expected_envelope_len(), Ok(out.len()));
     out
 }
 
@@ -289,7 +318,11 @@ pub fn decrypt_envelope(
     }
 
     let header = EnvelopeHeader::decode(&envelope_bytes[0..ENVELOPE_HEADER_LEN])?;
-    if envelope_bytes.len() != header.expected_envelope_len() {
+    // Bound the unauthenticated length claim before any size is derived from it.
+    if header.total_plaintext_len > MAX_ENVELOPE_PLAINTEXT {
+        return Err(EnvelopeError::PlaintextTooLarge(header.total_plaintext_len));
+    }
+    if envelope_bytes.len() != header.expected_envelope_len()? {
         return Err(EnvelopeError::LengthMismatch);
     }
 
@@ -298,7 +331,8 @@ pub fn decrypt_envelope(
 
     let chunk_size = header.chunk_size as usize;
     let chunk_count = header.chunk_count();
-    let mut plaintext = Vec::with_capacity(header.total_plaintext_len as usize);
+    // Grow per authenticated chunk; never reserve the header's claimed total up front.
+    let mut plaintext = Vec::new();
 
     let mut cursor = ENVELOPE_HEADER_LEN;
 
@@ -453,6 +487,99 @@ mod tests {
         assert_eq!(
             decrypt_envelope(&key, &store_uuid, 20, 1, &corrupted),
             Err(EnvelopeError::AuthenticationFailed)
+        );
+    }
+
+    /// Build a valid small envelope, then overwrite the unauthenticated header's
+    /// chunk_size and total_plaintext_len fields with hostile values.
+    fn hostile_envelope(chunk_size: u32, total_plaintext_len: u64) -> Vec<u8> {
+        let mut env = encrypt_envelope(
+            &[0x01u8; 32],
+            &[0x02u8; 16],
+            16,
+            1,
+            &[0x03u8; 16],
+            &[0x04u8; 8],
+            1,
+            b"hostile header probe",
+        );
+        env[16..20].copy_from_slice(&chunk_size.to_le_bytes());
+        env[20..28].copy_from_slice(&total_plaintext_len.to_le_bytes());
+        env
+    }
+
+    #[test]
+    fn test_hostile_header_huge_total_rejected_before_alloc() {
+        let env = hostile_envelope(DEFAULT_CHUNK_SIZE, u64::MAX);
+        assert_eq!(
+            decrypt_envelope(&[0x01u8; 32], &[0x02u8; 16], 16, 1, &env),
+            Err(EnvelopeError::PlaintextTooLarge(u64::MAX))
+        );
+    }
+
+    #[test]
+    fn test_hostile_header_chunk_size_one_huge_count_rejected() {
+        let env = hostile_envelope(1, u64::MAX);
+        assert_eq!(
+            decrypt_envelope(&[0x01u8; 32], &[0x02u8; 16], 16, 1, &env),
+            Err(EnvelopeError::PlaintextTooLarge(u64::MAX))
+        );
+
+        let over = MAX_ENVELOPE_PLAINTEXT + 1;
+        let env = hostile_envelope(1, over);
+        assert_eq!(
+            decrypt_envelope(&[0x01u8; 32], &[0x02u8; 16], 16, 1, &env),
+            Err(EnvelopeError::PlaintextTooLarge(over))
+        );
+    }
+
+    #[test]
+    fn test_hostile_header_at_bound_hits_length_check() {
+        // Exactly at the bound is allowed by the size check, but the claimed length
+        // cannot match the short input, so the checked length comparison rejects it.
+        let env = hostile_envelope(1, MAX_ENVELOPE_PLAINTEXT);
+        assert_eq!(
+            decrypt_envelope(&[0x01u8; 32], &[0x02u8; 16], 16, 1, &env),
+            Err(EnvelopeError::LengthMismatch)
+        );
+    }
+
+    #[test]
+    fn test_expected_envelope_len_overflow_is_error() {
+        let env = hostile_envelope(DEFAULT_CHUNK_SIZE, 0);
+        let valid = EnvelopeHeader::decode(&env).unwrap();
+
+        // chunk_size 1 with u64::MAX bytes: chunks * TAG_LEN overflows.
+        let header = EnvelopeHeader {
+            chunk_size: 1,
+            total_plaintext_len: u64::MAX,
+            ..valid
+        };
+        assert_eq!(
+            header.expected_envelope_len(),
+            Err(EnvelopeError::LengthOverflow)
+        );
+
+        // Largest chunks: the tag term fits but adding the plaintext length overflows.
+        let header = EnvelopeHeader {
+            chunk_size: DEFAULT_CHUNK_SIZE,
+            total_plaintext_len: u64::MAX - 8,
+            ..valid
+        };
+        assert_eq!(
+            header.expected_envelope_len(),
+            Err(EnvelopeError::LengthOverflow)
+        );
+
+        // A hand-built zero chunk size must not divide by zero.
+        let header = EnvelopeHeader {
+            chunk_size: 0,
+            total_plaintext_len: 1,
+            ..valid
+        };
+        assert_eq!(
+            header.expected_envelope_len(),
+            Err(EnvelopeError::InvalidChunkSize(0))
         );
     }
 }
