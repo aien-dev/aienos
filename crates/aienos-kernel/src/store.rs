@@ -1,10 +1,13 @@
-//! Host-tested implementation of ADR 0003 storage semantics.
+//! Legacy host-tested storage prototypes plus the current persistent format.
 //!
 //! Note: This module provides a host-tested implementation of ADR 0003 storage semantics,
 //! not yet native AIENOS storage on bare-metal block devices.
 //!
-//! Content-addressed extents (`model/<hash>`, `cortex/wal`, `agent/<id>`)
-//! rather than a general-purpose POSIX filesystem.
+//! `v1` is the side-effect-free System Store v1 implementation. The older
+//! `BlockStore` prototype is deliberately renamed below because its historical
+//! `open()` behavior formatted blank media and is not suitable for the v1 API.
+
+pub mod v1;
 
 use crate::block::{BlockDevice, BlockError};
 use crate::crypto::sha256;
@@ -14,7 +17,7 @@ const WAL_MAGIC: &[u8; 8] = b"AIENWL01";
 
 /// Latest committed extent on a block device. Payloads must fit in one block.
 /// Blocks 0 and 1 are alternating superblocks; later blocks form the WAL ring.
-pub struct BlockStore<D> {
+pub struct PrototypeBlockStore<D> {
     device: D,
     generation: u64,
     wal_lba: u64,
@@ -22,7 +25,7 @@ pub struct BlockStore<D> {
     hash: [u8; 32],
 }
 
-impl<D: BlockDevice> BlockStore<D> {
+impl<D: BlockDevice> PrototypeBlockStore<D> {
     pub fn format(mut device: D) -> Result<Self, BlockError> {
         if (device.block_size() as usize) < 92 || device.block_count() < 5 {
             return Err(BlockError::InvalidInput);
@@ -337,13 +340,13 @@ mod tests {
     #[test]
     fn block_store_persists_reopens_and_falls_back_from_bad_copy() {
         let disk = RamDisk::new(256, 12).unwrap();
-        let mut store = BlockStore::format(disk).unwrap();
+        let mut store = PrototypeBlockStore::format(disk).unwrap();
         store.write_extent(b"first committed payload").unwrap();
         store.write_extent(b"second committed payload").unwrap();
         let mut disk = store.into_device();
         // Generation two is in copy A (LBA 0); damage its checksum and use generation one.
         disk.corrupt_byte(256 - 1, 0x80).unwrap();
-        let mut reopened = BlockStore::open(disk).unwrap();
+        let mut reopened = PrototypeBlockStore::open(disk).unwrap();
         assert_eq!(reopened.generation(), 1);
         assert_eq!(
             reopened.read_extent().unwrap().unwrap(),
@@ -356,14 +359,14 @@ mod tests {
         let mut disk = RamDisk::new(256, 8).unwrap();
         disk.corrupt_byte(0, 0x7f).unwrap();
         assert!(matches!(
-            BlockStore::open(disk),
+            PrototypeBlockStore::open(disk),
             Err(BlockError::DeviceError)
         ));
     }
 
     #[test]
     fn block_store_crash_boundaries_keep_old_or_new_commit() {
-        let mut formatted = BlockStore::format(RamDisk::new(256, 12).unwrap()).unwrap();
+        let mut formatted = PrototypeBlockStore::format(RamDisk::new(256, 12).unwrap()).unwrap();
         formatted.write_extent(b"old state").unwrap();
         let base = formatted.into_device();
         let block_size = base.block_size() as usize;
@@ -371,10 +374,10 @@ mod tests {
         // superblock commit). Tear each one at every byte offset, 0..=block_size.
         for write_number in 1..=2 {
             for offset in 0..=block_size {
-                let mut store = BlockStore::open(base.clone()).unwrap();
+                let mut store = PrototypeBlockStore::open(base.clone()).unwrap();
                 store.device.tear_write(write_number, offset);
                 assert!(store.write_extent(b"new state").is_err());
-                let mut reopened = BlockStore::open(store.into_device()).unwrap();
+                let mut reopened = PrototypeBlockStore::open(store.into_device()).unwrap();
                 let value = reopened.read_extent().unwrap().unwrap();
                 assert!(value == b"old state" || value == b"new state");
             }
@@ -383,7 +386,7 @@ mod tests {
 
     #[test]
     fn block_store_rejects_corrupt_in_memory_length_without_panicking() {
-        let mut store = BlockStore::format(RamDisk::new(256, 8).unwrap()).unwrap();
+        let mut store = PrototypeBlockStore::format(RamDisk::new(256, 8).unwrap()).unwrap();
         store.write_extent(b"committed").unwrap();
         store.length = usize::MAX;
         assert_eq!(store.read_extent(), Err(BlockError::InvalidInput));
