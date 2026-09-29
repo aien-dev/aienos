@@ -488,13 +488,30 @@ static void gate_transport(void)
 /* ======================================================================= */
 /* ARGUS_TRANSPORT_SATURATION_PASS                                          */
 /* ======================================================================= */
+/* Each class is driven by a kind whose floor (argus_event_min_class) is that
+ * class, so every watermark is exercised by rule-abiding traffic:
+ *   INFORMATIONAL: no v1 kind has an INFORMATIONAL floor (design fact), so a
+ *                  non-v1 kind (0x7FFF) is used. The ring is transport and has
+ *                  no floor for it; the core rejects it (MALFORMED_EVENT, 16),
+ *                  and the gate counts those findings exactly.
+ *   SECURITY:      CAPABILITY_DENIED (SECURITY floor), no finding.
+ *   CRITICAL:      CREDENTIAL_LEASE_REVOKED of an unknown lease (CRITICAL floor),
+ *                  not applied, no finding, no state growth. */
+#define FLOOD_KIND_INF 0x7FFFu
+static uint16_t flood_kind(uint8_t cls)
+{
+    return cls == ARGUS_CLASS_INFORMATIONAL ? FLOOD_KIND_INF
+         : cls == ARGUS_CLASS_CRITICAL ? ARGUS_EV_CREDENTIAL_LEASE_REVOKED
+         : ARGUS_EV_CAPABILITY_DENIED;
+}
+
 static ArgusEvent flood_event(uint64_t seq, uint8_t cls)
 {
     ArgusEvent e;
     memset(&e, 0, sizeof e);
     e.version = ARGUS_ABI_VERSION;
     e.class_ = cls;
-    e.kind = ARGUS_EV_CAPABILITY_DENIED;
+    e.kind = flood_kind(cls);
     e.effect_class = ARGUS_EFFECT_NONE;
     e.outcome = ARGUS_OUTCOME_DENIED;
     e.flags = ARGUS_FLAG_SYNTHETIC;
@@ -574,11 +591,17 @@ static void gate_saturation(void)
     ArgusEvent *ev = xalloc(N * sizeof *ev);
     for (size_t i = 0; i < N; i++) ev[i] = flood_event(i + 1, flood_class(i));
 
-    /* pre-check: the flood kind itself yields no finding through a real core */
+    size_t n_inf = 0;
+    for (size_t i = 0; i < N; i++) n_inf += ev[i].class_ == ARGUS_CLASS_INFORMATIONAL;
+
+    /* pre-check: through a real core, the SEC/CRIT flood kinds yield no finding
+     * and each INF (non-v1) event yields exactly one MALFORMED_EVENT */
     Run pre;
-    run_init(&pre, 64);
-    for (size_t i = 0; i < 4096; i++) run_ingest(&pre, &ev[i]);
-    size_t pre_findings = pre.nf;
+    run_init(&pre, 8192);
+    size_t pre_inf = 0;
+    for (size_t i = 0; i < 4096; i++) { run_ingest(&pre, &ev[i]); pre_inf += ev[i].class_ == ARGUS_CLASS_INFORMATIONAL; }
+    size_t pre_findings = pre.nf - pre.per_code[ARGUS_F_MALFORMED_EVENT];
+    int pre_malformed_ok = pre.per_code[ARGUS_F_MALFORMED_EVENT] == pre_inf;
     run_free(&pre);
 
     Run run;
@@ -615,10 +638,13 @@ static void gate_saturation(void)
     argus_ring_stats(ring, &s);
 
     uint64_t loss_total = run.per_code[ARGUS_F_TELEMETRY_LOSS];
-    uint64_t other_findings = run.nf - loss_total;
+    uint64_t malformed = run.per_code[ARGUS_F_MALFORMED_EVENT];
+    uint64_t other_findings = run.nf - loss_total - malformed;
 
     int ok = 1;
-    ok &= pre_findings == 0;
+    ok &= pre_findings == 0 && pre_malformed_ok;
+    ok &= s.refused[0] == 0;                               /* every flood event met its class floor */
+    ok &= malformed == n_inf - s.refused[ARGUS_CLASS_INFORMATIONAL];   /* each accepted INF -> one code 16 */
     ok &= p.refused_below_limit[1] == 0 && p.refused_below_limit[2] == 0 && p.refused_below_limit[4] == 0;
     ok &= p.sec_refused_while_info_accepting == 0 && p.crit_refused_below_full == 0;
     ok &= p.first_refusal_idx[ARGUS_CLASS_INFORMATIONAL] != 0;
@@ -631,10 +657,11 @@ static void gate_saturation(void)
     ok &= sc.c.loss_seen == sc.c.loss_expected && sc.c.loss_wrong_sev == 0 && loss_total == sc.c.loss_seen;
     ok &= other_findings == 0;
     gate("ARGUS_TRANSPORT_SATURATION_PASS", ok,
-         "%zu attempts (5 INF:2 SEC:1 CRIT), ring %u, consumer stalled to 100%% then 8/20us; limits INF %u SEC %u CRIT %u; "
+         "%zu attempts (5 INF 0x7FFF : 2 SEC CAPABILITY_DENIED : 1 CRIT LEASE_REVOKED), ring %u, consumer stalled to 100%% then 8/20us; limits INF %u SEC %u CRIT %u; "
          "max depth seen %llu; refused INF %llu SEC %llu CRIT(overflow) %llu; first refusal idx INF %llu SEC %llu CRIT %llu; "
          "refused below limit INF/SEC/CRIT %llu/%llu/%llu; SEC refused while INF accepting %llu; CRIT refused below 100%% %llu; "
          "drop events %llu (CRIT-class %llu SEC-class %llu INF-class %llu) -> TELEMETRY_LOSS %llu/%llu expected, wrong sev %llu; "
+         "INF (non-v1 kind) delivered -> MALFORMED_EVENT %llu/%llu expected; ring malformed refusals %llu; "
          "other findings %llu (flood pre-check %zu)",
          N, RING_CAP, argus_ring_saturation_point(RING_CAP, 4), argus_ring_saturation_point(RING_CAP, 2),
          argus_ring_saturation_point(RING_CAP, 1), (unsigned long long)p.max_depth_seen,
@@ -646,7 +673,9 @@ static void gate_saturation(void)
          (unsigned long long)sc.c.drop_events, (unsigned long long)sc.c.drop_events_by_class[1],
          (unsigned long long)sc.c.drop_events_by_class[2], (unsigned long long)sc.c.drop_events_by_class[4],
          (unsigned long long)sc.c.loss_seen, (unsigned long long)sc.c.loss_expected,
-         (unsigned long long)sc.c.loss_wrong_sev, (unsigned long long)other_findings, pre_findings);
+         (unsigned long long)sc.c.loss_wrong_sev, (unsigned long long)malformed,
+         (unsigned long long)(n_inf - s.refused[ARGUS_CLASS_INFORMATIONAL]), (unsigned long long)s.refused[0],
+         (unsigned long long)other_findings, pre_findings);
     run_free(&run);
     free(mem);
     free(ev);
@@ -789,6 +818,15 @@ static void explain_unexpected(const char *label, const ArgusEvent *ev, size_t n
     run_free(&r);
 }
 
+/* Hard codes: every finding code except 11 (telemetry loss) and 12 (sequence
+ * anomaly), which have their own checks below. Since the hostile-review round
+ * this includes 13..16 (authority replay, subject mismatch, trust escalation,
+ * malformed event); lane E's corpus injects 14 and 15. */
+static int hard_code(unsigned c)
+{
+    return c >= 1 && c <= ARGUS_F_MAX && c != ARGUS_F_TELEMETRY_LOSS && c != ARGUS_F_SEQUENCE_ANOMALY;
+}
+
 static void gate_hard_invariants(void)
 {
     uint64_t exp_by[ARGUS_F_MAX + 1] = {0}, det_by[ARGUS_F_MAX + 1] = {0}, unexp_by[ARGUS_F_MAX + 1] = {0};
@@ -805,7 +843,7 @@ static void gate_hard_invariants(void)
     uint64_t unexpected_hard = 0;
     for (size_t j = 0; j < direct_h.nf; j++) {
         uint16_t code = direct_h.f[j].code;
-        if (code >= 1 && code <= 10 && !expected_has(direct_h.f[j].sequence, code)) {
+        if (hard_code(code) && !expected_has(direct_h.f[j].sequence, code)) {
             unexpected_hard++;
             unexp_by[code]++;
             if (unexpected_hard <= 10)
@@ -819,15 +857,17 @@ static void gate_hard_invariants(void)
     int missing = 0;
     printf("  hard invariants, hostile seed 1 (%zu events, %zu injected):\n", n_hostile, n_expect);
     printf("    code  detected/expected  unexpected\n");
-    for (unsigned c = 1; c <= 10; c++) {
+    for (unsigned c = 1; c <= ARGUS_F_MAX; c++) {
+        if (!hard_code(c)) continue;
         printf("    %4u  %8llu/%-8llu  %llu\n", c, (unsigned long long)det_by[c], (unsigned long long)exp_by[c],
                (unsigned long long)unexp_by[c]);
         if (det_by[c] != exp_by[c]) missing = 1;
     }
     char table[512];
     size_t off = 0;
-    for (unsigned c = 1; c <= 10; c++)
-        off += (size_t)snprintf(table + off, sizeof table - off, "%s%u:%llu/%llu", c > 1 ? " " : "", c,
+    for (unsigned c = 1; c <= ARGUS_F_MAX; c++)
+        if (hard_code(c))
+            off += (size_t)snprintf(table + off, sizeof table - off, "%s%u:%llu/%llu", c > 1 ? " " : "", c,
                                 (unsigned long long)det_by[c], (unsigned long long)exp_by[c]);
     /* 12 on strictly increasing per-stream sequences is an integration bug; 11 means shadow tables overflowed */
     int seq_ok = !(seq12 > 0 && incr == 1);
@@ -835,7 +875,7 @@ static void gate_hard_invariants(void)
     gate("ARGUS_HARD_INVARIANTS_PASS",
          !missing && unexpected_hard == 0 && seq_ok && loss11 == 0 && direct_h.rc_full == 0 && direct_h.rc_overflow == 0,
          "real core + real detectors, hostile seed 1: code detected/expected [%s]; all %zu injected found=%d; "
-         "unexpected hard (1..10) %llu; code 12 findings %llu (corpus sequences strictly increasing per "
+         "unexpected hard (1..16 except 11/12) %llu; code 12 findings %llu (corpus sequences strictly increasing per "
          "(machine_id,consumer) stream: %s, %zu streams); code 11 findings %llu; ingest rc FULL %llu OVERFLOW %llu",
          table, n_expect, !missing, (unsigned long long)unexpected_hard, (unsigned long long)seq12,
          incr == 1 ? "yes" : incr == 0 ? "NO" : "unknown", streams, (unsigned long long)loss11,

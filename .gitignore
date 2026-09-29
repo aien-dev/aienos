@@ -5,3 +5,4 @@ __pycache__/
 .claude/
 .agents/
 native/argus/out/
+native/argus/out-d/

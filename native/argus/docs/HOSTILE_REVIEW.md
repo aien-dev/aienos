@@ -1,60 +1,111 @@
 # ARGUS-0 hostile review (lane G)
 
-Reviewer: lane G (hostile). Date: 2026-09-28.
-Code reviewed: integration branch `feat/argus-0` at `e16ba31` (lanes B, D, E merged):
-`argus_abi.h`, `argus_event.c`, `argus_ring.c`, `argus_core.c`, `argus_detect.c`,
-plus ADR 0017 (aien-architecture branch `docs/adr-0017-argus`) and
-`native/capability/aienos_capability.h`. Line numbers below are for that commit.
+Reviewer: lane G (hostile). Date: 2026-09-28. **Re-verdicted by the integrator,
+round 2 (2026-09-29)** after lanes B `58d5a99`, D `57a7bea`, E `a33c1e0` were merged
+into `feat/argus-0` on top of the ABI rules commit `4cd73cc` (`b6c782a`).
 
-Tests: `tests/test_argus_hostile.c` (60 tests). Each prints `HOSTILE <name> PASS|FAIL`.
-Tests for OPEN/WEAK items are marked EXPECTED-FAIL and fail today on purpose; the
-binary exits nonzero only on an unexpected failure. Results at `e16ba31`:
-27 defended, 33 expected-fail, 0 unexpected, on Apple clang 17 arm64 and on gcc 13
-(also clean under `-fsanitize=address,undefined`).
+## Status after integrator round 2
 
-Build line (from `native/argus`, CFLAGS of `../capability/Makefile`):
+Tests: `tests/test_argus_hostile.c`, now part of `make test` (built from `out/libargus.a`
+only; the exit code counts). Each prints `HOSTILE <name> PASS|FAIL`. Three modes:
+expected-defended (a FAIL is UNEXPECTED and fails the build), EXPECTED-FAIL (a known
+open item, reported, does not fail the build), and N/A-v1 (an attack ABI v1 accepts by
+design; reported, exempt from the exit code).
 
-    cc -std=gnu11 -O2 -Wall -Wextra -Werror -fstack-protector-strong -I. \
-       -o out/test_argus_hostile tests/test_argus_hostile.c \
-       argus_core.c argus_event.c argus_ring.c sha256.c argus_detect.c
+Result on the Spark (gcc, aarch64) and on the MacBook (Apple clang 17, macOS 26.6), and
+under ASan+UBSan on the Spark: **62 tests: 57 defended, 4 expected-fail, 1 N/A-v1,
+0 xpass, 0 unexpected, exit 0.**
 
-## Bottom line
+Attribution rule for "fixed in": the commit whose component holds the logic that now
+defends the test (validate/ring = B `58d5a99`, core apply/lifecycle/tables = D `57a7bea`,
+detectors = E `a33c1e0`, ABI rules/codes/table sizes = `4cd73cc`). It was checked by
+rebuilding the hostile test with one lane reverted to `4cd73cc` at a time: the tests that
+fall back to FAIL are that lane's. Tests marked "D + E" pass if either lane is present.
 
-The substrate mechanics are sound: the ring never blocks, drop accounting is exact,
-the core is deterministic and snapshot-safe, and the state digest covers every shadow
-field. The security model is not. ARGUS-0 believes every field of every event, from
-anyone who can push, and it applies events it has itself flagged as replays. That
-turns the hard invariants into invariants an attacker can switch off (replay a grant,
-remove and rejoin a machine, relabel an event's class) or turn against the system
-(forge a revocation at generation 2^64-1, forge a loss report, fill the incident table).
-Several of these are plain code bugs independent of the missing producer identity.
+Rulings applied to the test file in round 2 (orchestrator):
+- `ev0()` sends each kind at `argus_event_min_class(kind)` (SECURITY for an unknown
+  kind); tests that relied on a weaker class were written before the class floor existed.
+- Code 16 (MALFORMED_EVENT) is an accepted defended outcome where validate now rejects
+  first (`cap_id_out_of_range_use_is_forged`, `effect_kind_mislabelled`,
+  `replay_rekeyed_by_consumer_flag`).
+- INFORMATIONAL/AUDIT ring floods use the non-v1 kind `0x7FFF`: no v1 kind has an
+  INFORMATIONAL floor (design fact), and the ring is transport with no floor for an
+  unknown kind.
+- `critical_self_label_starves_security` is N/A-v1: producers are inside the trusted
+  boundary in v1 and may strengthen a class (the table is a floor, not a ceiling).
+- `world_skip_flagged` rollback case is World 1, 2, 1. `world_repeat_silent` is
+  re-scoped: a repeat with the same generation and digest is idempotent and silent
+  (RULED); a repeat with a different digest must be code 9. **ADR 0017 row 9 must be
+  amended** to read "repeated a generation with a different digest".
+- Table-exhaustion tests fill the new sizes exactly and overshoot them (machines 64,
+  producers 256, incidents 256, leases 256; a lease test was added). Producer overflow
+  follows the RATIFIED rule: the first untracked event returns ERR_FULL with one CRITICAL
+  TELEMETRY_LOSS, later ones return OK and are counted in `producers_untracked`.
+- `zero_machine_id_escapes_attribution` sends flags 0: the zero-machine rule exempts
+  SYNTHETIC and CONSUMER events, which is what the old test sent.
+- `replay_evades_by_rekeying_stream` was split: the CONSUMER-flag variant is now
+  defended (code 16, new test `replay_rekeyed_by_consumer_flag`); the machine_id variant
+  keeps the old name and stays EXPECTED-FAIL.
+- Fixed a test bug: `state_digest_sensitive_to_every_table` variant 7 turned an
+  ADMITTED into a REJECTED without raising its class to the CRITICAL floor, so the
+  variant was rejected as malformed and did not test the artifact table.
 
-Verdict counts (26 sections: the 23 requested attacks + 2 found while reviewing
-+ 1 split out): **DEFENDED 8, WEAK 5, OPEN 13, N/A-ARGUS-0 0** (four sub-items are
-N/A-ARGUS-0 and are marked inside their sections).
+### Remaining open in ARGUS-0
 
-## Ranked OPEN / WEAK list
+| # | Sev | Section | Status | What is still possible |
+|---|---|---|---|---|
+| 1 | HIGH | G-5 | OPEN, ABI v1 limit (EXPECTED-FAIL `unattributed_grant_masks_forged_use`) | No producer identity: anything that can push can announce a GRANTED that makes its own later use look legitimate. Mitigated only by the v1 trust boundary (push reachable only from AEGIS/runtime code). Producer attestation is ARGUS-3. |
+| 2 | MEDIUM | G-21 | OPEN, no ruling (EXPECTED-FAIL `replay_evades_by_rekeying_stream`) | A byte replay with a different machine_id is a new sequence stream and escapes the replay check. Same root as #1. |
+| 3 | MEDIUM | G-20 | WEAK, no ruling, found in round 2 (no test) | Only the producer table got the "loud once" rule. Every event beyond a full machine (64), lease (256), provider (32) or artifact (256) table still returns ERR_FULL with its own CRITICAL TELEMETRY_LOSS (measured: 6 extra JOINED = 6 CRITICAL; same for leases, providers, artifacts). Machine and lease tables never free, so once full this is a per-event CRITICAL amplifier. |
+| 4 | MEDIUM | G-6 | OPEN, no ruling (EXPECTED-FAIL `sequence_gap_unflagged`) | A stream jumping from 1 to 100 with no drop report is not a finding (the core documents "gaps are not findings"). |
+| 5 | LOW | G-9 | WEAK, ABI v1 limit (EXPECTED-FAIL `provider_substitution_escapes_quarantine`) | A quarantined provider that reappears under a new digest is clean: no provider identity continuity in v1 (registry is N/A-ARGUS-0). |
+| 6 | LOW | G-21 / G-8 | WEAK, bounded | Streams beyond the 256-entry producer table are replay-blind (loud once, counted); the 65th machine's quarantine cannot be recorded (loud, and its use is still code 7). |
+| 7 | LOW | G-12 | WEAK, unchanged | Two opaque 32-byte slots can carry a secret; the guard must be producer-side. |
+| 8 | LOW | G-17 | WEAK, unchanged | The ring is SPSC by contract only; a second producer loses events silently. |
+| 9 | N/A-v1 | G-7 | documented limitation (N/A-v1 `critical_self_label_starves_security`) | Low-value kinds self-labelled CRITICAL can fill the ring and starve SECURITY. |
 
-| # | Sev | Section | One line |
-|---|---|---|---|
-| 1 | CRITICAL | G-5 OPEN | No producer identity: any holder of the ring (or caller of ingest) sets principal, outcome, machine_id, class and even the CONSUMER ("ARGUS itself") flag. |
-| 2 | CRITICAL | G-3 OPEN | A replayed or forged GRANTED at the same generation revives a REVOKED shadow slot; the next use of the revoked reference raises nothing. Byte-exact replays are flagged as SEQUENCE_ANOMALY and then applied anyway. |
-| 3 | HIGH | G-8 OPEN | Quarantine laundering: MACHINE_REMOVED then MACHINE_JOINED gives a clean machine; a quarantined machine can announce its own TRUSTED; zero machine_id escapes detectors 7 and 10; machine table full drops the quarantine. |
-| 4 | HIGH | G-4 OPEN | A use at a generation higher than any granted is not flagged; one forged REVOKED at generation UINT64_MAX poisons a slot forever (every later legitimate use = CRITICAL + FREEZE_PRINCIPAL). |
-| 5 | HIGH | G-20 OPEN | Free CRITICAL amplifiers: cap_id >= 256 on GRANTED/REVOKED, 33rd producer stream, 17th machine, or a forged TELEMETRY_DROPPED each yield ERR_FULL/CRITICAL TELEMETRY_LOSS per event, mis-attributed as ARGUS's own evidence gap. |
-| 6 | HIGH | G-13 OPEN | Incident table (64, keyed by attacker-chosen principal) fills with junk; later real incidents are counted only in `incidents_untracked`, which `argus_core_health` does not expose. |
-| 7 | HIGH | G-7 WEAK / G-6 OPEN | Class is producer-chosen and not bound to kind: a revocation labelled INFORMATIONAL is dropped first and reported as an INFORMATIONAL drop, which raises no TELEMETRY_LOSS (silent evidence gap); junk labelled CRITICAL fills 100% and starves SECURITY. |
-| 8 | HIGH | G-26 OPEN | A second CREDENTIAL_LEASE_CREATED for a live lease rewrites its subject and scope; the hijacker's use is then clean. |
-| 9 | MEDIUM | G-21 OPEN | Sequence abuse: one event at UINT64_MAX makes a stream anomalous forever; replays evade by flipping the CONSUMER bit or machine_id; the producer table never frees and an untracked stream is replay-blind; no restart/epoch field. |
-| 10 | MEDIUM | G-10 OPEN | Machine identity: TRUST_CHANGED before JOINED bricks the machine (never joinable, every event = IDENTITY_MISMATCH); JOINED may declare its own initial trust (TRUSTED); reporter and subject are the same field. |
-| 11 | MEDIUM | G-15 OPEN | A flagged World commit (skip) is still adopted by the shadow; the legitimate next commit is then the one flagged; a commit at UINT64_MAX freezes World tracking. |
-| 12 | MEDIUM | G-24 OPEN | Effect class: EXTERNAL_EFFECT_COMMITTED labelled effect_class NONE escapes detector 8; EVIDENCE writes under READ-only rights are not checked. |
-| 13 | MEDIUM | G-6 OPEN | Omission: sequence gaps without a matching drop report are not detected; malformed events are a counter only (not chained, no finding). |
-| 14 | MEDIUM | G-14 OPEN | Policy/runtime digests are stored but never checked by any detector; POLICY_CHANGED from anyone rewrites the expected digest; INTEGRITY_VIOLATION (kind 60) produces no finding. |
-| 15 | MEDIUM (HIGH at ARGUS-1) | G-2 WEAK | Self-reported kinds (FORGED_CAPABILITY, STALE_GENERATION, SIGNATURE_FAILURE) produce CRITICAL/HIGH findings with `sync_allowed=1` and FREEZE_PRINCIPAL against any principal named in the event, with no shadow evidence. |
-| 16 | LOW | G-9 WEAK | Provider identity = digest; a quarantined provider re-appearing under a new digest is clean; use of a never-discovered provider is not flagged. |
-| 17 | LOW | G-12 WEAK | Two opaque 32-byte slots (machine_id, evidence_digest) are exactly the office secret's length and are copied verbatim into findings, producer table and state digest; nothing structural keeps a secret out. |
-| 18 | LOW | G-17 WEAK | The ring is SPSC by contract only; a second producer silently corrupts/loses events with no guard or detection. |
+Verdict counts after round 2 (26 sections): **DEFENDED 19, WEAK 4, OPEN 3, N/A-v1 0**
+as whole-section verdicts (OPEN: G-5, G-6, G-21; WEAK: G-9, G-12, G-17, G-20). Sub-items
+that are N/A-v1 or N/A-ARGUS-0 are marked inside their sections (G-2, G-7, G-9, G-10,
+G-15, G-21). See each section's "Round 2" line.
+
+### Ranked list as first found (at `e16ba31`), with round-2 status
+
+| # | Sev | Section | One line (as found) | Round 2 |
+|---|---|---|---|---|
+| 1 | CRITICAL | G-5 OPEN | No producer identity: any holder of the ring (or caller of ingest) sets principal, outcome, machine_id, class and even the CONSUMER ("ARGUS itself") flag. | CONSUMER flag and class floor DEFENDED (`58d5a99`); producer identity OPEN (ABI v1 limit) |
+| 2 | CRITICAL | G-3 OPEN | A replayed or forged GRANTED at the same generation revives a REVOKED shadow slot; byte-exact replays are flagged and then applied anyway. | DEFENDED (`57a7bea` code 13, anomalous events not applied; `a33c1e0` code 14) |
+| 3 | HIGH | G-8 OPEN | Quarantine laundering: REMOVED then JOINED; self-announced TRUSTED; zero machine_id escapes; machine table full drops the quarantine. | DEFENDED (`57a7bea` tombstones, trust down only, table 64; `a33c1e0` codes 15 and 7 on zero id); table limit WEAK, bounded |
+| 4 | HIGH | G-4 OPEN | Future generation use unflagged; forged REVOKED at UINT64_MAX poisons a slot forever. | DEFENDED (`a33c1e0`, `57a7bea`) |
+| 5 | HIGH | G-20 OPEN | Free CRITICAL amplifiers: cap_id >= 256, 33rd producer, 17th machine, forged TELEMETRY_DROPPED. | cap_id and forged drop DEFENDED (`58d5a99`); producer overflow RATIFIED (`57a7bea`); per-event amplifier remains on machine/lease/provider/artifact overflow: WEAK |
+| 6 | HIGH | G-13 OPEN | Incident table fills with junk; saturation invisible in health. | DEFENDED (`57a7bea`: table 256, `incidents_untracked` in health; still no eviction) |
+| 7 | HIGH | G-7 WEAK / G-6 OPEN | Class not bound to kind: security event lost as INFORMATIONAL; junk labelled CRITICAL starves SECURITY. | lost-as-INFORMATIONAL DEFENDED (`58d5a99`); CRITICAL self-label N/A-v1 (ruled) |
+| 8 | HIGH | G-26 OPEN | Second LEASE_CREATED rewrites a live lease. | DEFENDED (`57a7bea` not applied; `a33c1e0` code 6) |
+| 9 | MEDIUM | G-21 OPEN | UINT64_MAX sequence poison; rekeyed replays; producer table never frees. | poison DEFENDED (`58d5a99`); CONSUMER rekey DEFENDED (`58d5a99`); machine_id rekey OPEN; overflow RATIFIED, replay-blind beyond 256 WEAK |
+| 10 | MEDIUM | G-10 OPEN | TRUST_CHANGED before JOINED bricks a machine; JOINED declares its own trust. | DEFENDED (`57a7bea`, `a33c1e0`) |
+| 11 | MEDIUM | G-15 OPEN | Flagged World skip still adopted; UINT64_MAX freezes World tracking. | DEFENDED (`57a7bea`); repeat RULED idempotent, ADR row 9 to amend |
+| 12 | MEDIUM | G-24 OPEN | Mislabelled effect kind; EVIDENCE under READ-only. | DEFENDED (`58d5a99` validate, code 16; `a33c1e0` detector 8) |
+| 13 | MEDIUM | G-6 OPEN | Sequence gaps undetected; malformed events leave no evidence. | malformed evidence DEFENDED (`57a7bea` code 16); gaps OPEN, no ruling |
+| 14 | MEDIUM | G-14 OPEN | Policy/runtime digests never checked; INTEGRITY_VIOLATION ignored. | DEFENDED at announcement level (`a33c1e0`: digest overwrite and INTEGRITY_VIOLATION raise code 5, sync 0) |
+| 15 | MEDIUM | G-2 WEAK | Self-reports yield sync-eligible FREEZE_PRINCIPAL against any principal. | DEFENDED (`a33c1e0`: uncorroborated self-reports sync 0, containment NONE) |
+| 16 | LOW | G-9 WEAK | Provider substitution; never-discovered provider use. | undiscovered use DEFENDED (`a33c1e0`); substitution WEAK, ABI v1 limit |
+| 17 | LOW | G-12 WEAK | Two opaque 32-byte slots could carry a secret. | unchanged, WEAK |
+| 18 | LOW | G-17 WEAK | SPSC by contract only. | unchanged, WEAK |
+
+## Original review (lane G, at `e16ba31`)
+
+Code reviewed: `argus_abi.h`, `argus_event.c`, `argus_ring.c`, `argus_core.c`,
+`argus_detect.c`, plus ADR 0017 (aien-architecture branch `docs/adr-0017-argus`) and
+`native/capability/aienos_capability.h`. Line numbers in the sections below are for
+`e16ba31` and are historical. Original results: 60 tests, 27 defended, 33 expected-fail,
+0 unexpected. Original verdict counts: DEFENDED 8, WEAK 5, OPEN 13.
+
+Original bottom line: the substrate mechanics are sound (the ring never blocks, drop
+accounting is exact, the core is deterministic and snapshot-safe, the state digest covers
+every shadow field) but ARGUS-0 believed every field of every event and applied events it
+had itself flagged as replays. The mandatory header changes below were adopted in
+`4cd73cc` (items 1 to 6; item 6's reporter identity is ARGUS-1 ABI v2) and implemented in
+the three lane commits.
 
 ## Header changes I consider mandatory before a hostile gate can pass
 
@@ -88,6 +139,10 @@ single event.
 
 ## G-1 ARGUS minting authority accidentally: DEFENDED
 
+**Round 2:** unchanged. The suggested `nm -u` on every ARGUS object is now the ARGUS_MEMORY integration gate (5 objects, 0 forbidden imports).
+
+As found at `e16ba31`:
+
 Tried: looked for any path from `native/argus` to `aienos_cap_mint`, the admin handle,
 `aienos_cap_authorize`, or the office secret.
 Evidence: no ARGUS source includes `aienos_capability.h`; `argus_detect.h` mirrors five
@@ -98,7 +153,11 @@ Test: the hostile test binary links without `libaienos_capability.a`; any `aieno
 reference from ARGUS objects fails the link. Add `nm -u` on all ARGUS objects to the
 integration gate (currently only `argus_core.o` is checked).
 
-## G-2 ARGUS-to-AEGIS confused deputy: WEAK (containment action N/A-ARGUS-0)
+## G-2 ARGUS-to-AEGIS confused deputy: DEFENDED (containment action N/A-ARGUS-0)
+
+**Round 2:** DEFENDED by `a33c1e0`: a finding derived only from a self-report (kinds 60-63) carries `sync_allowed 0` and containment NONE unless the shadow corroborates it for the same principal. `reported_forgery_names_arbitrary_victim` PASS. ARGUS-1 AEGIS must still bind any freeze to the principal a reporting producer may speak for.
+
+As found at `e16ba31`:
 
 Tried: can a Finding or ContainmentRequest act as authority, and can an attacker aim one?
 Evidence: `ArgusContainmentRequest` is a type with no consumer in ARGUS-0 (ADR 0017 §4,
@@ -114,7 +173,11 @@ event naming principal 1 yields a sync-eligible FREEZE_PRINCIPAL finding.
 Fix: findings derived only from a self-reported kind carry `sync_allowed=0`; ARGUS-1 AEGIS
 must bind any freeze to the principal that the reporting producer is authorized to speak for.
 
-## G-3 Capability replay: OPEN
+## G-3 Capability replay: DEFENDED
+
+**Round 2:** DEFENDED by `57a7bea` (GRANTED applies only when UNSEEN or strictly above the shadow generation, otherwise AUTHORITY_REPLAY code 13; anomalous events are detected but not applied) and `a33c1e0` (SUBJECT_MISMATCH code 14 on use by another principal). PASS: `grant_replay_revives_revoked`, `exact_replay_still_applied`, `use_by_other_subject_unflagged`.
+
+As found at `e16ba31`:
 
 Tried: replay a GRANTED after REVOKED; replay byte-exact; use by another principal.
 Evidence: `apply_cap` only ignores a generation strictly lower than stored
@@ -128,7 +191,11 @@ Tests (all EXPECTED-FAIL): `grant_replay_revives_revoked`, `exact_replay_still_a
 `use_by_other_subject_unflagged`. DEFENDED neighbours: `revoked_use_flagged`,
 `revoked_use_denied_is_quiet`.
 
-## G-4 Stale generation acceptance: OPEN
+## G-4 Stale generation acceptance: DEFENDED
+
+**Round 2:** DEFENDED: `future_generation_use_unflagged` PASS (`a33c1e0`, a generation above the shadow is FORGED), `revoke_gen_max_poisons_slot` PASS (`57a7bea`, REVOKED of an unseen slot is code 13 and creates nothing).
+
+As found at `e16ba31`:
 
 Tried: lower, higher, and extreme generations.
 Evidence: lower generation with outcome OK is caught (`argus_detect.c:174`), DEFENDED.
@@ -140,7 +207,11 @@ yields REVOKED_CAPABILITY_USED CRITICAL + STALE_GENERATION HIGH, permanently.
 Tests: `future_generation_use_unflagged` (EXPECTED-FAIL), `revoke_gen_max_poisons_slot`
 (EXPECTED-FAIL), `stale_generation_use_flagged` (PASS).
 
-## G-5 Event forgery: OPEN
+## G-5 Event forgery: OPEN (ABI v1 limit; validation parts DEFENDED)
+
+**Round 2:** the pure-validation parts are DEFENDED by `58d5a99`: CONSUMER only on TELEMETRY_DROPPED, and a producer TELEMETRY_DROPPED is rejected (`forged_telemetry_dropped`, `consumer_flag_accepted_from_wire` PASS); class floor per kind. Producer identity stays OPEN as an ABI v1 limit, documented in the header (`4cd73cc`: push reachable only from AEGIS/runtime code inside the trusted process; attestation is ARGUS-3). `unattributed_grant_masks_forged_use` stays EXPECTED-FAIL on purpose.
+
+As found at `e16ba31`:
 
 Tried: who can call `argus_ring_push` / `argus_core_ingest`, and what binds the fields.
 Evidence: anyone with the ring pointer may push (`argus_ring.c:126`); push checks only the
@@ -155,7 +226,11 @@ Tests (EXPECTED-FAIL): `forged_telemetry_dropped`, `consumer_flag_accepted_from_
 Note: full producer authentication is out of ARGUS-0 scope, but items 1 and 3 of the
 mandatory list close the parts that are pure validation.
 
-## G-6 Event omission: OPEN
+## G-6 Event omission: OPEN (gaps only; no ruling)
+
+**Round 2:** `malformed_event_leaves_no_evidence` PASS (`57a7bea`: MALFORMED_EVENT code 16 raised by the core, with the event digest); `security_event_lost_as_informational` PASS (`58d5a99`: a revocation cannot be labelled INFORMATIONAL, validate and ring refuse it). Sequence gaps remain undetected by design of the current core ("gaps are not findings"); `sequence_gap_unflagged` stays EXPECTED-FAIL, no ruling yet.
+
+As found at `e16ba31`:
 
 Tried: can a producer drop events without ARGUS noticing?
 Evidence: the sequence check detects repeats and decreases only (`argus_core.c:360`);
@@ -168,7 +243,11 @@ as an INFORMATIONAL drop, which by design raises nothing (`:601-603`).
 Tests (EXPECTED-FAIL): `sequence_gap_unflagged`, `malformed_event_leaves_no_evidence`,
 `security_event_lost_as_informational`.
 
-## G-7 Telemetry saturation: WEAK
+## G-7 Telemetry saturation: DEFENDED (CRITICAL self-label N/A-v1)
+
+**Round 2:** `security_event_lost_as_informational` PASS (`58d5a99`). `critical_self_label_starves_security` is N/A-v1 by ruling: producers are inside the trusted boundary and may strengthen a class. Drop reports are now always CRITICAL by design (`58d5a99`). The flood tests use the non-v1 kind 0x7FFF for INFORMATIONAL/AUDIT (no v1 kind has an INFORMATIONAL floor).
+
+As found at `e16ba31`:
 
 Tried: INFORMATIONAL flood vs SECURITY; CRITICAL overflow accounting; drain correctness.
 Evidence (DEFENDED): watermarks 50/75/90/100% (`argus_ring.c:67-77`); refusal is counted
@@ -182,7 +261,11 @@ Tests: PASS `info_flood_cannot_starve_security`, `critical_overflow_accounting`,
 `drain_partial_preserves_pending`, `attempt_conservation`; EXPECTED-FAIL
 `critical_self_label_starves_security`, `security_event_lost_as_informational`.
 
-## G-8 Quarantine bypass: OPEN
+## G-8 Quarantine bypass: DEFENDED (table limit WEAK, bounded)
+
+**Round 2:** DEFENDED: `quarantine_laundered_by_remove_rejoin` (`57a7bea`, REMOVED leaves a tombstone), `quarantined_machine_self_upgrades` (D + E: trust moves only down, upward is code 15 and ignored), `zero_machine_id_escapes_attribution` (`a33c1e0`: a live event with a zero machine_id is code 7; SYNTHETIC/CONSUMER are exempt), `machine_table_exhaustion_hides_quarantine` (`57a7bea`: table 64; the 65th JOINED is refused loudly and its later use is still code 7). Residual WEAK: a machine beyond the table cannot carry a quarantine.
+
+As found at `e16ba31`:
 
 Tried: rediscovery, rejoin, trust ordering, table limits, anonymity.
 Evidence: provider rediscovery never clears quarantine (`argus_core.c:502`), DEFENDED.
@@ -197,7 +280,11 @@ Tests: PASS `quarantined_machine_use_flagged`, `provider_rediscovery_keeps_quara
 EXPECTED-FAIL `quarantine_laundered_by_remove_rejoin`, `quarantined_machine_self_upgrades`,
 `zero_machine_id_escapes_attribution`, `machine_table_exhaustion_hides_quarantine`.
 
-## G-9 Provider identity substitution: WEAK (registry N/A-ARGUS-0)
+## G-9 Provider identity substitution: WEAK (ABI v1 limit; registry N/A-ARGUS-0)
+
+**Round 2:** `undiscovered_provider_use_unflagged` PASS (`a33c1e0`). `provider_substitution_escapes_quarantine` stays EXPECTED-FAIL: ABI v1 has no provider identity continuity.
+
+As found at `e16ba31`:
 
 Evidence: provider id = evidence_digest (`argus_abi.h` PROVIDER_* convention). No
 provider registry exists in C (ADR §14.4), so stable identity is **N/A-ARGUS-0**. But
@@ -207,7 +294,11 @@ never-discovered provider is not a finding (`argus_detect.c:396-403`).
 Tests (EXPECTED-FAIL): `provider_substitution_escapes_quarantine`,
 `undiscovered_provider_use_unflagged`.
 
-## G-10 Machine identity spoofing (the 32-byte provisional slot): OPEN
+## G-10 Machine identity spoofing (the 32-byte provisional slot): DEFENDED (spoofing a joined machine accepted in v1)
+
+**Round 2:** the code bugs are DEFENDED: `trust_before_join_bricks_machine` (`57a7bea`: TRUST_CHANGED on an unknown machine creates nothing), `join_declares_own_trust` (D + E: JOINED capped at OBSERVED, code 15). Spoofing a joined machine's id remains accepted by design of the provisional slot.
+
+As found at `e16ba31`:
 
 Evidence: the slot is opaque and producer-claimed (`argus_abi.h:21-22`, ADR §14.3), so
 spoofing a joined machine is undetectable by design; that part is accepted. The code bugs
@@ -222,12 +313,20 @@ Tests: EXPECTED-FAIL `trust_before_join_bricks_machine`, `join_declares_own_trus
 
 ## G-11 Credential metadata leakage: DEFENDED
 
+**Round 2:** unchanged.
+
+As found at `e16ba31`:
+
 Evidence: lease shadow keeps id, subject, 64-bit scope, state, sequence only
 (`argus_abi.h:259-265`); findings carry principal, cap ref, machine_id and event digest
 (`argus_abi.h:199-213`), never scope or lease contents. No credential material has a field.
 Test: covered structurally by `event_has_only_two_32byte_slots`; lease integrity is G-26.
 
 ## G-12 Secret leakage into event payload: WEAK
+
+**Round 2:** unchanged; the guard must be producer-side.
+
+As found at `e16ba31`:
 
 Tried: any 32-byte field that could carry the authority's 32-byte office secret.
 Evidence: exactly two 32-byte fields exist, `machine_id` (off 64) and `evidence_digest`
@@ -242,7 +341,11 @@ Test: `event_has_only_two_32byte_slots` (PASS: no third slot appears). The real 
 must be producer-side: machine_id := SHA-256(domain || identity), evidence_digest only from
 `sha256_*`, plus the existing grep gate extended to producer code that fills events.
 
-## G-13 Incident table poisoning: OPEN
+## G-13 Incident table poisoning: DEFENDED (no eviction)
+
+**Round 2:** DEFENDED by `57a7bea`: table 256 and `incidents_untracked` in `ArgusCoreHealth`. The test now overshoots 256 junk pairs and requires the real incident to be delivered and the saturation to be visible in health. Still no eviction (a CRITICAL cannot displace HIGH junk).
+
+As found at `e16ba31`:
 
 Tried: 64 slots, key (principal, code), severity >= HIGH.
 Evidence: principal is attacker-chosen; SIGNATURE_FAILURE (any outcome, no state) yields
@@ -255,7 +358,11 @@ can saturate without an attacker. No eviction: CRITICAL cannot displace HIGH jun
 Test: `incident_table_poisoning` (EXPECTED-FAIL: health does not change after a real
 CRITICAL incident once the table is full).
 
-## G-14 Policy-digest mismatch: OPEN
+## G-14 Policy-digest mismatch: DEFENDED (announcement level)
+
+**Round 2:** DEFENDED by `a33c1e0`: POLICY_CHANGED / RUNTIME_BUILD_CHANGED over a stored digest and any INTEGRITY_VIOLATION raise code 5 (HIGH, sync 0, containment NONE). `policy_digest_overwrite_silent`, `integrity_violation_report_ignored` PASS. Comparing a running policy with the announced one is still undefined in v1 (no event carries the in-use digest).
+
+As found at `e16ba31`:
 
 Evidence: `op_policy_digest` / `op_runtime_digest` exist (`argus_core.c` ops) but no
 detector calls them; `argus_detect_run` does not even require them non-null. POLICY_CHANGED
@@ -268,7 +375,11 @@ Fix: either declare policy mismatch out of ARGUS-0 scope in the ADR and stop sto
 digests, or route INTEGRITY_VIOLATION to a finding and define which event carries the
 in-use policy digest.
 
-## G-15 Provenance spoofing (WORLD_COMMITTED): OPEN
+## G-15 Provenance spoofing (WORLD_COMMITTED): DEFENDED (forged digest at prior+1 N/A-ARGUS-0)
+
+**Round 2:** DEFENDED by `57a7bea`: a flagged commit is not adopted (`world_inconsistent_commit_adopted` PASS). Rollback case now World 1, 2, 1 (`world_skip_flagged` PASS). Repeat RULED idempotent: same generation and digest is silent, a different digest is code 9 (`world_repeat_silent` re-scoped, PASS). ADR 0017 row 9 must be amended accordingly.
+
+As found at `e16ba31`:
 
 Evidence: skip, rollback and same-generation conflict are detected (`argus_detect.c:367-370`),
 DEFENDED. A forged digest at exactly prior+1 is undetectable with one source
@@ -283,6 +394,10 @@ Tests: PASS `world_skip_flagged`, `world_same_generation_conflict_flagged`; EXPE
 
 ## G-16 Recursive containment storms: DEFENDED
 
+**Round 2:** unchanged.
+
+As found at `e16ba31`:
+
 Evidence: drop reports are handed to the consumer directly and never re-enter the ring
 (`argus_ring.c` header comment, `:190-219`); the core emits findings, never events; a
 TELEMETRY_DROPPED yields exactly one TELEMETRY_LOSS (`argus_core.c:601-605`), and lane E
@@ -291,6 +406,10 @@ the ring, or loss -> finding -> request -> event can cycle.
 Test: `drop_report_does_not_recurse` (PASS).
 
 ## G-17 ARGUS deadlock / SPSC misuse: WEAK
+
+**Round 2:** unchanged. The threaded integration test now also runs under TSan (`make sanitize`), clean, but it uses one producer as the contract says.
+
+As found at `e16ba31`:
 
 Evidence: the ring has no locks and never waits (`argus_ring.c:126-146`); the core is
 single-threaded with no locks: deadlock is impossible. Multi-producer misuse is not guarded:
@@ -303,6 +422,10 @@ fetch-add reservation.
 
 ## G-18 ARGUS crash preventing AIEN progress: DEFENDED
 
+**Round 2:** unchanged.
+
+As found at `e16ba31`:
+
 Evidence: with no consumer, push returns ERR_FULL immediately at the class limit and
 counts it (`argus_ring.c:133-141`). There is no liveness signal: a dead consumer is only
 visible when someone drains; if the ring memory dies with ARGUS, the gap is never recorded
@@ -311,10 +434,18 @@ Test: `push_never_blocks_without_consumer` (PASS, 100,000 pushes, 16 accepted, r
 
 ## G-19 Backpressure freezing the runtime: DEFENDED
 
+**Round 2:** unchanged.
+
+As found at `e16ba31`:
+
 Evidence: same as G-18; there is no blocking path, no allocation, no syscall on push
 (`argus_ring.c:1-12`). Covered by the same test.
 
-## G-20 DoS by intentionally generating security events: OPEN
+## G-20 DoS by intentionally generating security events: WEAK (machine/lease/provider/artifact overflow still per-event CRITICAL)
+
+**Round 2:** `cap_id_out_of_range_is_critical_loss` PASS (`58d5a99`: cap_id >= ARGUS_CAP_MAX is malformed, code 16, never ERR_FULL); `forged_telemetry_dropped` PASS (`58d5a99`); `producer_table_exhaustion` PASS against the RATIFIED rule (`57a7bea`: first untracked event ERR_FULL + one CRITICAL loss, later ones OK + `producers_untracked`). Found in round 2, no ruling yet: the "loud once" rule covers only the producer table. Each event beyond a full machine (64), lease (256), provider (32) or artifact (256) table still returns ERR_FULL with its own CRITICAL TELEMETRY_LOSS (probe: 6 extra JOINED = 6 CRITICAL, same for the other three tables), and the machine and lease tables never free. `machine_table_exhaustion_hides_quarantine` and `lease_table_exhaustion` assert only that the first overflow is loud.
+
+As found at `e16ba31`:
 
 Tried: the cap_id >= 256 path and every other ERR_FULL path.
 Evidence: `argus_event_validate` accepts any cap_id (`argus_event.c:73-83`); GRANTED or
@@ -328,7 +459,11 @@ FORGED (`argus_detect.c:140`).
 Tests: EXPECTED-FAIL `cap_id_out_of_range_is_critical_loss`, `producer_table_exhaustion`,
 `forged_telemetry_dropped`; PASS `cap_id_out_of_range_use_is_forged`.
 
-## G-21 Sequence-anomaly abuse: OPEN (restart handling N/A-ARGUS-0)
+## G-21 Sequence-anomaly abuse: OPEN (machine_id rekey; restart handling N/A-ARGUS-0)
+
+**Round 2:** `sequence_high_water_poison` PASS (`58d5a99`: sequence UINT64_MAX is malformed). CONSUMER-flag rekey DEFENDED (`58d5a99`, new test `replay_rekeyed_by_consumer_flag`). machine_id rekey stays OPEN (`replay_evades_by_rekeying_stream` EXPECTED-FAIL, no ruling; same root as G-5). Producer table 256 with the ratified overflow rule; streams beyond it stay replay-blind (WEAK, counted).
+
+As found at `e16ba31`:
 
 Evidence: stream key = (machine_id, CONSUMER bit) (`argus_core.c:354-375`), both chosen by
 the sender, so a replay escapes by flipping either. One event at UINT64_MAX raises the
@@ -341,6 +476,10 @@ Tests: PASS `sequence_replay_flagged`; EXPECTED-FAIL `sequence_high_water_poison
 `replay_evades_by_rekeying_stream`, `producer_table_exhaustion`.
 
 ## G-22 Determinism breakers: DEFENDED
+
+**Round 2:** unchanged.
+
+As found at `e16ba31`:
 
 Tried: caller buffer size, memory contents, snapshot copies, uninitialised memory,
 detector truncation.
@@ -355,6 +494,10 @@ Tests (PASS): `same_stream_same_output`, `buffer_size_does_not_change_state`,
 
 ## G-23 State digest collisions: DEFENDED (fragile)
 
+**Round 2:** unchanged. Test bug fixed: variant 7 now sends REJECTED at its CRITICAL floor, so it actually reaches the artifact table.
+
+As found at `e16ba31`:
+
 Tried: two different states hashing equal via the fake-event packing.
 Evidence: every field of every shadow table is written into a record
 (`argus_core.c:659-758`); each table has its own kind and `code` tag; the header record
@@ -368,7 +511,11 @@ set of machines joined in a different order hashes differently: fine for replay
 determinism, wrong if the digest is ever compared across independently built cores.
 Tests (PASS): `state_digest_sensitive_to_every_table`, `state_digest_domain_separated`.
 
-## G-24 Effect-class bypass (found during review): OPEN
+## G-24 Effect-class bypass (found during review): DEFENDED
+
+**Round 2:** `effect_kind_mislabelled` PASS (`58d5a99`: EXTERNAL_EFFECT_* with effect_class != EXTERNAL is malformed, code 16); `evidence_write_with_read_only_right` PASS (`a33c1e0`).
+
+As found at `e16ba31`:
 
 Evidence: detector 8 decides from the producer's `effect_class` byte, not the kind: an
 EXTERNAL_EFFECT_COMMITTED with `effect_class NONE` and no capability passes
@@ -380,20 +527,62 @@ PASS `external_effect_without_right_flagged`.
 
 ## G-25 Artifacts (found during review): DEFENDED
 
+**Round 2:** unchanged.
+
+As found at `e16ba31`:
+
 Evidence: rejection is sticky (`argus_core.c:450-456`); ADMITTED needs outcome OK and code 0
 (`:530`); activation of a non-admitted digest is CRITICAL (`argus_detect.c:218-225`). ADR row 4
 "an admitted digest changed" cannot be expressed because the artifact is keyed by its
 digest; it needs an artifact id field (ARGUS-4).
 Test: `artifact_rejection_sticky` (PASS).
 
-## G-26 Credential lease re-creation hijack (found during review): OPEN
+## G-26 Credential lease re-creation hijack (found during review): DEFENDED
+
+**Round 2:** DEFENDED (D + E): a LEASE_CREATED on a known lease id is not applied (`57a7bea`, lease ids never reused) and is code 6 (`a33c1e0`). `lease_recreate_hijacks_subject` PASS. New `lease_table_exhaustion` PASS (256 leases, the 257th refused loudly).
+
+As found at `e16ba31`:
 
 Evidence: `apply_lease` overwrites subject and scope of any non-revoked lease on a second
 CREATED (`argus_core.c:427-431`); detector 6 then compares the use against the attacker's
 subject and scope. Revocation is sticky (DEFENDED).
 Tests: EXPECTED-FAIL `lease_recreate_hijacks_subject`; PASS `lease_other_subject_flagged`.
 
-## Test index
+## Test index (round 2)
+
+Expected-defended, PASS (57): every test not listed below, including the round-2
+additions `replay_rekeyed_by_consumer_flag` and `lease_table_exhaustion`.
+
+EXPECTED-FAIL (4), each documented above: `unattributed_grant_masks_forged_use` (G-5, ABI
+v1 limit), `provider_substitution_escapes_quarantine` (G-9, ABI v1 limit),
+`sequence_gap_unflagged` (G-6, no ruling), `replay_evades_by_rekeying_stream` (G-21,
+machine_id variant, no ruling).
+
+N/A-v1 (1, exempt from the exit code): `critical_self_label_starves_security` (G-7).
+
+Flipped from EXPECTED-FAIL to expected-defended in round 2 (28):
+grant_replay_revives_revoked, exact_replay_still_applied, future_generation_use_unflagged,
+use_by_other_subject_unflagged, revoke_gen_max_poisons_slot,
+cap_id_out_of_range_is_critical_loss, effect_kind_mislabelled,
+evidence_write_with_read_only_right, reported_forgery_names_arbitrary_victim,
+forged_telemetry_dropped, consumer_flag_accepted_from_wire, sequence_high_water_poison,
+producer_table_exhaustion, quarantine_laundered_by_remove_rejoin,
+quarantined_machine_self_upgrades, join_declares_own_trust, trust_before_join_bricks_machine,
+machine_table_exhaustion_hides_quarantine, zero_machine_id_escapes_attribution,
+undiscovered_provider_use_unflagged, lease_recreate_hijacks_subject,
+world_inconsistent_commit_adopted, world_repeat_silent, policy_digest_overwrite_silent,
+integrity_violation_report_ignored, incident_table_poisoning,
+malformed_event_leaves_no_evidence, security_event_lost_as_informational.
+
+Some tests were rewritten, not only flipped (see "Rulings applied" at the top):
+cap_id_out_of_range_use_is_forged, effect_kind_mislabelled, producer_table_exhaustion,
+machine_table_exhaustion_hides_quarantine, zero_machine_id_escapes_attribution,
+world_skip_flagged, world_repeat_silent, incident_table_poisoning,
+info_flood_cannot_starve_security, drain_partial_preserves_pending,
+security_event_lost_as_informational, critical_self_label_starves_security,
+state_digest_sensitive_to_every_table.
+
+## Test index (original, at `e16ba31`)
 
 PASS today (27): stale_generation_use_flagged, revoked_use_flagged,
 revoked_use_denied_is_quiet, cap_id_out_of_range_use_is_forged,
