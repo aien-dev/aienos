@@ -2,6 +2,37 @@
 
 /// Physical Page Size on AArch64 (4 KiB standard).
 pub const PAGE_SIZE: usize = 4096;
+pub const MAX_BATCH_FRAMES: usize = 160;
+
+/// Fixed-capacity ownership record for a reservation made under one allocator
+/// lock. The addresses are explicit physical frame starts; no Rust layout is
+/// persisted or passed across the firmware handoff.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameBatch {
+    frames: [PhysAddr; MAX_BATCH_FRAMES],
+    count: u16,
+}
+
+impl FrameBatch {
+    pub const fn empty() -> Self {
+        Self {
+            frames: [PhysAddr(0); MAX_BATCH_FRAMES],
+            count: 0,
+        }
+    }
+
+    pub fn as_slice(&self) -> &[PhysAddr] {
+        &self.frames[..usize::from(self.count)]
+    }
+
+    pub const fn len(&self) -> usize {
+        self.count as usize
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+}
 
 /// Physical address wrapper.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -204,6 +235,39 @@ impl<const WORDS: usize> BitmapFrameAllocator<WORDS> {
 
         None
     }
+
+    /// Reserve a bounded set of frames atomically from this allocator. On
+    /// exhaustion, every frame acquired by this call is returned before it
+    /// reports failure.
+    pub fn allocate_batch(&mut self, count: usize) -> Option<FrameBatch> {
+        if count == 0 || count > MAX_BATCH_FRAMES || count > self.free_count() {
+            return None;
+        }
+        let mut batch = FrameBatch::empty();
+        for index in 0..count {
+            match self.allocate_frame() {
+                Some(frame) => {
+                    batch.frames[index] = frame;
+                    batch.count += 1;
+                }
+                None => {
+                    self.release_batch(batch);
+                    return None;
+                }
+            }
+        }
+        Some(batch)
+    }
+
+    /// Return every frame owned by a prior batch. Invalid/double-freed entries
+    /// cause `false`; valid entries are still returned.
+    pub fn release_batch(&mut self, batch: FrameBatch) -> bool {
+        let mut complete = true;
+        for frame in batch.as_slice() {
+            complete &= self.deallocate_frame(*frame);
+        }
+        complete
+    }
 }
 
 #[cfg(test)]
@@ -246,6 +310,26 @@ mod tests {
         assert!(!alloc.deallocate_frame(PhysAddr(frame.0 + 1)));
         assert_eq!(alloc.allocated_count(), 1);
         assert!(alloc.deallocate_frame(frame));
+    }
+
+    #[test]
+    fn batch_reservation_is_bounded_and_released_as_a_unit() {
+        let mut alloc = BitmapFrameAllocator::<1>::new(PhysAddr(0x3000_0000), 8);
+        let batch = alloc.allocate_batch(6).unwrap();
+        assert_eq!(batch.len(), 6);
+        assert_eq!(alloc.free_count(), 2);
+        assert!(alloc.release_batch(batch));
+        assert_eq!(alloc.free_count(), 8);
+        assert!(alloc.allocate_batch(MAX_BATCH_FRAMES + 1).is_none());
+    }
+
+    #[test]
+    fn insufficient_batch_reservation_leaves_no_partial_allocations() {
+        let mut alloc = BitmapFrameAllocator::<1>::new(PhysAddr(0x4000_0000), 8);
+        assert!(alloc.allocate_frame().is_some());
+        assert!(alloc.allocate_batch(8).is_none());
+        assert_eq!(alloc.allocated_count(), 1);
+        assert_eq!(alloc.free_count(), 7);
     }
 
     #[test]

@@ -14,6 +14,7 @@ pub mod abi;
 pub mod acpi;
 pub mod admission;
 pub mod arch;
+pub mod artifact_loader;
 pub mod block;
 pub mod boot;
 pub mod budget;
