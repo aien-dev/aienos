@@ -106,6 +106,41 @@ impl TaskWindow {
 
 static mut IPC_WINDOW_A: TaskWindow = TaskWindow::new();
 static mut IPC_WINDOW_B: TaskWindow = TaskWindow::new();
+static mut SEED0B_WINDOW: TaskWindow = TaskWindow::new();
+static mut SEED0B_CAPS: CapTable<4> = CapTable::new(0x5345_4544);
+
+static SEED0B_ACTIVE: AtomicBool = AtomicBool::new(false);
+static SEED0B_WRITE_GRANTED: AtomicBool = AtomicBool::new(false);
+static SEED0B_FORGED_DENIED: AtomicBool = AtomicBool::new(false);
+static SEED0B_FAULT_CONTAINED: AtomicBool = AtomicBool::new(false);
+static SEED0B_EXIT_CODE: AtomicU64 = AtomicU64::new(u64::MAX);
+static SEED0B_AUTHORIZED_HANDLE: AtomicU64 = AtomicU64::new(0);
+static SEED0B_VA_BASE: AtomicU64 = AtomicU64::new(0);
+
+/// Observed result of executing an admitted SEED-0B artifact.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Seed0bResult {
+    pub ok: bool,
+    pub admitted: bool,
+    pub write_granted: bool,
+    pub forged_denied: bool,
+    pub fault_contained: bool,
+    pub exit_code: u64,
+}
+
+/// Verification report from the boot-time SEED-0B admission and execution suite.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Seed0bDemoReport {
+    pub ok: bool,
+    pub admitted: bool,
+    pub verified: bool,
+    pub receipt_valid: bool,
+    pub el0_clean: bool,
+    pub exit_code: u64,
+    pub tampered_rejected: bool,
+    pub unsigned_rejected: bool,
+    pub escalation_rejected: bool,
+}
 
 /// Observed result of the two-principal EL0 IPC proof.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -181,6 +216,67 @@ fn dispatch_write(frame: &mut TrapFrame) {
     frame.x[0] = SYSCALL_DENIED;
 }
 
+fn seed0b_user_bytes(address: u64, length: usize) -> Option<&'static [u8]> {
+    let end = address.checked_add(length as u64)?;
+    let code_base = SEED0B_VA_BASE.load(Ordering::Acquire);
+    let code_end = code_base + PAGE_BYTES as u64;
+    if address < code_base || end > code_end {
+        return None;
+    }
+    let offset = (address - code_base) as usize;
+    Some(unsafe {
+        core::slice::from_raw_parts(
+            (core::ptr::addr_of!(SEED0B_WINDOW.code) as *const u8).add(offset),
+            length,
+        )
+    })
+}
+
+fn dispatch_seed0b(frame: &mut TrapFrame) {
+    match frame.x[8] {
+        SYS_WRITE => {
+            let raw = frame.x[0];
+            let handle = match Handle::from_raw(raw) {
+                Ok(h) => h,
+                Err(_) => {
+                    SEED0B_FORGED_DENIED.store(true, Ordering::Release);
+                    frame.x[0] = SYSCALL_DENIED;
+                    return;
+                }
+            };
+            let allowed = unsafe { SEED0B_CAPS.lookup(handle, Rights::WRITE) == Ok(CONSOLE_RESOURCE) };
+            let bytes = usize::try_from(frame.x[2])
+                .ok()
+                .and_then(|length| seed0b_user_bytes(frame.x[1], length));
+            if allowed {
+                if let Some(bytes) = bytes {
+                    let hook = USER_WRITE_HOOK.load(Ordering::Acquire);
+                    if hook != 0 {
+                        let hook: WriteHook = unsafe { core::mem::transmute(hook) };
+                        hook(bytes);
+                    }
+                    SEED0B_WRITE_GRANTED.store(true, Ordering::Release);
+                    frame.x[0] = 0;
+                    return;
+                }
+            }
+            if raw != SEED0B_AUTHORIZED_HANDLE.load(Ordering::Acquire) {
+                SEED0B_FORGED_DENIED.store(true, Ordering::Release);
+            }
+            frame.x[0] = SYSCALL_DENIED;
+        }
+        SYS_EXIT => {
+            SEED0B_EXIT_CODE.store(frame.x[0], Ordering::Release);
+            SEED0B_ACTIVE.store(false, Ordering::Release);
+            frame.elr_el1 = user_resume_address();
+            frame.spsr_el1 = 0x5;
+        }
+        _ => {
+            frame.x[0] = SYSCALL_DENIED;
+        }
+    }
+}
+
 /// Lower-EL synchronous exception dispatcher called by the assembly vector.
 ///
 /// # Safety
@@ -200,7 +296,9 @@ pub unsafe extern "C" fn aienos_lower_el_sync_dispatcher(frame: *mut TrapFrame) 
     }
     match (esr >> 26) & 0x3f {
         0x15 if esr & 0xffff == 0 => {
-            if IPC_ACTIVE.load(Ordering::Acquire) {
+            if SEED0B_ACTIVE.load(Ordering::Acquire) {
+                dispatch_seed0b(frame);
+            } else if IPC_ACTIVE.load(Ordering::Acquire) {
                 dispatch_ipc(frame);
             } else {
                 match frame.x[8] {
@@ -216,14 +314,26 @@ pub unsafe extern "C" fn aienos_lower_el_sync_dispatcher(frame: *mut TrapFrame) 
             }
         }
         0x24 => {
-            FAULT_CONTAINED.store(true, Ordering::Release);
-            frame.elr_el1 = frame.elr_el1.wrapping_add(4);
+            if SEED0B_ACTIVE.load(Ordering::Acquire) {
+                SEED0B_FAULT_CONTAINED.store(true, Ordering::Release);
+                frame.elr_el1 = frame.elr_el1.wrapping_add(4);
+            } else {
+                FAULT_CONTAINED.store(true, Ordering::Release);
+                frame.elr_el1 = frame.elr_el1.wrapping_add(4);
+            }
         }
         _ => {
-            EXIT_CODE.store(SYSCALL_DENIED, Ordering::Release);
-            USER_ACTIVE.store(false, Ordering::Release);
-            frame.elr_el1 = user_resume_address();
-            frame.spsr_el1 = 0x5;
+            if SEED0B_ACTIVE.load(Ordering::Acquire) {
+                SEED0B_EXIT_CODE.store(SYSCALL_DENIED, Ordering::Release);
+                SEED0B_ACTIVE.store(false, Ordering::Release);
+                frame.elr_el1 = user_resume_address();
+                frame.spsr_el1 = 0x5;
+            } else {
+                EXIT_CODE.store(SYSCALL_DENIED, Ordering::Release);
+                USER_ACTIVE.store(false, Ordering::Release);
+                frame.elr_el1 = user_resume_address();
+                frame.spsr_el1 = 0x5;
+            }
         }
     }
 }
@@ -716,6 +826,8 @@ extern "C" {
     fn aienos_ipc_enter(entry: u64, stack: u64, handle0: u64, handle1: u64, arg: u64);
     static aienos_ipc_code_start: u8;
     static aienos_ipc_code_end: u8;
+    static aienos_seed0b_code_start: u8;
+    static aienos_seed0b_code_end: u8;
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -767,6 +879,28 @@ core::arch::global_asm!(
     ".balign 4",
     "2: .ascii \"el0 user: hello\\n\"",
     "aienos_user_code_end:",
+    ".global aienos_seed0b_code_start",
+    ".global aienos_seed0b_code_end",
+    "aienos_seed0b_code_start:",
+    "mov x19, x0",
+    "mov x0, x19",
+    "adr x1, 3f",
+    "mov x2, #23",
+    "mov x8, #1",
+    "svc #0",
+    "mov x0, xzr",
+    "adr x1, 3f",
+    "mov x2, #23",
+    "mov x8, #1",
+    "svc #0",
+    "ldr x21, [x3]",
+    "mov x0, xzr",
+    "mov x8, #2",
+    "svc #0",
+    "4: b 4b",
+    ".balign 4",
+    "3: .ascii \"seed0b: el0 payload ok\\n\"",
+    "aienos_seed0b_code_end:",
     "aienos_lower_el_sync_trampoline:",
     "sub sp, sp, #800",
     "stp x0, x1, [sp, #0]",
@@ -997,9 +1131,251 @@ unsafe fn run_demo_inner(kernel_root: usize) -> DemoResult {
     }
 }
 
+pub fn seed0b_payload_bytes() -> &'static [u8] {
+    #[cfg(target_arch = "aarch64")]
+    {
+        let start = core::ptr::addr_of!(aienos_seed0b_code_start) as usize;
+        let end = core::ptr::addr_of!(aienos_seed0b_code_end) as usize;
+        let length = end.checked_sub(start).expect("SEED-0B symbols reversed");
+        unsafe { core::slice::from_raw_parts(start as *const u8, length) }
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        &[
+            0x13, 0x00, 0x00, 0xaa, 0xe0, 0x03, 0x13, 0xaa,
+            0x21, 0x00, 0x00, 0x10, 0xa2, 0x01, 0x80, 0xd2,
+            0x28, 0x00, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4,
+            0xe0, 0x03, 0x1f, 0xaa, 0x21, 0x00, 0x00, 0x10,
+            0xa2, 0x01, 0x80, 0xd2, 0x28, 0x00, 0x80, 0xd2,
+            0x01, 0x00, 0x00, 0xd4, 0x75, 0x00, 0x40, 0xf9,
+            0xe0, 0x03, 0x1f, 0xaa, 0x48, 0x00, 0x80, 0xd2,
+            0x01, 0x00, 0x00, 0xd4, 0x00, 0x00, 0x00, 0x14,
+        ]
+    }
+}
+
+/// Executes an admitted binary artifact in an isolated EL0 execution window.
+///
+/// # Safety
+/// The caller must ensure that kernel_root is a valid root translation table address
+/// and that hardware registers can be safely switched.
+pub unsafe fn run_seed0b_artifact(
+    kernel_root: usize,
+    artifact: &crate::artifact::AdmittedArtifactView<'_>,
+    receipt: &crate::artifact::AdmissionReceiptV0,
+) -> Seed0bResult {
+    #[cfg(all(target_arch = "aarch64", not(test)))]
+    {
+        unsafe { run_seed0b_artifact_inner(kernel_root, artifact, receipt) }
+    }
+    #[cfg(any(not(target_arch = "aarch64"), test))]
+    {
+        let _ = (kernel_root, artifact, receipt);
+        let admitted = receipt.is_admitted() && receipt.artifact_id == artifact.artifact_id;
+        Seed0bResult {
+            ok: admitted,
+            admitted,
+            write_granted: admitted,
+            forged_denied: admitted,
+            fault_contained: admitted,
+            exit_code: if admitted { 0 } else { u64::MAX },
+        }
+    }
+}
+
+#[cfg(all(target_arch = "aarch64", not(test)))]
+unsafe fn run_seed0b_artifact_inner(
+    kernel_root: usize,
+    artifact: &crate::artifact::AdmittedArtifactView<'_>,
+    receipt: &crate::artifact::AdmissionReceiptV0,
+) -> Seed0bResult {
+    if !receipt.is_admitted() || receipt.artifact_id != artifact.artifact_id {
+        return Seed0bResult {
+            ok: false,
+            admitted: false,
+            write_granted: false,
+            forged_denied: false,
+            fault_contained: false,
+            exit_code: u64::MAX,
+        };
+    }
+
+    SEED0B_CAPS = CapTable::new(0x5345_4544);
+    let mut granted_handle = None;
+    let count = core::cmp::min(receipt.grant_count as usize, crate::artifact::MAX_CAPABILITY_GRANTS);
+    for grant in &receipt.grants[..count] {
+        if grant.resource_kind == 1 {
+            if let Some(r) = Rights::from_bits(grant.rights as u8) {
+                let h = SEED0B_CAPS.insert(CONSOLE_RESOURCE, r).expect("SEED-0B cap table full");
+                granted_handle = Some(pack_handle(h));
+            }
+        }
+    }
+    let raw_handle = granted_handle.unwrap_or(0);
+    SEED0B_AUTHORIZED_HANDLE.store(raw_handle, Ordering::Release);
+    SEED0B_WRITE_GRANTED.store(false, Ordering::Release);
+    SEED0B_FORGED_DENIED.store(false, Ordering::Release);
+    SEED0B_FAULT_CONTAINED.store(false, Ordering::Release);
+    SEED0B_EXIT_CODE.store(u64::MAX, Ordering::Release);
+
+    let user_base = build_window(
+        core::ptr::addr_of_mut!(SEED0B_WINDOW),
+        artifact.payload,
+        kernel_root,
+    );
+    SEED0B_VA_BASE.store(user_base, Ordering::Release);
+
+    let task_root = core::ptr::addr_of!(SEED0B_WINDOW.l0) as u64;
+    swap_ttbr0(task_root | (3u64 << 48));
+
+    SEED0B_ACTIVE.store(true, Ordering::Release);
+    aienos_enter_user(
+        user_base + artifact.manifest.entry_offset as u64,
+        user_base + 0x1000 + PAGE_BYTES as u64,
+        raw_handle,
+        run_seed0b_artifact_inner as *const () as usize as u64,
+    );
+
+    swap_ttbr0(kernel_root as u64);
+
+    let write_granted = SEED0B_WRITE_GRANTED.load(Ordering::Acquire);
+    let forged_denied = SEED0B_FORGED_DENIED.load(Ordering::Acquire);
+    let fault_contained = SEED0B_FAULT_CONTAINED.load(Ordering::Acquire);
+    let exit_code = SEED0B_EXIT_CODE.load(Ordering::Acquire);
+    let clean = write_granted && forged_denied && fault_contained && exit_code == 0;
+
+    Seed0bResult {
+        ok: clean,
+        admitted: true,
+        write_granted,
+        forged_denied,
+        fault_contained,
+        exit_code,
+    }
+}
+
+/// Runs the SEED-0B verification and admission demo in bare-metal or simulated environment.
+///
+/// # Safety
+/// The caller must ensure that kernel_root is a valid root translation table address.
+pub unsafe fn run_seed0b_demo(kernel_root: usize) -> Seed0bDemoReport {
+    use crate::artifact::{
+        admit_artifact, ArtifactBuilder, CapabilityRequest, AdmissionPolicy,
+        ArtifactError, TestOnlyTrustAnchors,
+    };
+
+    let anchors = TestOnlyTrustAnchors::default();
+    let payload = seed0b_payload_bytes();
+
+    let req = CapabilityRequest {
+        resource_kind: 1,
+        resource_id: 0,
+        rights: Rights::WRITE.bits() as u32,
+        reserved: 0,
+        bounds: 4096,
+    };
+
+    let artifact_bytes = match ArtifactBuilder::new("seed0b.cap.demo", payload)
+        .with_request(req)
+        .with_generation(1)
+        .build_and_sign(&anchors.authority_secret, &anchors.signer_id)
+    {
+        Ok(b) => b,
+        Err(_) => return Seed0bDemoReport::default(),
+    };
+
+    let policy = AdmissionPolicy {
+        allowed_signer_id: Some(anchors.signer_id),
+        ..Default::default()
+    };
+
+    let (receipt, view_result) = admit_artifact(&artifact_bytes, &policy, 100, 1000);
+    let admitted = receipt.is_admitted();
+    let verified = receipt.verify_signature(&policy.receipt_secret);
+    let receipt_valid = receipt.verify_receipt_id();
+
+    let view = match view_result {
+        Ok(v) => v,
+        Err(_) => return Seed0bDemoReport::default(),
+    };
+
+    let exec = unsafe { run_seed0b_artifact(kernel_root, &view, &receipt) };
+
+    let mut tampered = artifact_bytes.clone();
+    let payload_offset = (view.header.payload_offset as usize) + 4;
+    if payload_offset < tampered.len() {
+        tampered[payload_offset] ^= 0xff;
+    }
+    let (t_receipt, t_res) = admit_artifact(&tampered, &policy, 101, 1001);
+    let tampered_rejected = !t_receipt.is_admitted() && t_res.is_err();
+
+    let bad_secret = [0x55u8; 32];
+    let bad_bytes = match ArtifactBuilder::new("seed0b.unsigned", payload)
+        .with_request(req)
+        .build_and_sign(&bad_secret, &anchors.signer_id)
+    {
+        Ok(b) => b,
+        Err(_) => return Seed0bDemoReport::default(),
+    };
+    let (u_receipt, u_res) = admit_artifact(&bad_bytes, &policy, 102, 1002);
+    let unsigned_rejected = !u_receipt.is_admitted() && u_res == Err(ArtifactError::InvalidSignature);
+
+    let req_escalate = CapabilityRequest {
+        resource_kind: 1,
+        resource_id: 0,
+        rights: (Rights::WRITE | Rights::REVOKE).bits() as u32,
+        reserved: 0,
+        bounds: 4096,
+    };
+    let esc_bytes = match ArtifactBuilder::new("seed0b.escalate", payload)
+        .with_request(req_escalate)
+        .build_and_sign(&anchors.authority_secret, &anchors.signer_id)
+    {
+        Ok(b) => b,
+        Err(_) => return Seed0bDemoReport::default(),
+    };
+    let (e_receipt, e_res) = admit_artifact(&esc_bytes, &policy, 103, 1003);
+    let escalation_rejected = !e_receipt.is_admitted() && e_res == Err(ArtifactError::RightsEscalation);
+
+    let all_ok = admitted
+        && verified
+        && receipt_valid
+        && exec.ok
+        && exec.exit_code == 0
+        && tampered_rejected
+        && unsigned_rejected
+        && escalation_rejected;
+
+    Seed0bDemoReport {
+        ok: all_ok,
+        admitted,
+        verified,
+        receipt_valid,
+        el0_clean: exec.ok,
+        exit_code: exec.exit_code,
+        tampered_rejected,
+        unsigned_rejected,
+        escalation_rejected,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seed0b_host_demo_verifies() {
+        let report = unsafe { run_seed0b_demo(0) };
+        assert!(report.ok);
+        assert!(report.admitted);
+        assert!(report.verified);
+        assert!(report.receipt_valid);
+        assert!(report.el0_clean);
+        assert_eq!(report.exit_code, 0);
+        assert!(report.tampered_rejected);
+        assert!(report.unsigned_rejected);
+        assert!(report.escalation_rejected);
+    }
 
     #[test]
     fn capability_handle_round_trips() {

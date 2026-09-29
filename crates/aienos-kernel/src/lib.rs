@@ -13,6 +13,7 @@ extern crate alloc;
 pub mod abi;
 pub mod acpi;
 pub mod arch;
+pub mod artifact;
 pub mod block;
 pub mod boot;
 pub mod budget;

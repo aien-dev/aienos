@@ -1593,6 +1593,20 @@ fn main() -> Status {
             "accepted"
         },
     );
+    let seed0b = unsafe { aienos_kernel::user::run_seed0b_demo(kernel_root) };
+    let _ = writeln!(
+        report,
+        "seed0b: {} admitted={} verified={} receipt={} el0={} exit={} tampered={} unsigned={} escalation={}",
+        if seed0b.ok { "ok" } else { "failed" },
+        if seed0b.admitted { "yes" } else { "no" },
+        if seed0b.verified { "yes" } else { "no" },
+        if seed0b.receipt_valid { "valid" } else { "invalid" },
+        if seed0b.el0_clean { "clean" } else { "failed" },
+        seed0b.exit_code,
+        if seed0b.tampered_rejected { "rejected" } else { "accepted" },
+        if seed0b.unsigned_rejected { "rejected" } else { "accepted" },
+        if seed0b.escalation_rejected { "rejected" } else { "accepted" },
+    );
     let _ = writeln!(
         report,
         "runtime_code: {}",
