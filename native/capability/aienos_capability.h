@@ -8,8 +8,8 @@
  * not honor the old reference, generation is 64 bits and never wraps, a
  * restarted table starts above every generation the old table used,
  * delegation can only narrow rights, and revoking an ancestor revokes the
- * descendants. Each entry carries its subject, epoch, lease, full 64-bit resource, and office
- * rights that cannot be delegated.
+ * descendants. Each entry carries its subject, epoch, lease, full 64-bit
+ * resource, and office rights that cannot be delegated.
  *
  * The declarations below match omega/src/runtime/aienos_cap.h in name and
  * layout, so the reaction world links this file without change.
