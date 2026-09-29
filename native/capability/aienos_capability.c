@@ -34,8 +34,12 @@ typedef struct {
     atomic_uint holders;
 } CapShared;
 
+/* The observer lives on the admin handle, so the view cannot reach it.
+ * Both fields are read and written under shared->state_lock. */
 struct AienosCapAdmin {
     CapShared *shared;
+    AienosCapObserver observer;
+    void *observer_ctx;
 };
 
 struct AienosCapView {
@@ -288,7 +292,11 @@ static int state_mint(CapState *s, const AienosCapMint *r, AienosCapRef *out) {
     return saw_exhausted ? AIENOS_CAP_ERR_EXHAUSTED : AIENOS_CAP_ERR_FULL;
 }
 
-static void cascade_revoke(CapState *s) {
+/* Revokes every live descendant of a revoked entry. When `ids` is not
+ * NULL, appends each slot it revokes, in the order revoked; an ancestor is
+ * always revoked in an earlier pass or earlier in the same pass than its
+ * descendants. */
+static void cascade_revoke(CapState *s, uint32_t *ids, uint32_t *n) {
     for (uint32_t guard = 0; guard < AIENOS_CAP_MAX; guard++) {
         bool changed = false;
         for (uint32_t i = 0; i < AIENOS_CAP_MAX; i++) {
@@ -300,6 +308,7 @@ static void cascade_revoke(CapState *s) {
             if (parent->generation == e->parent_generation &&
                 parent->state == AIENOS_CAP_STATE_REVOKED) {
                 e->state = AIENOS_CAP_STATE_REVOKED;
+                if (ids) ids[(*n)++] = i;
                 changed = true;
             }
         }
@@ -307,7 +316,8 @@ static void cascade_revoke(CapState *s) {
     }
 }
 
-static int state_revoke(CapState *s, AienosCapRef authority, AienosCapRef target) {
+static int state_revoke(CapState *s, AienosCapRef authority, AienosCapRef target,
+                        uint32_t *ids, uint32_t *n) {
     if (!s->writer_alive) return AIENOS_CAP_ERR_IO;
     uint32_t auth_index;
     int rc = auth_use(s, authority, AIENOS_CAP_RIGHT_REVOKE, &auth_index);
@@ -319,7 +329,8 @@ static int state_revoke(CapState *s, AienosCapRef authority, AienosCapRef target
     if (e->state != AIENOS_CAP_STATE_LIVE) return AIENOS_CAP_ERR_STATE;
     if ((e->rights & AIENOS_CAP_RIGHT_PRIVILEGED) & ~auth_rights) return AIENOS_CAP_ERR_UNAUTHORIZED;
     e->state = AIENOS_CAP_STATE_REVOKED;
-    cascade_revoke(s);
+    if (ids) ids[(*n)++] = target.cap_id;
+    cascade_revoke(s, ids, n);
     return AIENOS_CAP_OK;
 }
 
@@ -450,33 +461,109 @@ int aienos_cap_office(const AienosCapAdmin *admin, AienosCapRef *out) {
     return AIENOS_CAP_OK;
 }
 
+static void announce(AienosCapObserver fn, void *ctx, uint32_t op, const AienosCapEntry *entry,
+                     int rc) {
+    if (fn) fn(ctx, op, entry, rc);
+}
+
+int aienos_cap_set_observer(AienosCapAdmin *admin, AienosCapObserver fn, void *ctx) {
+    if (!admin) return AIENOS_CAP_ERR_STATE;
+    CapShared *sh = admin->shared;
+    pthread_mutex_lock(&sh->state_lock);
+    admin->observer = fn;
+    admin->observer_ctx = fn ? ctx : NULL;
+    pthread_mutex_unlock(&sh->state_lock);
+    return AIENOS_CAP_OK;
+}
+
+/* Each admin operation below: change the table under the lock, copy the
+ * observer and the changed entries while still holding it, release, then
+ * announce. The observer never runs under the table lock. */
+
 int aienos_cap_mint(AienosCapAdmin *admin, const AienosCapMint *request, AienosCapRef *out) {
     if (!admin || !request) return AIENOS_CAP_ERR_STATE;
     AienosCapMint r = *request;
     AienosCapRef got;
-    int rc = LOCKED(admin->shared, state_mint(&admin->shared->state, &r, &got));
+    CapShared *sh = admin->shared;
+    AienosCapEntry snap;
+    pthread_mutex_lock(&sh->state_lock);
+    int rc = state_mint(&sh->state, &r, &got);
+    AienosCapObserver fn = admin->observer;
+    void *ctx = admin->observer_ctx;
+    if (fn && rc == AIENOS_CAP_OK) snap = sh->state.entries[got.cap_id];
+    pthread_mutex_unlock(&sh->state_lock);
+    announce(fn, ctx, AIENOS_CAP_OBS_MINT, rc == AIENOS_CAP_OK ? &snap : NULL, rc);
     if (rc == AIENOS_CAP_OK && out) *out = got;
     return rc;
 }
 
 int aienos_cap_revoke(AienosCapAdmin *admin, AienosCapRef authority, AienosCapRef target) {
     if (!admin) return AIENOS_CAP_ERR_STATE;
-    return LOCKED(admin->shared, state_revoke(&admin->shared->state, authority, target));
+    CapShared *sh = admin->shared;
+    uint32_t ids[AIENOS_CAP_MAX];
+    uint32_t n = 0;
+    pthread_mutex_lock(&sh->state_lock);
+    AienosCapObserver fn = admin->observer;
+    void *ctx = admin->observer_ctx;
+    int rc = state_revoke(&sh->state, authority, target, fn ? ids : NULL, &n);
+    if (!fn) {
+        pthread_mutex_unlock(&sh->state_lock);
+        return rc;
+    }
+    /* A revoke can take every slot with it, so the copies are made here,
+     * under the lock: a reclaim on another thread could free a slot before
+     * the observer runs. */
+    AienosCapEntry snaps[AIENOS_CAP_MAX];
+    for (uint32_t i = 0; i < n; i++) snaps[i] = sh->state.entries[ids[i]];
+    pthread_mutex_unlock(&sh->state_lock);
+    if (rc != AIENOS_CAP_OK) {
+        announce(fn, ctx, AIENOS_CAP_OBS_REVOKE, NULL, rc);
+        return rc;
+    }
+    for (uint32_t i = 0; i < n; i++) announce(fn, ctx, AIENOS_CAP_OBS_REVOKE, &snaps[i], rc);
+    return rc;
 }
 
 int aienos_cap_reclaim(AienosCapAdmin *admin, AienosCapRef authority, uint32_t cap_id) {
     if (!admin) return AIENOS_CAP_ERR_STATE;
-    return LOCKED(admin->shared, state_reclaim(&admin->shared->state, authority, cap_id));
+    CapShared *sh = admin->shared;
+    AienosCapEntry snap;
+    pthread_mutex_lock(&sh->state_lock);
+    int rc = state_reclaim(&sh->state, authority, cap_id);
+    AienosCapObserver fn = admin->observer;
+    void *ctx = admin->observer_ctx;
+    if (fn && rc == AIENOS_CAP_OK) snap = sh->state.entries[cap_id];
+    pthread_mutex_unlock(&sh->state_lock);
+    announce(fn, ctx, AIENOS_CAP_OBS_RECLAIM, rc == AIENOS_CAP_OK ? &snap : NULL, rc);
+    return rc;
 }
 
 int aienos_cap_advance_clock(AienosCapAdmin *admin, AienosCapRef authority, uint64_t ticks) {
     if (!admin) return AIENOS_CAP_ERR_STATE;
-    return LOCKED(admin->shared, state_advance_clock(&admin->shared->state, authority, ticks));
+    CapShared *sh = admin->shared;
+    AienosCapEntry snap;
+    pthread_mutex_lock(&sh->state_lock);
+    int rc = state_advance_clock(&sh->state, authority, ticks);
+    AienosCapObserver fn = admin->observer;
+    void *ctx = admin->observer_ctx;
+    if (fn && rc == AIENOS_CAP_OK) snap = sh->state.entries[authority.cap_id];
+    pthread_mutex_unlock(&sh->state_lock);
+    announce(fn, ctx, AIENOS_CAP_OBS_CLOCK, rc == AIENOS_CAP_OK ? &snap : NULL, rc);
+    return rc;
 }
 
 int aienos_cap_bump_epoch(AienosCapAdmin *admin, AienosCapRef authority) {
     if (!admin) return AIENOS_CAP_ERR_STATE;
-    return LOCKED(admin->shared, state_bump_epoch(&admin->shared->state, authority));
+    CapShared *sh = admin->shared;
+    AienosCapEntry snap;
+    pthread_mutex_lock(&sh->state_lock);
+    int rc = state_bump_epoch(&sh->state, authority);
+    AienosCapObserver fn = admin->observer;
+    void *ctx = admin->observer_ctx;
+    if (fn && rc == AIENOS_CAP_OK) snap = sh->state.entries[authority.cap_id];
+    pthread_mutex_unlock(&sh->state_lock);
+    announce(fn, ctx, AIENOS_CAP_OBS_EPOCH, rc == AIENOS_CAP_OK ? &snap : NULL, rc);
+    return rc;
 }
 
 int aienos_cap_kill(AienosCapAdmin *admin) {
@@ -484,13 +571,17 @@ int aienos_cap_kill(AienosCapAdmin *admin) {
     CapShared *sh = admin->shared;
     pthread_mutex_lock(&sh->state_lock);
     sh->state.writer_alive = false;
+    AienosCapObserver fn = admin->observer;
+    void *ctx = admin->observer_ctx;
     pthread_mutex_unlock(&sh->state_lock);
+    announce(fn, ctx, AIENOS_CAP_OBS_KILL, NULL, AIENOS_CAP_OK);
     return AIENOS_CAP_OK;
 }
 
 /* Replace the table with the next boot generation. The new table starts
  * above every generation the old one used, so outstanding references fail
- * against it even after reclaims. The office token is replaced. */
+ * against it even after reclaims. The office token is replaced. The
+ * observer is on the admin handle, so it stays set across a restart. */
 int aienos_cap_restart(AienosCapAdmin *admin) {
     if (!admin) return AIENOS_CAP_ERR_STATE;
     CapState *fresh = malloc(sizeof *fresh);
@@ -501,11 +592,15 @@ int aienos_cap_restart(AienosCapAdmin *admin) {
         return AIENOS_CAP_ERR_IO;
     }
     CapShared *sh = admin->shared;
+    AienosCapEntry snap;
     pthread_mutex_lock(&sh->state_lock);
     uint64_t boot;
     int rc = take_boot_gen(table_floor(&sh->state), &boot);
     if (rc == AIENOS_CAP_OK) rc = bootstrap(fresh, boot);
     if (rc == AIENOS_CAP_OK) sh->state = *fresh;
+    AienosCapObserver fn = admin->observer;
+    void *ctx = admin->observer_ctx;
+    if (fn && rc == AIENOS_CAP_OK) snap = sh->state.entries[0];
     pthread_mutex_unlock(&sh->state_lock);
     free(fresh);
     if (rc == AIENOS_CAP_OK) {
@@ -514,6 +609,7 @@ int aienos_cap_restart(AienosCapAdmin *admin) {
         pthread_mutex_unlock(&sh->token_lock);
     }
     memset(token, 0, sizeof token);
+    announce(fn, ctx, AIENOS_CAP_OBS_RESTART, rc == AIENOS_CAP_OK ? &snap : NULL, rc);
     return rc;
 }
 

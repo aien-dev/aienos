@@ -2,7 +2,7 @@
 # library and pthreads (it reads /dev/urandom for the office token).
 #
 #   make          build out/libaienos_capability.a
-#   make test     build and run the rule tests
+#   make test     build and run the rule tests (SEED=n picks the random-op seed)
 #   make clean
 
 CC ?= cc
@@ -28,7 +28,7 @@ $(TEST): tests/capability_test.c $(LIB)
 	$(CC) $(CFLAGS) -pthread -o $@ tests/capability_test.c $(LIB)
 
 test: $(TEST)
-	./$(TEST)
+	./$(TEST) $(SEED)
 
 clean:
 	rm -rf $(OUT)
