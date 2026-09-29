@@ -268,14 +268,14 @@ static void test_round_trip(void)
         unsigned fl = floor_of(all_kinds[i]);
         CHECK(fl >= 1 && fl <= 3);
         CHECK(argus_event_min_class(all_kinds[i]) == fl);
-        for (uint8_t cls = 1; cls <= fl; cls++) {
+        for (unsigned cls = 1; cls <= fl; cls++) {
             ArgusEvent e = valid_event(), d;
             e.kind = all_kinds[i];
             e.effect_class = (uint8_t)(i % 4);
             e.outcome = (uint8_t)(1 + i % 3);
             e.flags = (uint16_t)((i % 2) | ((i * 613u) << ARGUS_FLAG_STREAM_SHIFT));   /* v1.1 stream bits */
             fit_kind(&e);
-            e.class_ = cls;
+            e.class_ = (uint8_t)cls;
             e.sequence = 1 + i * 7 + cls;
             e.code = (int32_t)(0 - (int32_t)i);
             e.cap_id = i % 5 == 4 ? ARGUS_CAP_NONE : (uint32_t)(i * 9 % ARGUS_CAP_MAX);
