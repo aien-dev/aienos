@@ -5,6 +5,7 @@
 
 use crate::aes::Aes256Key;
 use crate::polyval::Polyval;
+use zeroize::Zeroizing;
 
 /// Tag size in bytes (128 bits).
 pub const TAG_LEN: usize = 16;
@@ -18,13 +19,13 @@ pub const KEY_LEN: usize = 32;
 pub struct AuthenticationError;
 
 /// Derive the 128-bit authentication key and 256-bit encryption key per RFC 8452 Section 4.
-pub fn derive_keys(key: &[u8; 32], nonce: &[u8; 12]) -> ([u8; 16], [u8; 32]) {
+pub fn derive_keys(key: &[u8; 32], nonce: &[u8; 12]) -> (Zeroizing<[u8; 16]>, Zeroizing<[u8; 32]>) {
     let k_cipher = Aes256Key::new(key);
-    let mut auth_key = [0u8; 16];
-    let mut enc_key = [0u8; 32];
+    let mut auth_key = Zeroizing::new([0u8; 16]);
+    let mut enc_key = Zeroizing::new([0u8; 32]);
 
     for i in 0..6u32 {
-        let mut block = [0u8; 16];
+        let mut block = Zeroizing::new([0u8; 16]);
         block[0..4].copy_from_slice(&i.to_le_bytes());
         block[4..16].copy_from_slice(nonce);
 

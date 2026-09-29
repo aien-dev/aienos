@@ -369,7 +369,7 @@ pub fn decrypt_envelope(
         );
 
         // Verification scratchpad: verified before writing to caller buffer
-        let mut scratchpad = alloc::vec![0u8; pt_chunk_len];
+        let mut scratchpad = zeroize::Zeroizing::new(alloc::vec![0u8; pt_chunk_len]);
         if raw_decrypt(key, &nonce, &aad, ct_chunk, &mut scratchpad).is_err() {
             // Scratchpad was wiped by raw_decrypt on failure; wipe and drop plaintext
             for b in plaintext.iter_mut() {

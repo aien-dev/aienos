@@ -40,9 +40,7 @@ fn div_x(v: &mut Block) {
         carry = next_carry;
     }
 
-    if lsb != 0 {
-        v[15] ^= X_INV_BYTE_15;
-    }
+    v[15] ^= X_INV_BYTE_15 & 0u8.wrapping_sub(lsb);
 }
 
 /// Compute dot(a, b) = a * b * x^-128 mod P(x) per RFC 8452 Section 3.
@@ -54,10 +52,9 @@ pub fn dot(a: &Block, b: &Block) -> Block {
         let bit_idx = i % 8;
         let bit = (a[byte_idx] >> bit_idx) & 1;
 
-        if bit != 0 {
-            for j in 0..16 {
-                v[j] ^= b[j];
-            }
+        let mask = 0u8.wrapping_sub(bit);
+        for j in 0..16 {
+            v[j] ^= b[j] & mask;
         }
 
         div_x(&mut v);

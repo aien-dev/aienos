@@ -9,3 +9,7 @@ description = "Shared no_std cryptographic primitives for AIENOS"
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+aes = { version = "=0.8.4", default-features = false, features = ["zeroize"] }
+zeroize = { version = "1.8", default-features = false }
