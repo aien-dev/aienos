@@ -52,6 +52,7 @@ const MARGIN_CELLS: usize = 1;
 pub const BACKGROUND: (u8, u8, u8) = (0x10, 0x14, 0x1c);
 pub const FOREGROUND: (u8, u8, u8) = (0xe8, 0xec, 0xf2);
 pub const ACCENT: (u8, u8, u8) = (0x5c, 0xd6, 0x8a);
+pub const ERROR: (u8, u8, u8) = (0xff, 0x6b, 0x6b);
 
 /// Text console over a linear 32-bit framebuffer.
 pub struct Screen {

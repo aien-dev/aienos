@@ -393,3 +393,115 @@ mod tests {
         assert_eq!(registers[0], 0);
     }
 }
+
+/// Dedicated 16 KiB EL1 bootstrap stack in BSS.
+#[repr(C, align(16))]
+pub struct El1BootstrapStack(pub [u8; 16384]);
+
+pub static mut EL1_BOOTSTRAP_STACK: El1BootstrapStack = El1BootstrapStack([0; 16384]);
+
+/// Busy-wait loop using architectural counter ticks.
+pub fn wait_seconds(seconds: u64, frequency_hz: u64) {
+    if frequency_hz == 0 {
+        return;
+    }
+    let start = counter_ticks();
+    let ticks = seconds.saturating_mul(frequency_hz);
+    while counter_ticks().wrapping_sub(start) < ticks {
+        core::hint::spin_loop();
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+core::arch::global_asm!(
+    ".global el2_to_el1_transition",
+    "el2_to_el1_transition:",
+    // x0 = context_ptr (*const KernelHandoffContext)
+    // x1 = stack_top (u64)
+    "msr daifset, #0xf",
+    "mrs x2, CurrentEL",
+    "lsr x2, x2, #2",
+    "cmp x2, #2",
+    "b.eq 2f",
+    "cmp x2, #1",
+    "b.eq 1f",
+    "0: wfi",
+    "b 0b",
+
+    "1:",
+    "mov sp, x1",
+    "b el1_entry",
+
+    "2:",
+    // HCR_EL2.RW = 1 (AArch64 at EL1), VM = 0
+    "mov x2, #(1 << 31)",
+    "msr hcr_el2, x2",
+
+    // CPTR_EL2 = 0 (no FP/SIMD traps to EL2)
+    "msr cptr_el2, xzr",
+
+    // CNTHCTL_EL2: bit 0 (EL1PCTEN) | bit 1 (EL1PCEN) = 0x3
+    "mov x2, #0x3",
+    "msr cnthctl_el2, x2",
+    "msr cntvoff_el2, xzr",
+
+    // SCTLR_EL1: clear M (bit 0) and C (bit 2)
+    "mrs x2, sctlr_el1",
+    "mov x3, #0x5",
+    "bic x2, x2, x3",
+    "msr sctlr_el1, x2",
+
+    // CPACR_EL1.FPEN = 0b11 (bits 21:20)
+    "mov x2, #(3 << 20)",
+    "msr cpacr_el1, x2",
+
+    // Set SP_EL1 to dedicated stack top
+    "msr sp_el1, x1",
+
+    // Target entrypoint: el1_entry
+    "adrp x2, el1_entry",
+    "add x2, x2, :lo12:el1_entry",
+    "msr elr_el2, x2",
+
+    // SPSR_EL2 = 0x3c5 (EL1h mode, dedicated SP_EL1, DAIF masked)
+    "mov x2, #0x3c5",
+    "msr spsr_el2, x2",
+
+    "dsb sy",
+    "isb",
+    "eret",
+
+    ".global el1_entry",
+    "el1_entry:",
+    "adrp x1, aienos_exception_vectors",
+    "add x1, x1, :lo12:aienos_exception_vectors",
+    "msr vbar_el1, x1",
+    "isb",
+
+    "mrs x1, CurrentEL",
+    "lsr x1, x1, #2",
+    "cmp x1, #1",
+    "b.ne 3f",
+
+    "bl early_kernel_el1_enter",
+
+    "3: wfi",
+    "b 3b",
+);
+
+#[cfg(target_arch = "aarch64")]
+extern "C" {
+    #[allow(improper_ctypes)]
+    pub fn el2_to_el1_transition(
+        context: *const crate::boot::KernelHandoffContext,
+        stack_top: u64,
+    ) -> !;
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+pub unsafe fn el2_to_el1_transition(
+    context: *const crate::boot::KernelHandoffContext,
+    _stack_top: u64,
+) -> ! {
+    crate::boot::early_kernel_el1_enter(context);
+}
