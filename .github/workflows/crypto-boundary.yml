@@ -25,6 +25,6 @@ jobs:
           targets: aarch64-unknown-none
           components: clippy
       - run: cargo test --locked --offline -p aienos-crypto
-      - run: cargo test --locked --offline -p aienos-kernel crypto::
+      - run: 'cargo test --locked --offline -p aienos-kernel crypto::'
       - run: cargo clippy --locked --offline -p aienos-crypto --all-targets -- -D warnings
       - run: cargo check --locked --offline -p aienos-kernel --target aarch64-unknown-none --no-default-features
