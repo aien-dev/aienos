@@ -1155,3 +1155,148 @@ size_t argus_corpus_hostile(ArgusEvent *out, size_t max, uint64_t seed,
     *n_expect = g.n_expect;
     return n;
 }
+
+/* ---- ARGUS-1 containment corpora ----------------------------------------- */
+static void contain_corpus_identity(uint8_t out[ARGUS_MACHINE_ID_LEN], uint64_t seed,
+                                    uint32_t index)
+{
+    uint64_t x = seed ^ (0x9E3779B97F4A7C15ull * (uint64_t)(index + 1));
+    for (size_t i = 0; i < ARGUS_MACHINE_ID_LEN; i++) {
+        x ^= x >> 12; x ^= x << 25; x ^= x >> 27;
+        out[i] = (uint8_t)(x * 0x2545F4914F6CDD1Dull >> 56);
+    }
+    uint8_t any = 0;
+    for (size_t i = 0; i < ARGUS_MACHINE_ID_LEN; i++) any |= out[i];
+    if (any == 0) out[0] = 1;
+}
+
+static ArgusEvent contain_corpus_event(uint16_t kind, uint64_t sequence,
+                                       const uint8_t machine[ARGUS_MACHINE_ID_LEN])
+{
+    ArgusEvent e = {0};
+    e.version = ARGUS_ABI_VERSION;
+    e.class_ = stub_min_class(kind);
+    e.kind = kind;
+    e.outcome = ARGUS_OUTCOME_OK;
+    e.flags = (uint16_t)(1u << ARGUS_FLAG_STREAM_SHIFT);
+    e.sequence = sequence;
+    e.cap_id = ARGUS_CAP_NONE;
+    memcpy(e.machine_id, machine, ARGUS_MACHINE_ID_LEN);
+    return e;
+}
+
+size_t argus_corpus_containment_storm(ArgusEvent *out, size_t capacity,
+                                      size_t stale_uses, uint64_t seed)
+{
+    size_t need = 1u + ARGUS_CAP_MAX + stale_uses;
+    if (!out || need < stale_uses || capacity < need) return 0;
+    uint8_t machine[ARGUS_MACHINE_ID_LEN]; contain_corpus_identity(machine, seed, 0);
+    size_t n = 0;
+    ArgusEvent e = contain_corpus_event(ARGUS_EV_MACHINE_JOINED, ++n, machine);
+    e.object_id = ARGUS_TRUST_OBSERVED; out[n - 1] = e;
+    for (uint32_t id = 0; id < ARGUS_CAP_MAX; id++) {
+        e = contain_corpus_event(ARGUS_EV_CAPABILITY_GRANTED, n + 1, machine);
+        e.cap_id = id; e.cap_generation = 1; e.principal = id == 0 ? 0 : 1000u + id;
+        e.object_id = id == 0 ? ARGUS_CAP_RIGHT_PRIVILEGED : 1u;
+        e.resource = 0xA000u + id; out[n++] = e;
+    }
+    for (size_t i = 0; i < stale_uses; i++) {
+        uint32_t id = (uint32_t)(i % ARGUS_CAP_MAX);
+        e = contain_corpus_event(ARGUS_EV_CAPABILITY_USED, n + 1, machine);
+        e.cap_id = id; e.cap_generation = 0; e.principal = id == 0 ? 0 : 1000u + id;
+        e.code = -4; /* authority's stale-generation result */
+        e.effect_class = ARGUS_EFFECT_NONE; out[n++] = e;
+    }
+    return n;
+}
+
+size_t argus_corpus_cap0_framing(ArgusEvent *out, size_t capacity,
+                                 size_t stale_uses, uint64_t seed)
+{
+    size_t need = 2u + stale_uses;
+    if (!out || need < stale_uses || capacity < need) return 0;
+    uint8_t machine[ARGUS_MACHINE_ID_LEN]; contain_corpus_identity(machine, seed, 0);
+    size_t n = 0;
+    ArgusEvent e = contain_corpus_event(ARGUS_EV_MACHINE_JOINED, ++n, machine);
+    e.object_id = ARGUS_TRUST_OBSERVED; out[n - 1] = e;
+    e = contain_corpus_event(ARGUS_EV_CAPABILITY_GRANTED, n + 1, machine);
+    e.cap_id = 0; e.cap_generation = 1; e.principal = 0;
+    e.object_id = ARGUS_CAP_RIGHT_PRIVILEGED; e.resource = 0xA000u; out[n++] = e;
+    for (size_t i = 0; i < stale_uses; i++) {
+        e = contain_corpus_event(ARGUS_EV_CAPABILITY_USED, n + 1, machine);
+        e.cap_id = 0; e.cap_generation = 0; e.principal = 7; e.code = -4;
+        e.effect_class = ARGUS_EFFECT_NONE; out[n++] = e;
+    }
+    return n;
+}
+
+size_t argus_corpus_table_saturation(ArgusEvent *out, size_t capacity,
+                                    uint16_t table_kind, size_t slots,
+                                    size_t overflows, uint64_t seed)
+{
+    if (!out || slots > SIZE_MAX - overflows - 1) return 0;
+    if (table_kind != ARGUS_EV_MACHINE_JOINED &&
+        table_kind != ARGUS_EV_CREDENTIAL_LEASE_CREATED &&
+        table_kind != ARGUS_EV_PROVIDER_DISCOVERED &&
+        table_kind != ARGUS_EV_ARTIFACT_ADMITTED) return 0;
+    size_t n = 0;
+    uint8_t machine[ARGUS_MACHINE_ID_LEN]; contain_corpus_identity(machine, seed, 0);
+    if (table_kind != ARGUS_EV_MACHINE_JOINED) {
+        ArgusEvent join = contain_corpus_event(ARGUS_EV_MACHINE_JOINED, 1, machine);
+        join.object_id = ARGUS_TRUST_OBSERVED;
+        if (capacity == 0) return 0;
+        out[n++] = join;
+    }
+    for (size_t i = 0; i < slots + overflows; i++) {
+        uint8_t event_machine[ARGUS_MACHINE_ID_LEN];
+        if (table_kind == ARGUS_EV_MACHINE_JOINED)
+            contain_corpus_identity(event_machine, seed, (uint32_t)i + 1);
+        else memcpy(event_machine, machine, ARGUS_MACHINE_ID_LEN);
+        uint64_t sequence = table_kind == ARGUS_EV_MACHINE_JOINED ? 1 : n + 1;
+        ArgusEvent e = contain_corpus_event(table_kind, sequence, event_machine);
+        switch (table_kind) {
+        case ARGUS_EV_MACHINE_JOINED:
+            e.object_id = ARGUS_TRUST_OBSERVED;
+            break;
+        case ARGUS_EV_CREDENTIAL_LEASE_CREATED:
+            e.object_id = (uint32_t)i + 1; e.principal = (uint32_t)i + 1; e.resource = 1;
+            break;
+        case ARGUS_EV_PROVIDER_DISCOVERED:
+        case ARGUS_EV_ARTIFACT_ADMITTED:
+            contain_corpus_identity(e.evidence_digest, seed ^ 0xD1B54A32D192ED03ull,
+                                    (uint32_t)i + 1);
+            break;
+        default: return 0;
+        }
+        if (n >= capacity) return 0;
+        out[n++] = e;
+    }
+    return n;
+}
+
+size_t argus_corpus_authority_churn(ArgusEvent *out, size_t capacity,
+                                    size_t cycles, uint64_t seed)
+{
+    size_t need = 1u + cycles * 3u;
+    if (!out || cycles > (SIZE_MAX - 1u) / 3u || need < cycles || capacity < need) return 0;
+    uint8_t machine[ARGUS_MACHINE_ID_LEN]; contain_corpus_identity(machine, seed, 0);
+    size_t n = 0;
+    ArgusEvent e = contain_corpus_event(ARGUS_EV_MACHINE_JOINED, ++n, machine);
+    e.object_id = ARGUS_TRUST_OBSERVED; out[n - 1] = e;
+    uint64_t generation[16] = {0};
+    for (size_t i = 0; i < cycles; i++) {
+        uint32_t id = 1u + (uint32_t)(i % 16u);
+        uint32_t subject = 100u + id;
+        generation[id - 1]++;
+        e = contain_corpus_event(ARGUS_EV_CAPABILITY_GRANTED, n + 1, machine);
+        e.cap_id = id; e.cap_generation = generation[id - 1]; e.principal = subject;
+        e.object_id = 1u; e.resource = 0xB000u + id; out[n++] = e;
+        e = contain_corpus_event(ARGUS_EV_CAPABILITY_USED, n + 1, machine);
+        e.cap_id = id; e.cap_generation = generation[id - 1]; e.principal = subject;
+        e.resource = 0; e.effect_class = ARGUS_EFFECT_NONE; out[n++] = e;
+        e = contain_corpus_event(ARGUS_EV_CAPABILITY_REVOKED, n + 1, machine);
+        e.cap_id = id; e.cap_generation = generation[id - 1]; e.principal = subject;
+        e.object_id = 1u; e.resource = 0xB000u + id; out[n++] = e;
+    }
+    return n;
+}

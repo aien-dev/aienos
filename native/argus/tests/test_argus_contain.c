@@ -1,6 +1,7 @@
 #include "../argus_abi.h"
 #include "../argus_core.h"
 #include "../argus_contain.h"
+#include "stub_state.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +15,117 @@ static ArgusEvent event(uint16_t kind, uint64_t seq)
     ArgusEvent e={0}; e.version=ARGUS_ABI_VERSION; e.kind=kind; e.sequence=seq;
     e.class_=argus_event_min_class(kind); e.outcome=ARGUS_OUTCOME_OK;
     e.cap_id=ARGUS_CAP_NONE; e.principal=7; e.machine_id[0]=0xA5; return e;
+}
+
+static void corpus_storm_test(void)
+{
+    const size_t uses=100000, cap=1u+ARGUS_CAP_MAX+uses;
+    ArgusEvent *stream=calloc(cap,sizeof *stream);
+    void *cmem=calloc(1,argus_core_footprint()), *smem=calloc(1,argus_contain_footprint());
+    ArgusCore *core=NULL; ArgusContain *state=NULL;
+    CHECK(stream&&cmem&&smem);
+    size_t n=argus_corpus_containment_storm(stream,cap,uses,41);
+    CHECK(n==cap);
+    CHECK(argus_core_init(&core,cmem,argus_core_footprint())==ARGUS_OK);
+    CHECK(argus_contain_init(&state,smem,argus_contain_footprint())==ARGUS_OK);
+    size_t requested=0; uint32_t per_principal[ARGUS_CAP_MAX+1]={0};
+    uint32_t per_window[32]={0};
+    for(size_t i=0;i<n;i++) {
+        ArgusFinding cf[ARGUS_CORE_MAX_FINDINGS], xf[ARGUS_CORE_MAX_FINDINGS], all[ARGUS_CORE_MAX_FINDINGS*2];
+        ArgusContainmentRequest rq[ARGUS_CONTAIN_WINDOW_MAX]; ArgusEvent pe[ARGUS_CONTAIN_WINDOW_MAX];
+        size_t nc=0,nx=0,na=0,np=0;
+        int rc=argus_core_ingest(core,&stream[i],cf,ARGUS_CORE_MAX_FINDINGS,&nc);
+        CHECK(rc==ARGUS_OK);
+        CHECK(argus_contain_observe(state,core,&stream[i],xf,ARGUS_CORE_MAX_FINDINGS,&nx)==ARGUS_OK);
+        for(size_t j=0;j<nc;j++) all[na++]=cf[j];
+        for(size_t j=0;j<nx;j++) all[na++]=xf[j];
+        CHECK(argus_contain_propose(state,core,all,na,&stream[i],rq,ARGUS_CONTAIN_WINDOW_MAX,
+              pe,ARGUS_CONTAIN_WINDOW_MAX,&np)==ARGUS_OK);
+        size_t window=i/ARGUS_CONTAIN_WINDOW_EVENTS;
+        for(size_t j=0;j<np;j++) {
+            requested++;
+            CHECK(rq[j].containment==ARGUS_CONTAIN_REVOKE_CAPABILITY);
+            CHECK(rq[j].target.cap_id!=0);
+            CHECK(window<32); if(window<32) per_window[window]++;
+            uint32_t key=rq[j].principal>=1000u?rq[j].principal-1000u:ARGUS_CAP_MAX;
+            CHECK(key<=ARGUS_CAP_MAX); if(key<=ARGUS_CAP_MAX) per_principal[key]++;
+        }
+    }
+    ArgusContainHealth h; argus_contain_health(state,&h);
+    CHECK(requested==h.requested && requested>0 && h.pending_full>0);
+    for(size_t w=0;w<32;w++) CHECK(per_window[w]<=ARGUS_CONTAIN_WINDOW_MAX);
+    for(size_t k=0;k<=ARGUS_CAP_MAX;k++) CHECK(per_principal[k]<=2);
+    free(stream); free(smem); free(cmem);
+}
+
+static void corpus_cap0_test(void)
+{
+    ArgusEvent stream[102]; size_t n=argus_corpus_cap0_framing(stream,102,100,7);
+    CHECK(n==102);
+    void *cmem=calloc(1,argus_core_footprint()), *smem=calloc(1,argus_contain_footprint());
+    ArgusCore *core=NULL; ArgusContain *state=NULL;
+    CHECK(cmem&&smem&&argus_core_init(&core,cmem,argus_core_footprint())==ARGUS_OK);
+    CHECK(argus_contain_init(&state,smem,argus_contain_footprint())==ARGUS_OK);
+    for(size_t i=0;i<n;i++) {
+        ArgusFinding cf[ARGUS_CORE_MAX_FINDINGS],xf[ARGUS_CORE_MAX_FINDINGS],all[ARGUS_CORE_MAX_FINDINGS*2];
+        ArgusContainmentRequest rq[4]; ArgusEvent pe[4]; size_t nc=0,nx=0,na=0,np=0;
+        CHECK(argus_core_ingest(core,&stream[i],cf,ARGUS_CORE_MAX_FINDINGS,&nc)==ARGUS_OK);
+        CHECK(argus_contain_observe(state,core,&stream[i],xf,ARGUS_CORE_MAX_FINDINGS,&nx)==ARGUS_OK);
+        for(size_t j=0;j<nc;j++) all[na++]=cf[j];
+        for(size_t j=0;j<nx;j++) all[na++]=xf[j];
+        CHECK(argus_contain_propose(state,core,all,na,&stream[i],rq,4,pe,4,&np)==ARGUS_OK);
+        for(size_t j=0;j<np;j++) CHECK(rq[j].target.cap_id!=0);
+    }
+    ArgusContainHealth h; argus_contain_health(state,&h); CHECK(h.suppressed_protected>0);
+    free(smem); free(cmem);
+}
+
+static void corpus_saturation_test(void)
+{
+    const uint16_t kinds[]={ARGUS_EV_MACHINE_JOINED,ARGUS_EV_CREDENTIAL_LEASE_CREATED,
+        ARGUS_EV_PROVIDER_DISCOVERED,ARGUS_EV_ARTIFACT_ADMITTED};
+    const size_t slots[]={ARGUS_CORE_MACHINES,ARGUS_CORE_LEASES,ARGUS_CORE_PROVIDERS,ARGUS_CORE_ARTIFACTS};
+    const uint8_t expected[]={ARGUS_CONTAIN_REQUIRE_REATTESTATION,ARGUS_CONTAIN_REVOKE_CREDENTIAL_LEASE,
+        ARGUS_CONTAIN_QUARANTINE_PROVIDER,ARGUS_CONTAIN_REJECT_ARTIFACT};
+    for(size_t t=0;t<4;t++) {
+        size_t cap=slots[t]+5; ArgusEvent *stream=calloc(cap,sizeof *stream);
+        CHECK(stream!=NULL); size_t n=argus_corpus_table_saturation(stream,cap,kinds[t],slots[t],4,91+t);
+        CHECK(n==cap - (kinds[t] == ARGUS_EV_MACHINE_JOINED ? 1u : 0u));
+        void *cmem=calloc(1,argus_core_footprint()), *smem=calloc(1,argus_contain_footprint());
+        ArgusCore *core=NULL; ArgusContain *state=NULL;
+        CHECK(cmem&&smem&&argus_core_init(&core,cmem,argus_core_footprint())==ARGUS_OK);
+        CHECK(argus_contain_init(&state,smem,argus_contain_footprint())==ARGUS_OK);
+        size_t requested=0;
+        for(size_t i=0;i<n;i++) {
+            ArgusFinding cf[ARGUS_CORE_MAX_FINDINGS],xf[ARGUS_CORE_MAX_FINDINGS],all[ARGUS_CORE_MAX_FINDINGS*2];
+            ArgusContainmentRequest rq[4]; ArgusEvent pe[4]; size_t nc=0,nx=0,na=0,np=0;
+            int rc=argus_core_ingest(core,&stream[i],cf,ARGUS_CORE_MAX_FINDINGS,&nc);
+            CHECK(rc==ARGUS_OK || rc==ARGUS_ERR_FULL);
+            CHECK(argus_contain_observe(state,core,&stream[i],xf,ARGUS_CORE_MAX_FINDINGS,&nx)==ARGUS_OK);
+            for(size_t j=0;j<nc;j++) all[na++]=cf[j];
+            for(size_t j=0;j<nx;j++) all[na++]=xf[j];
+            CHECK(argus_contain_propose(state,core,all,na,&stream[i],rq,4,pe,4,&np)==ARGUS_OK);
+            requested+=np;
+            if(np) CHECK(rq[0].containment==expected[t] && (rq[0].flags&ARGUS_CREQ_SATURATION));
+        }
+        ArgusContainHealth h; argus_contain_health(state,&h);
+        CHECK(requested==1 && h.requested==1);
+        free(stream); free(smem); free(cmem);
+    }
+}
+
+static void corpus_churn_test(void)
+{
+    ArgusEvent stream[301]; size_t n=argus_corpus_authority_churn(stream,301,100,55);
+    CHECK(n==301);
+    for(size_t i=0;i<n;i++) CHECK(argus_event_validate(&stream[i])==ARGUS_OK);
+    void *cmem=calloc(1,argus_core_footprint()); ArgusCore *core=NULL;
+    CHECK(cmem&&argus_core_init(&core,cmem,argus_core_footprint())==ARGUS_OK);
+    for(size_t i=0;i<n;i++) { ArgusFinding f[ARGUS_CORE_MAX_FINDINGS]; size_t nf=0;
+        CHECK(argus_core_ingest(core,&stream[i],f,ARGUS_CORE_MAX_FINDINGS,&nf)==ARGUS_OK);
+        CHECK(nf==0);
+    }
+    free(cmem);
 }
 
 int main(void)
@@ -221,6 +333,13 @@ int main(void)
     np=0; CHECK(argus_contain_propose(deny_state,core,&f,1,&trigger,req,4,prop,4,&np)==ARGUS_OK && np==0);
     argus_contain_health(deny_state,&h); CHECK(h.suppressed_cooldown==1);
     free(deny_mem);
+
+    /* Lane E's 256-principal storm, cap-0 framing, four table saturation
+     * streams, and ordinary grant/use/revoke churn. */
+    corpus_storm_test();
+    corpus_cap0_test();
+    corpus_saturation_test();
+    corpus_churn_test();
 
     printf("ARGUS-1 containment: %d checks, %d failures; state bytes=%zu\n",checks,failures,argus_contain_footprint());
     free(smem); free(cmem); return failures?1:0;
