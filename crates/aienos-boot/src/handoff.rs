@@ -87,8 +87,11 @@ const PRE_EXIT_SAVED: u8 = 4;
 const EXIT_BOOT_SERVICES: u8 = 5;
 const VECTORS_INSTALLED: u8 = 6;
 const KERNEL_ENTERED: u8 = 7;
+#[allow(dead_code)]
 const SCREEN_DRAWN: u8 = 8;
+#[allow(dead_code)]
 const FINAL_SAVED: u8 = 9;
+#[allow(dead_code)]
 const UART_SENT: u8 = 10;
 const COUNTDOWN: u8 = 11;
 
@@ -516,6 +519,8 @@ fn on_fault(info: &FaultInfo) -> ! {
 }
 
 /// First-boot evidence image. Building it does not install or boot it.
+static mut HANDOFF_CONTEXT: Option<aienos_kernel::boot::KernelHandoffContext> = None;
+
 #[entry]
 fn main() -> Status {
     let uefi_entry_ticks = counter_ticks();
@@ -622,86 +627,29 @@ fn main() -> Status {
         counter_frequency_hz: FREQUENCY_HZ.load(Ordering::SeqCst),
     };
 
-    stage(KERNEL_ENTERED);
-    let (kernel_report, boot_ok) = aienos_kernel::boot::early_kernel_enter(
-        summary.conventional_kb(),
-        summary.largest,
-        Some(summary),
-        Some(timing),
+    let pre_transition_el = aienos_kernel::arch::aarch64::current_el();
+    let context = aienos_kernel::boot::KernelHandoffContext {
+        conventional_memory_kb: summary.conventional_kb(),
+        memory_region: summary.largest,
+        memory_map: Some(summary),
+        timing: Some(timing),
         gb10,
         cpu,
-    );
+        spcr_uart: acpi_facts.spcr.map(|s| s.kind()),
+        framebuffer,
+        pre_transition_el,
+        progress_saved: progress_saved.is_ok(),
+        pre_file_saved: pre_file.is_ok(),
+        restart_secs: restart_after_secs(),
+        commit: COMMIT,
+    };
 
-    let mut report = Report::new();
-    header(&mut report, "final");
-    write_index_line(&mut report);
-    let _ = write!(report, "{}", kernel_report.as_str());
-    match progress_saved {
-        Ok(_) => {
-            let _ = writeln!(report, "progress_record: saved");
-        }
-        Err(e) => {
-            let _ = writeln!(report, "progress_record: not saved ({e})");
-        }
+    stage(KERNEL_ENTERED);
+    unsafe {
+        HANDOFF_CONTEXT = Some(context);
+        let ctx_ptr = core::ptr::addr_of!(HANDOFF_CONTEXT) as *const aienos_kernel::boot::KernelHandoffContext;
+        let stack_base = core::ptr::addr_of_mut!(aienos_kernel::arch::EL1_BOOTSTRAP_STACK.0) as *mut u8;
+        let stack_top = stack_base.add(16384) as u64;
+        aienos_kernel::arch::el2_to_el1_transition(ctx_ptr, stack_top);
     }
-    match pre_file {
-        Ok(()) => {
-            let _ = writeln!(report, "pre_exit_file: saved");
-        }
-        Err(status) => {
-            let _ = writeln!(report, "pre_exit_file: not saved ({status:?})");
-        }
-    }
-
-    // Draw and send first, then record both outcomes in the saved report.
-    let mut screen = screen();
-    if let Some(s) = screen.as_mut() {
-        s.clear();
-        s.set_color(ACCENT);
-        let _ = writeln!(s, "AIENOS NATIVE BOOT REPORT");
-        s.set_color(FOREGROUND);
-        let _ = write!(s, "{}", report.as_str());
-        stage(SCREEN_DRAWN);
-    }
-    let uart = send_to_console(report.as_str());
-    stage(UART_SENT);
-
-    let mut outcomes = ReportBuf::<256>::new();
-    match framebuffer.filter(|_| screen.is_some()) {
-        Some(f) => {
-            let _ = writeln!(outcomes, "screen_report: drawn {}x{}", f.width, f.height);
-        }
-        None => {
-            let _ = writeln!(outcomes, "screen_report: unavailable");
-        }
-    }
-    let _ = writeln!(outcomes, "uart_report: {uart}");
-    let _ = write!(report, "{}", outcomes.as_str());
-    if report.truncated() {
-        let _ = writeln!(report, "truncated: yes");
-    }
-    if let Some(s) = screen.as_mut() {
-        let _ = write!(s, "{}", outcomes.as_str());
-    }
-
-    let saved = save_report_var(report.as_bytes());
-    stage(FINAL_SAVED);
-    if let Some(s) = screen.as_mut() {
-        match saved {
-            Ok(n) => {
-                let _ = writeln!(s, "nvram_report: saved (write {n} of {MAX_VAR_WRITES})");
-            }
-            Err(e) => {
-                let _ = writeln!(s, "nvram_report: not saved ({e})");
-            }
-        }
-    }
-
-    if !boot_ok {
-        if let Some(s) = screen.as_mut() {
-            s.set_color(ERROR);
-            let _ = writeln!(s, "boot halted: no usable memory region");
-        }
-    }
-    finish(screen)
 }

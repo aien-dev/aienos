@@ -7,6 +7,8 @@ use crate::arch::aarch64::{
     counter_ticks, current_el, disable_interrupts, dsb, halt, isb, midr_el1, midr_part, EarlyUart,
     SPARK_16550_UART_BASE,
 };
+use crate::console::EarlyConsole;
+use crate::display::{FramebufferInfo, Screen, ACCENT, ERROR, FOREGROUND};
 use crate::mem::{BitmapFrameAllocator, PhysAddr, PAGE_SIZE};
 use crate::report::ReportBuf;
 use crate::sync::spinlock::SpinLock;
@@ -191,6 +193,7 @@ pub struct BootFacts {
     /// MIDR of the core running the boot path.
     pub boot_midr: u64,
     pub exception_level: u8,
+    pub pre_transition_exception_level: Option<u8>,
 }
 
 /// Formats the report. Returns false if boot cannot continue (no allocator).
@@ -286,6 +289,9 @@ pub fn write_boot_report(out: &mut impl Write, facts: &BootFacts) -> bool {
             let _ = writeln!(out, "handoff_to_kernel_entry_ms: {ms}");
         }
     }
+    if let Some(pre_el) = facts.pre_transition_exception_level {
+        let _ = writeln!(out, "pre_transition_exception_level: EL{pre_el}");
+    }
     let _ = writeln!(out, "exception_level: EL{}", facts.exception_level);
     let _ = writeln!(out, "kernel: alive");
     true
@@ -301,6 +307,7 @@ pub fn early_kernel_enter(
     boot_timing: Option<BootTiming>,
     gb10: Option<aienos_accel::Gb10Identity>,
     cpu: Option<CpuTopology>,
+    pre_transition_el: Option<u8>,
 ) -> (BootReport, bool) {
     let kernel_entry_ticks = counter_ticks();
     disable_interrupts();
@@ -318,6 +325,7 @@ pub fn early_kernel_enter(
         cpu,
         boot_midr: midr_el1(),
         exception_level: current_el(),
+        pre_transition_exception_level: pre_transition_el,
     };
     let mut report = BootReport::new();
     let ok = write_boot_report(&mut report, &facts);
@@ -339,6 +347,7 @@ pub fn early_kernel_init_with_gpu(
         boot_timing,
         gb10,
         None,
+        None,
     );
     let uart = EarlyUart::new(SPARK_16550_UART_BASE);
     uart.write_str("\n");
@@ -347,6 +356,137 @@ pub fn early_kernel_init_with_gpu(
         uart.write_str("halt: clean\n");
     }
     halt();
+}
+
+
+/// One-way immutable context passed from EL2 bootstrap to EL1h kernel entry.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct KernelHandoffContext {
+    pub conventional_memory_kb: u64,
+    pub memory_region: Option<BootMemoryRegion>,
+    pub memory_map: Option<MemoryMapSummary>,
+    pub timing: Option<BootTiming>,
+    pub gb10: Option<aienos_accel::Gb10Identity>,
+    pub cpu: Option<CpuTopology>,
+    pub spcr_uart: Option<crate::acpi::UartKind>,
+    pub framebuffer: Option<FramebufferInfo>,
+    pub pre_transition_el: u8,
+    pub progress_saved: bool,
+    pub pre_file_saved: bool,
+    pub restart_secs: u64,
+    pub commit: &'static str,
+}
+
+/// Core kernel entry at EL1h following the EL2 to EL1h eret transition.
+/// Never returns.
+///
+/// # Safety
+///
+/// `context_ptr` must point to an initialized, valid `KernelHandoffContext`
+/// located in persistent memory that remains valid for kernel execution.
+#[no_mangle]
+pub unsafe extern "C" fn early_kernel_el1_enter(context_ptr: *const KernelHandoffContext) -> ! {
+    if context_ptr.is_null() {
+        crate::arch::aarch64::halt();
+    }
+    let context = unsafe { &*context_ptr };
+
+    // 1. Enter kernel core and initialize frame allocator
+    let (kernel_report, boot_ok) = early_kernel_enter(
+        context.conventional_memory_kb,
+        context.memory_region,
+        context.memory_map,
+        context.timing,
+        context.gb10,
+        context.cpu,
+        Some(context.pre_transition_el),
+    );
+
+    // 2. Assemble the final boot report
+    let mut report = crate::report::ReportBuf::<3072>::new();
+    let _ = writeln!(report, "report_version: 1");
+    let _ = writeln!(report, "aienos_commit: {}", context.commit);
+    let _ = writeln!(report, "report_kind: final");
+    let _ = writeln!(report, "last_stage: kernel_entered");
+    let _ = write!(report, "{}", kernel_report.as_str());
+    if context.progress_saved {
+        let _ = writeln!(report, "progress_record: saved");
+    } else {
+        let _ = writeln!(report, "progress_record: not saved");
+    }
+    if context.pre_file_saved {
+        let _ = writeln!(report, "pre_exit_file: saved");
+    } else {
+        let _ = writeln!(report, "pre_exit_file: not saved");
+    }
+
+    // 3. Render report to screen if framebuffer is available
+    let mut screen = context.framebuffer.and_then(|fb| unsafe { Screen::new(fb) });
+    if let Some(s) = screen.as_mut() {
+        s.clear();
+        s.set_color(ACCENT);
+        let _ = writeln!(s, "AIENOS NATIVE BOOT REPORT");
+        s.set_color(FOREGROUND);
+        let _ = write!(s, "{}", report.as_str());
+    }
+
+    // 4. Send report to serial console
+    let uart_status = match context.spcr_uart.and_then(EarlyConsole::from_kind) {
+        Some(console) => {
+            console.write_str("\n");
+            console.write_str(report.as_str());
+            if console.is_dead() {
+                "no response"
+            } else {
+                "sent"
+            }
+        }
+        None => "no drivable console",
+    };
+
+    // 5. Append screen and console outcomes
+    let mut outcomes = crate::report::ReportBuf::<256>::new();
+    match context.framebuffer.filter(|_| screen.is_some()) {
+        Some(f) => {
+            let _ = writeln!(outcomes, "screen_report: drawn {}x{}", f.width, f.height);
+        }
+        None => {
+            let _ = writeln!(outcomes, "screen_report: unavailable");
+        }
+    }
+    let _ = writeln!(outcomes, "uart_report: {uart_status}");
+    let _ = write!(report, "{}", outcomes.as_str());
+    if let Some(s) = screen.as_mut() {
+        let _ = write!(s, "{}", outcomes.as_str());
+    }
+    if let Some(console) = context.spcr_uart.and_then(EarlyConsole::from_kind) {
+        console.write_str(outcomes.as_str());
+    }
+
+    if !boot_ok {
+        if let Some(s) = screen.as_mut() {
+            s.set_color(ERROR);
+            let _ = writeln!(s, "boot halted: no usable memory region");
+        }
+    }
+
+    // 6. Countdown and reset
+    let hz = context.timing.map(|t| t.counter_frequency_hz).unwrap_or(0);
+    if let Some(s) = screen.as_mut() {
+        let _ = writeln!(s);
+        s.set_color(ACCENT);
+        for remaining in (1..=context.restart_secs).rev() {
+            s.clear_row();
+            let _ = write!(s, "restarting in {remaining} s");
+            crate::arch::aarch64::wait_seconds(1, hz);
+        }
+    } else {
+        crate::arch::aarch64::wait_seconds(context.restart_secs, hz);
+    }
+
+    crate::arch::aarch64::psci_system_reset();
+    crate::arch::aarch64::halt();
 }
 
 #[cfg(test)]
@@ -422,7 +562,8 @@ mod tests {
                 boot_class: Some(0),
             }),
             boot_midr: 0x410f_d870,
-            exception_level: 2,
+            exception_level: 1,
+            pre_transition_exception_level: Some(2),
         };
         let mut report = BootReport::new();
         assert!(write_boot_report(&mut report, &facts));
@@ -444,7 +585,8 @@ mod tests {
             "allocator_reserved_frame_phys: 0x10000000",
             "uefi_entry_to_handoff_ms: 1",
             "handoff_to_kernel_entry_ms: 2",
-            "exception_level: EL2",
+            "pre_transition_exception_level: EL2",
+            "exception_level: EL1",
             "kernel: alive",
         ] {
             assert!(
