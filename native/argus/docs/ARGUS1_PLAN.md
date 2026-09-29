@@ -9,11 +9,12 @@ Everything in C. No GPU use anywhere. Reports go to ~/workspace/argus-reports/<l
 1. ARGUS-0 closed: integrator round 3 finished on feat/argus-0 (WIP be2814d is unverified),
    ARGUS0_GATES.md written, draft PR open. Handoff rule: ARGUS-1 code only if all ARGUS-0 gates
    pass; otherwise spec only.
-2. Authority observer hook 12add16 (feat/capability-observer) merged to aienos main, or pinned
-   by commit as the base for lane G.
+2. DONE: authority observer hook 12add16 (feat/capability-observer) merged to aienos main
+   (d39dd5b); lane G bases on it.
 3. Record the ARGUS-0 closing commit hash + its Spark bench numbers: this is G8's baseline.
 4. Decisions D1-D5 answered (done 2026-09-29, spec section 0), then the spec commit (done).
-5. ARGUS_PERFORMANCE_GATE passes (FAIL at a64bc55: R8 wall +6.2%).
+5. ARGUS_PERFORMANCE_GATE: PASS-WITH-DOCUMENTED-LIMITS at omega cf6f45d (requires spare core;
+   unpinned FAIL). Was FAIL at a64bc55: R8 wall +6.2%.
 
 ## 1. Lanes
 

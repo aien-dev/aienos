@@ -39,6 +39,35 @@ LIB_OBJ = $(OUT)/obj/argus_event.o $(OUT)/obj/argus_ring.o $(OUT)/obj/argus_core
           $(OUT)/obj/argus_detect.o $(OUT)/obj/sha256.o
 LIB = $(OUT)/libargus.a
 
+# ---- ARGUS-1 lanes (docs/ARGUS1_PLAN.md) ------------------------------------
+# Lanes drop their files in without editing this Makefile. Every ARGUS-1 target is
+# guarded by $(wildcard ...): until its sources exist it prints "skipped" and passes.
+# Lane C: argus_contain.c/.h join libargus (and so the nm -u memory check, G7).
+CONTAIN_SRC := $(wildcard argus_contain.c)
+CONTAIN_HDR := $(wildcard argus_contain.h)
+LIB_SRC += $(CONTAIN_SRC)
+LIB_HDR += $(CONTAIN_HDR)
+LIB_OBJ += $(patsubst %.c,$(OUT)/obj/%.o,$(CONTAIN_SRC))
+# Lane G gate (native/capability) + lane X bridge: never part of libargus (the
+# hostile review links the archive alone and must not see any aienos_cap_* symbol).
+CAP_DIR = ../capability
+AUTH_SRC := $(wildcard $(CAP_DIR)/aienos_capability.c)
+GATE_SRC := $(wildcard $(CAP_DIR)/aienos_contain.c)
+BRIDGE_SRC := $(wildcard bridge/argus_aegis_bridge.c)
+BRIDGE_HDR := $(wildcard bridge/argus_aegis_bridge.h $(CAP_DIR)/aienos_contain.h $(CAP_DIR)/aienos_capability.h)
+# The full containment stack: present only when authority, gate and bridge all exist.
+STACK_SRC := $(if $(and $(AUTH_SRC),$(GATE_SRC),$(BRIDGE_SRC)),$(BRIDGE_SRC) $(GATE_SRC) $(AUTH_SRC))
+STACK_INC = -I. -Itests -Ibridge -I$(CAP_DIR)
+
+CONTAIN_TEST_SRC := $(wildcard tests/test_argus_contain.c)
+E2E_SRC          := $(wildcard tests/test_argus_containment_e2e.c)
+CHOSTILE_SRC     := $(wildcard tests/test_argus_contain_hostile.c)
+CBENCH_SRC       := $(wildcard tests/bench_argus_contain.c)
+CONTAIN_TEST = $(OUT)/test_argus_contain
+E2E          = $(OUT)/test_argus_containment_e2e
+CHOSTILE     = $(OUT)/test_argus_contain_hostile
+CBENCH       = $(OUT)/bench_argus_contain
+
 INT_SRC = tests/test_argus_integration.c tests/stub_state.c
 INT_HDR = tests/stub_state.h
 INT = $(OUT)/test_argus_integration
@@ -55,7 +84,8 @@ else
 LANE_B_SAN =
 endif
 
-.PHONY: all lib test test-lanes test-integration test-hostile bench sanitize clean
+.PHONY: all lib test test-lanes test-integration test-hostile bench sanitize clean \
+        test-argus1 test-contain test-e2e test-contain-hostile bench-contain sanitize-argus1
 
 all: lib
 lib: $(LIB)
@@ -85,7 +115,72 @@ $(OUT)/test_argus_integration_asan: $(INT_SRC) $(INT_HDR) $(LIB_SRC) $(LIB_HDR) 
 $(OUT)/test_argus_integration_tsan: $(INT_SRC) $(INT_HDR) $(LIB_SRC) $(LIB_HDR) | $(OUT)/obj
 	$(CC) $(CFLAGS) $(SANFLAGS_TSAN) -I. -Itests -pthread -o $@ $(INT_SRC) $(LIB_SRC)
 
-test: test-lanes test-integration test-hostile
+# ---- ARGUS-1 executables and targets (skipped until the lane's files exist) ----
+ifneq ($(CONTAIN_TEST_SRC),)
+$(CONTAIN_TEST): $(CONTAIN_TEST_SRC) tests/stub_state.c $(INT_HDR) $(LIB)
+	$(CC) $(CFLAGS) -I. -Itests -o $@ $(CONTAIN_TEST_SRC) tests/stub_state.c $(LIB)
+test-contain: $(CONTAIN_TEST)
+	./$(CONTAIN_TEST)
+else
+test-contain:
+	@echo "test-contain: skipped (tests/test_argus_contain.c not present yet, lane C)"
+endif
+
+ifneq ($(and $(E2E_SRC),$(STACK_SRC)),)
+$(E2E): $(E2E_SRC) $(STACK_SRC) $(BRIDGE_HDR) tests/stub_state.c $(INT_HDR) $(LIB)
+	$(CC) $(CFLAGS) $(STACK_INC) -pthread -o $@ $(E2E_SRC) $(STACK_SRC) tests/stub_state.c $(LIB)
+test-e2e: $(E2E)
+	./$(E2E)
+else
+test-e2e:
+	@echo "test-e2e: skipped (needs tests/test_argus_containment_e2e.c + bridge + gate, lanes X/G)"
+endif
+
+ifneq ($(and $(CHOSTILE_SRC),$(STACK_SRC)),)
+$(CHOSTILE): $(CHOSTILE_SRC) $(STACK_SRC) $(BRIDGE_HDR) tests/stub_state.c $(INT_HDR) $(LIB)
+	$(CC) $(CFLAGS) $(STACK_INC) -pthread -o $@ $(CHOSTILE_SRC) $(STACK_SRC) tests/stub_state.c $(LIB)
+test-contain-hostile: $(CHOSTILE)
+	./$(CHOSTILE)
+else
+test-contain-hostile:
+	@echo "test-contain-hostile: skipped (needs tests/test_argus_contain_hostile.c + bridge + gate, lanes H/X/G)"
+endif
+
+# Bench (lane F): never part of `make test`. Lane F takes ~/workspace/.argus-bench.lock and
+# refuses to start while ~/workspace/.spark-quiet exists.
+ifneq ($(and $(CBENCH_SRC),$(STACK_SRC)),)
+$(CBENCH): $(CBENCH_SRC) $(STACK_SRC) $(BRIDGE_HDR) tests/stub_state.c $(INT_HDR) $(LIB)
+	$(CC) $(CFLAGS) $(STACK_INC) -pthread -o $@ $(CBENCH_SRC) $(STACK_SRC) tests/stub_state.c $(LIB)
+bench-contain: $(CBENCH)
+	./$(CBENCH)
+else
+bench-contain:
+	@echo "bench-contain: skipped (needs tests/bench_argus_contain.c + bridge + gate, lane F)"
+endif
+
+test-argus1: test-contain test-e2e test-contain-hostile
+
+# Linux only (called from `sanitize`): lane C unit test under ASan+UBSan, e2e under
+# ASan+UBSan and TSan, containment hostile under ASan+UBSan. Library sources are
+# recompiled with the sanitizer, as for the ARGUS-0 integration binaries.
+sanitize-argus1:
+ifneq ($(CONTAIN_TEST_SRC),)
+	$(CC) $(CFLAGS) $(SANFLAGS_ASAN) -I. -Itests -o $(OUT)/test_argus_contain_asan $(CONTAIN_TEST_SRC) tests/stub_state.c $(LIB_SRC)
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 ./$(OUT)/test_argus_contain_asan
+endif
+ifneq ($(and $(E2E_SRC),$(STACK_SRC)),)
+	$(CC) $(CFLAGS) $(SANFLAGS_ASAN) $(STACK_INC) -pthread -o $(OUT)/test_argus_containment_e2e_asan $(E2E_SRC) $(STACK_SRC) tests/stub_state.c $(LIB_SRC)
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 ./$(OUT)/test_argus_containment_e2e_asan
+	$(CC) $(CFLAGS) $(SANFLAGS_TSAN) $(STACK_INC) -pthread -o $(OUT)/test_argus_containment_e2e_tsan $(E2E_SRC) $(STACK_SRC) tests/stub_state.c $(LIB_SRC)
+	TSAN_OPTIONS=halt_on_error=1 $(TSAN_RUN) ./$(OUT)/test_argus_containment_e2e_tsan
+endif
+ifneq ($(and $(CHOSTILE_SRC),$(STACK_SRC)),)
+	$(CC) $(CFLAGS) $(SANFLAGS_ASAN) $(STACK_INC) -pthread -o $(OUT)/test_argus_contain_hostile_asan $(CHOSTILE_SRC) $(STACK_SRC) tests/stub_state.c $(LIB_SRC)
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 ./$(OUT)/test_argus_contain_hostile_asan
+endif
+	@echo "sanitize-argus1: done (targets whose sources are absent were skipped)"
+
+test: test-lanes test-integration test-hostile test-argus1
 
 test-lanes:
 	$(MAKE) -f lane_b.mk $(SUBMAKE_VARS) $(LANE_B_SAN) LANE_B_OUT=$(OUT)/lane_b test-event fuzz-event test-ring
@@ -98,7 +193,7 @@ test-integration: $(INT)
 test-hostile: $(HOSTILE)
 	./$(HOSTILE)
 
-bench: $(INT)
+bench: $(INT) bench-contain
 	$(MAKE) -f lane_b.mk $(SUBMAKE_VARS) LANE_B_OUT=$(OUT)/lane_b bench-ring
 	./$(INT) --bench
 
@@ -114,6 +209,7 @@ sanitize: $(OUT)/test_argus_integration_asan $(OUT)/test_argus_integration_tsan 
 	TSAN_OPTIONS=halt_on_error=1 $(TSAN_RUN) ./$(OUT)/test_argus_integration_tsan $(LIB_OBJ)
 	$(MAKE) -f lane_b.mk $(SUBMAKE_VARS) LANE_B_OUT=$(OUT)/lane_b test-ring-tsan
 	$(MAKE) -f lane_e.mk $(SUBMAKE_VARS) OUT=$(OUT)/lane_e test-detect-asan
+	$(MAKE) sanitize-argus1
 endif
 
 clean:
