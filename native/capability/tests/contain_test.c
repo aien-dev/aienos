@@ -239,29 +239,31 @@ static void test_sha_and_encoding(void) {
     q.incident_id = 0x0102030405060708ull;
     q.containment = 1;
     q.severity = 4;
-    q.finding_code = 0x0B0A;
-    q.principal = 0x0F0E0D0C;
-    q.target.cap_id = 0x13121110;
-    q.target.generation = 0x1B1A191817161514ull;
-    memset(q.machine_id, 0x1C, 32);
-    memset(q.finding_digest, 0x3C, 32);
-    q.request_id = 0x6362616065646667ull;
-    q.finding_sequence = 0x7372717075767778ull;
-    q.target_object = 0x8B8A8988;
-    q.target_rights = 0x9392;
-    memset(q.target_digest, 0x74, 32);
-    q.flags = 0x0001;
+    q.finding_code = 0x0002;
+    q.principal = 0x21222324;
+    q.target.cap_id = 0x31;
+    q.target.generation = 0x4142434445464748ull;
+    for (int i = 0; i < 32; i++) {
+        q.machine_id[i] = (uint8_t)(0xA0 + i);
+        q.finding_digest[i] = (uint8_t)(0xC0 + i);
+        q.target_digest[i] = (uint8_t)(0xE0 - i);
+    }
+    q.request_id = 0x5152535455565758ull;
+    q.finding_sequence = 0x6162636465666768ull;
+    q.target_object = 0x71727374;
+    q.target_rights = 0x81828384;
+    q.flags = 0x0003;
     q.version = 2;
     uint8_t b[AIENOS_CONTAIN_REQUEST_SIZE];
     aienos_contain_request_encode(&q, b);
-    CHECK(b[0] == 0x08 && b[7] == 0x01 && b[8] == 1 && b[9] == 4 && b[10] == 0x0A && b[12] == 0x0C);
-    CHECK(b[16] == 0x10 && b[20] == 0x14 && b[27] == 0x1B && b[28] == 0x1C && b[59] == 0x1C);
-    CHECK(b[60] == 0x3C && b[91] == 0x3C && b[92] == 0x67 && b[100] == 0x78 && b[108] == 0x88);
-    CHECK(b[112] == 0x92 && b[116] == 0x74 && b[147] == 0x74 && b[148] == 1 && b[150] == 2 && b[151] == 0);
+    CHECK(b[0] == 0x08 && b[7] == 0x01 && b[8] == 1 && b[9] == 4 && b[10] == 2 && b[11] == 0);
+    CHECK(b[12] == 0x24 && b[15] == 0x21 && b[16] == 0x31 && b[20] == 0x48 && b[27] == 0x41);
+    CHECK(b[28] == 0xA0 && b[59] == 0xBF && b[60] == 0xC0 && b[91] == 0xDF);
+    CHECK(b[92] == 0x58 && b[99] == 0x51 && b[100] == 0x68 && b[107] == 0x61);
+    CHECK(b[108] == 0x74 && b[111] == 0x71 && b[112] == 0x84 && b[115] == 0x81);
+    CHECK(b[116] == 0xE0 && b[147] == 0xC1 && b[148] == 3 && b[150] == 2 && b[151] == 0);
     aienos_contain_request_digest(&q, d);
-    printf("KAT request digest (lane B cross-check): ");
-    for (int i = 0; i < 32; i++) printf("%02x", d[i]);
-    printf("\n");
+    CHECK(hex_eq(d, "e7b9720638cb215683fe4a5944efb630fa96a023d1afb7dd575ceebbed1204a6"));
 
     /* 10,000 random round trips, byte identical. */
     uint64_t s = 0x9E3779B97F4A7C15ull;
