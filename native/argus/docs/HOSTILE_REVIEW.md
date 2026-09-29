@@ -43,7 +43,7 @@ What changed in round 3:
 | # | Sev | Section | Status | What is still possible |
 |---|---|---|---|---|
 | 1 | HIGH | G-5 | OPEN, ABI v1 limit (EXPECTED-FAIL `unattributed_grant_masks_forged_use`) | No producer identity: anything that can push can announce a GRANTED that makes its own later use look legitimate. Mitigated only by the v1 trust boundary (push reachable only from AEGIS/runtime code). Producer attestation is ARGUS-3. |
-| 2 | MEDIUM | G-21 under G-5 | ABI v1 limit (EXPECTED-FAIL `replay_evades_by_rekeying_stream`, ruling c) | A byte replay with a different machine_id is a new sequence stream and escapes the replay check. Same root as #1. |
+| 2 | MEDIUM | G-21 under G-5 | WEAK, ABI v1 limit (EXPECTED-FAIL `replay_evades_by_rekeying_stream`, ruling c) | A byte replay with a different machine_id is a new sequence stream and escapes the replay check. Same root as #1. |
 | 3 | LOW | G-9 | WEAK, ABI v1 limit (EXPECTED-FAIL `provider_substitution_escapes_quarantine`) | A quarantined provider that reappears under a new digest is clean. |
 | 4 | LOW | G-21 / G-8 / G-20 | WEAK, bounded, loud once per table | Streams beyond the 256-entry producer table are replay-blind; a machine beyond the 64-entry table cannot carry a quarantine (its use is still code 7); any full table stops mirroring new entries (one CRITICAL, then counted). |
 | 5 | LOW | G-12 | WEAK, unchanged | Two opaque 32-byte slots can carry a secret; the guard must be producer-side. |

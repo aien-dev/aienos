@@ -8,6 +8,8 @@ copies the evidence, it does not replace it.
 Code commit measured: **`b375dca`** on `feat/argus-0` (header `argus_abi.h` v1.1 =
 `398cfb9`, byte-identical since; round-3 code commits `df27200`, `62e5163`, `ee87069`).
 Measured 2026-09-29 00:15-00:20 CDT.
+Re-run 2026-09-29 00:31 CDT on the Spark at `a77ce9d` plus the reconcile docs commit (code
+unchanged): `make test` exit 0, every gate line and the hostile summary identical.
 
 Environments:
 - **Spark**: NVIDIA DGX Spark, aarch64, Linux 7.0.0-1019-nvidia, gcc 13.3.0 (Ubuntu
@@ -35,7 +37,7 @@ Commands (from the repository root):
 | ARGUS_FALSE_POSITIVE_BASELINE_PASS | A benign synthetic corpus (9 seeds x 5000 events, all v1.1 kinds incl. USE_SUMMARY, per-store Worlds) produces zero findings through the real core. Synthetic only: the live omega baseline is part of RUNTIME_INTEGRATION. | `make test`: integration gate | **PASS**. 45,000 events, findings per seed [0,0,0,0,0,0,0,0,0], total 0; FULL 0. | `b375dca` | Spark + Mac |
 | ARGUS_RUNTIME_INTEGRATION_PASS | ARGUS runs inside the live AIEN runtime: the omega producer emits real events from AEGIS/runtime hooks, the consumer ingests them, the omega regression tests still pass, and a normal run yields no unexplained findings. | measured by omega producer lane, see `feat/argus-producer` (aien-dev/omega) | **PENDING (orchestrator fills)**: `<result, commit, env from the omega producer lane>` | `<omega commit>` | `<env>` |
 | ARGUS_PERFORMANCE_GATE_PASS | ARGUS adds acceptable overhead to the runtime hot path (micro-op and R8 wall clock) against the brief's budget. Isolated ARGUS micro-numbers below are context, not this gate. | measured by omega producer lane, see `feat/argus-producer` (aien-dev/omega) | **PENDING (orchestrator fills)**: `<result from the omega producer lane>`. Note: the first producer measurement (pre-redesign, lane H `527a721`) was a **FAIL** (-60% ops/s at RX_ARGUS=1); the v1.1 "emit on transition, count on use" redesign is what is being re-measured. A blank here does not mean "probably fine". | `<omega commit>` | `<env>` |
-| ARGUS_HOSTILE_REVIEW_PASS | See the definition below the table. | `make test` (and `make sanitize`): `test_argus_hostile` + `docs/HOSTILE_REVIEW.md` | **PASS-WITH-DOCUMENTED-LIMITS** (not a bare PASS). 63 tests: 58 defended, 3 expected-fail, 2 N/A-v1, 0 xpass, 0 unexpected; sections DEFENDED 20, WEAK 3, OPEN 2, N/A-v1 1. Limits listed below. | `b375dca` | Spark (+ASan/UBSan) + Mac |
+| ARGUS_HOSTILE_REVIEW_PASS | See the definition below the table. | `make test` (and `make sanitize`): `test_argus_hostile` + `docs/HOSTILE_REVIEW.md` | **PASS-WITH-DOCUMENTED-LIMITS** (not a bare PASS). 63 tests: 58 defended, 3 expected-fail, 2 N/A-v1, 0 xpass, 0 unexpected; sections DEFENDED 20, WEAK 4, OPEN 1, N/A-v1 1 (OPEN: G-5; WEAK: G-9, G-12, G-17, G-21; N/A-v1: G-6; counted from the section verdicts in `HOSTILE_REVIEW.md`, the test prints per-test verdicts only). Limits listed below. | `b375dca` | Spark (+ASan/UBSan) + Mac |
 
 Extra (not a brief gate, printed by the same run): `ARGUS_MEMORY` **PASS**. Core footprint
 60,296 B, ring(1024) 131,456 B (128 B per slot); library objects import no heap, I/O or
@@ -68,7 +70,7 @@ Documented limits (all ABI v1 or design limits, none a code bug):
    identity in ABI v1; any pusher can pre-announce a GRANTED. Mitigation: the ring is inside
    the trusted process boundary (AEGIS/runtime code only). Closes with producer attestation
    (ARGUS-3).
-2. EXPECTED-FAIL `replay_evades_by_rekeying_stream`: G-21, OPEN under G-5 (MEDIUM). A byte
+2. EXPECTED-FAIL `replay_evades_by_rekeying_stream`: G-21, WEAK (MEDIUM; this rekey variant is the G-5 ABI v1 limit). A byte
    replay under another machine_id/stream id is a new stream. Same root and milestone as 1.
 3. EXPECTED-FAIL `provider_substitution_escapes_quarantine`: G-9, WEAK (LOW). No stable
    provider identity in v1 (no C provider registry: N/A-ARGUS-0).
