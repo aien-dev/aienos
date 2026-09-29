@@ -10,7 +10,7 @@
  * Rules fixed by this header (see docs/adr/0017 in aien-architecture):
  *   - C only, freestanding-friendly: <stdint.h>/<stddef.h> only, no libc I/O.
  *   - Fixed 128-byte event, version byte first, no pointers, no variable
- *     length fields, no field sized like a token. Digests only.
+ *     length fields, no secret-sized field. Digests only.
  *   - Deterministic: no wall clock in any hashed field. Time = sequence +
  *     the authority's logical tick (aienos_cap_clock).
  *   - Capability reference = AienosCapRef layout (u32 id, u64 generation).
@@ -20,8 +20,19 @@
  *     rx_generation id. Object generation, when needed, travels in `resource`.
  *   - MachineId is a PROVISIONAL opaque 32-byte slot. Fabric identity is not
  *     designed here (cryptographic identity is on the operator's escalation list).
- *   - A Finding is evidence, never authority. A ContainmentRequest is a
+ *    - A Finding is evidence, never authority. A ContainmentRequest is a
  *     proposal to AEGIS, never an action.
+ *   - Conventions fixed at integration (lanes B/D/E agree):
+ *     CAPABILITY_GRANTED: `resource` = authority resource, `object_id` = rights
+ *       mask (AIENOS_CAP_RIGHT_*), `principal` = subject.
+ *     Producer sequence streams are keyed by (machine_id, CONSUMER flag bit);
+ *       the core reports a repeat/decrease as ARGUS_F_SEQUENCE_ANOMALY and
+ *       still applies the event. ARGUS_ERR_SEQUENCE is reserved for producers/ring.
+ *     argus_event_encode and argus_chain_extend never validate their input
+ *       (the core reuses chain_extend for its state digest); only decode/validate do.
+ *     argus_core_ingest may return ARGUS_ERR_FULL or ARGUS_ERR_OVERFLOW after the
+ *       event has already been applied; MALFORMED means nothing was applied.
+ *     Detectors never raise ARGUS_F_TELEMETRY_LOSS for TELEMETRY_DROPPED; the core does.
  *
  * Wire encoding (argus_event_encode/decode): each field in the order below,
  * little-endian, packed to exactly ARGUS_EVENT_SIZE bytes, offsets as noted.

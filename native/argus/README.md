@@ -10,5 +10,6 @@ hard-invariant detectors, findings.
 `argus_detect.c` (hard invariants). `tests/` hold each lane's tests and the
 integration and determinism tests. Design: aien-architecture ADR 0017.
 
-Rule enforced by test: the words `token` and `AIENOS_CAP_TOKEN_LEN` never
-appear under `native/argus/`, and no event field is token-sized except digests.
+Rule enforced by test: the authority secret-word and its length macro never
+appear under `native/argus/` (see lane B secret-negative test), and no event
+field is secret-sized except digests.
