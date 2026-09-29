@@ -43,6 +43,9 @@
 #define H_PRODUCERS  256u
 #define H_INCIDENTS  256u
 #define H_LEASES     256u
+#define H_ARTIFACTS  256u
+#define H_PROVIDERS  32u
+#define H_WORLDS     8u     /* ARGUS_WORLD_STORES (v1.1 per-store shadows) */
 
 /* A kind value outside ABI v1. argus_event_min_class() returns 0 for it, so the
  * ring (transport only) accepts it at any class, while the core's validate
@@ -153,6 +156,7 @@ static ArgusEvent ev0(uint16_t kind)
     e.effect_class = ARGUS_EFFECT_NONE;
     e.outcome = ARGUS_OUTCOME_OK;
     e.flags = ARGUS_FLAG_SYNTHETIC;
+    e.cap_id = ARGUS_CAP_NONE;          /* v1.1: cap 0 is the office capability; "none" is CAP_NONE */
     return e;
 }
 
@@ -500,7 +504,7 @@ static void t_unattributed_grant_masks_forged_use(void)
 static void t_sequence_replay_flagged(void)
 {
     H h; h_new(&h);
-    ArgusEvent e = use(0, 0, 7, ARGUS_OUTCOME_DENIED, 0);
+    ArgusEvent e = use(ARGUS_CAP_NONE, 0, 7, ARGUS_OUTCOME_DENIED, 0);
     e.sequence = 5; feed(&h, &e);
     ArgusEvent r = e; feed(&h, &r);
     result("sequence_replay_flagged",
@@ -515,7 +519,7 @@ static void t_sequence_replay_flagged(void)
 static void t_sequence_high_water_poison(void)
 {
     H h; h_new(&h);
-    ArgusEvent e = use(0, 0, 7, ARGUS_OUTCOME_DENIED, 0);
+    ArgusEvent e = use(ARGUS_CAP_NONE, 0, 7, ARGUS_OUTCOME_DENIED, 0);
     e.sequence = 1; feed(&h, &e);
     e.sequence = UINT64_MAX; feed(&h, &e);
     size_t on_poison = h.n;
@@ -529,16 +533,17 @@ static void t_sequence_high_water_poison(void)
     h_free(&h);
 }
 
-/* EXPECTED-FAIL, still OPEN, no ruling (the core documents "gaps are not
- * findings"; G-6, OPEN): omission. A producer stream jumping from 1 to
- * 100 with no TELEMETRY_DROPPED in between is not reported. */
+/* N/A-v1 (round-2 ruling c; G-6): a producer stream jumping from 1 to 100 with
+ * no TELEMETRY_DROPPED in between is not reported. Gaps are legitimate in v1:
+ * ring refusals leave them by design, and the drop report travels on its own
+ * stream. Documented limit, exempt from the exit code. */
 static void t_sequence_gap_unflagged(void)
 {
     H h; h_new(&h);
-    ArgusEvent e = use(0, 0, 7, ARGUS_OUTCOME_DENIED, 0);
+    ArgusEvent e = use(ARGUS_CAP_NONE, 0, 7, ARGUS_OUTCOME_DENIED, 0);
     e.sequence = 1; feed(&h, &e);
     e.sequence = 100; feed(&h, &e);
-    result("sequence_gap_unflagged", h.n > 0, EXPECT_FAIL, "gaps are not detected; only repeats/decreases are");
+    result("sequence_gap_unflagged", h.n > 0, NA_V1, "gaps are legitimate ring refusals in v1; only repeats/decreases are findings (ruling c)");
     h_free(&h);
 }
 
@@ -559,7 +564,7 @@ static void t_replay_rekeyed_by_consumer_flag(void)
     h_free(&h);
 }
 
-/* EXPECTED-FAIL, still OPEN, no ruling (G-21 second variant): a byte replay
+/* EXPECTED-FAIL under G-5 (round-2 ruling c; G-21 second variant): a byte replay
  * escapes the sequence check by re-keying the stream with another machine_id.
  * Same root as G-5: ABI v1 has no producer identity, so the stream key is
  * chosen by the sender. (Attribution by the machine table does not help for
@@ -573,7 +578,7 @@ static void t_replay_evades_by_rekeying_stream(void)
     mid(r.machine_id, 4242);                              /* new stream, same sequence */
     feed(&h, &r);
     result("replay_evades_by_rekeying_stream", count(&h, ARGUS_F_SEQUENCE_ANOMALY) > 0, EXPECT_FAIL,
-           "stream key (machine_id) is chosen by the sender");
+           "G-5: no producer identity in ABI v1; the stream key (machine_id) is chosen by the sender");
     h_free(&h);
 }
 
@@ -591,7 +596,7 @@ static void t_producer_table_exhaustion(void)
     H h; h_new(&h);
     int ok = 1;
     for (uint32_t m = 0; m < H_PRODUCERS; m++) {         /* fill exactly */
-        ArgusEvent e = use(0, 0, 7, ARGUS_OUTCOME_DENIED, 0);
+        ArgusEvent e = use(ARGUS_CAP_NONE, 0, 7, ARGUS_OUTCOME_DENIED, 0);
         mid(e.machine_id, 1000u + m);
         feed(&h, &e);
         if (h.rc != ARGUS_OK || count(&h, ARGUS_F_TELEMETRY_LOSS) != 0)
@@ -601,7 +606,7 @@ static void t_producer_table_exhaustion(void)
     argus_core_health(h.c, &before);
     int first_loud = 0, later_quiet = 1;
     for (uint32_t m = 0; m < 8u; m++) {                  /* overshoot */
-        ArgusEvent e = use(0, 0, 7, ARGUS_OUTCOME_DENIED, 0);
+        ArgusEvent e = use(ARGUS_CAP_NONE, 0, 7, ARGUS_OUTCOME_DENIED, 0);
         mid(e.machine_id, 1000u + H_PRODUCERS + m);
         feed(&h, &e);
         if (m == 0)
@@ -629,7 +634,7 @@ static void t_quarantined_machine_use_flagged(void)
     H h; h_new(&h);
     ArgusEvent e = machine_ev(ARGUS_EV_MACHINE_JOINED, 3, 0); feed(&h, &e);
     e = machine_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, 3, ARGUS_TRUST_QUARANTINED); feed(&h, &e);
-    e = use(0, 0, 7, ARGUS_OUTCOME_OK, 0); mid(e.machine_id, 3); feed(&h, &e);
+    e = use(ARGUS_CAP_NONE, 0, 7, ARGUS_OUTCOME_OK, 0); mid(e.machine_id, 3); feed(&h, &e);
     result("quarantined_machine_use_flagged", count(&h, ARGUS_F_QUARANTINED_USE) == 1, EXPECT_DEFENDED,
            "use by a quarantined machine not reported");
     h_free(&h);
@@ -647,7 +652,7 @@ static void t_quarantine_laundered_by_remove_rejoin(void)
     size_t n_removed = h.n;
     e = machine_ev(ARGUS_EV_MACHINE_JOINED, 3, 0); feed(&h, &e);
     size_t n_rejoin = h.n;
-    e = use(0, 0, 7, ARGUS_OUTCOME_OK, 0); mid(e.machine_id, 3); feed(&h, &e);
+    e = use(ARGUS_CAP_NONE, 0, 7, ARGUS_OUTCOME_OK, 0); mid(e.machine_id, 3); feed(&h, &e);
     int defended = n_removed + n_rejoin > 0 || count(&h, ARGUS_F_QUARANTINED_USE) > 0;
     result("quarantine_laundered_by_remove_rejoin", defended, EXPECT_DEFENDED,
            "MACHINE_REMOVED deletes the quarantined entry; rejoin starts clean");
@@ -664,7 +669,7 @@ static void t_quarantined_machine_self_upgrades(void)
     e = machine_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, 3, ARGUS_TRUST_QUARANTINED); feed(&h, &e);
     e = machine_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, 3, ARGUS_TRUST_TRUSTED); feed(&h, &e);
     size_t on_upgrade = h.n;
-    e = use(0, 0, 7, ARGUS_OUTCOME_OK, 0); mid(e.machine_id, 3); feed(&h, &e);
+    e = use(ARGUS_CAP_NONE, 0, 7, ARGUS_OUTCOME_OK, 0); mid(e.machine_id, 3); feed(&h, &e);
     result("quarantined_machine_self_upgrades", on_upgrade + h.n > 0, EXPECT_DEFENDED,
            "no reporter/subject split; QUARANTINED -> TRUSTED accepted from anyone");
     h_free(&h);
@@ -692,7 +697,7 @@ static void t_trust_before_join_bricks_machine(void)
     H h; h_new(&h);
     ArgusEvent e = machine_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, 3, ARGUS_TRUST_OBSERVED); feed(&h, &e);
     e = machine_ev(ARGUS_EV_MACHINE_JOINED, 3, 0); feed(&h, &e);
-    e = use(0, 0, 7, ARGUS_OUTCOME_OK, 0); mid(e.machine_id, 3); feed(&h, &e);
+    e = use(ARGUS_CAP_NONE, 0, 7, ARGUS_OUTCOME_OK, 0); mid(e.machine_id, 3); feed(&h, &e);
     result("trust_before_join_bricks_machine", count(&h, ARGUS_F_MACHINE_IDENTITY_MISMATCH) == 0, EXPECT_DEFENDED,
            "pre-join TRUST_CHANGED leaves joined_sequence 0 permanently");
     h_free(&h);
@@ -735,11 +740,17 @@ static void t_machine_table_exhaustion_hides_quarantine(void)
     }
     ArgusEvent e = machine_ev(ARGUS_EV_MACHINE_JOINED, 3, 0); feed(&h, &e);   /* 65th */
     int loud = h.rc == ARGUS_ERR_FULL && count(&h, ARGUS_F_TELEMETRY_LOSS) == 1;
+    /* ruling (a): the NEXT overflow of the same table is ERR_FULL, no finding, counted */
+    ArgusCoreHealth h0, h1; argus_core_health(h.c, &h0);
+    e = machine_ev(ARGUS_EV_MACHINE_JOINED, 4, 0); feed(&h, &e);                 /* 66th */
+    argus_core_health(h.c, &h1);
+    int quiet = h.rc == ARGUS_ERR_FULL && count(&h, ARGUS_F_TELEMETRY_LOSS) == 0 &&
+                h1.tables_full == h0.tables_full + 1 && h1.events_not_applied == h0.events_not_applied + 1;
     e = machine_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, 3, ARGUS_TRUST_QUARANTINED); feed(&h, &e);
-    e = use(0, 0, 7, ARGUS_OUTCOME_OK, 0); mid(e.machine_id, 3); feed(&h, &e);
+    e = use(ARGUS_CAP_NONE, 0, 7, ARGUS_OUTCOME_OK, 0); mid(e.machine_id, 3); feed(&h, &e);
     int flagged = count(&h, ARGUS_F_QUARANTINED_USE) + count(&h, ARGUS_F_MACHINE_IDENTITY_MISMATCH) > 0;
-    result("machine_table_exhaustion_hides_quarantine", fill_ok && loud && flagged, EXPECT_DEFENDED,
-           "machine table (64) full: overflow silent or later use unflagged");
+    result("machine_table_exhaustion_hides_quarantine", fill_ok && loud && quiet && flagged, EXPECT_DEFENDED,
+           "machine table (64) full: first overflow not loud, later overflow not counted, or later use unflagged");
     h_free(&h);
 }
 
@@ -753,11 +764,14 @@ static void t_zero_machine_id_escapes_attribution(void)
     H h; h_new(&h);
     ArgusEvent e = machine_ev(ARGUS_EV_MACHINE_JOINED, 3, 0); feed(&h, &e);
     e = machine_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, 3, ARGUS_TRUST_QUARANTINED); feed(&h, &e);
-    e = use(0, 0, 7, ARGUS_OUTCOME_OK, 0);                 /* machine_id all zero */
+    e = use(ARGUS_CAP_NONE, 0, 7, ARGUS_OUTCOME_OK, 0);                 /* machine_id all zero */
     e.flags = 0;   /* ruled: the zero-machine rule exempts SYNTHETIC/CONSUMER events */
     feed(&h, &e);
-    result("zero_machine_id_escapes_attribution", h.n > 0, EXPECT_DEFENDED,
-           "zero machine_id means 'not attributed' and never triggers");
+    /* round 3: defended only for the RIGHT reason, the zero-machine rule (code 7);
+     * with v1.1 cap 0 is a real (ungranted) slot, so a use of cap 0 would pass via
+     * code 1 (forged) instead. The use carries ARGUS_CAP_NONE. */
+    result("zero_machine_id_escapes_attribution", count(&h, ARGUS_F_MACHINE_IDENTITY_MISMATCH) > 0, EXPECT_DEFENDED,
+           "zero machine_id means 'not attributed' and never triggers code 7");
     h_free(&h);
 }
 
@@ -846,8 +860,66 @@ static void t_lease_table_exhaustion(void)
     ArgusEvent e = ev0(ARGUS_EV_CREDENTIAL_LEASE_CREATED);
     e.object_id = 1000u + H_LEASES; e.principal = 7; e.resource = 0x1; feed(&h, &e);
     int loud = h.rc == ARGUS_ERR_FULL && count(&h, ARGUS_F_TELEMETRY_LOSS) == 1;
-    result("lease_table_exhaustion", fill_ok && loud, EXPECT_DEFENDED,
-           "lease table (256) overflow not loud");
+    ArgusCoreHealth h0, h1; argus_core_health(h.c, &h0);
+    e = ev0(ARGUS_EV_CREDENTIAL_LEASE_CREATED);
+    e.object_id = 1001u + H_LEASES; e.principal = 7; e.resource = 0x1; feed(&h, &e);
+    argus_core_health(h.c, &h1);
+    int quiet = h.rc == ARGUS_ERR_FULL && h.n == 0 &&
+                h1.tables_full == h0.tables_full + 1 && h1.events_not_applied == h0.events_not_applied + 1;
+    result("lease_table_exhaustion", fill_ok && loud && quiet, EXPECT_DEFENDED,
+           "lease table (256): first overflow not loud, or a later one not quiet+counted (ruling a)");
+    h_free(&h);
+}
+
+/* Ruling (a), round 3: "loud once" holds for EVERY shadow table. Providers (32),
+ * artifacts (256) and World stores (8) are each filled exactly in ONE core;
+ * each table's FIRST overflow returns ERR_FULL + exactly one CRITICAL
+ * TELEMETRY_LOSS (so it is per table, not a global once), its second overflow
+ * returns ERR_FULL with no finding, and every overflow counts in tables_full
+ * and events_not_applied. */
+static ArgusEvent world(uint64_t gen, uint32_t d);
+
+static int overflow_twice(H *h, ArgusEvent *a, ArgusEvent *b)
+{
+    ArgusCoreHealth h0, h1;
+    argus_core_health(h->c, &h0);
+    feed(h, a);
+    int loud = h->rc == ARGUS_ERR_FULL && h->n == 1 && h->f[0].code == ARGUS_F_TELEMETRY_LOSS &&
+               h->f[0].severity == ARGUS_SEV_CRITICAL;
+    feed(h, b);
+    int quiet = h->rc == ARGUS_ERR_FULL && h->n == 0;
+    argus_core_health(h->c, &h1);
+    return loud && quiet && h1.tables_full == h0.tables_full + 2 && h1.events_not_applied == h0.events_not_applied + 2;
+}
+
+static void t_every_table_loud_once(void)
+{
+    H h; h_new(&h);
+    int fill_ok = 1;
+    ArgusEvent e, a, b;
+    for (uint32_t i = 0; i < H_PROVIDERS; i++) {
+        e = ev0(ARGUS_EV_PROVIDER_DISCOVERED); dg(e.evidence_digest, 5000u + i); feed(&h, &e);
+        if (h.rc != ARGUS_OK) fill_ok = 0;
+    }
+    a = ev0(ARGUS_EV_PROVIDER_DISCOVERED); dg(a.evidence_digest, 5900u);
+    b = ev0(ARGUS_EV_PROVIDER_QUARANTINED); dg(b.evidence_digest, 5901u);
+    int prov = overflow_twice(&h, &a, &b);
+    for (uint32_t i = 0; i < H_ARTIFACTS; i++) {
+        e = ev0(ARGUS_EV_ARTIFACT_ADMITTED); dg(e.evidence_digest, 6000u + i); feed(&h, &e);
+        if (h.rc != ARGUS_OK) fill_ok = 0;
+    }
+    a = ev0(ARGUS_EV_ARTIFACT_ADMITTED); dg(a.evidence_digest, 6900u);
+    b = ev0(ARGUS_EV_ARTIFACT_REJECTED); dg(b.evidence_digest, 6901u);
+    int art = overflow_twice(&h, &a, &b);
+    for (uint32_t s = 0; s < H_WORLDS; s++) {
+        e = world(1, 7000u + s); e.object_id = 10u + s; feed(&h, &e);
+        if (h.rc != ARGUS_OK) fill_ok = 0;
+    }
+    a = world(1, 7900u); a.object_id = 90u;
+    b = world(1, 7901u); b.object_id = 91u;
+    int wor = overflow_twice(&h, &a, &b);
+    result("every_table_loud_once", fill_ok && prov && art && wor, EXPECT_DEFENDED,
+           "a table overflow is silent, repeats its CRITICAL per event, or is not counted (ruling a)");
     h_free(&h);
 }
 
@@ -903,7 +975,7 @@ static void t_world_inconsistent_commit_adopted(void)
     e = world(2, 2); feed(&h, &e);
     int legit_flagged = count(&h, ARGUS_F_WORLD_PROVENANCE_INCONSISTENT) > 0;
     ArgusWorldShadow w;
-    int frozen = argus_core_ops()->world(argus_core_view(h.c), &w) == ARGUS_OK && w.generation == UINT64_MAX;
+    int frozen = argus_core_ops()->world(argus_core_view(h.c), 0, &w) == ARGUS_OK && w.generation == UINT64_MAX;
     result("world_inconsistent_commit_adopted", !legit_flagged && !frozen, EXPECT_DEFENDED,
            "apply keeps any higher generation even when detector 9 fired");
     h_free(&h);
@@ -1257,7 +1329,7 @@ static size_t build_stream(ArgusEvent *s)
     { ArgusEvent e = ev0(ARGUS_EV_SIGNATURE_FAILURE); e.principal = 8; PUSH(e); }
     { ArgusEvent e = ev0(ARGUS_EV_CREDENTIAL_LEASE_CREATED); e.object_id = 11; e.principal = 7; e.resource = 1; PUSH(e); }
     { ArgusEvent e = ev0(ARGUS_EV_CREDENTIAL_LEASE_USED); e.object_id = 11; e.principal = 9; e.resource = 1; PUSH(e); }
-    { ArgusEvent e = use(0, 0, 7, ARGUS_OUTCOME_OK, 0); mid(e.machine_id, 77); PUSH(e); }  /* unknown machine */
+    { ArgusEvent e = use(ARGUS_CAP_NONE, 0, 7, ARGUS_OUTCOME_OK, 0); mid(e.machine_id, 77); PUSH(e); }  /* unknown machine */
     { ArgusEvent e = ev0(ARGUS_EV_TELEMETRY_DROPPED); e.flags = ARGUS_FLAG_CONSUMER; e.object_id = 1; e.resource = 2; PUSH(e); }
 #undef PUSH
     s[n] = s[1];                                                     /* exact replay */
@@ -1501,6 +1573,7 @@ int main(void)
     t_lease_other_subject_flagged();
     t_lease_recreate_hijacks_subject();
     t_lease_table_exhaustion();
+    t_every_table_loud_once();
     t_world_skip_flagged();
     t_world_same_generation_conflict_flagged();
     t_world_inconsistent_commit_adopted();

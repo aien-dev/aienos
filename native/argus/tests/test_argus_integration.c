@@ -519,6 +519,7 @@ static ArgusEvent flood_event(uint64_t seq, uint8_t cls)
     e.tick = seq;
     e.principal = 1;
     e.code = -7;   /* authority: rights */
+    e.cap_id = ARGUS_CAP_NONE;   /* v1.1: no capability (cap 0 is the office slot) */
     return e;
 }
 
@@ -716,25 +717,28 @@ static void gate_determinism(void)
 
 /* ======================================================================= */
 /* sequence analysis for code 12: streams keyed like the core,              */
-/* (machine_id, CONSUMER bit)                                               */
+/* (machine_id, ARGUS_STREAM_OF(flags), CONSUMER bit)  (v1.1)                */
 /* ======================================================================= */
 static int per_stream_strictly_increasing(const ArgusEvent *ev, size_t n, size_t *streams)
 {
     enum { MAXS = 4096 };
     static uint8_t ids[MAXS][ARGUS_MACHINE_ID_LEN];
     static uint8_t cons[MAXS];
+    static uint16_t strm[MAXS];
     static uint64_t last[MAXS];
     size_t ns = 0;
     int ok = 1;
     for (size_t i = 0; i < n; i++) {
         uint8_t cb = (ev[i].flags & ARGUS_FLAG_CONSUMER) ? 1 : 0;
+        uint16_t st = ARGUS_STREAM_OF(ev[i].flags);
         size_t k;
         for (k = 0; k < ns; k++)
-            if (cons[k] == cb && memcmp(ids[k], ev[i].machine_id, ARGUS_MACHINE_ID_LEN) == 0) break;
+            if (cons[k] == cb && strm[k] == st && memcmp(ids[k], ev[i].machine_id, ARGUS_MACHINE_ID_LEN) == 0) break;
         if (k == ns) {
             if (ns == MAXS) return -1;
             memcpy(ids[ns], ev[i].machine_id, ARGUS_MACHINE_ID_LEN);
             cons[ns] = cb;
+            strm[ns] = st;
             last[ns] = ev[i].sequence;
             ns++;
             continue;
@@ -876,7 +880,7 @@ static void gate_hard_invariants(void)
          !missing && unexpected_hard == 0 && seq_ok && loss11 == 0 && direct_h.rc_full == 0 && direct_h.rc_overflow == 0,
          "real core + real detectors, hostile seed 1: code detected/expected [%s]; all %zu injected found=%d; "
          "unexpected hard (1..16 except 11/12) %llu; code 12 findings %llu (corpus sequences strictly increasing per "
-         "(machine_id,consumer) stream: %s, %zu streams); code 11 findings %llu; ingest rc FULL %llu OVERFLOW %llu",
+         "(machine_id,stream,consumer) stream: %s, %zu streams); code 11 findings %llu; ingest rc FULL %llu OVERFLOW %llu",
          table, n_expect, !missing, (unsigned long long)unexpected_hard, (unsigned long long)seq12,
          incr == 1 ? "yes" : incr == 0 ? "NO" : "unknown", streams, (unsigned long long)loss11,
          (unsigned long long)direct_h.rc_full, (unsigned long long)direct_h.rc_overflow);
