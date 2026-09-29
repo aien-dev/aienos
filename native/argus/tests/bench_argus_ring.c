@@ -18,7 +18,6 @@
 #include <string.h>
 #include <time.h>
 
-uint32_t argus_ring_saturation_point(uint32_t capacity_pow2, uint8_t class_);   /* proposed for argus_abi.h */
 
 #define CAP 4096u
 #define SAMPLES 200000u
@@ -58,11 +57,19 @@ static ArgusRing *new_ring(uint32_t cap, void **mem)
     return r;
 }
 
+/* A kind whose class floor admits cls (0x7FFF: no v1 kind, so no floor at the ring;
+ * no v1 kind may be INFORMATIONAL, the watermark is kept for future kinds). */
+static uint16_t kind_for(uint8_t cls)
+{
+    return cls == 1 ? ARGUS_EV_FORGED_CAPABILITY : cls == 2 ? ARGUS_EV_CAPABILITY_DENIED
+         : cls == 3 ? ARGUS_EV_CAPABILITY_USED : 0x7FFF;
+}
+
 static ArgusEvent ev(uint8_t cls, uint64_t seq)
 {
     ArgusEvent e;
     memset(&e, 0, sizeof e);
-    e.version = 1; e.class_ = cls; e.kind = ARGUS_EV_CAPABILITY_USED; e.outcome = 1; e.sequence = seq;
+    e.version = 1; e.class_ = cls; e.kind = kind_for(cls); e.outcome = 1; e.sequence = seq;
     return e;
 }
 

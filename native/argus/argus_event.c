@@ -11,12 +11,16 @@
  *
  * Validation (argus_event_decode and argus_event_validate):
  *   version == ARGUS_ABI_VERSION         else ARGUS_ERR_VERSION
- *   class_ in 1..ARGUS_CLASS_MAX          else ARGUS_ERR_MALFORMED
+ *   class_ in 1..ARGUS_CLASS_MAX          else ARGUS_ERR_MALFORMED (all below too)
  *   kind in the enumerated ARGUS_EV_* set (ARGUS_EV_NONE is NOT accepted)
+ *   class_ <= argus_event_min_class(kind) (as strong as the kind requires, or stronger)
  *   effect_class in 0..ARGUS_EFFECT_MAX
  *   outcome in 1..ARGUS_OUTCOME_MAX
  *   flags a subset of ARGUS_FLAG_KNOWN
- *   sequence != 0
+ *   ARGUS_FLAG_CONSUMER set if and only if kind == TELEMETRY_DROPPED
+ *   cap_id < ARGUS_CAP_MAX
+ *   sequence != 0 and sequence != UINT64_MAX
+ *   EXTERNAL_EFFECT_REQUESTED/DENIED/COMMITTED carry effect_class EXTERNAL
  * Every one of the 128 bytes is carried by some field, so a buffer that
  * decodes successfully re-encodes to exactly the same bytes.
  *
@@ -47,24 +51,41 @@ static uint32_t get32(const uint8_t *p)
 static uint64_t get64(const uint8_t *p) { return (uint64_t)get32(p) | ((uint64_t)get32(p + 4) << 32); }
 static void copy_bytes(uint8_t *dst, const uint8_t *src, size_t n) { for (size_t i = 0; i < n; i++) dst[i] = src[i]; }
 
-static int kind_known(uint16_t kind)
+/*
+ * Weakest class a producer may give each kind (smaller number = stronger).
+ * A producer may always label an event STRONGER than this, never weaker:
+ * the ring's watermarks and the core's loss reporting are keyed on class,
+ * so a weak label on a security-relevant kind would let it be dropped
+ * first and reported as a harmless loss (HOSTILE_REVIEW G-6/G-7).
+ *   CRITICAL: evidence of compromise, loss of evidence, trust/authority
+ *             withdrawn, the trusted base changed, irreversible effects done
+ *   SECURITY: authority granted or refused, new objects/machines/providers
+ *             entering the system, effects requested/denied, World commits
+ *   AUDIT:    routine use of authority that is already recorded
+ * No v1 kind has an INFORMATIONAL floor. Unknown kinds (including NONE) -> 0.
+ */
+uint8_t argus_event_min_class(uint16_t kind)
 {
     switch (kind) {
-    case ARGUS_EV_CAPABILITY_GRANTED: case ARGUS_EV_CAPABILITY_USED:
-    case ARGUS_EV_CAPABILITY_DENIED: case ARGUS_EV_CAPABILITY_REVOKED:
-    case ARGUS_EV_CREDENTIAL_LEASE_CREATED: case ARGUS_EV_CREDENTIAL_LEASE_USED:
-    case ARGUS_EV_CREDENTIAL_LEASE_REVOKED:
-    case ARGUS_EV_ARTIFACT_ADMITTED: case ARGUS_EV_ARTIFACT_REJECTED: case ARGUS_EV_ARTIFACT_ACTIVATED:
-    case ARGUS_EV_MACHINE_JOINED: case ARGUS_EV_MACHINE_TRUST_CHANGED: case ARGUS_EV_MACHINE_REMOVED:
-    case ARGUS_EV_PROVIDER_DISCOVERED: case ARGUS_EV_PROVIDER_CHANGED:
-    case ARGUS_EV_PROVIDER_QUARANTINED: case ARGUS_EV_PROVIDER_USED:
-    case ARGUS_EV_EXTERNAL_EFFECT_REQUESTED: case ARGUS_EV_EXTERNAL_EFFECT_DENIED:
-    case ARGUS_EV_EXTERNAL_EFFECT_COMMITTED:
     case ARGUS_EV_INTEGRITY_VIOLATION: case ARGUS_EV_SIGNATURE_FAILURE:
     case ARGUS_EV_STALE_GENERATION: case ARGUS_EV_FORGED_CAPABILITY:
-    case ARGUS_EV_WORLD_COMMITTED: case ARGUS_EV_POLICY_CHANGED: case ARGUS_EV_RUNTIME_BUILD_CHANGED:
-    case ARGUS_EV_TELEMETRY_DROPPED:
-        return 1;
+    case ARGUS_EV_TELEMETRY_DROPPED: case ARGUS_EV_PROVIDER_QUARANTINED:
+    case ARGUS_EV_MACHINE_TRUST_CHANGED: case ARGUS_EV_MACHINE_REMOVED:
+    case ARGUS_EV_POLICY_CHANGED: case ARGUS_EV_RUNTIME_BUILD_CHANGED:
+    case ARGUS_EV_CAPABILITY_REVOKED: case ARGUS_EV_CREDENTIAL_LEASE_REVOKED:
+    case ARGUS_EV_ARTIFACT_REJECTED: case ARGUS_EV_EXTERNAL_EFFECT_COMMITTED:
+        return ARGUS_CLASS_CRITICAL;
+    case ARGUS_EV_CAPABILITY_GRANTED: case ARGUS_EV_CAPABILITY_DENIED:
+    case ARGUS_EV_CREDENTIAL_LEASE_CREATED:
+    case ARGUS_EV_ARTIFACT_ADMITTED: case ARGUS_EV_ARTIFACT_ACTIVATED:
+    case ARGUS_EV_MACHINE_JOINED:
+    case ARGUS_EV_PROVIDER_DISCOVERED: case ARGUS_EV_PROVIDER_CHANGED:
+    case ARGUS_EV_EXTERNAL_EFFECT_REQUESTED: case ARGUS_EV_EXTERNAL_EFFECT_DENIED:
+    case ARGUS_EV_WORLD_COMMITTED:
+        return ARGUS_CLASS_SECURITY;
+    case ARGUS_EV_CAPABILITY_USED: case ARGUS_EV_CREDENTIAL_LEASE_USED:
+    case ARGUS_EV_PROVIDER_USED:
+        return ARGUS_CLASS_AUDIT;
     default:
         return 0;
     }
@@ -75,11 +96,20 @@ int argus_event_validate(const ArgusEvent *ev)
     if (!ev) return ARGUS_ERR_ARG;
     if (ev->version != ARGUS_ABI_VERSION) return ARGUS_ERR_VERSION;
     if (ev->class_ < ARGUS_CLASS_CRITICAL || ev->class_ > ARGUS_CLASS_MAX) return ARGUS_ERR_MALFORMED;
-    if (!kind_known(ev->kind)) return ARGUS_ERR_MALFORMED;
+    uint8_t min = argus_event_min_class(ev->kind);
+    if (min == 0) return ARGUS_ERR_MALFORMED;                       /* unknown kind */
+    if (ev->class_ > min) return ARGUS_ERR_MALFORMED;               /* weaker than the kind allows */
     if (ev->effect_class > ARGUS_EFFECT_MAX) return ARGUS_ERR_MALFORMED;
     if (ev->outcome < ARGUS_OUTCOME_OK || ev->outcome > ARGUS_OUTCOME_MAX) return ARGUS_ERR_MALFORMED;
     if (ev->flags & (uint16_t)~ARGUS_FLAG_KNOWN) return ARGUS_ERR_MALFORMED;
-    if (ev->sequence == 0) return ARGUS_ERR_MALFORMED;
+    /* CONSUMER is set exactly on TELEMETRY_DROPPED: only ARGUS reports its own losses. */
+    if (((ev->flags & ARGUS_FLAG_CONSUMER) != 0) != (ev->kind == ARGUS_EV_TELEMETRY_DROPPED))
+        return ARGUS_ERR_MALFORMED;
+    if (ev->cap_id >= ARGUS_CAP_MAX) return ARGUS_ERR_MALFORMED;    /* the authority cannot mint it */
+    if (ev->sequence == 0 || ev->sequence == UINT64_MAX) return ARGUS_ERR_MALFORMED;
+    if ((ev->kind == ARGUS_EV_EXTERNAL_EFFECT_REQUESTED || ev->kind == ARGUS_EV_EXTERNAL_EFFECT_DENIED ||
+         ev->kind == ARGUS_EV_EXTERNAL_EFFECT_COMMITTED) && ev->effect_class != ARGUS_EFFECT_EXTERNAL)
+        return ARGUS_ERR_MALFORMED;
     return ARGUS_OK;
 }
 

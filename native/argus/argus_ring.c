@@ -1,6 +1,16 @@
 /*
  * argus_ring.c -- ARGUS single-producer / single-consumer bounded event ring.
  *
+ * MALFORMED PUSHES
+ *   argus_ring_push returns ARGUS_ERR_MALFORMED, stores nothing and adds 1 to
+ *   refused[0] (ArgusRingStats: index 0 = malformed pushes, indices 1..4 =
+ *   capacity refusals per class) when class_ is outside 1..ARGUS_CLASS_MAX or
+ *   is weaker than argus_event_min_class(kind). A kind the ring does not know
+ *   (min class 0) has no floor here: the ring is transport, the core runs the
+ *   full argus_event_validate. Malformed pushes are not telemetry loss: they
+ *   are never drained as TELEMETRY_DROPPED. Conservation still holds:
+ *   attempts = accepted + refused[0..4] + critical_overflow.
+ *
  * One producer thread calls argus_ring_push. One consumer thread calls
  * argus_ring_pop, argus_ring_pop_batch and argus_ring_drain_drops.
  * argus_ring_stats may be called from either. The ring lives entirely in
@@ -31,9 +41,9 @@
  *   ERROR, code ARGUS_ERR_FULL), one per class with a nonzero pending count,
  *   CRITICAL first. It resets exactly the pending counts it reported
  *   (atomic exchange, so refusals racing with the drain are never lost; they
- *   show up in the next drain). Each synthesized event has class CRITICAL if
- *   critical_overflow has ever been nonzero on this ring, else SECURITY: once
- *   a critical event has been lost, every later drop report is critical too.
+ *   show up in the next drain). Every synthesized event has class CRITICAL,
+ *   the minimum class for TELEMETRY_DROPPED (argus_event_min_class): an
+ *   evidence gap is always critical telemetry; the lost class is object_id.
  *   The synthesized events are handed to the consumer directly; they do not
  *   go through the ring, so reporting a loss can never itself be refused.
  *   Accepted events are delivered in exact push order (FIFO overall, hence
@@ -81,9 +91,7 @@ static int capacity_ok(uint32_t cap)
     return cap >= ARGUS_RING_MIN_CAPACITY && cap <= ARGUS_RING_MAX_CAPACITY && (cap & (cap - 1u)) == 0;
 }
 
-/* Not in argus_abi.h yet (proposed addition): the ring depth at which pushes of
- * `class_` start being refused, for a ring of the given capacity. 0 if invalid. */
-uint32_t argus_ring_saturation_point(uint32_t capacity_pow2, uint8_t class_);
+/* The ring depth at which pushes of `class_` start being refused, 0 if invalid. */
 uint32_t argus_ring_saturation_point(uint32_t capacity_pow2, uint8_t class_)
 {
     if (!capacity_ok(capacity_pow2)) return 0;
@@ -127,7 +135,11 @@ int argus_ring_push(ArgusRing *r, const ArgusEvent *ev)
 {
     if (!r || !ev) return ARGUS_ERR_ARG;
     unsigned cls = ev->class_;
-    if (cls < ARGUS_CLASS_CRITICAL || cls > ARGUS_CLASS_MAX) return ARGUS_ERR_MALFORMED;
+    unsigned min = argus_event_min_class(ev->kind);
+    if (cls < ARGUS_CLASS_CRITICAL || cls > ARGUS_CLASS_MAX || (min != 0 && cls > min)) {
+        bump(&r->refused[0]);   /* index 0 = malformed (see top of file); not a drop, never drained */
+        return ARGUS_ERR_MALFORMED;
+    }
     uint64_t h = atomic_load_explicit(&r->head, memory_order_relaxed);
     uint64_t limit = r->limit[cls];
     if (h - r->tail_cache >= limit) {
@@ -199,13 +211,11 @@ size_t argus_ring_drain_drops(ArgusRing *r, ArgusEvent *out, size_t max, uint64_
         if (atomic_load_explicit(&r->pending[cls], memory_order_relaxed) == 0) continue;
         uint64_t count = atomic_exchange_explicit(&r->pending[cls], 0, memory_order_relaxed);
         if (count == 0) continue;
-        uint8_t ev_class = atomic_load_explicit(&r->critical_overflow, memory_order_relaxed) > 0
-                               ? ARGUS_CLASS_CRITICAL : ARGUS_CLASS_SECURITY;
         if (*next_sequence == 0) *next_sequence = 1;
         ArgusEvent *e = &out[n++];
         *e = (ArgusEvent){0};
         e->version = ARGUS_ABI_VERSION;
-        e->class_ = ev_class;
+        e->class_ = ARGUS_CLASS_CRITICAL;
         e->kind = ARGUS_EV_TELEMETRY_DROPPED;
         e->effect_class = ARGUS_EFFECT_NONE;
         e->outcome = ARGUS_OUTCOME_ERROR;

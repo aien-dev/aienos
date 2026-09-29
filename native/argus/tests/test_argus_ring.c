@@ -15,7 +15,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-uint32_t argus_ring_saturation_point(uint32_t capacity_pow2, uint8_t class_);   /* proposed for argus_abi.h */
+/* The ring enforces only the class floor of argus_event_min_class(kind). No v1 kind
+ * may be INFORMATIONAL, so the INFORMATIONAL watermark is exercised with a kind
+ * value that is not in v1 (no floor at the ring; the core would reject it). */
+#define NOFLOOR_KIND 0x7FFFu
+static uint16_t kind_for(uint8_t cls)
+{
+    return cls == 1 ? ARGUS_EV_FORGED_CAPABILITY : cls == 2 ? ARGUS_EV_CAPABILITY_DENIED
+         : cls == 3 ? ARGUS_EV_CAPABILITY_USED : NOFLOOR_KIND;
+}
 
 static int failures;
 #define CHECK(cond) do { if (!(cond)) { failures++; fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } } while (0)
@@ -26,7 +34,7 @@ static ArgusEvent mk(uint8_t cls, uint64_t seq, uint64_t resource)
     memset(&e, 0, sizeof e);
     e.version = ARGUS_ABI_VERSION;
     e.class_ = cls;
-    e.kind = ARGUS_EV_CAPABILITY_USED;
+    e.kind = kind_for(cls);
     e.outcome = ARGUS_OUTCOME_OK;
     e.flags = ARGUS_FLAG_SYNTHETIC;
     e.sequence = seq;
@@ -75,8 +83,46 @@ static void test_init(void)
     ArgusRingStats s;
     argus_ring_stats(r, &s);
     CHECK(s.pushed == 1 && s.popped == 1 && s.depth == 0 && s.capacity == 16);
+    CHECK(s.refused[0] == 2 && s.refused[1] == 0 && s.refused[2] == 0 && s.refused[3] == 0 && s.refused[4] == 0);
     free(mem);
     printf("init/args: OK\n");
+}
+
+/* Class weaker than the kind floor: MALFORMED, stored nowhere, counted in refused[0]
+ * only (not a drop, never drained). Every kind value x every class byte. */
+static void test_class_floor(void)
+{
+    void *mem; ArgusRing *r = new_ring(1024, &mem);
+    uint64_t attempts = 0, ok = 0, bad = 0;
+    for (unsigned k = 0; k < 65536; k++) {
+        unsigned fl = argus_event_min_class((uint16_t)k);
+        for (unsigned c = 0; c < 256; c++) {
+            ArgusEvent e = mk((uint8_t)c, 1, 0), o;
+            e.kind = (uint16_t)k;
+            int want = (c >= 1 && c <= 4 && (fl == 0 || c <= fl)) ? ARGUS_OK : ARGUS_ERR_MALFORMED;
+            int rc = argus_ring_push(r, &e);
+            CHECK(rc == want);
+            attempts++;
+            if (rc == ARGUS_OK) { ok++; CHECK(argus_ring_pop(r, &o) == ARGUS_OK); } else bad++;
+        }
+    }
+    ArgusRingStats s;
+    argus_ring_stats(r, &s);
+    CHECK(s.refused[0] == bad && s.pushed == ok && s.popped == ok);
+    CHECK(s.refused[1] + s.refused[2] + s.refused[3] + s.refused[4] == 0 && s.critical_overflow == 0);
+    CHECK(attempts == s.pushed + s.refused[0]);
+    ArgusEvent d[8]; uint64_t seq = 1;
+    CHECK(argus_ring_drain_drops(r, d, 8, &seq) == 0);   /* malformed is not telemetry loss */
+    /* The hostile cases by name. */
+    ArgusEvent e = mk(ARGUS_CLASS_INFORMATIONAL, 1, 0); e.kind = ARGUS_EV_CAPABILITY_REVOKED;
+    CHECK(argus_ring_push(r, &e) == ARGUS_ERR_MALFORMED);
+    e.class_ = ARGUS_CLASS_SECURITY; CHECK(argus_ring_push(r, &e) == ARGUS_ERR_MALFORMED);
+    e.class_ = ARGUS_CLASS_CRITICAL; CHECK(argus_ring_push(r, &e) == ARGUS_OK);
+    e.kind = ARGUS_EV_PROVIDER_USED; e.class_ = ARGUS_CLASS_INFORMATIONAL; CHECK(argus_ring_push(r, &e) == ARGUS_ERR_MALFORMED);
+    e.class_ = ARGUS_CLASS_AUDIT; CHECK(argus_ring_push(r, &e) == ARGUS_OK);
+    free(mem);
+    printf("class floor: %llu pushes (every kind x every class byte), %llu MALFORMED counted in refused[0], "
+           "none drained\n", (unsigned long long)attempts, (unsigned long long)bad);
 }
 
 /* For each capacity and class: the depth at which the class is first refused,
@@ -95,15 +141,15 @@ static void test_watermarks(void)
             /* alone */
             void *mem; ArgusRing *r = new_ring(cap, &mem);
             uint32_t depth = 0;
-            while (argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = cls, .kind = 2, .outcome = 1, .sequence = 1 }) == ARGUS_OK)
+            while (argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = cls, .kind = NOFLOOR_KIND, .outcome = 1, .sequence = 1 }) == ARGUS_OK)
                 depth++;
             CHECK(depth == sat);
             free(mem);
             /* on top of d CRITICAL events */
             for (uint32_t d = 0; d <= cap; d++) {
                 r = new_ring(cap, &mem);
-                for (uint32_t k = 0; k < d; k++) CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 1, .kind = 2, .outcome = 1, .sequence = 1 }) == (k < cap ? ARGUS_OK : ARGUS_ERR_FULL));
-                int rc = argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = cls, .kind = 2, .outcome = 1, .sequence = 1 });
+                for (uint32_t k = 0; k < d; k++) CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 1, .kind = NOFLOOR_KIND, .outcome = 1, .sequence = 1 }) == (k < cap ? ARGUS_OK : ARGUS_ERR_FULL));
+                int rc = argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = cls, .kind = NOFLOOR_KIND, .outcome = 1, .sequence = 1 });
                 CHECK(rc == (d < sat ? ARGUS_OK : ARGUS_ERR_FULL));
                 free(mem);
             }
@@ -121,18 +167,18 @@ static void test_drain_drops(void)
     uint64_t seq = 0;
     CHECK(argus_ring_drain_drops(r, out, 8, &seq) == 0);
     /* Fill to 4 with SECURITY: INFO refused (limit 4). */
-    for (int i = 0; i < 4; i++) CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 2, .kind = 2, .outcome = 1, .sequence = 1 }) == ARGUS_OK);
-    for (int i = 0; i < 3; i++) CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 4, .kind = 2, .outcome = 1, .sequence = 1 }) == ARGUS_ERR_FULL);
-    for (int i = 0; i < 2; i++) CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 2, .kind = 2, .outcome = 1, .sequence = 1 }) == ARGUS_OK);
+    for (int i = 0; i < 4; i++) CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 2, .kind = NOFLOOR_KIND, .outcome = 1, .sequence = 1 }) == ARGUS_OK);
+    for (int i = 0; i < 3; i++) CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 4, .kind = NOFLOOR_KIND, .outcome = 1, .sequence = 1 }) == ARGUS_ERR_FULL);
+    for (int i = 0; i < 2; i++) CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 2, .kind = NOFLOOR_KIND, .outcome = 1, .sequence = 1 }) == ARGUS_OK);
     /* depth 6 = AUDIT limit (6) */
-    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 3, .kind = 2, .outcome = 1, .sequence = 1 }) == ARGUS_ERR_FULL);
+    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 3, .kind = NOFLOOR_KIND, .outcome = 1, .sequence = 1 }) == ARGUS_ERR_FULL);
     argus_ring_stats(r, &s);
     CHECK(s.refused[4] == 3 && s.refused[3] == 1 && s.refused[2] == 0 && s.critical_overflow == 0 && s.depth == 6);
 
     CHECK(argus_ring_drain_drops(r, out, 8, NULL) == 0);
     CHECK(argus_ring_drain_drops(r, out, 1, &seq) == 1);   /* max honoured: AUDIT first (higher class), INFO stays pending */
     CHECK(seq == 2 && out[0].sequence == 1);
-    CHECK(out[0].kind == ARGUS_EV_TELEMETRY_DROPPED && out[0].class_ == ARGUS_CLASS_SECURITY);
+    CHECK(out[0].kind == ARGUS_EV_TELEMETRY_DROPPED && out[0].class_ == ARGUS_CLASS_CRITICAL);   /* floor of TELEMETRY_DROPPED */
     CHECK(out[0].flags == ARGUS_FLAG_CONSUMER && out[0].object_id == ARGUS_CLASS_AUDIT && out[0].resource == 1);
     CHECK(argus_event_validate(&out[0]) == ARGUS_OK);
     CHECK(argus_ring_drain_drops(r, out, 8, &seq) == 1);
@@ -142,24 +188,24 @@ static void test_drain_drops(void)
     CHECK(s.refused[4] == 3 && s.refused[3] == 1);          /* cumulative stats unchanged */
 
     /* Fill to full with CRITICAL, overflow twice. */
-    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 1, .kind = 2, .outcome = 1, .sequence = 1 }) == ARGUS_OK);
-    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 1, .kind = 2, .outcome = 1, .sequence = 1 }) == ARGUS_OK);
-    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 1, .kind = 2, .outcome = 1, .sequence = 1 }) == ARGUS_ERR_FULL);
-    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 1, .kind = 2, .outcome = 1, .sequence = 1 }) == ARGUS_ERR_FULL);
-    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 2, .kind = 2, .outcome = 1, .sequence = 1 }) == ARGUS_ERR_FULL);
+    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 1, .kind = NOFLOOR_KIND, .outcome = 1, .sequence = 1 }) == ARGUS_OK);
+    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 1, .kind = NOFLOOR_KIND, .outcome = 1, .sequence = 1 }) == ARGUS_OK);
+    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 1, .kind = NOFLOOR_KIND, .outcome = 1, .sequence = 1 }) == ARGUS_ERR_FULL);
+    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 1, .kind = NOFLOOR_KIND, .outcome = 1, .sequence = 1 }) == ARGUS_ERR_FULL);
+    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 2, .kind = NOFLOOR_KIND, .outcome = 1, .sequence = 1 }) == ARGUS_ERR_FULL);
     argus_ring_stats(r, &s);
     CHECK(s.critical_overflow == 2 && s.refused[1] == 0 && s.refused[2] == 1 && s.depth == 8);
     CHECK(argus_ring_drain_drops(r, out, 8, &seq) == 2);
     CHECK(out[0].object_id == ARGUS_CLASS_CRITICAL && out[0].resource == 2 && out[0].class_ == ARGUS_CLASS_CRITICAL);
     CHECK(out[1].object_id == ARGUS_CLASS_SECURITY && out[1].resource == 1 && out[1].class_ == ARGUS_CLASS_CRITICAL);
-    /* Sticky: later drop reports remain CRITICAL class, stats keep the overflow. */
-    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 4, .kind = 2, .outcome = 1, .sequence = 1 }) == ARGUS_ERR_FULL);
+    /* Drop reports are always CRITICAL class; stats keep the overflow (sticky). */
+    CHECK(argus_ring_push(r, &(ArgusEvent){ .version = 1, .class_ = 4, .kind = NOFLOOR_KIND, .outcome = 1, .sequence = 1 }) == ARGUS_ERR_FULL);
     CHECK(argus_ring_drain_drops(r, out, 8, &seq) == 1);
     CHECK(out[0].class_ == ARGUS_CLASS_CRITICAL && out[0].object_id == ARGUS_CLASS_INFORMATIONAL);
     argus_ring_stats(r, &s);
     CHECK(s.critical_overflow == 2);
     free(mem);
-    printf("drain_drops: OK (max honoured, reset after report, sticky critical overflow)\n");
+    printf("drain_drops: OK (max honoured, reset after report, always CRITICAL, sticky critical overflow)\n");
 }
 
 /* ---- two-thread SPSC run ---- */
@@ -286,6 +332,7 @@ int main(int argc, char **argv)
 {
     uint64_t events = argc > 1 ? strtoull(argv[1], NULL, 10) : 10000000ull;
     test_init();
+    test_class_floor();
     test_watermarks();
     test_drain_drops();
     int require_refusals = !(argc > 2 && strcmp(argv[2], "--allow-no-refusals") == 0);
