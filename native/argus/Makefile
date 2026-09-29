@@ -151,14 +151,18 @@ endif
 ifneq ($(and $(CBENCH_SRC),$(STACK_SRC)),)
 $(CBENCH): $(CBENCH_SRC) $(STACK_SRC) $(BRIDGE_HDR) tests/stub_state.c $(INT_HDR) $(LIB)
 	$(CC) $(CFLAGS) $(STACK_INC) -pthread -o $@ $(CBENCH_SRC) $(STACK_SRC) tests/stub_state.c $(LIB)
+test-contain-fp: $(CBENCH)
+	./$(CBENCH) --gate-only
 bench-contain: $(CBENCH)
-	./$(CBENCH)
+	./tests/run_argus1_bench.sh "./$(CBENCH)" contain "$(OUT)/test_argus_integration" "$(OUT)/lane_b"
 else
+test-contain-fp:
+	@echo "test-contain-fp: skipped (needs tests/bench_argus_contain.c + bridge + gate, lane F)"
 bench-contain:
 	@echo "bench-contain: skipped (needs tests/bench_argus_contain.c + bridge + gate, lane F)"
 endif
 
-test-argus1: test-contain test-e2e test-contain-hostile
+test-argus1: test-contain test-e2e test-contain-hostile test-contain-fp
 
 # Linux only (called from `sanitize`): lane C unit test under ASan+UBSan, e2e under
 # ASan+UBSan and TSan, containment hostile under ASan+UBSan. Library sources are
@@ -193,9 +197,8 @@ test-integration: $(INT)
 test-hostile: $(HOSTILE)
 	./$(HOSTILE)
 
-bench: $(INT) bench-contain
-	$(MAKE) -f lane_b.mk $(SUBMAKE_VARS) LANE_B_OUT=$(OUT)/lane_b bench-ring
-	./$(INT) --bench
+bench: $(INT) $(CBENCH)
+	./tests/run_argus1_bench.sh "./$(CBENCH)" full "$(OUT)/test_argus_integration" "$(OUT)/lane_b"
 
 ifeq ($(UNAME_S),Darwin)
 sanitize:

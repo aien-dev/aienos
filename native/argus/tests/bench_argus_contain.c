@@ -1,0 +1,33 @@
+#define _GNU_SOURCE
+#include "../argus_abi.h"
+#include "../argus_core.h"
+#include "../argus_contain.h"
+#include "stub_state.h"
+#include "../../capability/aienos_capability.h"
+#include "../../capability/aienos_contain.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#define CORPUS_N 5000u
+#define BATCH_N 100u
+#define ROUNDS 5u
+#define SAMPLE_N ((CORPUS_N/BATCH_N)*ROUNDS)
+static int failures;
+#define CHECK(x) do { if(!(x)){failures++;fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#x);} } while(0)
+typedef struct { ArgusCore *core; ArgusContain *contain; void *cmem,*smem; } State;
+typedef struct { uint32_t calls; } Obs;
+static uint64_t now_ns(void){struct timespec t;if(clock_gettime(CLOCK_MONOTONIC_RAW,&t))abort();return(uint64_t)t.tv_sec*1000000000u+t.tv_nsec;}
+static void obs(void *p,uint32_t op,const AienosCapEntry *e,int rc){(void)op;(void)e;(void)rc;((Obs*)p)->calls++;}
+static int init(State*s,int contain){memset(s,0,sizeof *s);s->cmem=calloc(1,argus_core_footprint());if(!s->cmem||argus_core_init(&s->core,s->cmem,argus_core_footprint()))return-1;if(contain){s->smem=calloc(1,argus_contain_footprint());if(!s->smem||argus_contain_init(&s->contain,s->smem,argus_contain_footprint()))return-1;}return 0;}
+static void fini(State*s){free(s->smem);free(s->cmem);}
+static int replay(State*s,const ArgusEvent*ev,size_t n,int attached,uint64_t*samples,size_t*ns,size_t*proposals){ArgusFinding cf[ARGUS_CORE_MAX_FINDINGS],xf[ARGUS_CORE_MAX_FINDINGS],all[ARGUS_CORE_MAX_FINDINGS*2];ArgusContainmentRequest rq[ARGUS_CONTAIN_WINDOW_MAX];ArgusEvent pe[ARGUS_CONTAIN_WINDOW_MAX];for(size_t b=0;b<n;b+=BATCH_N){size_t z=b+BATCH_N<n?b+BATCH_N:n;uint64_t t=now_ns();for(size_t i=b;i<z;i++){size_t nc=0;int rc=argus_core_ingest(s->core,&ev[i],cf,ARGUS_CORE_MAX_FINDINGS,&nc);if(rc!=ARGUS_OK&&rc!=ARGUS_ERR_FULL)return rc;if(attached){size_t nx=0,na=0,np=0;rc=argus_contain_observe(s->contain,s->core,&ev[i],xf,ARGUS_CORE_MAX_FINDINGS,&nx);if(rc)return rc;for(size_t j=0;j<nc;j++)all[na++]=cf[j];for(size_t j=0;j<nx;j++)all[na++]=xf[j];rc=argus_contain_propose(s->contain,s->core,all,na,&ev[i],rq,ARGUS_CONTAIN_WINDOW_MAX,pe,ARGUS_CONTAIN_WINDOW_MAX,&np);if(rc)return rc;*proposals+=np;}}if(samples&&*ns<SAMPLE_N)samples[(*ns)++]=(now_ns()-t)/(z-b);}return ARGUS_OK;}
+static int cmp64(const void*a,const void*b){uint64_t x=*(const uint64_t*)a,y=*(const uint64_t*)b;return(x>y)-(x<y);}
+static uint64_t pct(uint64_t*v,size_t n,double p){qsort(v,n,sizeof *v,cmp64);return v[(size_t)((n-1)*p)];}
+static int feed(const ArgusEvent*ev,size_t n,size_t*p){State s;CHECK(init(&s,1)==0);int rc=replay(&s,ev,n,1,NULL,(size_t[]){0},p);ArgusCoreHealth h;argus_core_health(s.core,&h);CHECK(h.events_rejected==0);fini(&s);return rc;}
+static int load(const char*name,ArgusEvent**out,size_t*n){char path[256];snprintf(path,sizeof path,"tests/fixtures/argus1/%s",name);FILE*f=fopen(path,"rb");if(!f)return-1;if(fseek(f,0,SEEK_END)){fclose(f);return-1;}long bytes=ftell(f);rewind(f);if(bytes<0||bytes%ARGUS_EVENT_SIZE){fclose(f);return-1;}*n=(size_t)bytes/ARGUS_EVENT_SIZE;uint8_t*raw=malloc((size_t)bytes);*out=calloc(*n,sizeof **out);if(!raw||!*out||fread(raw,ARGUS_EVENT_SIZE,*n,f)!=*n){free(raw);free(*out);fclose(f);return-1;}fclose(f);for(size_t i=0;i<*n;i++)if(argus_event_decode(raw+i*ARGUS_EVENT_SIZE,&(*out)[i])){free(raw);free(*out);return-1;}free(raw);return 0;}
+static void gate10(void){AienosCapAdmin*a=NULL;AienosCapView*v=NULL;AienosContain*g=NULL;AienosCapRef office;Obs o={0};void*gm=calloc(1,aienos_contain_footprint());CHECK(gm!=NULL);CHECK(aienos_cap_start(&a,&v)==AIENOS_CAP_OK);CHECK(aienos_cap_office(a,&office)==AIENOS_CAP_OK);CHECK(aienos_cap_set_observer(a,obs,&o)==AIENOS_CAP_OK);AienosContainTablePolicy p={0};AienosContainAuthorizer az={aienos_contain_table_decide,&p};CHECK(aienos_contain_create(&g,gm,aienos_contain_footprint(),a,v,office,&az)==AIENOS_CONTAIN_OK);uint32_t baseline=o.calls;size_t proposals=0,events=0;for(uint64_t seed=1;seed<=9;seed++){ArgusEvent*ev=calloc(CORPUS_N,sizeof *ev);CHECK(ev!=NULL);size_t n=argus_corpus_benign(ev,CORPUS_N,seed);CHECK(n==CORPUS_N);CHECK(feed(ev,n,&proposals)==ARGUS_OK);events+=n;free(ev);}const char*files[]={"r7-v11.bin","r8-v11.bin","r9-v11.bin"};for(size_t i=0;i<3;i++){ArgusEvent*ev=NULL;size_t n=0;CHECK(load(files[i],&ev,&n)==0&&n>0);CHECK(feed(ev,n,&proposals)==ARGUS_OK);events+=n;free(ev);}CHECK(proposals==0);CHECK(o.calls==baseline);printf("GATE ARGUS1_FALSE_POSITIVE_PASS %s events=%zu proposals=%zu authority_calls=%u\n",failures?"FAIL":"PASS",events,proposals,o.calls-baseline);aienos_cap_set_observer(a,NULL,NULL);aienos_contain_destroy(g);aienos_cap_stop(a,v);free(gm);}
+static void one_bench(int attached,uint64_t*vals,size_t*nvals){ArgusEvent*ev=calloc(CORPUS_N,sizeof *ev);if(!ev)abort();if(argus_corpus_benign(ev,CORPUS_N,77)!=CORPUS_N)abort();State s;if(init(&s,attached))abort();size_t props=0;int rc=replay(&s,ev,CORPUS_N,attached,vals,nvals,&props);if(rc||props){fprintf(stderr,"bench replay rc=%d proposals=%zu\n",rc,props);failures++;}fini(&s);free(ev);}
+static void bench_g8(void){uint64_t b[SAMPLE_N],a[SAMPLE_N];size_t nb=0,na=0;for(size_t i=0;i<ROUNDS;i++){if(i&1){one_bench(1,a,&na);one_bench(0,b,&nb);}else{one_bench(0,b,&nb);one_bench(1,a,&na);}}uint64_t bp=pct(b,nb,.5),ap=pct(a,na,.5),b99=pct(b,nb,.99),a99=pct(a,na,.99);double d=100.0*((double)ap/(double)bp-1.0);printf("GATE ARGUS1_G8_INGEST base_p50=%llu attached_p50=%llu base_p99=%llu attached_p99=%llu delta=%.2f%% batches=%zu\n",(unsigned long long)bp,(unsigned long long)ap,(unsigned long long)b99,(unsigned long long)a99,d,nb);if(d>3.0)failures++;}
+int main(int argc,char**argv){int gate_only=argc>1&&!strcmp(argv[1],"--gate-only");gate10();if(!gate_only)bench_g8();printf("ARGUS-1 F: %s\n",failures?"FAIL":"PASS");return failures?1:0;}
