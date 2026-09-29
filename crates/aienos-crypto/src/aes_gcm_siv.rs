@@ -81,7 +81,7 @@ fn compute_tag(
         poly.update_block(chunk);
     }
     if !aad_rem.is_empty() {
-        let mut b = [0u8; 16];
+        let mut b = Zeroizing::new([0u8; 16]);
         b[..aad_rem.len()].copy_from_slice(aad_rem);
         poly.update_block(&b);
     }
@@ -92,7 +92,7 @@ fn compute_tag(
         poly.update_block(chunk);
     }
     if !pt_rem.is_empty() {
-        let mut b = [0u8; 16];
+        let mut b = Zeroizing::new([0u8; 16]);
         b[..pt_rem.len()].copy_from_slice(pt_rem);
         poly.update_block(&b);
     }
@@ -101,7 +101,7 @@ fn compute_tag(
     let len_block = make_length_block(aad.len(), plaintext.len());
     poly.update_block(&len_block);
 
-    let mut s_s = poly.finalize();
+    let mut s_s = Zeroizing::new(poly.finalize());
 
     // XOR first 12 bytes with nonce, clear MSB of last byte
     for i in 0..12 {
@@ -111,7 +111,7 @@ fn compute_tag(
 
     // Encrypt with enc_key
     enc_cipher.encrypt_block(&mut s_s);
-    s_s
+    *s_s
 }
 
 /// Perform AES-CTR keystream encryption/decryption in place.
@@ -121,7 +121,7 @@ fn apply_ctr(enc_cipher: &Aes256Key, tag: &[u8; 16], buf: &mut [u8]) {
 
     let mut offset = 0;
     while offset < buf.len() {
-        let mut keystream = counter_block;
+        let mut keystream = Zeroizing::new(counter_block);
         enc_cipher.encrypt_block(&mut keystream);
 
         let ctr = u32::from_le_bytes([
