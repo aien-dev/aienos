@@ -1,0 +1,10 @@
+[package]
+name = "aienos-capability"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native AIENOS capability authority. The Linux mint process remains the differential oracle."
+
+[dependencies]
