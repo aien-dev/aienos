@@ -178,12 +178,15 @@ static int cmp_u64(const void *a, const void *b)
  * validate: version 1, class CRITICAL, effect NONE, object_id =
  * ARGUS_CONTAIN_PACK(type, status, finding_code), outcome paired with status,
  * world_generation = request_id (!= 0), CONSUMER only on 90, resource =
- * finding_sequence (90) / decision_id (91) / slots revoked (92).
+ * finding_sequence (90) / decision_id (91) / slots revoked (92); kind 4 class CRITICAL
+ * (its real floor). Lanes C/H/X: treat the EVENT PATTERN as canonical, not the digests
+ * (evidence_digest changes once fx_request_digest becomes lane B's SHA-256).
  *
  * Fixture k uses machine 200+k (authority stream 0, bridge stream 1, Omega
  * stream 2, consumer stream 0 + CONSUMER), caps 200+2k / 201+2k, principal
  * 100+k, so all fixtures can be concatenated into one coherent stream.
- * The trigger (event 2) is a stale-generation USED: the stub detector raises
+ * Event 0 joins machine 200+k (so the real code-7 detector stays quiet), events
+ * 1-2 grant the target and a descendant, and the trigger (event 3) is a stale-generation USED: the stub detector raises
  * code 2 STALE_GENERATION HIGH (the ARGUS-1 LIVE RevokeCapability trigger).
  *
  * fx_request_digest is a TEST-ONLY stand-in (152-byte canonical encoding per
@@ -283,23 +286,25 @@ static void fx_build(uint32_t k, ArgusCore *c)
     size_t nf;
     stub_detect_mode = 0;
 
-    ArgusEvent e = fx_base(ARGUS_EV_CAPABILITY_GRANTED, k, 0, 1);
+    ArgusEvent e = fx_base(ARGUS_EV_MACHINE_JOINED, k, 0, 1);  /* joined, so real detectors raise no code 7 */
+    s[n++] = e;
+    e = fx_base(ARGUS_EV_CAPABILITY_GRANTED, k, 0, 2);
     e.principal = P; e.cap_id = cap; e.cap_generation = 3; e.object_id = 0x1; e.resource = 0x77;
     s[n++] = e;
-    e = fx_base(ARGUS_EV_CAPABILITY_GRANTED, k, 0, 2);       /* a descendant, used by the cascade fixture */
+    e = fx_base(ARGUS_EV_CAPABILITY_GRANTED, k, 0, 3);       /* a descendant, used by the cascade fixture */
     e.principal = P; e.cap_id = child; e.cap_generation = 1; e.object_id = 0x1; e.resource = 0x77;
     s[n++] = e;
-    e = fx_base(ARGUS_EV_CAPABILITY_USED, k, 0, 3);          /* stale generation -> code 2 HIGH (stub) */
+    e = fx_base(ARGUS_EV_CAPABILITY_USED, k, 0, 4);          /* stale generation -> code 2 HIGH (stub) */
     e.principal = P; e.cap_id = cap; e.cap_generation = 2;
     s[n++] = e;
     for (size_t i = 0; i < n; i++)
         argus_core_ingest(c, &s[i], f, ARGUS_CORE_MAX_FINDINGS, &nf);
-    CHECK(nf == 1 && f[0].code == ARGUS_F_STALE_GENERATION && f[0].sequence == 3);
+    CHECK(nf == 1 && f[0].code == ARGUS_F_STALE_GENERATION && f[0].sequence == 4);
 
     ArgusContainmentRequest *r = &fx_req[k];
     memset(r, 0, sizeof *r);
     uint64_t first = 0;
-    CHECK(argus_core_incident(c, P, ARGUS_F_STALE_GENERATION, &first) == ARGUS_OK && first == 3);
+    CHECK(argus_core_incident(c, P, ARGUS_F_STALE_GENERATION, &first) == ARGUS_OK && first == 4);
     r->incident_id = first;
     r->containment = ARGUS_CONTAIN_REVOKE_CAPABILITY;
     r->severity = f[0].severity;
@@ -323,6 +328,7 @@ static void fx_build(uint32_t k, ArgusCore *c)
         s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_DECIDED, k, bs++, ARGUS_CSTATUS_GRANT, ARGUS_OUTCOME_OK, 1, 1, 0, 10);
         rv = fx_base(ARGUS_EV_CAPABILITY_REVOKED, k, 1, bs++);
         rv.flags = (uint16_t)(1u << ARGUS_FLAG_STREAM_SHIFT);
+        rv.class_ = ARGUS_CLASS_CRITICAL;                  /* real validate floor for kind 4 */
         rv.principal = P; rv.cap_id = cap; rv.cap_generation = 3; rv.tick = 11;
         s[n++] = rv;
         s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_EXECUTED, k, bs++, ARGUS_CSTATUS_DONE, ARGUS_OUTCOME_OK, 1, 1, 0, 12);
@@ -350,7 +356,7 @@ static void fx_build(uint32_t k, ArgusCore *c)
         s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_DECIDED, k, bs++, ARGUS_CSTATUS_ESCALATE, ARGUS_OUTCOME_ERROR, 1, 1,
                             1114, 10);
         for (uint32_t i = 0; i <= ARGUS_CONTAIN_TIMEOUT_EVENTS; i++) {   /* benign: valid use of the live cap */
-            e = fx_base(ARGUS_EV_CAPABILITY_USED, k, 0, 4u + i);
+            e = fx_base(ARGUS_EV_CAPABILITY_USED, k, 0, 5u + i);
             e.principal = P; e.cap_id = cap; e.cap_generation = 3; e.tick = 11u + i;
             s[n++] = e;
         }
@@ -360,6 +366,7 @@ static void fx_build(uint32_t k, ArgusCore *c)
         s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_DECIDED, k, bs++, ARGUS_CSTATUS_GRANT, ARGUS_OUTCOME_OK, 1, 1, 0, 10);
         rv = fx_base(ARGUS_EV_CAPABILITY_REVOKED, k, 1, bs++);
         rv.flags = (uint16_t)(1u << ARGUS_FLAG_STREAM_SHIFT);
+        rv.class_ = ARGUS_CLASS_CRITICAL;                  /* real validate floor for kind 4 */
         rv.principal = P; rv.cap_id = cap; rv.cap_generation = 3; rv.tick = 11;
         s[n++] = rv;
         rv.sequence = bs++; rv.cap_id = child; rv.cap_generation = 1; rv.tick = 11;
@@ -434,11 +441,11 @@ static uint64_t fx_head(const uint8_t d[32])
 
 /* Known answers (lane-D STUB hash, first 8 bytes of chain / state digest). */
 static const uint64_t fx_ka_chain[FX_COUNT] = {
-    0xc2b624ed62918752ull, 0x3a019b7017a89eccull, 0x5c7292fc11c74dd6ull,
-    0x414d5d2d901c778aull, 0x2c7b1d0e36873807ull, 0xe7c88ea0e59cf4f2ull };
+    0xec4418b4ad3dc77aull, 0x04bde290d9a3a1c9ull, 0x8b75181dd4693465ull,
+    0xcaeca58f278dd4ebull, 0x2ddc5ad172df4b13ull, 0x9c663317ef8c91fcull };
 static const uint64_t fx_ka_state[FX_COUNT] = {
-    0x47aa8681a74ca412ull, 0xe24af450450af397ull, 0xd23ec461962d79b8ull,
-    0x55e19d566fc41b17ull, 0xf8586b5451a5bde7ull, 0x826a85dbc56b0b7full };
+    0x96dbf6bf7e4b4dedull, 0x79d4c68ed2abd306ull, 0x40ed0cc6ee771388ull,
+    0xcd7d14bef7d4e43cull, 0x8b8523ec8118a375ull, 0xb156623776adf070ull };
 
 static ArgusEvent fx_all[N_EVENTS + FX_COUNT * FX_MAX];
 
@@ -503,7 +510,7 @@ static void argus1_containment_determinism(void)
     }
     CHECK(chunk_ok);
     CHECK(r0.contain_findings == 0 && r0.det_calls_on_contain == 0 && r0.codes_17_21 == 0);
-    int mixed_ok = fx_head(r0.chain) == 0x9380e0f276189543ull && fx_head(r0.state) == 0xc351c431495e9bdeull;
+    int mixed_ok = fx_head(r0.chain) == 0x0f2acd9c89ce80a7ull && fx_head(r0.state) == 0x12d3aff9edb6513dull;
     CHECK(mixed_ok);
     printf("argus1 mixed stream: %zu events (%llu of kinds 90-93), replayed twice + chunks 1/7/64/4096 %s; "
            "chain %016llx state %016llx (stub hash) known-answer %s\n",
