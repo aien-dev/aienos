@@ -171,21 +171,31 @@ static void promote_right_cannot_be_delegated(void) {
     aienos_cap_stop(a.admin, a.view);
 }
 
-static void generation_wrap_restarts_and_cognition_cannot_mint(void) {
-    uint32_t next = 0;
-    EQ(aienos_cap_generation_advance(UINT32_MAX, &next), AIENOS_CAP_ERR_EXHAUSTED);
+static void generation_exhaustion_fails_closed(void) {
+    uint64_t next = 0;
+    EQ(aienos_cap_generation_advance(UINT64_MAX, &next), AIENOS_CAP_ERR_EXHAUSTED);
+    EQ(aienos_cap_generation_advance((uint64_t)UINT32_MAX, &next), AIENOS_CAP_OK);
+    EQ(next, (uint64_t)UINT32_MAX + 1);
     Auth a = boot();
-    AienosCapRef cap, replacement, old, out;
+    AienosCapRef cap, replacement;
     EQ(root_mint(&a, 1, 0x10, AIENOS_CAP_RIGHT_READ, &cap), AIENOS_CAP_OK);
     EQ(aienos_cap_revoke(a.admin, office(&a), cap), AIENOS_CAP_OK);
-    EQ(aienos_cap_force_generation(a.admin, cap.cap_id, UINT32_MAX), AIENOS_CAP_OK);
+    EQ(aienos_cap_force_generation(a.admin, cap.cap_id, UINT64_MAX), AIENOS_CAP_OK);
     EQ(aienos_cap_reclaim(a.admin, office(&a), cap.cap_id), AIENOS_CAP_ERR_EXHAUSTED);
     EQ(validate(&a, cap, 1, 0x10, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_ERR_STALE_GEN);
     EQ(root_mint(&a, 1, 0x11, AIENOS_CAP_RIGHT_READ, &replacement), AIENOS_CAP_OK);
     CHECK(replacement.cap_id != cap.cap_id);
     /* A live slot cannot be moved onto a chosen generation. */
     EQ(aienos_cap_force_generation(a.admin, replacement.cap_id, 99), AIENOS_CAP_ERR_STATE);
+    /* No start above an exhausted generation exists, so restart refuses
+     * rather than reuse one. */
+    EQ(aienos_cap_restart(a.admin), AIENOS_CAP_ERR_EXHAUSTED);
+    aienos_cap_stop(a.admin, a.view);
+}
 
+static void restart_invalidates_and_cognition_cannot_mint(void) {
+    Auth a = boot();
+    AienosCapRef old, out;
     EQ(root_mint(&a, 1, 0x12, AIENOS_CAP_RIGHT_READ, &old), AIENOS_CAP_OK);
     AienosCapRef old_office = office(&a);
     EQ(aienos_cap_kill(a.admin), AIENOS_CAP_OK);
@@ -203,6 +213,65 @@ static void generation_wrap_restarts_and_cognition_cannot_mint(void) {
     EQ(aienos_cap_cognition_admin(a.view, 1, office(&a), old), AIENOS_CAP_ERR_UNAUTHORIZED);
     EQ(aienos_cap_clock(a.view), before);
     EQ(aienos_cap_authorize(a.admin, guess), AIENOS_CAP_ERR_UNAUTHORIZED);
+    aienos_cap_stop(a.admin, a.view);
+}
+
+/* The old defect: a reclaim moved a slot to boot+1, and the restart started
+ * the new table at boot+1 too, so the pre-restart reference validated
+ * again once the same slot was minted for the same subject and resource. */
+static void reclaimed_reference_stays_dead_after_restart(void) {
+    Auth a = boot();
+    AienosCapRef first, second, fresh;
+    EQ(root_mint(&a, 1, 0x40, AIENOS_CAP_RIGHT_READ, &first), AIENOS_CAP_OK);
+    EQ(aienos_cap_revoke(a.admin, office(&a), first), AIENOS_CAP_OK);
+    EQ(aienos_cap_reclaim(a.admin, office(&a), first.cap_id), AIENOS_CAP_OK);
+    EQ(root_mint(&a, 1, 0x40, AIENOS_CAP_RIGHT_READ, &second), AIENOS_CAP_OK);
+    EQ(second.cap_id, first.cap_id);
+    EQ(second.generation, first.generation + 1);
+    EQ(aienos_cap_restart(a.admin), AIENOS_CAP_OK);
+    EQ(root_mint(&a, 1, 0x40, AIENOS_CAP_RIGHT_READ, &fresh), AIENOS_CAP_OK);
+    EQ(fresh.cap_id, second.cap_id);
+    CHECK(fresh.generation > second.generation);
+    EQ(validate(&a, second, 1, 0x40, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_ERR_STALE_GEN);
+    EQ(validate(&a, first, 1, 0x40, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_ERR_STALE_GEN);
+    EQ(validate(&a, fresh, 1, 0x40, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_OK);
+    aienos_cap_stop(a.admin, a.view);
+}
+
+static void restarts_and_authorities_never_share_a_start(void) {
+    Auth a = boot();
+    Auth b = boot();
+    AienosCapRef a0 = office(&a);
+    AienosCapRef b0 = office(&b);
+    CHECK(b0.generation > a0.generation);
+    EQ(aienos_cap_restart(a.admin), AIENOS_CAP_OK);
+    AienosCapRef a1 = office(&a);
+    EQ(aienos_cap_restart(a.admin), AIENOS_CAP_OK);
+    AienosCapRef a2 = office(&a);
+    CHECK(a1.generation > b0.generation);
+    CHECK(a2.generation > a1.generation);
+    aienos_cap_stop(a.admin, a.view);
+    aienos_cap_stop(b.admin, b.view);
+}
+
+static void generation_above_32_bits_is_kept(void) {
+    Auth a = boot();
+    uint64_t high = ((uint64_t)1 << 32) + 5;
+    AienosCapRef cap;
+    /* Slot 1 is the first free slot after the office. */
+    EQ(aienos_cap_force_generation(a.admin, 1, high), AIENOS_CAP_OK);
+    EQ(root_mint(&a, 1, 0x50, AIENOS_CAP_RIGHT_READ, &cap), AIENOS_CAP_OK);
+    EQ(cap.cap_id, 1u);
+    EQ(cap.generation, high);
+    EQ(validate(&a, cap, 1, 0x50, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_OK);
+    AienosCapRef truncated = {cap.cap_id, (uint32_t)cap.generation};
+    EQ(validate(&a, truncated, 1, 0x50, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_ERR_STALE_GEN);
+    AienosCapEntry e;
+    EQ(aienos_cap_inspect(a.view, cap, &e), AIENOS_CAP_OK);
+    EQ(e.generation, high);
+    EQ(aienos_cap_restart(a.admin), AIENOS_CAP_OK);
+    CHECK(office(&a).generation > high);
+    EQ(validate(&a, cap, 1, 0x50, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_ERR_STALE_GEN);
     aienos_cap_stop(a.admin, a.view);
 }
 
@@ -242,7 +311,11 @@ int main(void) {
     child_lease_cannot_outlive_parent();
     privileged_rights_cannot_be_delegated_and_office_stays();
     promote_right_cannot_be_delegated();
-    generation_wrap_restarts_and_cognition_cannot_mint();
+    generation_exhaustion_fails_closed();
+    restart_invalidates_and_cognition_cannot_mint();
+    reclaimed_reference_stays_dead_after_restart();
+    restarts_and_authorities_never_share_a_start();
+    generation_above_32_bits_is_kept();
     ordinary_capability_cannot_administer_and_depth_stops();
     table_fills_then_refuses();
     printf("capability: %d checks, %d failures\n", checks, failures);
