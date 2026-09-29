@@ -162,7 +162,19 @@ bench-contain:
 	@echo "bench-contain: skipped (needs tests/bench_argus_contain.c + bridge + gate, lane F)"
 endif
 
-test-argus1: test-contain test-e2e test-contain-hostile test-contain-fp
+test-argus1: test-contain test-e2e test-contain-hostile test-contain-fp test-containment-authority test-contain-symbols
+
+# The AEGIS gate tests live with the capability authority; keep them in the
+# one ARGUS-1 regression command so G12 cannot silently omit the authority path.
+test-containment-authority:
+	$(MAKE) -C ../capability test-contain
+
+# G11/I4: low-level event/ring code and the authority must not depend upward on
+# detection, containment, or the bridge. The gate has its own checks in the
+# capability Makefile; this checks the other direction across the three objects.
+test-contain-symbols: $(LIB) test-containment-authority
+	$(MAKE) -C ../capability out/aienos_capability.o
+	./tests/check_argus1_symbols.sh $(OUT)/obj/argus_event.o $(OUT)/obj/argus_ring.o ../capability/out/aienos_capability.o
 
 # Linux only (called from `sanitize`): lane C unit test under ASan+UBSan, e2e under
 # ASan+UBSan and TSan, containment hostile under ASan+UBSan. Library sources are
@@ -182,6 +194,7 @@ ifneq ($(and $(CHOSTILE_SRC),$(STACK_SRC)),)
 	$(CC) $(CFLAGS) $(SANFLAGS_ASAN) $(STACK_INC) -pthread -o $(OUT)/test_argus_contain_hostile_asan $(CHOSTILE_SRC) $(STACK_SRC) tests/stub_state.c $(LIB_SRC)
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 ./$(OUT)/test_argus_contain_hostile_asan
 endif
+	$(MAKE) -C ../capability sanitize
 	@echo "sanitize-argus1: done (targets whose sources are absent were skipped)"
 
 test: test-lanes test-integration test-hostile test-argus1
@@ -217,3 +230,5 @@ endif
 
 clean:
 	rm -rf $(OUT)
+
+.PHONY: test-argus1 test-containment-authority test-contain-symbols sanitize-argus1
