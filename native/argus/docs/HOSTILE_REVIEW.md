@@ -714,3 +714,37 @@ surface: an environment variable that chooses where the omega ARGUS consumer thr
 - It cannot widen ARGUS's authority: it only moves a thread between CPUs; ARGUS still mints,
   grants and revokes nothing. Note that `auto` deliberately places the consumer outside the
   CPU mask the operator gave the process (see PERFORMANCE_GATE limits in `ARGUS0_GATES.md`).
+
+## ARGUS-1 containment hostile review (lane H)
+
+Reviewer: lane H. Date: 2026-09-29. Scope: the ARGUS containment state, AEGIS gate,
+capability observer bridge, and the live revoke path on `main` after PRs #167 and #168.
+The gate's own invariant suite remains `native/capability/tests/contain_test.c`; this
+section records cross-layer hostile cases from `tests/test_argus_contain_hostile.c`.
+
+On DGX Spark, `make -C native/argus test-contain-hostile` passed (103 checks, 0 failures).
+The cases verify: a changed request digest is denied without revocation; a target minted
+while the observer is detached cannot receive an automatic revoke; an automatic grant can
+execute once and a second attempt is refused; replaying the same request ID is denied; the
+office capability remains live when targeted; a synthetic machine quarantine is not
+performed automatically; fabricated or unmatched decisions are reported; execution before
+approval is reported; and a claimed DONE without its matching authority revoke is reported.
+These are pass/fail tests; no expected-fail case is hidden from the test exit code.
+
+| Attack | Verdict | Boundary |
+|---|---|---|
+| Change request bytes after computing the digest | DEFENDED | Gate compares the canonical request digest before deciding. |
+| Submit an unobserved capability as a revoke target | DEFENDED | Gate escalates because observer lineage cannot verify the target. |
+| Execute one grant twice | DEFENDED | First call revokes once; the second is refused and cannot revive or re-revoke it. |
+| Replay the same request ID | DEFENDED | Monotonic request IDs reject the duplicate. |
+| Aim revoke at the office capability | DEFENDED | Protected-target rules deny it; office capability remains live. |
+| Ask the live gate to quarantine a machine | DEFENDED, synthetic only | Request escalates and cannot execute without human resolution; no machine-quarantine mechanism is wired. |
+| Send an unmatched decision receipt | DEFENDED | Containment reports code 17. |
+| Send DONE before any GRANT | DEFENDED | Containment reports code 18. |
+| Claim DONE after GRANT without an observed revoke | DEFENDED | Containment reports code 19; the real capability remains live. |
+
+Remaining limits: a correct office-secret resolution cannot be exercised because the
+authority does not expose the office secret to this test harness; the bridge's
+automatic revoke path is covered by the end-to-end test. Stream 16383 remains a reserved
+convention, not a validator-enforced restriction. ARGUS-1 still trusts the in-process
+observer/bridge caller and does not add producer authentication.
