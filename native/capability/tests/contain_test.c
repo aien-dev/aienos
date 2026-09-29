@@ -753,6 +753,31 @@ static void test_i4(void) {
     rig_free(r);
 }
 
+/* Destroy cannot enable a second executor mint from the same authority. */
+static void test_destroy_recreate(void) {
+    inv_begin();
+    Rig *r = rig_new(1, 1);
+    AienosCapRef ex;
+    CHECK(aienos_contain_executor(r->gate, &ex) == AIENOS_CONTAIN_OK);
+    uint32_t mints = count_subject_mints(r, 0, AIENOS_CONTAIN_SUBJ);
+    CHECK(mints == 1);
+    aienos_contain_destroy(r->gate);
+    r->gate = NULL;
+    static _Alignas(16) unsigned char mem[32 * 1024];
+    AienosContain *again = NULL;
+    AienosContainAuthorizer az = {aienos_contain_table_decide, &r->policy};
+    uint32_t obs = r->nobs;
+    CHECK(aienos_contain_create(&again, mem, sizeof mem, r->admin, r->view, r->office, &az) ==
+          AIENOS_CONTAIN_ERR_EXISTS);
+    CHECK(again == NULL && r->nobs == obs);
+    CHECK(count_subject_mints(r, 0, AIENOS_CONTAIN_SUBJ) == mints);
+    AienosCapEntry entry;
+    CHECK(aienos_cap_inspect(r->view, ex, &entry) == AIENOS_CAP_OK &&
+          entry.state == AIENOS_CAP_STATE_LIVE && entry.rights == AIENOS_CAP_RIGHT_REVOKE);
+    inv_end("I5.a destroy-does-not-enable-remint");
+    rig_free(r);
+}
+
 /* ---- Determinism: same request sequence -> same receipts ---- */
 typedef struct {
     uint32_t n;
@@ -822,6 +847,7 @@ int main(void) {
     test_i2();
     test_i5_and_replay();
     test_i4();
+    test_destroy_recreate();
     test_determinism();
     CHECK(aienos_contain_footprint() <= 24u * 1024u);
     printf("contain_test: %d checks, %d failures, footprint %zu bytes (<= 24576)\n", checks, failures,

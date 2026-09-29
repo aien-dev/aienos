@@ -248,11 +248,10 @@ size_t aienos_contain_footprint(void);
 int aienos_contain_create(AienosContain **g, void *mem, size_t bytes, AienosCapAdmin *admin,
                           const AienosCapView *view, AienosCapRef office,
                           const AienosContainAuthorizer *authz);
-/* Clears the memory and releases the authority's registry entry. Revokes
- * nothing: the executor stays LIVE for the operator to revoke. A second create
- * is refused only while a gate for that authority exists; destroy + create is
- * an admin-holder action (it can mint anyway). Registry: AIENOS_CONTAIN_REGISTRY
- * live gates per process; create returns ERR_FULL beyond that. */
+/* Clears the memory. Revokes nothing; the authority entry stays registered,
+ * so a second create for the same authority is refused even after destroy.
+ * The registry is bounded to AIENOS_CONTAIN_REGISTRY authority instances per
+ * process; failed creates release their reservation. */
 void aienos_contain_destroy(AienosContain *g);
 
 int aienos_contain_set_sink(AienosContain *g, AienosContainSink fn, void *ctx);

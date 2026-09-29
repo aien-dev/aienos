@@ -444,7 +444,6 @@ int aienos_contain_create(AienosContain **gp, void *mem, size_t bytes, AienosCap
 
 void aienos_contain_destroy(AienosContain *g) {
     if (!g) return;
-    if (g->admin) reg_release(g->admin, g->office.generation);
     pthread_mutex_destroy(&g->lock);
     memset(g, 0, sizeof *g);
 }
