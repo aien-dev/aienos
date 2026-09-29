@@ -71,6 +71,11 @@
  *       total, so no use is ever silently lost; refusals are still counted.
  *     Tick (aienos_cap_clock, a mutex) is read only for transition events; USED and
  *       summaries carry tick 0.
+ *     A producer flushes a slot's pending summary BEFORE emitting GRANTED or REVOKED for
+ *       that slot (a summary spanning a re-grant would read as stale/revoked use).
+ *     The consumer uses ONE shared next_sequence for argus_ring_drain_drops across all
+ *       rings (drop events share the zero-machine/stream-0/CONSUMER stream).
+ *     A 9th World store is table-full: ERR_FULL + one CRITICAL TELEMETRY_LOSS, counted.
  *     One ring and one stream id per producer thread; no push lock; the consumer
  *       polls all rings. Sequence is per stream.
  *     cap_id 0 is the office capability and is checked like any other; "none" is
@@ -149,8 +154,8 @@ enum {
     ARGUS_EV_RUNTIME_BUILD_CHANGED   = 72,
     ARGUS_EV_TELEMETRY_DROPPED       = 80,  /* synthesized by the ring consumer: object_id = class, resource = count */
     ARGUS_EV_CAPABILITY_USE_SUMMARY  = 81,  /* aggregation of successful validates per (cap_id, principal) since the last flush:
-                                               resource = count, cap_generation = MAX generation seen, object_id = MIN generation
-                                               seen, tick = 0, outcome OK. Detectors 1-3 treat it as a USED (3 checks max vs
+                                               resource = count, cap_generation = MAX generation seen, world_generation = MIN
+                                               generation seen (64-bit; object_id unused = 0), tick = 0, outcome OK (else malformed). Detectors 1-3 treat it as a USED (3 checks max vs
                                                REVOKED, 2 checks min vs shadow generation). The core applies nothing. Floor AUDIT. */
     ARGUS_EV_KIND_MAX                = 81
 };
@@ -180,6 +185,7 @@ enum {
 #define ARGUS_FLAG_STREAM_SHIFT 2u
 #define ARGUS_FLAG_STREAM_MASK 0xFFFCu
 #define ARGUS_FLAG_KNOWN       0xFFFFu
+/* Every flag bit is now meaningful; "reserved bits" checks no longer apply in v1.1. */
 #define ARGUS_STREAM_OF(flags) ((uint16_t)(((flags) & ARGUS_FLAG_STREAM_MASK) >> ARGUS_FLAG_STREAM_SHIFT))
 #define ARGUS_STREAM_MAX       16384u
 
