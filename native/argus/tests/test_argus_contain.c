@@ -72,6 +72,28 @@ int main(void)
     /* A closed confirmed key cannot be replayed; an unknown decision raises code 17. */
     np=0; CHECK(argus_contain_propose(state,core,&f,1,&trigger,req,4,prop,4,&np)==ARGUS_OK && np==0);
     argus_contain_health(state,&h); CHECK(h.suppressed_cooldown==1);
+
+    /* Only the first overflow per shadow table creates its synthetic ask. */
+    void *sat_mem=calloc(1,argus_contain_footprint()); ArgusContain *sat_state=NULL;
+    CHECK(sat_mem && argus_contain_init(&sat_state,sat_mem,argus_contain_footprint())==ARGUS_OK);
+    const uint16_t full_kinds[4]={ARGUS_EV_MACHINE_JOINED,ARGUS_EV_CREDENTIAL_LEASE_CREATED,
+        ARGUS_EV_PROVIDER_DISCOVERED,ARGUS_EV_ARTIFACT_ADMITTED};
+    const uint8_t sat_types[4]={ARGUS_CONTAIN_REQUIRE_REATTESTATION,ARGUS_CONTAIN_REVOKE_CREDENTIAL_LEASE,
+        ARGUS_CONTAIN_QUARANTINE_PROVIDER,ARGUS_CONTAIN_REJECT_ARTIFACT};
+    ArgusFinding sat_f={0}; sat_f.code=ARGUS_F_TELEMETRY_LOSS; sat_f.severity=ARGUS_SEV_CRITICAL;
+    sat_f.confidence=ARGUS_CONF_DETERMINISTIC; sat_f.principal=7; sat_f.machine_id[0]=0xA5;
+    for(size_t i=0;i<4;i++) {
+        trigger=event(full_kinds[i],11000+i); trigger.object_id=(uint32_t)(80+i); trigger.evidence_digest[0]=(uint8_t)(0xC0+i);
+        sat_f.sequence=trigger.sequence;
+        np=0; CHECK(argus_contain_propose(sat_state,core,&sat_f,1,&trigger,req,4,prop,4,&np)==ARGUS_OK && np==1);
+        CHECK(req[0].containment==sat_types[i] && (req[0].flags&ARGUS_CREQ_SATURATION)!=0);
+        if(i==1) CHECK(req[0].target_object==trigger.object_id);
+        if(i==2 || i==3) CHECK(req[0].target_digest[0]==trigger.evidence_digest[0]);
+    }
+    trigger=event(ARGUS_EV_MACHINE_JOINED,12000); sat_f.sequence=trigger.sequence; np=0;
+    CHECK(argus_contain_propose(sat_state,core,&sat_f,1,&trigger,req,4,prop,4,&np)==ARGUS_OK && np==0);
+    argus_contain_health(sat_state,&h); CHECK(h.requested==4 && h.suppressed_dedup==1);
+    free(sat_mem);
     ArgusEvent foreign=event(ARGUS_EV_CONTAINMENT_DECIDED,6); foreign.class_=ARGUS_CLASS_CRITICAL;
     foreign.world_generation=999; foreign.object_id=ARGUS_CONTAIN_PACK(ARGUS_CONTAIN_REVOKE_CAPABILITY,ARGUS_CSTATUS_GRANT,ARGUS_F_STALE_GENERATION);
     CHECK(argus_contain_observe(state,core,&foreign,scratch,ARGUS_CORE_MAX_FINDINGS,&nfind)==ARGUS_OK);

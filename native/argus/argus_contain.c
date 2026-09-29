@@ -26,7 +26,7 @@ struct ArgusContain {
     uint64_t events, next_request_id, next_proposal_sequence, window_start;
     uint32_t window_count;
     uint32_t executor_cap_id;
-    uint8_t overflow_reported, overflow_pending;
+    uint8_t saturation_mask, overflow_reported, overflow_pending;
     uint8_t overflow_machine_id[ARGUS_MACHINE_ID_LEN];
     Pending pending[ARGUS_CONTAIN_PENDING];
     Recent recent[ARGUS_CONTAIN_RECENT];
@@ -260,6 +260,17 @@ static int protected_target(const ArgusContain *s, const ArgusStateOps *ops, con
 static int never_propose(uint16_t code)
 { return code==11 || code==12 || code==13 || code==16 || (code>=17 && code<=21); }
 
+static uint8_t saturation_request_type(uint16_t kind, uint8_t *bit)
+{
+    switch(kind) {
+    case ARGUS_EV_MACHINE_JOINED: *bit=0x1u; return ARGUS_CONTAIN_REQUIRE_REATTESTATION;
+    case ARGUS_EV_CREDENTIAL_LEASE_CREATED: *bit=0x2u; return ARGUS_CONTAIN_REVOKE_CREDENTIAL_LEASE;
+    case ARGUS_EV_PROVIDER_DISCOVERED: *bit=0x4u; return ARGUS_CONTAIN_QUARANTINE_PROVIDER;
+    case ARGUS_EV_ARTIFACT_ADMITTED: *bit=0x8u; return ARGUS_CONTAIN_REJECT_ARTIFACT;
+    default: *bit=0; return ARGUS_CONTAIN_NONE;
+    }
+}
+
 int argus_contain_propose(ArgusContain *s, const ArgusCore *core,
                           const ArgusFinding *findings, size_t nf, const ArgusEvent *trigger,
                           ArgusContainmentRequest *requests, size_t rcap,
@@ -269,20 +280,28 @@ int argus_contain_propose(ArgusContain *s, const ArgusCore *core,
     size_t n=0; const ArgusStateOps *ops=argus_core_ops(); const ArgusStateView *view=argus_core_view(core);
     for(size_t j=0;j<nf;j++) {
         const ArgusFinding *f=&findings[j];
+        uint8_t sat_bit=0;
+        uint8_t sat_type=(f->code==ARGUS_F_TELEMETRY_LOSS && trigger && f->severity==ARGUS_SEV_CRITICAL)?
+            saturation_request_type(trigger->kind,&sat_bit):ARGUS_CONTAIN_NONE;
+        int saturation=sat_type!=ARGUS_CONTAIN_NONE;
+        uint8_t request_type=saturation?sat_type:f->containment;
         if(f->confidence!=ARGUS_CONF_DETERMINISTIC || f->severity<ARGUS_SEV_HIGH ||
-           f->containment==ARGUS_CONTAIN_NONE || f->containment>ARGUS_CONTAIN_MAX || never_propose(f->code)) continue;
+           request_type==ARGUS_CONTAIN_NONE || request_type>ARGUS_CONTAIN_MAX ||
+           (never_propose(f->code) && !saturation)) continue;
+        if(saturation && (s->saturation_mask&sat_bit)) { s->health.suppressed_dedup++; continue; }
         if(s->next_request_id==0 || s->next_request_id==UINT64_MAX ||
            s->next_proposal_sequence==0 || s->next_proposal_sequence==UINT64_MAX) return ARGUS_ERR_FULL;
         ArgusCapShadow c={0}; int has=ops->cap(view,f->cap_id,&c)==ARGUS_OK && c.state==ARGUS_SHADOW_LIVE;
-        if(f->containment==ARGUS_CONTAIN_REVOKE_CAPABILITY && protected_target(s,ops,view,f,&c,has)) { s->health.suppressed_protected++; continue; }
-        if(f->containment==ARGUS_CONTAIN_REVOKE_CAPABILITY && (!has || c.generation==0)) continue;
+        if(request_type==ARGUS_CONTAIN_REVOKE_CAPABILITY && protected_target(s,ops,view,f,&c,has)) { s->health.suppressed_protected++; continue; }
+        if(request_type==ARGUS_CONTAIN_REVOKE_CAPABILITY && (!has || c.generation==0)) continue;
         ArgusContainmentRequest q={0};
         uint64_t incident=0; (void)argus_core_incident(core,f->principal,f->code,&incident);
-        q.incident_id=incident; q.containment=f->containment; q.severity=f->severity; q.finding_code=f->code;
-        q.principal=(f->containment==ARGUS_CONTAIN_REVOKE_CAPABILITY)?c.subject:f->principal;
-        q.target.cap_id=(f->containment==ARGUS_CONTAIN_REVOKE_CAPABILITY)?f->cap_id:ARGUS_CAP_NONE;
-        q.target.generation=(f->containment==ARGUS_CONTAIN_REVOKE_CAPABILITY)?c.generation:0;
+        q.incident_id=incident; q.containment=request_type; q.severity=f->severity; q.finding_code=f->code;
+        q.principal=(request_type==ARGUS_CONTAIN_REVOKE_CAPABILITY)?c.subject:f->principal;
+        q.target.cap_id=(request_type==ARGUS_CONTAIN_REVOKE_CAPABILITY)?f->cap_id:ARGUS_CAP_NONE;
+        q.target.generation=(request_type==ARGUS_CONTAIN_REVOKE_CAPABILITY)?c.generation:0;
         if (q.containment!=ARGUS_CONTAIN_LIVE_TYPE) q.flags=ARGUS_CREQ_SYNTHETIC;
+        if (saturation) q.flags|=ARGUS_CREQ_SATURATION;
         if (trigger && q.containment==ARGUS_CONTAIN_REVOKE_CREDENTIAL_LEASE) q.target_object=trigger->object_id;
         if (trigger && (q.containment==ARGUS_CONTAIN_REJECT_ARTIFACT || q.containment==ARGUS_CONTAIN_QUARANTINE_PROVIDER))
             memcpy(q.target_digest,trigger->evidence_digest,ARGUS_DIGEST_LEN);
@@ -318,6 +337,7 @@ int argus_contain_propose(ArgusContain *s, const ArgusCore *core,
         e->world_generation=q.request_id; e->object_id=ARGUS_CONTAIN_PACK(q.containment,ARGUS_CSTATUS_PROPOSED,q.finding_code);
         e->resource=q.finding_sequence; memcpy(e->machine_id,q.machine_id,ARGUS_MACHINE_ID_LEN); memcpy(e->evidence_digest,p->digest,ARGUS_DIGEST_LEN);
         n++; s->next_request_id++; s->window_count++; s->health.requested++;
+        if (saturation) s->saturation_mask|=sat_bit;
     }
     *n_out=n; return ARGUS_OK;
 }
@@ -344,7 +364,7 @@ void argus_contain_state_digest(const ArgusContain *s, uint8_t out[ARGUS_DIGEST_
     if(!s) {memset(out,0,ARGUS_DIGEST_LEN);return;}
     uint8_t b[ARGUS_CONTAIN_PENDING*(ARGUS_CONTAIN_REQUEST_SIZE+56)+ARGUS_CONTAIN_RECENT*80+256]; size_t n=0;
     static const uint8_t domain[]="AIENOS-ARGUS-CONTAIN-STATE-V1\0"; memcpy(b+n,domain,sizeof domain);n+=sizeof domain;
-    wr64(b+n,s->events);n+=8; wr64(b+n,s->next_request_id);n+=8; wr64(b+n,s->next_proposal_sequence);n+=8; wr64(b+n,s->window_start);n+=8; wr32(b+n,s->window_count);n+=4; wr32(b+n,s->executor_cap_id);n+=4; b[n++]=s->overflow_reported; b[n++]=s->overflow_pending; memcpy(b+n,s->overflow_machine_id,ARGUS_MACHINE_ID_LEN);n+=ARGUS_MACHINE_ID_LEN;
+    wr64(b+n,s->events);n+=8; wr64(b+n,s->next_request_id);n+=8; wr64(b+n,s->next_proposal_sequence);n+=8; wr64(b+n,s->window_start);n+=8; wr32(b+n,s->window_count);n+=4; wr32(b+n,s->executor_cap_id);n+=4; b[n++]=s->saturation_mask; b[n++]=s->overflow_reported; b[n++]=s->overflow_pending; memcpy(b+n,s->overflow_machine_id,ARGUS_MACHINE_ID_LEN);n+=ARGUS_MACHINE_ID_LEN;
     for(size_t i=0;i<ARGUS_CONTAIN_PENDING;i++) { const Pending *p=&s->pending[i]; b[n++]=p->state; if(p->state==ST_FREE) continue;
         uint8_t enc[ARGUS_CONTAIN_REQUEST_SIZE]; (void)argus_contain_request_encode(&p->req,enc); memcpy(b+n,enc,sizeof enc);n+=sizeof enc;
         memcpy(b+n,p->digest,ARGUS_DIGEST_LEN);n+=ARGUS_DIGEST_LEN; b[n++]=p->kind4_count; wr64(b+n,p->entered);n+=8;wr64(b+n,p->decision_id);n+=8; }
