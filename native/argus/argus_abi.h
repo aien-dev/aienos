@@ -358,7 +358,7 @@ int    argus_ring_pop(ArgusRing *ring, ArgusEvent *out);                    /* c
 size_t argus_ring_pop_batch(ArgusRing *ring, ArgusEvent *out, size_t max);
 typedef struct {
     uint64_t pushed, popped;
-    uint64_t refused[ARGUS_CLASS_MAX + 1];   /* per class, index by class */
+    uint64_t refused[ARGUS_CLASS_MAX + 1];   /* per class, index by class; index 0 = malformed pushes (never a loss) */
     uint64_t critical_overflow;              /* sticky count: evidence gap */
     uint32_t depth, capacity;
 } ArgusRingStats;
