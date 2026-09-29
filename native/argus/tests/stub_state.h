@@ -83,4 +83,21 @@ size_t argus_corpus_benign(ArgusEvent *out, size_t max, uint64_t seed);
 size_t argus_corpus_hostile(ArgusEvent *out, size_t max, uint64_t seed,
                             ArgusExpectedFinding *expect, size_t expect_max, size_t *n_expect);
 
+/* ARGUS-1 stress inputs. These are legal, deterministic event streams; the
+ * stale-use storm has 256 principals (including protected cap 0), and each
+ * use after the seed grants is a confirmed stale-generation trigger. */
+size_t argus_corpus_containment_storm(ArgusEvent *out, size_t capacity,
+                                      size_t stale_uses, uint64_t seed);
+size_t argus_corpus_cap0_framing(ArgusEvent *out, size_t capacity,
+                                 size_t stale_uses, uint64_t seed);
+/* table_kind is one of MACHINE_JOINED, CREDENTIAL_LEASE_CREATED,
+ * PROVIDER_DISCOVERED, or ARTIFACT_ADMITTED. `slots` events fill its shadow;
+ * `overflows` additional unique entries exercise first/later saturation. */
+size_t argus_corpus_table_saturation(ArgusEvent *out, size_t capacity,
+                                    uint16_t table_kind, size_t slots,
+                                    size_t overflows, uint64_t seed);
+/* Repeated grant/use/revoke/regrant cycles over ordinary leaf slots. */
+size_t argus_corpus_authority_churn(ArgusEvent *out, size_t capacity,
+                                    size_t cycles, uint64_t seed);
+
 #endif /* ARGUS_STUB_STATE_H */
