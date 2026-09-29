@@ -17,6 +17,7 @@
 #include "argus_detect.h"
 #include "sha256.h"
 #include "stub_state.h"
+#include "../capability/aienos_capability.h"   /* header only: ARGUS-1 mirror constants (never linked) */
 
 #include <dirent.h>
 #include <errno.h>
@@ -1077,6 +1078,94 @@ static void capacity_probe(void)
     run_free(&r);
 }
 
+/* ---- ARGUS-1 (ABI v1.2) header checks: lane L0 --------------------------------
+ * Exercises the header only: v1.2 is strictly additive over v1.1. The encode/
+ * decode/digest functions (lane B) and argus_contain (lane C) are declared but not
+ * called here until they land. */
+#define ARGUS1_FSIZE(T, f) sizeof(((T *)0)->f)
+_Static_assert(ARGUS_ABI_MINOR == 2u && ARGUS_ABI_VERSION == 1u, "v1.2 minor, event version byte unchanged");
+_Static_assert(ARGUS_CONTAIN_REQUEST_SIZE == 152u, "request encoding is 152 bytes");
+_Static_assert(ARGUS_CONTAIN_REQUEST_VERSION == 2u, "request version 2");
+_Static_assert(ARGUS1_FSIZE(ArgusContainmentRequest, incident_id) + ARGUS1_FSIZE(ArgusContainmentRequest, containment) +
+               ARGUS1_FSIZE(ArgusContainmentRequest, severity) + ARGUS1_FSIZE(ArgusContainmentRequest, finding_code) +
+               ARGUS1_FSIZE(ArgusContainmentRequest, principal) + sizeof(uint32_t) + sizeof(uint64_t) /* target, packed */ +
+               ARGUS1_FSIZE(ArgusContainmentRequest, machine_id) + ARGUS1_FSIZE(ArgusContainmentRequest, finding_digest) +
+               ARGUS1_FSIZE(ArgusContainmentRequest, request_id) + ARGUS1_FSIZE(ArgusContainmentRequest, finding_sequence) +
+               ARGUS1_FSIZE(ArgusContainmentRequest, target_object) + ARGUS1_FSIZE(ArgusContainmentRequest, target_rights) +
+               ARGUS1_FSIZE(ArgusContainmentRequest, target_digest) + ARGUS1_FSIZE(ArgusContainmentRequest, flags) +
+               ARGUS1_FSIZE(ArgusContainmentRequest, version) + ARGUS1_FSIZE(ArgusContainmentRequest, reserved) ==
+               ARGUS_CONTAIN_REQUEST_SIZE, "request field sizes sum to the wire size");
+_Static_assert(offsetof(ArgusContainmentRequest, request_id) > offsetof(ArgusContainmentRequest, finding_digest),
+               "v1.2 fields are appended after the ARGUS-0 fields");
+_Static_assert(ARGUS_EV_KIND_MAX == 93 && ARGUS_F_MAX == 21, "v1.2 maxima");
+_Static_assert(ARGUS_EV_CAPABILITY_USE_SUMMARY == 81 && ARGUS_EV_TELEMETRY_DROPPED == 80 &&
+               ARGUS_F_MALFORMED_EVENT == 16, "v1.1 values unchanged");
+_Static_assert(ARGUS_EV_CONTAINMENT_PROPOSED == 90 && ARGUS_EV_CONTAINMENT_DECIDED == 91 &&
+               ARGUS_EV_CONTAINMENT_EXECUTED == 92 && ARGUS_EV_AUTHORITY_ESCALATED == 93, "kinds 90-93");
+_Static_assert(ARGUS_F_CONTAINMENT_DECISION_UNMATCHED == 17 && ARGUS_F_CONTAINMENT_EXECUTION_UNAUTHORIZED == 18 &&
+               ARGUS_F_CONTAINMENT_EXECUTION_UNCONFIRMED == 19 && ARGUS_F_CONTAINMENT_UNANSWERED == 20 &&
+               ARGUS_F_CONTAINMENT_SCOPE_EXCEEDED == 21, "codes 17-21");
+_Static_assert(ARGUS_CONTAIN_MAX == 10 && ARGUS_CONTAIN_LIVE_TYPE == ARGUS_CONTAIN_REVOKE_CAPABILITY &&
+               ARGUS_CONTAIN_REVOKE_CAPABILITY == 1, "request types 1..10 unchanged; one LIVE type");
+_Static_assert(ARGUS_CREQ_KNOWN == (ARGUS_CREQ_SYNTHETIC | ARGUS_CREQ_SATURATION), "request flags");
+_Static_assert(ARGUS_CSTATUS_MAX == 8 && ARGUS_CSTATUS_FAILED_SCOPE == 8, "status 0..8");
+_Static_assert(sizeof(ArgusContainHealth) == 17 * sizeof(uint64_t), "spec 4.3: 17 counters");
+_Static_assert(ARGUS_CONTAIN_PENDING == 32 && ARGUS_CONTAIN_RECENT == 128 && ARGUS_CONTAIN_WINDOW_EVENTS == 4096 &&
+               ARGUS_CONTAIN_WINDOW_MAX == 16 && ARGUS_CONTAIN_TIMEOUT_EVENTS == 16384 &&
+               ARGUS_CONTAIN_COOLDOWN_EVENTS == 65536 && ARGUS_CONTAIN_RETRIES == 1, "spec 4 table constants");
+_Static_assert(ARGUS_CAP_RIGHT_PRIVILEGED == AIENOS_CAP_RIGHT_PRIVILEGED &&
+               ARGUS_CAP_RIGHT_REVOKE == AIENOS_CAP_RIGHT_REVOKE, "ARGUS rights mirrors equal the authority's");
+_Static_assert(ARGUS_CAP_MAX == AIENOS_CAP_MAX, "cap table size");
+
+static void gate_abi_v12(void)
+{
+    /* kinds 90-93: distinct, strictly above every v1.1 kind (max 81) */
+    static const uint16_t v12k[] = { ARGUS_EV_CONTAINMENT_PROPOSED, ARGUS_EV_CONTAINMENT_DECIDED,
+                                     ARGUS_EV_CONTAINMENT_EXECUTED, ARGUS_EV_AUTHORITY_ESCALATED };
+    static const uint16_t v12f[] = { ARGUS_F_CONTAINMENT_DECISION_UNMATCHED, ARGUS_F_CONTAINMENT_EXECUTION_UNAUTHORIZED,
+                                     ARGUS_F_CONTAINMENT_EXECUTION_UNCONFIRMED, ARGUS_F_CONTAINMENT_UNANSWERED,
+                                     ARGUS_F_CONTAINMENT_SCOPE_EXCEEDED };
+    int kinds_ok = 1, codes_ok = 1;
+    for (size_t i = 0; i < 4; i++) {
+        if (v12k[i] <= ARGUS_EV_CAPABILITY_USE_SUMMARY || v12k[i] > ARGUS_EV_KIND_MAX) kinds_ok = 0;
+        for (size_t j = 0; j < i; j++) if (v12k[i] == v12k[j]) kinds_ok = 0;
+    }
+    for (size_t i = 0; i < 5; i++) {
+        if (v12f[i] <= ARGUS_F_MALFORMED_EVENT || v12f[i] > ARGUS_F_MAX) codes_ok = 0;
+        for (size_t j = 0; j < i; j++) if (v12f[i] == v12f[j]) codes_ok = 0;
+    }
+    /* no ARGUS-0 detector raises a containment code (17-21 never come from detection) */
+    int det_ok = 1;
+    for (size_t i = 0; i < argus_hard_detector_count; i++)
+        if (argus_hard_detectors[i].id > ARGUS_F_MALFORMED_EVENT) det_ok = 0;
+    /* object_id packing round trip over every type x status x containment code */
+    int pack_ok = 1;
+    for (unsigned t = 1; t <= ARGUS_CONTAIN_MAX; t++)
+        for (unsigned s = 0; s <= ARGUS_CSTATUS_MAX; s++)
+            for (unsigned c = 0; c <= ARGUS_F_MAX; c++) {
+                uint32_t o = ARGUS_CONTAIN_PACK(t, s, c);
+                if (ARGUS_CONTAIN_TYPE_OF(o) != t || ARGUS_CONTAIN_STATUS_OF(o) != s || ARGUS_CONTAIN_CODE_OF(o) != c)
+                    pack_ok = 0;
+            }
+    /* G11 (table half): the ratified sync mask (spec section 7) equals argus_hard_detectors[] */
+    uint32_t mask = 0;
+    for (size_t i = 0; i < argus_hard_detector_count; i++)
+        if (argus_hard_detectors[i].sync_allowed) mask |= 1u << argus_hard_detectors[i].id;
+    int sync_ok = mask == ARGUS_SYNC_RATIFIED_MASK;
+    /* TODO(L0, G11 symbol half, after lanes C/G/X): nm check that argus_ring.o, argus_event.o and
+     *   aienos_capability.o reference no symbol defined in argus_detect.o, argus_contain.o,
+     *   aienos_contain.o or the bridge (I4). */
+    /* TODO(L0, G12, wave 3): full `make test` + `make sanitize` on the Spark incl. test-argus1
+     *   and sanitize-argus1; `make test` on the Mac. */
+    /* TODO(L0, after X): G2 recorded-bridge-stream replay and G6 end-to-end runs with GATE lines. */
+    gate("ARGUS1_ABI_V12_HEADER", kinds_ok && codes_ok && det_ok && pack_ok && sync_ok,
+         "static: event 128 B + 17 v1.1 offsets pinned, request wire %u B (field sum), request v%u, ABI minor %u; "
+         "kinds 90-93 above 81 distinct=%d; codes 17-21 above 16 distinct=%d; no detector raises 17-21=%d; "
+         "object_id pack round trip=%d; sync mask 0x%x vs ratified 0x%x=%d",
+         ARGUS_CONTAIN_REQUEST_SIZE, ARGUS_CONTAIN_REQUEST_VERSION, ARGUS_ABI_MINOR, kinds_ok, codes_ok, det_ok,
+         pack_ok, mask, (unsigned)ARGUS_SYNC_RATIFIED_MASK, sync_ok);
+}
+
 int main(int argc, char **argv)
 {
     int bench = 0;
@@ -1102,6 +1191,7 @@ int main(int argc, char **argv)
     for (size_t i = 0; i < n_hostile; i++) run_ingest(&direct_h, &hostile[i]);
 
     gate_abi();
+    gate_abi_v12();
     gate_secret();
     gate_transport();
     gate_saturation();

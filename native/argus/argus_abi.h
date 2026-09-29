@@ -86,6 +86,16 @@
  *       aienos PR); until then a mint outside rx_aegis is reported as FORGED.
  *     Table sizes: caps ARGUS_CAP_MAX, artifacts 256, incidents 256; every FULL is counted in health.
  *
+ *   - v1.2 (ARGUS-1 containment, docs/ARGUS1_SPEC.md; strictly ADDITIVE):
+ *     The 128-byte event layout and ARGUS_ABI_VERSION (the event version byte, 1) are
+ *     unchanged; static asserts below pin every v1.1 offset. ARGUS_ABI_MINOR = 2.
+ *     Appended: kinds 90-93 (containment proposed/decided/executed, authority escalated),
+ *     finding codes 17-21 (containment bookkeeping; never propose), the request fields
+ *     after the ARGUS-0 ones plus its 152-byte canonical encoding, ArgusContainHealth,
+ *     the containment table constants and argus_core_incident. Invariants I1-I5 bind:
+ *     only RevokeCapability has a LIVE executor; FreezePrincipal is a declared stand-in
+ *     with no executor (I2); no request type grants, mints or widens anything (I5.c).
+ *
  * Wire encoding (argus_event_encode/decode): each field in the order below,
  * little-endian, packed to exactly ARGUS_EVENT_SIZE bytes, offsets as noted.
  * Event digest = SHA-256 of those 128 bytes. Chain digest =
@@ -97,6 +107,7 @@
 #include <stdint.h>
 
 #define ARGUS_ABI_VERSION     1u    /* v1.1: layout-identical; stream id in flag bits, USE_SUMMARY, CAP_NONE, store id */
+#define ARGUS_ABI_MINOR       2u    /* v1.2: ARGUS-1 containment, additive; the event version byte stays ARGUS_ABI_VERSION */
 #define ARGUS_EVENT_SIZE      128u
 #define ARGUS_DIGEST_LEN      32u
 #define ARGUS_MACHINE_ID_LEN  32u   /* PROVISIONAL opaque identity slot */
@@ -157,7 +168,15 @@ enum {
                                                resource = count, cap_generation = MAX generation seen, world_generation = MIN
                                                generation seen (64-bit; object_id unused = 0), tick = 0, outcome OK (else malformed). Detectors 1-3 treat it as a USED (3 checks max vs
                                                REVOKED, 2 checks min vs shadow generation). The core applies nothing. Floor AUDIT. */
-    ARGUS_EV_KIND_MAX                = 81
+    /* v1.2 containment kinds (spec section 3). All four: floor CRITICAL, effect_class NONE.
+     * 90-92: object_id = ARGUS_CONTAIN_PACK(type, status, finding_code), world_generation =
+     * request_id, evidence_digest = request digest. The core applies no shadow change and
+     * the detectors never treat them as triggers. */
+    ARGUS_EV_CONTAINMENT_PROPOSED    = 90,  /* ARGUS consumer only (CONSUMER flag); resource = finding_sequence; ring push refuses it */
+    ARGUS_EV_CONTAINMENT_DECIDED     = 91,  /* gate via bridge; outcome OK=GRANT DENIED=DENY ERROR=ESCALATE; code = WHY; resource = decision_id */
+    ARGUS_EV_CONTAINMENT_EXECUTED    = 92,  /* executor via bridge; code = authority rc; resource low32 = slots revoked, high32 = refused */
+    ARGUS_EV_AUTHORITY_ESCALATED     = 93,  /* Omega rx_aegis ESCALATE record; code = RX_AEGIS_WHY_*; resource = requested resource */
+    ARGUS_EV_KIND_MAX                = 93
 };
 
 /* Effect class of the operation the event describes. Mirrors RX_WORK_* + none. */
@@ -246,10 +265,21 @@ enum {
     ARGUS_F_SUBJECT_MISMATCH              = 14,  /* capability used with outcome OK by a principal other than the granted subject */
     ARGUS_F_TRUST_ESCALATION              = 15,  /* TRUST_CHANGED/JOINED attempted to raise trust; ignored */
     ARGUS_F_MALFORMED_EVENT               = 16,  /* validate rejected the event; core-raised, not applied */
-    ARGUS_F_MAX                           = 16
+    /* v1.2: raised by argus_contain only; DETERMINISTIC, containment NONE, sync 0; never propose (no recursion). */
+    ARGUS_F_CONTAINMENT_DECISION_UNMATCHED   = 17,  /* HIGH: 91 unknown/closed request, digest/target echo mismatch, bad transition, foreign 90 */
+    ARGUS_F_CONTAINMENT_EXECUTION_UNAUTHORIZED = 18, /* CRITICAL: 92 DONE/PARTIAL or kind 4 on a target while not GRANTED (I5.d) */
+    ARGUS_F_CONTAINMENT_EXECUTION_UNCONFIRMED  = 19, /* HIGH: 92 DONE with no matching kind 4 since the GRANT */
+    ARGUS_F_CONTAINMENT_UNANSWERED           = 20,  /* MEDIUM: no next step within ARGUS_CONTAIN_TIMEOUT_EVENTS; expires */
+    ARGUS_F_CONTAINMENT_SCOPE_EXCEEDED       = 21,  /* CRITICAL: GRANTed revoke produced > 1 kind 4, or 92 resource low32 != 1 (I1.b) */
+    ARGUS_F_MAX                           = 21
 };
 
-/* Recommended containment class. Advisory. AEGIS decides. */
+/* Recommended containment class. Advisory. AEGIS decides. Values 1..10 are the ARGUS-1
+ * request types (unchanged). None grants, mints or widens anything (I5.c). ARGUS-1: only
+ * REVOKE_CAPABILITY has a LIVE executor (I1); the other nine are SYNTH (typed and decided,
+ * executed only by a labelled test executor with ARGUS_CREQ_SYNTHETIC).
+ * FREEZE_PRINCIPAL is a stand-in with no executor (I2). */
+#define ARGUS_CONTAIN_LIVE_TYPE ARGUS_CONTAIN_REVOKE_CAPABILITY   /* the only LIVE type in ARGUS-1 */
 enum {
     ARGUS_CONTAIN_NONE = 0,
     ARGUS_CONTAIN_REVOKE_CAPABILITY,
@@ -281,17 +311,88 @@ typedef struct {
     uint8_t  event_digest[ARGUS_DIGEST_LEN];   /* digest of the triggering event bytes */
 } ArgusFinding;
 
-/* Typed proposal to AEGIS. ARGUS-0 defines the type only; ARGUS-1 wires it. */
+/* Typed proposal to AEGIS (spec section 2). A request is not authority; only an AEGIS GRANT is.
+ * ARGUS-0 fields keep their order and meaning; v1.2 appends after them. The authority side
+ * declares a layout-identical AienosContainRequest (every offsetof equal, lane G test).
+ * In-memory offsets are NOT the wire offsets (ArgusCapRef is 16 bytes in memory, 12 on the
+ * wire); the canonical encoding is ARGUS_CONTAIN_REQUEST_SIZE packed little-endian bytes. */
 typedef struct {
-    uint64_t incident_id;
-    uint8_t  containment;       /* ARGUS_CONTAIN_* */
-    uint8_t  severity;
-    uint16_t finding_code;
-    uint32_t principal;
-    ArgusCapRef target;         /* capability to revoke, if any */
-    uint8_t  machine_id[ARGUS_MACHINE_ID_LEN];
-    uint8_t  finding_digest[ARGUS_DIGEST_LEN];
-} ArgusContainmentRequest;
+    /* ARGUS-0 fields, unchanged                   wire offset */
+    uint64_t incident_id;       /*   0  first_sequence of the (principal, code) incident; 0 = untracked */
+    uint8_t  containment;       /*   8  ARGUS_CONTAIN_* (request type, 1..ARGUS_CONTAIN_MAX) */
+    uint8_t  severity;          /*   9  of the triggering finding */
+    uint16_t finding_code;      /*  10  ARGUS_F_* */
+    uint32_t principal;         /*  12  target subject, or the finding's principal */
+    ArgusCapRef target;         /*  16  cap_id (u32), 20 generation (u64): FROM ARGUS SHADOW (I1.d) */
+    uint8_t  machine_id[ARGUS_MACHINE_ID_LEN];      /*  28 */
+    uint8_t  finding_digest[ARGUS_DIGEST_LEN];      /*  60  argus_finding_digest of the trigger (I1.c) */
+    /* v1.2 appended */
+    uint64_t request_id;        /*  92  per ARGUS instance, strictly increasing from 1 */
+    uint64_t finding_sequence;  /* 100  sequence of the triggering event (I1.c); never 0 */
+    uint32_t target_object;     /* 108  lease id / store id, 0 if n/a */
+    uint32_t target_rights;     /* 112  RESTRICT: rights to remove; 0 otherwise */
+    uint8_t  target_digest[ARGUS_DIGEST_LEN];       /* 116  artifact digest / provider id, zero if n/a */
+    uint16_t flags;             /* 148  ARGUS_CREQ_* */
+    uint8_t  version;           /* 150  = ARGUS_CONTAIN_REQUEST_VERSION */
+    uint8_t  reserved;          /* 151  = 0, decode rejects nonzero */
+} ArgusContainmentRequest;      /* wire end 152 */
+
+#define ARGUS_CONTAIN_REQUEST_SIZE    152u   /* canonical encoding bytes; request digest = SHA-256 of them */
+#define ARGUS_CONTAIN_REQUEST_VERSION 2u     /* request.version; independent of the event version byte */
+/* Request flags (request.flags). Decode rejects any other bit. */
+#define ARGUS_CREQ_SYNTHETIC   0x0001u   /* test authorizer/executor or SYNTH type (I2) */
+#define ARGUS_CREQ_SATURATION  0x0002u   /* table-saturation request (2.2): ask, never auto */
+#define ARGUS_CREQ_KNOWN       0x0003u
+
+/* Status carried in 90-92 object_id bits 8..15 (spec section 3). */
+enum {
+    ARGUS_CSTATUS_PROPOSED     = 0,   /* 90 */
+    ARGUS_CSTATUS_GRANT        = 1,   /* 91, outcome OK */
+    ARGUS_CSTATUS_DENY         = 2,   /* 91, outcome DENIED */
+    ARGUS_CSTATUS_ESCALATE     = 3,   /* 91, outcome ERROR */
+    ARGUS_CSTATUS_DONE         = 4,   /* 92, outcome OK */
+    ARGUS_CSTATUS_PARTIAL      = 5,   /* 92, outcome OK */
+    ARGUS_CSTATUS_FAILED       = 6,   /* 92, outcome DENIED or ERROR */
+    ARGUS_CSTATUS_UNAVAILABLE  = 7,   /* 92, outcome ERROR (no live executor for the type) */
+    ARGUS_CSTATUS_FAILED_SCOPE = 8,   /* 92, outcome ERROR (I1.b) */
+    ARGUS_CSTATUS_MAX          = 8
+};
+/* object_id = type | (status << 8) | (finding_code << 16) for kinds 90-92. */
+#define ARGUS_CONTAIN_PACK(type, status, code) \
+    ((uint32_t)(uint8_t)(type) | ((uint32_t)(uint8_t)(status) << 8) | ((uint32_t)(uint16_t)(code) << 16))
+#define ARGUS_CONTAIN_TYPE_OF(object_id)   ((uint8_t)((object_id) & 0xFFu))
+#define ARGUS_CONTAIN_STATUS_OF(object_id) ((uint8_t)(((object_id) >> 8) & 0xFFu))
+#define ARGUS_CONTAIN_CODE_OF(object_id)   ((uint16_t)((object_id) >> 16))
+
+/* argus_contain tables and limits (spec 4, 4.1, 4.2). Time = ingested events, never a clock.
+ * ARGUS_CONTAIN_WINDOW_MAX is I3.b enforcement: changing it is a spec change. */
+#define ARGUS_CONTAIN_PENDING          32u      /* open requests */
+#define ARGUS_CONTAIN_RECENT           128u     /* closed keys remembered for dedup / cooldown */
+#define ARGUS_CONTAIN_WINDOW_EVENTS    4096u    /* proposal budget window */
+#define ARGUS_CONTAIN_WINDOW_MAX       16u      /* proposals per window, globally (I3.b) */
+#define ARGUS_CONTAIN_TIMEOUT_EVENTS   16384u   /* no next step -> EXPIRED, code 20 */
+#define ARGUS_CONTAIN_COOLDOWN_EVENTS  65536u   /* re-proposal after DENY/EXPIRED/FAILED/FAILED_SCOPE */
+#define ARGUS_CONTAIN_RETRIES          1u       /* re-proposals per key per lifetime */
+
+/* ARGUS-side mirrors for the never-propose filter (4.2 rule 2; defence in depth, not
+ * authority). libargus never includes aienos_capability.h; a test asserts equality. */
+#define ARGUS_CAP_RIGHT_REVOKE         0x020u   /* == AIENOS_CAP_RIGHT_REVOKE */
+#define ARGUS_CAP_RIGHT_PRIVILEGED     0x3F0u   /* == AIENOS_CAP_RIGHT_PRIVILEGED (MINT|REVOKE|RECLAIM|EPOCH|CLOCK|PROMOTE) */
+#define ARGUS_SUBJ_AEGIS               41u      /* == RX_AEGIS_SUBJ (Omega rx_aegis.h) */
+#define ARGUS_SUBJ_AEGIS_ROOT          42u      /* == RX_AEGIS_ROOT_SUBJ */
+/* AIENOS_CONTAIN_SUBJ (the gate's executor subject) is defined by the gate (lane G), not here. */
+
+/* Synchronous-eligible policy, ratified as DATA ONLY (spec section 7, I4; none wired):
+ * bit c set = argus_hard_detectors[] entry for code c has sync_allowed 1 (codes 1,2,3,4,5,8,10,14). */
+#define ARGUS_SYNC_RATIFIED_MASK \
+    ((1u << 1) | (1u << 2) | (1u << 3) | (1u << 4) | (1u << 5) | (1u << 8) | (1u << 10) | (1u << 14))
+
+/* argus_contain health (spec 4.3). ARGUS's own claims; never input to the I5.d audit. */
+typedef struct {
+    uint64_t requested, granted, denied, escalated, confirmed, failed, failed_scope, unavailable, expired;
+    uint64_t suppressed_dedup, suppressed_cooldown, suppressed_budget, suppressed_protected, pending_full;
+    uint64_t decisions_unmatched, executions_unauthorized, executions_unconfirmed;
+} ArgusContainHealth;
 
 /* ---- Shadow state view: what detectors may ask the core ------------------- */
 
@@ -388,6 +489,13 @@ uint8_t argus_event_min_class(uint16_t kind);   /* weakest class allowed for a k
 void argus_event_digest(const ArgusEvent *ev, uint8_t out[ARGUS_DIGEST_LEN]);
 void argus_chain_extend(uint8_t chain[ARGUS_DIGEST_LEN], const ArgusEvent *ev);   /* chain = H(chain || bytes) */
 void argus_finding_digest(const ArgusFinding *f, uint8_t out[ARGUS_DIGEST_LEN]);
+/* v1.2 (lane B): containment request canonical encoding (spec section 2). Encode never
+ * validates. Decode validates: containment 1..ARGUS_CONTAIN_MAX, severity valid, version
+ * ARGUS_CONTAIN_REQUEST_VERSION, reserved 0, flags within ARGUS_CREQ_KNOWN, request_id != 0,
+ * finding_sequence != 0; else ARGUS_ERR_MALFORMED / ARGUS_ERR_VERSION. */
+int  argus_contain_request_encode(const ArgusContainmentRequest *r, uint8_t out[ARGUS_CONTAIN_REQUEST_SIZE]);
+int  argus_contain_request_decode(const uint8_t in[ARGUS_CONTAIN_REQUEST_SIZE], ArgusContainmentRequest *out);
+void argus_contain_request_digest(const ArgusContainmentRequest *r, uint8_t out[ARGUS_DIGEST_LEN]);   /* SHA-256 of the 152 bytes */
 
 /* argus_ring.c (lane B): single-producer/single-consumer bounded ring of events. */
 typedef struct ArgusRing ArgusRing;
@@ -433,5 +541,44 @@ typedef struct {
     uint8_t  chain[ARGUS_DIGEST_LEN];
 } ArgusCoreHealth;
 void   argus_core_health(const ArgusCore *core, ArgusCoreHealth *out);
+/* v1.2 (lane D): first_sequence of the open (principal, code) incident -> ARGUS_OK, else ARGUS_ERR_STATE. */
+int    argus_core_incident(const ArgusCore *core, uint32_t principal, uint16_t code, uint64_t *first_sequence);
+
+/* ---- v1.2 additivity proof: the v1.1 event layout is frozen ---------------- */
+_Static_assert(sizeof(ArgusEvent) == ARGUS_EVENT_SIZE, "ArgusEvent is 128 bytes");
+_Static_assert(offsetof(ArgusEvent, version) == 0, "v1.1 offset version");
+_Static_assert(offsetof(ArgusEvent, class_) == 1, "v1.1 offset class_");
+_Static_assert(offsetof(ArgusEvent, kind) == 2, "v1.1 offset kind");
+_Static_assert(offsetof(ArgusEvent, effect_class) == 4, "v1.1 offset effect_class");
+_Static_assert(offsetof(ArgusEvent, outcome) == 5, "v1.1 offset outcome");
+_Static_assert(offsetof(ArgusEvent, flags) == 6, "v1.1 offset flags");
+_Static_assert(offsetof(ArgusEvent, sequence) == 8, "v1.1 offset sequence");
+_Static_assert(offsetof(ArgusEvent, tick) == 16, "v1.1 offset tick");
+_Static_assert(offsetof(ArgusEvent, principal) == 24, "v1.1 offset principal");
+_Static_assert(offsetof(ArgusEvent, code) == 28, "v1.1 offset code");
+_Static_assert(offsetof(ArgusEvent, cap_id) == 32, "v1.1 offset cap_id");
+_Static_assert(offsetof(ArgusEvent, object_id) == 36, "v1.1 offset object_id");
+_Static_assert(offsetof(ArgusEvent, cap_generation) == 40, "v1.1 offset cap_generation");
+_Static_assert(offsetof(ArgusEvent, world_generation) == 48, "v1.1 offset world_generation");
+_Static_assert(offsetof(ArgusEvent, resource) == 56, "v1.1 offset resource");
+_Static_assert(offsetof(ArgusEvent, machine_id) == 64, "v1.1 offset machine_id");
+_Static_assert(offsetof(ArgusEvent, evidence_digest) == 96, "v1.1 offset evidence_digest");
+_Static_assert(sizeof(ArgusCapRef) == 16 && offsetof(ArgusCapRef, generation) == 8, "ArgusCapRef layout");
+_Static_assert(ARGUS_ABI_VERSION == 1u, "event version byte unchanged in v1.2");
+/* The ARGUS-0 request fields keep their in-memory offsets. */
+_Static_assert(offsetof(ArgusContainmentRequest, incident_id) == 0 &&
+               offsetof(ArgusContainmentRequest, containment) == 8 &&
+               offsetof(ArgusContainmentRequest, severity) == 9 &&
+               offsetof(ArgusContainmentRequest, finding_code) == 10 &&
+               offsetof(ArgusContainmentRequest, principal) == 12 &&
+               offsetof(ArgusContainmentRequest, target) == 16 &&
+               offsetof(ArgusContainmentRequest, machine_id) == 32 &&
+               offsetof(ArgusContainmentRequest, finding_digest) == 64,
+               "ARGUS-0 request fields unchanged");
+/* Wire size = sum of the field sizes (packed, target = 4 + 8). */
+_Static_assert(8 + 1 + 1 + 2 + 4 + (4 + 8) + ARGUS_MACHINE_ID_LEN + ARGUS_DIGEST_LEN + 8 + 8 + 4 + 4 +
+               ARGUS_DIGEST_LEN + 2 + 1 + 1 == ARGUS_CONTAIN_REQUEST_SIZE, "request wire size 152");
+_Static_assert(ARGUS_F_MAX == ARGUS_F_CONTAINMENT_SCOPE_EXCEEDED && ARGUS_EV_KIND_MAX == ARGUS_EV_AUTHORITY_ESCALATED,
+               "v1.2 maxima");
 
 #endif /* ARGUS_ABI_H */
