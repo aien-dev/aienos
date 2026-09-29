@@ -33,6 +33,33 @@
  *     argus_core_ingest may return ARGUS_ERR_FULL or ARGUS_ERR_OVERFLOW after the
  *       event has already been applied; MALFORMED means nothing was applied.
  *     Detectors never raise ARGUS_F_TELEMETRY_LOSS for TELEMETRY_DROPPED; the core does.
+ *   - Hostile-review rules (docs/HOSTILE_REVIEW.md, applied after the first review):
+ *     Producer trust boundary (v1): argus_ring_push is reachable only from AEGIS/runtime
+ *       code inside the trusted process, never from cognition (same split as the
+ *       authority admin/view). Cryptographic producer attestation is ARGUS-3 work.
+ *     validate rejects: ARGUS_FLAG_CONSUMER on any kind but TELEMETRY_DROPPED;
+ *       cap_id >= ARGUS_CAP_MAX; sequence == UINT64_MAX; a class weaker than
+ *       argus_event_min_class(kind) (producers may strengthen, never weaken);
+ *       EXTERNAL_EFFECT_* with effect_class != EXTERNAL. argus_ring_push also
+ *       refuses (ARGUS_ERR_MALFORMED) a class weaker than the kind minimum.
+ *     Apply rules (core): an event that raises SEQUENCE_ANOMALY or AUTHORITY_REPLAY is
+ *       detected but NOT applied. GRANTED applies only when the slot is UNSEEN or the
+ *       generation is strictly above the shadow generation; otherwise AUTHORITY_REPLAY.
+ *       REVOKED on an UNSEEN slot is AUTHORITY_REPLAY and creates no entry.
+ *       LEASE_CREATED on a LIVE or REVOKED lease id is a finding (code 6, prior_sequence set)
+ *       and is not applied: lease ids are never reused. WORLD_COMMITTED applies only when
+ *       generation == shadow+1 (or shadow 0); a flagged commit is not adopted.
+ *       Malformed events raise MALFORMED_EVENT (core) and are not applied or chained.
+ *     Machine lifecycle: JOINED trust = max(OBSERVED, object_id) by rank (a machine cannot
+ *       declare itself TRUSTED); TRUST_CHANGED may only move DOWN the rank order
+ *       TRUSTED < OBSERVED < REATTESTATION_REQUIRED < RESTRICTED < QUARANTINED < UNTRUSTED;
+ *       an upward move is TRUST_ESCALATION and is ignored (re-entry is ARGUS-1/2 work);
+ *       TRUST_CHANGED for an unknown machine is MACHINE_IDENTITY_MISMATCH and creates no
+ *       entry; REMOVED keeps a tombstone (state REMOVED, trust preserved, joined_sequence 0).
+ *     Self-reported kinds 60-63 without shadow corroboration yield sync_allowed = 0 and
+ *       containment NONE (a report is not evidence).
+ *     Sequence gaps are expected (ring refusals) and are not findings.
+ *     Table sizes: caps ARGUS_CAP_MAX, artifacts 256, incidents 256; every FULL is counted in health.
  *
  * Wire encoding (argus_event_encode/decode): each field in the order below,
  * little-endian, packed to exactly ARGUS_EVENT_SIZE bytes, offsets as noted.
@@ -48,6 +75,7 @@
 #define ARGUS_EVENT_SIZE      128u
 #define ARGUS_DIGEST_LEN      32u
 #define ARGUS_MACHINE_ID_LEN  32u   /* PROVISIONAL opaque identity slot */
+#define ARGUS_CAP_MAX         256u  /* == AIENOS_CAP_MAX; cap_id >= this is MALFORMED, never "table full" */
 
 /* Result codes. Negative, distinct from AIENOS_CAP_* (-1..-17) and RX_GEN_* (-40..-49). */
 #define ARGUS_OK                 0
@@ -177,7 +205,11 @@ enum {
     ARGUS_F_QUARANTINED_USE               = 10,  /* provider/machine used after quarantine, outcome OK */
     ARGUS_F_TELEMETRY_LOSS                = 11,  /* CRITICAL/SECURITY events were dropped: evidence gap */
     ARGUS_F_SEQUENCE_ANOMALY              = 12,  /* replayed or out-of-order sequence from a producer */
-    ARGUS_F_MAX                           = 12
+    ARGUS_F_AUTHORITY_REPLAY              = 13,  /* GRANTED not above shadow generation, or REVOKED of an unseen slot (core) */
+    ARGUS_F_SUBJECT_MISMATCH              = 14,  /* capability used with outcome OK by a principal other than the granted subject */
+    ARGUS_F_TRUST_ESCALATION              = 15,  /* TRUST_CHANGED/JOINED attempted to raise trust; ignored */
+    ARGUS_F_MALFORMED_EVENT               = 16,  /* validate rejected the event; core-raised, not applied */
+    ARGUS_F_MAX                           = 16
 };
 
 /* Recommended containment class. Advisory. AEGIS decides. */
@@ -226,7 +258,7 @@ typedef struct {
 
 /* ---- Shadow state view: what detectors may ask the core ------------------- */
 
-enum { ARGUS_SHADOW_UNSEEN = 0, ARGUS_SHADOW_LIVE = 1, ARGUS_SHADOW_REVOKED = 2, ARGUS_SHADOW_REJECTED = 3 };
+enum { ARGUS_SHADOW_UNSEEN = 0, ARGUS_SHADOW_LIVE = 1, ARGUS_SHADOW_REVOKED = 2, ARGUS_SHADOW_REJECTED = 3, ARGUS_SHADOW_REMOVED = 4 };
 enum {
     ARGUS_TRUST_UNKNOWN = 0, ARGUS_TRUST_TRUSTED, ARGUS_TRUST_OBSERVED, ARGUS_TRUST_RESTRICTED,
     ARGUS_TRUST_QUARANTINED, ARGUS_TRUST_UNTRUSTED, ARGUS_TRUST_REATTESTATION_REQUIRED
@@ -312,6 +344,7 @@ typedef struct {
 int  argus_event_encode(const ArgusEvent *ev, uint8_t out[ARGUS_EVENT_SIZE]);
 int  argus_event_decode(const uint8_t in[ARGUS_EVENT_SIZE], ArgusEvent *out);   /* validates; rejects malformed */
 int  argus_event_validate(const ArgusEvent *ev);
+uint8_t argus_event_min_class(uint16_t kind);   /* weakest class allowed for a kind (see argus_event.c table) */
 void argus_event_digest(const ArgusEvent *ev, uint8_t out[ARGUS_DIGEST_LEN]);
 void argus_chain_extend(uint8_t chain[ARGUS_DIGEST_LEN], const ArgusEvent *ev);   /* chain = H(chain || bytes) */
 void argus_finding_digest(const ArgusFinding *f, uint8_t out[ARGUS_DIGEST_LEN]);
@@ -353,6 +386,10 @@ void   argus_core_state_digest(const ArgusCore *core, uint8_t out[ARGUS_DIGEST_L
 typedef struct {
     uint64_t events_received, events_rejected, findings_emitted, incidents_open;
     uint64_t detector_ns_total;   /* only when the caller supplies timings; 0 in library */
+    uint64_t incidents_untracked; /* (principal, code) pairs beyond the incident table */
+    uint64_t producers_untracked; /* sequence streams beyond the producer table */
+    uint64_t tables_full;         /* ingest calls that returned ARGUS_ERR_FULL */
+    uint64_t events_not_applied;  /* detected but not applied (anomaly, replay, lease reuse, world skip) */
     uint8_t  chain[ARGUS_DIGEST_LEN];
 } ArgusCoreHealth;
 void   argus_core_health(const ArgusCore *core, ArgusCoreHealth *out);
