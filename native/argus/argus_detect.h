@@ -22,14 +22,34 @@
 #define ARGUS_AUTH_ERR_STALE_GEN (-2)
 #define ARGUS_AUTH_ERR_REVOKED  (-3)
 #define ARGUS_AUTH_ERR_CHAIN    (-9)
+#define ARGUS_AUTH_RIGHT_WRITE  0x2u
 #define ARGUS_AUTH_RIGHT_EFFECT 0x4u
 
-/* Number of detectors in argus_hard_detectors (ids 1..10, in id order). */
-#define ARGUS_HARD_DETECTOR_COUNT 10u
+/* Number of detectors in argus_hard_detectors: ids 1..10, 14, 15, in id order.
+ * Codes 11, 12, 13 and 16 are raised by the core, never by a detector. */
+#define ARGUS_HARD_DETECTOR_COUNT 12u
 
-/* Upper bound on findings a single detector can emit for one event.
- * Only QUARANTINED_USE can emit two (provider + machine). A caller that
- * passes cap >= ARGUS_DETECT_MAX_FINDINGS never sees ARGUS_ERR_OVERFLOW. */
-#define ARGUS_DETECT_MAX_FINDINGS 11u
+/* Upper bound on findings argus_detect_run can emit for one event: one per
+ * detector, except QUARANTINED_USE, which can emit two (provider + machine).
+ * A caller that passes cap >= ARGUS_DETECT_MAX_FINDINGS never sees
+ * ARGUS_ERR_OVERFLOW. */
+#define ARGUS_DETECT_MAX_FINDINGS 13u
+
+/* Machine trust rank (argus_abi.h machine lifecycle): lower is more trusted.
+ * TRUSTED 0 < OBSERVED 1 < REATTESTATION_REQUIRED 2 < RESTRICTED 3 <
+ * QUARANTINED 4 < UNTRUSTED 5. Returns -1 for values outside 1..6
+ * (UNKNOWN or garbage), which callers treat as "no claim". */
+static inline int argus_trust_rank(uint32_t trust)
+{
+    switch (trust) {
+    case ARGUS_TRUST_TRUSTED:                return 0;
+    case ARGUS_TRUST_OBSERVED:               return 1;
+    case ARGUS_TRUST_REATTESTATION_REQUIRED: return 2;
+    case ARGUS_TRUST_RESTRICTED:             return 3;
+    case ARGUS_TRUST_QUARANTINED:            return 4;
+    case ARGUS_TRUST_UNTRUSTED:              return 5;
+    default:                                 return -1;
+    }
+}
 
 #endif /* ARGUS_DETECT_H */
