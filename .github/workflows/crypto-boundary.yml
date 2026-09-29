@@ -1,5 +1,6 @@
 name: Crypto boundary
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - 'crates/aienos-crypto/**'
