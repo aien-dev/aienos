@@ -16,7 +16,8 @@
  *   - Capability reference = AienosCapRef layout (u32 id, u64 generation).
  *     The Omega stand-in rx_caproot (u32 generation) is NOT a source.
  *   - Principal = the authority's subject (u32). No parallel principal type.
- *   - Object/World = RxGenObject style (u32 id, u32 generation, 32-byte digest).
+ *   - Object = RxGenObject id (u32) + digest; World generation = the 64-bit
+ *     rx_generation id. Object generation, when needed, travels in `resource`.
  *   - MachineId is a PROVISIONAL opaque 32-byte slot. Fabric identity is not
  *     designed here (cryptographic identity is on the operator's escalation list).
  *   - A Finding is evidence, never authority. A ContainmentRequest is a
@@ -133,8 +134,7 @@ typedef struct {
     uint32_t cap_id;             /* off 32  0 = none */
     uint32_t object_id;          /* off 36  RxGenObject id, lease id, or 0 */
     uint64_t cap_generation;     /* off 40 */
-    uint32_t object_generation;  /* off 48 */
-    uint32_t world_generation;   /* off 52  0 = unknown */
+    uint64_t world_generation;   /* off 48  rx_generation World generation id (64-bit), 0 = unknown */
     uint64_t resource;           /* off 56  authority resource, rights mask, or count */
     uint8_t  machine_id[ARGUS_MACHINE_ID_LEN];      /* off 64  PROVISIONAL */
     uint8_t  evidence_digest[ARGUS_DIGEST_LEN];     /* off 96  digest of the referenced object/artifact/policy, or zero */
@@ -260,7 +260,7 @@ typedef struct {
 } ArgusProviderShadow;
 
 typedef struct {
-    uint32_t generation;        /* last committed World generation, 0 = none */
+    uint64_t generation;        /* last committed World generation (64-bit), 0 = none */
     uint8_t  digest[ARGUS_DIGEST_LEN];
     uint64_t sequence;
 } ArgusWorldShadow;
