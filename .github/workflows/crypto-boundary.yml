@@ -1,0 +1,25 @@
+name: Crypto boundary
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'crates/aienos-crypto/**'
+      - 'crates/aienos-kernel/src/crypto/**'
+      - '.github/workflows/crypto-boundary.yml'
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  crypto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-none
+          components: clippy
+      - run: cargo test --locked --offline -p aienos-crypto
+      - run: 'cargo test --locked --offline -p aienos-kernel crypto::'
+      - run: cargo clippy --locked --offline -p aienos-crypto --all-targets -- -D warnings
+      - run: cargo check --locked --offline -p aienos-kernel --target aarch64-unknown-none --no-default-features

@@ -2,9 +2,14 @@
 //!
 //! Nonce-misuse-resistant authenticated encryption with associated data (AEAD)
 //! using 256-bit keys, 96-bit nonces, and 128-bit authentication tags.
+//!
+//! Secret intermediates (derived keys, key-derivation scratch, CTR keystream,
+//! padded plaintext tails) live in self-wiping buffers, so they are zeroed on
+//! every return path, including authentication failure.
 
 use crate::aes::Aes256Key;
 use crate::polyval::Polyval;
+use crate::Secret;
 
 /// Tag size in bytes (128 bits).
 pub const TAG_LEN: usize = 16;
@@ -18,17 +23,31 @@ pub const KEY_LEN: usize = 32;
 pub struct AuthenticationError;
 
 /// Derive the 128-bit authentication key and 256-bit encryption key per RFC 8452 Section 4.
-pub fn derive_keys(key: &[u8; 32], nonce: &[u8; 12]) -> ([u8; 16], [u8; 32]) {
+///
+/// Both returned buffers wipe themselves on drop, including caller error paths.
+pub fn derive_keys(key: &[u8; 32], nonce: &[u8; 12]) -> (Secret<16>, Secret<32>) {
+    let mut auth_key = Secret::<16>::zeroed();
+    let mut enc_key = Secret::<32>::zeroed();
+    derive_keys_into(key, nonce, &mut auth_key.0, &mut enc_key.0);
+    (auth_key, enc_key)
+}
+
+/// Derive both per-nonce keys into caller-owned buffers. The scratch block is wiped.
+fn derive_keys_into(
+    key: &[u8; 32],
+    nonce: &[u8; 12],
+    auth_key: &mut [u8; 16],
+    enc_key: &mut [u8; 32],
+) {
     let k_cipher = Aes256Key::new(key);
-    let mut auth_key = [0u8; 16];
-    let mut enc_key = [0u8; 32];
+    let mut scratch = Secret::<16>::zeroed();
+    let block = &mut scratch.0;
 
     for i in 0..6u32 {
-        let mut block = [0u8; 16];
         block[0..4].copy_from_slice(&i.to_le_bytes());
         block[4..16].copy_from_slice(nonce);
 
-        k_cipher.encrypt_block(&mut block);
+        k_cipher.encrypt_block(block);
 
         match i {
             0 => auth_key[0..8].copy_from_slice(&block[0..8]),
@@ -40,8 +59,6 @@ pub fn derive_keys(key: &[u8; 32], nonce: &[u8; 12]) -> ([u8; 16], [u8; 32]) {
             _ => unreachable!(),
         }
     }
-
-    (auth_key, enc_key)
 }
 
 /// Constant-time comparison of two 16-byte tags.
@@ -80,9 +97,9 @@ fn compute_tag(
         poly.update_block(chunk);
     }
     if !aad_rem.is_empty() {
-        let mut b = [0u8; 16];
-        b[..aad_rem.len()].copy_from_slice(aad_rem);
-        poly.update_block(&b);
+        let mut b = Secret::<16>::zeroed();
+        b.0[..aad_rem.len()].copy_from_slice(aad_rem);
+        poly.update_block(&b.0);
     }
 
     // Feed plaintext padded to 16-byte boundary
@@ -91,9 +108,10 @@ fn compute_tag(
         poly.update_block(chunk);
     }
     if !pt_rem.is_empty() {
-        let mut b = [0u8; 16];
-        b[..pt_rem.len()].copy_from_slice(pt_rem);
-        poly.update_block(&b);
+        // Holds a plaintext tail: wiped on drop.
+        let mut b = Secret::<16>::zeroed();
+        b.0[..pt_rem.len()].copy_from_slice(pt_rem);
+        poly.update_block(&b.0);
     }
 
     // Feed length block
@@ -118,10 +136,12 @@ fn apply_ctr(enc_cipher: &Aes256Key, tag: &[u8; 16], buf: &mut [u8]) {
     let mut counter_block = *tag;
     counter_block[15] |= 0x80;
 
+    // Keystream bytes are secret (they unmask the plaintext): wiped on drop.
+    let mut keystream = Secret::<16>::zeroed();
     let mut offset = 0;
     while offset < buf.len() {
-        let mut keystream = counter_block;
-        enc_cipher.encrypt_block(&mut keystream);
+        keystream.0 = counter_block;
+        enc_cipher.encrypt_block(&mut keystream.0);
 
         let ctr = u32::from_le_bytes([
             counter_block[0],
@@ -133,7 +153,7 @@ fn apply_ctr(enc_cipher: &Aes256Key, tag: &[u8; 16], buf: &mut [u8]) {
 
         let todo = core::cmp::min(buf.len() - offset, 16);
         for i in 0..todo {
-            buf[offset + i] ^= keystream[i];
+            buf[offset + i] ^= keystream.0[i];
         }
         offset += todo;
     }
@@ -155,10 +175,13 @@ pub fn encrypt(
         "Destination buffer must equal plaintext len + 16"
     );
 
-    let (auth_key, enc_key) = derive_keys(key, nonce);
-    let enc_cipher = Aes256Key::new(&enc_key);
+    // Derived keys live in self-wiping buffers, wiped on every return path.
+    let mut auth_key = Secret::<16>::zeroed();
+    let mut enc_key = Secret::<32>::zeroed();
+    derive_keys_into(key, nonce, &mut auth_key.0, &mut enc_key.0);
+    let enc_cipher = Aes256Key::new(&enc_key.0);
 
-    let tag = compute_tag(&auth_key, &enc_cipher, nonce, aad, plaintext);
+    let tag = compute_tag(&auth_key.0, &enc_cipher, nonce, aad, plaintext);
 
     // Copy plaintext into output slice, then apply CTR in place
     out_ciphertext_and_tag[..plaintext.len()].copy_from_slice(plaintext);
@@ -197,23 +220,25 @@ pub fn decrypt(
     let mut received_tag = [0u8; 16];
     received_tag.copy_from_slice(received_tag_slice);
 
-    let (auth_key, enc_key) = derive_keys(key, nonce);
-    let enc_cipher = Aes256Key::new(&enc_key);
+    // Derived keys live in self-wiping buffers, wiped on every return path
+    // (success and authentication failure alike).
+    let mut auth_key = Secret::<16>::zeroed();
+    let mut enc_key = Secret::<32>::zeroed();
+    derive_keys_into(key, nonce, &mut auth_key.0, &mut enc_key.0);
+    let enc_cipher = Aes256Key::new(&enc_key.0);
 
     // Decrypt in place into out_plaintext
     out_plaintext.copy_from_slice(ciphertext);
     apply_ctr(&enc_cipher, &received_tag, out_plaintext);
 
     // Compute expected tag over decrypted plaintext
-    let expected_tag = compute_tag(&auth_key, &enc_cipher, nonce, aad, out_plaintext);
+    let expected_tag = compute_tag(&auth_key.0, &enc_cipher, nonce, aad, out_plaintext);
 
     if constant_time_eq_tag(&received_tag, &expected_tag) {
         Ok(())
     } else {
         // Zero decrypted plaintext on failure
-        for b in out_plaintext.iter_mut() {
-            unsafe { core::ptr::write_volatile(b, 0) };
-        }
+        crate::wipe(out_plaintext);
         Err(AuthenticationError)
     }
 }
@@ -222,6 +247,24 @@ pub fn decrypt(
 mod tests {
     use super::*;
     use std::vec;
+
+    #[test]
+    fn public_derived_keys_are_guarded_and_redacted() {
+        let key = [0x31; KEY_LEN];
+        let nonce = [0x72; NONCE_LEN];
+        let (auth, enc) = derive_keys(&key, &nonce);
+        let mut expected_auth = [0; 16];
+        let mut expected_enc = [0; 32];
+        derive_keys_into(&key, &nonce, &mut expected_auth, &mut expected_enc);
+        assert_eq!(*auth, expected_auth);
+        assert_eq!(*enc, expected_enc);
+        assert_eq!(
+            std::format!("{auth:?} {enc:?}"),
+            "Secret([REDACTED]) Secret([REDACTED])"
+        );
+        crate::wipe(&mut expected_auth);
+        crate::wipe(&mut expected_enc);
+    }
 
     fn hex_to_vec(hex: &str) -> std::vec::Vec<u8> {
         let mut v = std::vec::Vec::new();
