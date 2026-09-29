@@ -59,6 +59,26 @@
  *     Self-reported kinds 60-63 without shadow corroboration yield sync_allowed = 0 and
  *       containment NONE (a report is not evidence).
  *     Sequence gaps are expected (ring refusals) and are not findings.
+ *   - v1.1 hot-path rules (after the lane H measurement: one 128-byte event per validate
+ *     cost ~50 ns on a ~24 ns operation, -60% throughput; see docs/PERF.md):
+ *     Emit on transition, count on use. Full events only for GRANTED/DENIED/REVOKED/
+ *       WORLD_COMMITTED/errors/joins. A successful validate updates a per-thread
+ *       256-slot use table (count, min gen, max gen) and emits nothing.
+ *     Flush policy (the explicit aggregation policy of brief section 3): every
+ *       ARGUS_USE_FLUSH_OPS validates per thread AND at least every flush interval
+ *       the producer emits one CAPABILITY_USE_SUMMARY per touched slot; a table that
+ *       cannot flush (ring refused) keeps counting and the next summary carries the
+ *       total, so no use is ever silently lost; refusals are still counted.
+ *     Tick (aienos_cap_clock, a mutex) is read only for transition events; USED and
+ *       summaries carry tick 0.
+ *     One ring and one stream id per producer thread; no push lock; the consumer
+ *       polls all rings. Sequence is per stream.
+ *     cap_id 0 is the office capability and is checked like any other; "none" is
+ *       ARGUS_CAP_NONE. validate accepts cap_id < ARGUS_CAP_MAX or == ARGUS_CAP_NONE.
+ *     Detector 3 also requires cap_generation <= shadow generation (a use above the
+ *       revoked generation is detector 1 territory).
+ *     GRANTED/REVOKED should originate at the authority (observer hook, separate
+ *       aienos PR); until then a mint outside rx_aegis is reported as FORGED.
  *     Table sizes: caps ARGUS_CAP_MAX, artifacts 256, incidents 256; every FULL is counted in health.
  *
  * Wire encoding (argus_event_encode/decode): each field in the order below,
@@ -71,11 +91,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define ARGUS_ABI_VERSION     1u
+#define ARGUS_ABI_VERSION     1u    /* v1.1: layout-identical; stream id in flag bits, USE_SUMMARY, CAP_NONE, store id */
 #define ARGUS_EVENT_SIZE      128u
 #define ARGUS_DIGEST_LEN      32u
 #define ARGUS_MACHINE_ID_LEN  32u   /* PROVISIONAL opaque identity slot */
 #define ARGUS_CAP_MAX         256u  /* == AIENOS_CAP_MAX; cap_id >= this is MALFORMED, never "table full" */
+#define ARGUS_CAP_NONE        UINT32_MAX  /* "no capability". cap_id 0 is the authority OFFICE slot, a real capability. */
 
 /* Result codes. Negative, distinct from AIENOS_CAP_* (-1..-17) and RX_GEN_* (-40..-49). */
 #define ARGUS_OK                 0
@@ -123,11 +144,15 @@ enum {
     ARGUS_EV_SIGNATURE_FAILURE       = 61,
     ARGUS_EV_STALE_GENERATION        = 62,
     ARGUS_EV_FORGED_CAPABILITY       = 63,
-    ARGUS_EV_WORLD_COMMITTED         = 70,
+    ARGUS_EV_WORLD_COMMITTED         = 70,  /* object_id = store/lineage id (several stores per process); world shadow per id */
     ARGUS_EV_POLICY_CHANGED          = 71,
     ARGUS_EV_RUNTIME_BUILD_CHANGED   = 72,
     ARGUS_EV_TELEMETRY_DROPPED       = 80,  /* synthesized by the ring consumer: object_id = class, resource = count */
-    ARGUS_EV_KIND_MAX                = 80
+    ARGUS_EV_CAPABILITY_USE_SUMMARY  = 81,  /* aggregation of successful validates per (cap_id, principal) since the last flush:
+                                               resource = count, cap_generation = MAX generation seen, object_id = MIN generation
+                                               seen, tick = 0, outcome OK. Detectors 1-3 treat it as a USED (3 checks max vs
+                                               REVOKED, 2 checks min vs shadow generation). The core applies nothing. Floor AUDIT. */
+    ARGUS_EV_KIND_MAX                = 81
 };
 
 /* Effect class of the operation the event describes. Mirrors RX_WORK_* + none. */
@@ -147,10 +172,16 @@ enum {
     ARGUS_OUTCOME_MAX     = 3
 };
 
-/* Flags. Reserved bits must be zero or the event is malformed. */
+/* Flags. Bits 0-1 are markers; bits 2-15 are the producer STREAM id (14 bits, 0 = default).
+ * Sequence streams are keyed by (machine_id, stream id, CONSUMER bit), so each producer
+ * thread/ring owns a stream and its own monotonic sequence. */
 #define ARGUS_FLAG_SYNTHETIC   0x0001u  /* produced by a test or replay, not a live producer */
 #define ARGUS_FLAG_CONSUMER    0x0002u  /* synthesized by ARGUS itself (e.g. TELEMETRY_DROPPED) */
-#define ARGUS_FLAG_KNOWN       0x0003u
+#define ARGUS_FLAG_STREAM_SHIFT 2u
+#define ARGUS_FLAG_STREAM_MASK 0xFFFCu
+#define ARGUS_FLAG_KNOWN       0xFFFFu
+#define ARGUS_STREAM_OF(flags) ((uint16_t)(((flags) & ARGUS_FLAG_STREAM_MASK) >> ARGUS_FLAG_STREAM_SHIFT))
+#define ARGUS_STREAM_MAX       16384u
 
 /* Layout-identical to AienosCapRef in native/capability/aienos_capability.h. */
 typedef struct {
@@ -303,10 +334,13 @@ typedef struct {
 } ArgusProviderShadow;
 
 typedef struct {
+    uint32_t store_id;          /* WORLD_COMMITTED object_id; the core keeps ARGUS_WORLD_STORES (8) of these */
     uint64_t generation;        /* last committed World generation (64-bit), 0 = none */
     uint8_t  digest[ARGUS_DIGEST_LEN];
     uint64_t sequence;
 } ArgusWorldShadow;
+#define ARGUS_WORLD_STORES 8u
+#define ARGUS_USE_FLUSH_OPS 4096u   /* default per-thread flush threshold for use summaries */
 
 typedef struct ArgusStateView ArgusStateView;   /* opaque, owned by argus_core */
 
@@ -318,7 +352,7 @@ typedef struct {
     int (*artifact)(const ArgusStateView *v, const uint8_t digest[ARGUS_DIGEST_LEN], ArgusArtifactShadow *out);
     int (*lease)(const ArgusStateView *v, uint32_t lease_id, ArgusLeaseShadow *out);
     int (*provider)(const ArgusStateView *v, const uint8_t id[ARGUS_DIGEST_LEN], ArgusProviderShadow *out);
-    int (*world)(const ArgusStateView *v, ArgusWorldShadow *out);
+    int (*world)(const ArgusStateView *v, uint32_t store_id, ArgusWorldShadow *out);
     /* Expected digest of the trusted policy / runtime build last announced. Zero digest = none. */
     int (*policy_digest)(const ArgusStateView *v, uint8_t out[ARGUS_DIGEST_LEN]);
     int (*runtime_digest)(const ArgusStateView *v, uint8_t out[ARGUS_DIGEST_LEN]);
