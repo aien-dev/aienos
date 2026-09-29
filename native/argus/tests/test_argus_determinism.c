@@ -4,7 +4,8 @@
  *
  * A 10,000-event synthetic stream (xorshift64*, fixed seed, covers every event
  * kind, non-OK outcomes, sequence repeats, malformed events, table overflow)
- * is fed to two fresh cores in lockstep: return codes and finding bytes must be
+ * (cap_id up to 260, so ids >= ARGUS_CAP_MAX exercise the malformed path; replays and
+ * stale grants/revokes exercise AUTHORITY_REPLAY and not-applied) is fed to two fresh cores in lockstep: return codes and finding bytes must be
  * identical per event, and final state digests and chains equal. The same
  * stream is then fed with two other chunkings (one event at a time with
  * digest/health queries interleaved; and split at event 3333 with the core's
@@ -90,7 +91,7 @@ static void gen(void)
 }
 
 typedef struct {
-    uint64_t fold, nfind, rc_fold, full, overflow, malformed, seq_anom, det_findings;
+    uint64_t fold, nfind, rc_fold, full, overflow, malformed, seq_anom, det_findings, replay, malformed_f;
     uint8_t state[32], chain[32];
 } RunSummary;
 
@@ -110,7 +111,10 @@ static void account(RunSummary *s, int rc, const ArgusFinding *f, size_t n)
     for (size_t i = 0; i < n; i++) {
         fold_bytes(&s->fold, &f[i], sizeof f[i]);
         if (f[i].code == ARGUS_F_SEQUENCE_ANOMALY) s->seq_anom++;
-        if (f[i].code != ARGUS_F_SEQUENCE_ANOMALY && f[i].code != ARGUS_F_TELEMETRY_LOSS) s->det_findings++;
+        if (f[i].code == ARGUS_F_AUTHORITY_REPLAY) s->replay++;
+        if (f[i].code == ARGUS_F_MALFORMED_EVENT) s->malformed_f++;
+        if (f[i].code != ARGUS_F_SEQUENCE_ANOMALY && f[i].code != ARGUS_F_TELEMETRY_LOSS &&
+            f[i].code != ARGUS_F_AUTHORITY_REPLAY && f[i].code != ARGUS_F_MALFORMED_EVENT) s->det_findings++;
     }
     s->nfind += n;
 }
@@ -185,6 +189,9 @@ int main(void)
     CHECK(mismatch == 0);
     CHECK(same(&sa, &sb, 1));
     CHECK(sa.nfind > 0 && sa.seq_anom > 0 && sa.full > 0 && sa.malformed > 0 && sa.det_findings > 0);
+    CHECK(sa.replay > 0 && sa.malformed_f == sa.malformed);   /* every MALFORMED return carries one code-16 finding */
+    ArgusCoreHealth h1; argus_core_health(A, &h1);
+    CHECK(h1.events_not_applied > 0 && h1.events_rejected == sa.malformed && h1.tables_full == sa.full);
 
     /* Chunking 1: one at a time, queries interleaved. */
     ArgusCore *C = NULL;
@@ -234,11 +241,14 @@ int main(void)
     CHECK(same(&sa, &se, 0));
     ArgusCoreHealth ha, he; argus_core_health(A, &ha); argus_core_health(E, &he);
     CHECK(ha.findings_emitted == he.findings_emitted && ha.incidents_open == he.incidents_open);
+    CHECK(ha.events_not_applied == he.events_not_applied && ha.incidents_untracked == he.incidents_untracked &&
+          ha.producers_untracked == he.producers_untracked && ha.tables_full == he.tables_full);
 
-    printf("determinism: %u events, %llu findings (%llu sequence, %llu detector), %llu FULL, %llu malformed, incidents %llu\n",
-           N_EVENTS, (unsigned long long)sa.nfind, (unsigned long long)sa.seq_anom,
-           (unsigned long long)sa.det_findings, (unsigned long long)sa.full,
-           (unsigned long long)sa.malformed, (unsigned long long)ha.incidents_open);
+    printf("determinism: %u events, %llu findings (%llu sequence, %llu replay, %llu malformed, %llu detector), %llu FULL, "
+           "%llu MALFORMED returns, %llu not applied, incidents %llu\n",
+           N_EVENTS, (unsigned long long)sa.nfind, (unsigned long long)sa.seq_anom, (unsigned long long)sa.replay,
+           (unsigned long long)sa.malformed_f, (unsigned long long)sa.det_findings, (unsigned long long)sa.full,
+           (unsigned long long)sa.malformed, (unsigned long long)ha.events_not_applied, (unsigned long long)ha.incidents_open);
     printf("state digest %02x%02x%02x%02x... (stub hash) identical across lockstep, interleaved, byte-copy split, 1-slot runs\n",
            sa.state[0], sa.state[1], sa.state[2], sa.state[3]);
 

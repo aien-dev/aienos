@@ -10,12 +10,12 @@
 #include "argus_abi.h"
 
 #define ARGUS_CORE_CAPS          256u  /* == AIENOS_CAP_MAX; indexed directly by cap_id */
-#define ARGUS_CORE_MACHINES      16u
-#define ARGUS_CORE_ARTIFACTS     64u
-#define ARGUS_CORE_LEASES        64u
+#define ARGUS_CORE_MACHINES      64u   /* includes REMOVED tombstones (never freed); kept sorted by machine_id */
+#define ARGUS_CORE_ARTIFACTS     256u
+#define ARGUS_CORE_LEASES        256u  /* lease ids are never reused, so the table only grows */
 #define ARGUS_CORE_PROVIDERS     32u
-#define ARGUS_CORE_PRODUCERS     32u   /* (machine_id, consumer bit) sequence streams */
-#define ARGUS_CORE_INCIDENTS     64u   /* distinct (principal, finding code) with severity >= HIGH */
+#define ARGUS_CORE_PRODUCERS     256u  /* (machine_id, consumer bit) sequence streams, sorted */
+#define ARGUS_CORE_INCIDENTS     256u  /* distinct (principal, finding code) with severity >= HIGH */
 #define ARGUS_CORE_MAX_FINDINGS  32u   /* internal scratch per ingest; more are counted then truncated */
 
 #endif /* ARGUS_CORE_H */
