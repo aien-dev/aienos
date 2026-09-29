@@ -50,6 +50,7 @@ static int oracle_bytes(const uint8_t b[ARGUS_EVENT_SIZE])
     if (((fl & 2u) != 0) != (kind == 80)) return ARGUS_ERR_MALFORMED;
     if (le32(b + 32) >= 256 && le32(b + 32) != 0xFFFFFFFFu) return ARGUS_ERR_MALFORMED;   /* CAP_NONE ok */
     if (kind == 81 && out != 1) return ARGUS_ERR_MALFORMED;                                /* summary: OK only */
+    if (kind == 81 && le64(b + 48) > le64(b + 40)) return ARGUS_ERR_MALFORMED;                /* summary: min gen <= max gen */
     if (seq == 0 || seq == UINT64_MAX) return ARGUS_ERR_MALFORMED;
     if (kind >= 50 && kind <= 52 && eff != 3) return ARGUS_ERR_MALFORMED;
     return ARGUS_OK;
@@ -69,6 +70,8 @@ static void valid_event(uint8_t b[ARGUS_EVENT_SIZE])
     e.flags = (uint16_t)((rnd() % 2) | ((rnd() % ARGUS_STREAM_MAX) << ARGUS_FLAG_STREAM_SHIFT) |
                          (e.kind == ARGUS_EV_TELEMETRY_DROPPED ? ARGUS_FLAG_CONSUMER : 0));
     e.cap_id = rnd() % 8 == 0 ? ARGUS_CAP_NONE : (uint32_t)(rnd() % ARGUS_CAP_MAX);
+    if (e.kind == ARGUS_EV_CAPABILITY_USE_SUMMARY && e.world_generation > e.cap_generation)
+        e.world_generation = e.cap_generation - (e.cap_generation ? rnd() % (e.cap_generation < 1000 ? e.cap_generation : 1000) : 0);
     if (e.sequence == 0 || e.sequence == UINT64_MAX) e.sequence = 1;
     if (argus_event_encode(&e, b) != ARGUS_OK || argus_event_validate(&e) != ARGUS_OK) {
         fprintf(stderr, "FAIL: generated valid event did not validate/encode\n");

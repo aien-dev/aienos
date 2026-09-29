@@ -928,12 +928,12 @@ static void t_runner(void)
 
 /* ---- v1.1: cap 0, CAP_NONE, CAPABILITY_USE_SUMMARY, per-store World -------- */
 
-static ArgusEvent summ(uint32_t cap_id, uint64_t max_gen, uint32_t min_gen, uint32_t principal)
+static ArgusEvent summ(uint32_t cap_id, uint64_t max_gen, uint64_t min_gen, uint32_t principal)
 {
     ArgusEvent e = use(ARGUS_EV_CAPABILITY_USE_SUMMARY, ARGUS_OUTCOME_OK, 0, cap_id, max_gen);
     e.class_ = ARGUS_CLASS_AUDIT;
     e.tick = 0;
-    e.object_id = min_gen;
+    e.world_generation = min_gen;   /* v1.1: MIN in world_generation (64-bit), object_id 0 */
     e.resource = 4096;
     e.principal = principal;
     return e;
@@ -1111,7 +1111,7 @@ static void check_stream_shape(const ArgusEvent *evs, size_t n, int benign)
             ok = 0;
         /* v1.1: summaries are outcome OK with tick 0 and min <= max; USED carries tick 0 */
         if (e->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY &&
-            (e->outcome != ARGUS_OUTCOME_OK || e->tick != 0 || e->resource == 0 || e->object_id > e->cap_generation))
+            (e->outcome != ARGUS_OUTCOME_OK || e->tick != 0 || e->resource == 0 || e->world_generation > e->cap_generation || e->object_id != 0))
             ok = 0;
         if (e->kind == ARGUS_EV_CAPABILITY_USED && e->tick != 0)
             ok = 0;

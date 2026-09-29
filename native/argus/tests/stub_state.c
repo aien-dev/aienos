@@ -550,7 +550,7 @@ static void gop_summary(Gen *g)
     ArgusEvent *e = emit_ev(g, ARGUS_EV_CAPABILITY_USE_SUMMARY, ARGUS_OUTCOME_OK, 0);
     if (!e) return;
     fill_cap(e, g, i, g->slot[i].gen);
-    e->object_id = (uint32_t)g->slot[i].gen;   /* MIN generation seen */
+    e->world_generation = g->slot[i].gen;      /* MIN generation seen (v1.1: 64-bit); object_id 0 */
     e->resource = 1u + rn(g, 4096);            /* count */
     e->effect_class = ARGUS_EFFECT_NONE;
     attach_ok(g, e);
@@ -1012,7 +1012,7 @@ static int inject(Gen *g, unsigned type)
         if ((i = find_slot(g, ARGUS_SHADOW_REVOKED, 0, 0, 1)) < 0) return 0;
         if (!(e = emit_ev(g, ARGUS_EV_CAPABILITY_USE_SUMMARY, ARGUS_OUTCOME_OK, 0))) return 0;
         fill_cap(e, g, i, g->slot[i].gen);
-        e->object_id = (uint32_t)g->slot[i].gen; e->resource = 1u + rn(g, 64);
+        e->world_generation = g->slot[i].gen; e->resource = 1u + rn(g, 64);
         attach_ok(g, e);
         expect_code(g, e->sequence, ARGUS_F_REVOKED_CAPABILITY_USED);
         return 1;
@@ -1020,7 +1020,7 @@ static int inject(Gen *g, unsigned type)
         if ((i = find_slot(g, ARGUS_SHADOW_LIVE, 0, 0, 2)) < 0) return 0;
         if (!(e = emit_ev(g, ARGUS_EV_CAPABILITY_USE_SUMMARY, ARGUS_OUTCOME_OK, 0))) return 0;
         fill_cap(e, g, i, g->slot[i].gen);
-        e->object_id = (uint32_t)(g->slot[i].gen - 1); e->resource = 2u + rn(g, 64);
+        e->world_generation = g->slot[i].gen - 1; e->resource = 2u + rn(g, 64);
         attach_ok(g, e);
         expect_code(g, e->sequence, ARGUS_F_STALE_GENERATION);
         return 1;
@@ -1037,7 +1037,7 @@ static int inject(Gen *g, unsigned type)
         if ((i = find_slot(g, ARGUS_SHADOW_REVOKED, 0, 0, 1)) < 0) return 0;
         if (!(e = emit_ev(g, ARGUS_EV_CAPABILITY_USE_SUMMARY, ARGUS_OUTCOME_OK, 0))) return 0;
         fill_cap(e, g, i, g->slot[i].gen + 1);
-        e->object_id = (uint32_t)(g->slot[i].gen + 1); e->resource = 1;
+        e->world_generation = g->slot[i].gen + 1; e->resource = 1;
         attach_ok(g, e);
         expect_code(g, e->sequence, ARGUS_F_FORGED_CAPABILITY);
         return 1;

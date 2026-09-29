@@ -21,7 +21,9 @@
  *   cap_id < ARGUS_CAP_MAX, or == ARGUS_CAP_NONE ("no capability"; cap_id 0 is
  *     the authority OFFICE slot, a real capability)
  *   CAPABILITY_USE_SUMMARY (81): outcome OK (a summary counts successful
- *     validates only); any tick is accepted (producers write 0)
+ *     validates only); any tick is accepted (producers write 0);
+ *     world_generation (MIN generation) <= cap_generation (MAX), else
+ *     malformed. object_id is not checked (forward-compat; producers write 0)
  *   sequence != 0 and sequence != UINT64_MAX
  *   EXTERNAL_EFFECT_REQUESTED/DENIED/COMMITTED carry effect_class EXTERNAL
  * Every one of the 128 bytes is carried by some field, so a buffer that
@@ -112,6 +114,8 @@ int argus_event_validate(const ArgusEvent *ev)
         return ARGUS_ERR_MALFORMED;                                 /* the authority cannot mint it */
     if (ev->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY && ev->outcome != ARGUS_OUTCOME_OK)
         return ARGUS_ERR_MALFORMED;                                 /* a summary counts successful validates only */
+    if (ev->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY && ev->world_generation > ev->cap_generation)
+        return ARGUS_ERR_MALFORMED;                                 /* summary MIN generation above its MAX */
     if (ev->sequence == 0 || ev->sequence == UINT64_MAX) return ARGUS_ERR_MALFORMED;
     if ((ev->kind == ARGUS_EV_EXTERNAL_EFFECT_REQUESTED || ev->kind == ARGUS_EV_EXTERNAL_EFFECT_DENIED ||
          ev->kind == ARGUS_EV_EXTERNAL_EFFECT_COMMITTED) && ev->effect_class != ARGUS_EFFECT_EXTERNAL)

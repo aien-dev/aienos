@@ -23,8 +23,9 @@
  *     one definition for all). cap_id 0 is the authority OFFICE slot and is
  *     checked like any other (v1.1).
  *   - A USE_SUMMARY is a USED spanning generations: MAX in cap_generation, MIN in
- *     object_id (use_gen_max/use_gen_min). Detector 1 checks the max, detector 2
- *     the min, detector 3 the max (<= the revoked generation), 8 and 14 as a USED.
+ *     world_generation (64-bit; object_id unused = 0) (use_gen_max/use_gen_min).
+ *     Detector 1 checks the max, detector 2 the min, detector 3 the max
+ *     (<= the revoked generation), 8 and 14 as a USED.
  *   - A machine is "joined" when machine() finds it AND joined_sequence != 0.
  *     MACHINE_REMOVED leaves a tombstone (joined_sequence 0, trust kept).
  *   - Machine trust rank (argus_trust_rank): TRUSTED < OBSERVED <
@@ -102,11 +103,11 @@ static int outcome_ok(const ArgusEvent *ev)
 
 /* Generation span of a use (v1.1). A USED carries one generation. A
  * CAPABILITY_USE_SUMMARY carries the MAX generation seen in cap_generation and
- * the MIN in object_id (u32; see the header note on generations above 2^32). */
+ * the MIN in world_generation (64-bit, header v1.1; object_id is unused = 0). */
 static uint64_t use_gen_max(const ArgusEvent *ev) { return ev->cap_generation; }
 static uint64_t use_gen_min(const ArgusEvent *ev)
 {
-    return ev->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY ? (uint64_t)ev->object_id : ev->cap_generation;
+    return ev->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY ? ev->world_generation : ev->cap_generation;
 }
 
 static int cap_lookup(const ArgusStateOps *ops, const ArgusStateView *v, uint32_t id, ArgusCapShadow *s)
@@ -204,7 +205,7 @@ static int det_forged_capability(const ArgusStateOps *ops, const ArgusStateView 
  *           reference is CAPABILITY_USED/DENIED code ERR_STALE_GEN, which does
  *           NOT trigger; or
  *           (b) a capability use with outcome OK and cap_generation (summary:
- *           its MIN generation, object_id) lower than the shadow's current
+ *           its MIN generation, world_generation) lower than the shadow's current
  *           generation for that slot; or
  *           (c) a capability use with outcome OK but code ERR_STALE_GEN.
  * Evidence: ev cap_id/cap_generation/outcome/code; cap shadow generation.

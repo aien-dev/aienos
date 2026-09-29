@@ -88,7 +88,7 @@ static void gen(void)
             e->object_id = s;
             e->world_generation = world[s]; dg(e->evidence_digest, 5000 + 100 * s + (uint32_t)world[s]); break;
         }
-        case ARGUS_EV_CAPABILITY_USE_SUMMARY: e->resource = 1 + rn(4096); e->object_id = (uint32_t)e->cap_generation - rn(2); break;
+        case ARGUS_EV_CAPABILITY_USE_SUMMARY: e->resource = 1 + rn(4096); e->world_generation = e->cap_generation - (e->cap_generation ? rn(2) : 0); break;
         case ARGUS_EV_POLICY_CHANGED: case ARGUS_EV_RUNTIME_BUILD_CHANGED: dg(e->evidence_digest, 7000 + rn(5)); break;
         case ARGUS_EV_TELEMETRY_DROPPED: e->object_id = 1 + rn(4); e->resource = 1 + rn(50); break;
         default: break;

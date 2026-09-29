@@ -100,6 +100,7 @@ static int oracle(const ArgusEvent *e)
     if (((e->flags & 2u) != 0) != (e->kind == 80)) return ARGUS_ERR_MALFORMED;
     if (e->cap_id >= 256 && e->cap_id != 0xFFFFFFFFu) return ARGUS_ERR_MALFORMED;   /* v1.1: CAP_NONE allowed */
     if (e->kind == 81 && e->outcome != 1) return ARGUS_ERR_MALFORMED;               /* summary: outcome OK only */
+    if (e->kind == 81 && e->world_generation > e->cap_generation) return ARGUS_ERR_MALFORMED;   /* summary: min gen <= max gen (v1.1) */
     if (e->sequence == 0 || e->sequence == UINT64_MAX) return ARGUS_ERR_MALFORMED;
     if (e->kind >= 50 && e->kind <= 52 && e->effect_class != 3) return ARGUS_ERR_MALFORMED;
     return ARGUS_OK;
@@ -142,13 +143,13 @@ static ArgusEvent valid_event(void)
 }
 
 /* Make e valid for its kind: class at the floor, CONSUMER iff TELEMETRY_DROPPED, EXTERNAL for effects,
- * outcome OK for CAPABILITY_USE_SUMMARY. Stream bits (2-15) are kept. */
+ * outcome OK for CAPABILITY_USE_SUMMARY (MIN generation = MAX). Stream bits (2-15) are kept. */
 static void fit_kind(ArgusEvent *e)
 {
     e->class_ = (uint8_t)floor_of(e->kind);
     e->flags = (uint16_t)((e->flags & (uint16_t)~ARGUS_FLAG_CONSUMER) | (e->kind == ARGUS_EV_TELEMETRY_DROPPED ? ARGUS_FLAG_CONSUMER : 0));
     if (e->kind >= 50 && e->kind <= 52) e->effect_class = ARGUS_EFFECT_EXTERNAL;
-    if (e->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY) e->outcome = ARGUS_OUTCOME_OK;
+    if (e->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY) { e->outcome = ARGUS_OUTCOME_OK; e->world_generation = e->cap_generation; }
 }
 
 static ArgusFinding fixed_finding(void)
@@ -308,14 +309,17 @@ static int decode_mut(size_t off, uint8_t v)
 }
 
 /* validate rejects; encode never validates but its bytes must then fail decode the same way. */
-static void expect_struct(ArgusEvent e, int want)
+static void expect_struct_at(ArgusEvent e, int want, int line)
 {
     uint8_t b[ARGUS_EVENT_SIZE];
     ArgusEvent out;
+    int f0 = failures;
     CHECK(argus_event_validate(&e) == want);
     CHECK(argus_event_encode(&e, b) == ARGUS_OK);
     CHECK(argus_event_decode(b, &out) == want);
+    if (failures != f0) fprintf(stderr, "  (expect_struct called from line %d)\n", line);
 }
+#define expect_struct(e, want) expect_struct_at((e), (want), __LINE__)
 
 /* Byte-level check: e encoded, decode must agree with the oracle. */
 static void expect_oracle(ArgusEvent e)
@@ -439,7 +443,7 @@ static void test_malformed(void)
      * CONSUMER rejected, stream bits and CAP_NONE accepted. */
     {
         ArgusEvent s = valid_event(); s.kind = ARGUS_EV_CAPABILITY_USE_SUMMARY; fit_kind(&s);
-        s.tick = 0; s.resource = 4096; s.cap_generation = 9; s.object_id = 7; s.effect_class = ARGUS_EFFECT_NONE;
+        s.tick = 0; s.resource = 4096; s.cap_generation = 9; s.world_generation = 7; s.object_id = 0; s.effect_class = ARGUS_EFFECT_NONE;
         CHECK(argus_event_min_class(ARGUS_EV_CAPABILITY_USE_SUMMARY) == ARGUS_CLASS_AUDIT);
         expect_struct(s, ARGUS_OK);
         ArgusEvent t = s; t.tick = 12345; expect_struct(t, ARGUS_OK);          /* producer rule says 0; not enforced */
@@ -452,6 +456,16 @@ static void test_malformed(void)
         CHECK(ARGUS_STREAM_OF(t.flags) == 0x3FFFu);
         t = s; t.cap_id = ARGUS_CAP_NONE; expect_struct(t, ARGUS_OK);
         t = s; t.cap_id = 0; expect_struct(t, ARGUS_OK);
+        /* header v1.1 (398cfb9): MIN generation in world_generation (64-bit), must be <= MAX
+         * (cap_generation); object_id is unused and deliberately not checked (forward-compat). */
+        t = s; t.world_generation = t.cap_generation; expect_struct(t, ARGUS_OK);
+        t = s; t.world_generation = 0; expect_struct(t, ARGUS_OK);
+        t = s; t.world_generation = t.cap_generation + 1; expect_struct(t, ARGUS_ERR_MALFORMED);
+        t = s; t.cap_generation = 0; t.world_generation = UINT64_MAX; expect_struct(t, ARGUS_ERR_MALFORMED);
+        t = s; t.cap_generation = UINT64_MAX; t.world_generation = (uint64_t)1 << 40; expect_struct(t, ARGUS_OK);
+        t = s; t.object_id = 0xFFFFFFFFu; expect_struct(t, ARGUS_OK);
+        t = s; t.object_id = 0; expect_struct(t, ARGUS_OK);
+        { ArgusEvent u = valid_event(); u.world_generation = u.cap_generation + 1; expect_struct(u, ARGUS_OK); }   /* rule is summary-only */
         for (unsigned v = 0; v < 256; v++) {             /* outcome byte of an encoded summary */
             uint8_t b[ARGUS_EVENT_SIZE]; ArgusEvent out;
             argus_event_encode(&s, b); b[5] = (uint8_t)v;
