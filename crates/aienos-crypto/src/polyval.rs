@@ -7,10 +7,16 @@
 pub type Block = [u8; 16];
 
 /// POLYVAL state accumulator.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Polyval {
     key: Block,
     accumulator: Block,
+}
+
+impl core::fmt::Debug for Polyval {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Polyval([REDACTED])")
+    }
 }
 
 impl Drop for Polyval {
@@ -40,12 +46,13 @@ fn div_x(v: &mut Block) {
         carry = next_carry;
     }
 
-    if lsb != 0 {
-        v[15] ^= X_INV_BYTE_15;
-    }
+    // Branch-free reduction: mask is 0xff when lsb == 1, 0x00 when lsb == 0.
+    v[15] ^= X_INV_BYTE_15 & 0u8.wrapping_sub(core::hint::black_box(lsb));
 }
 
 /// Compute dot(a, b) = a * b * x^-128 mod P(x) per RFC 8452 Section 3.
+///
+/// Constant-time: always 128 steps, no branch or memory address depends on `a` or `b`.
 pub fn dot(a: &Block, b: &Block) -> Block {
     let mut v = [0u8; 16];
 
@@ -54,10 +61,12 @@ pub fn dot(a: &Block, b: &Block) -> Block {
         let bit_idx = i % 8;
         let bit = (a[byte_idx] >> bit_idx) & 1;
 
-        if bit != 0 {
-            for j in 0..16 {
-                v[j] ^= b[j];
-            }
+        // Branch-free conditional add: mask is 0xff when bit == 1, else 0x00.
+        // `black_box` hides that `bit` is 0 or 1, so LLVM cannot turn the mask
+        // back into a branch (it did so without it; seen in AArch64 disassembly).
+        let mask = 0u8.wrapping_sub(core::hint::black_box(bit));
+        for j in 0..16 {
+            v[j] ^= b[j] & mask;
         }
 
         div_x(&mut v);

@@ -379,6 +379,10 @@ pub fn decrypt_envelope(
         }
 
         plaintext.extend_from_slice(&scratchpad);
+        // The scratchpad held verified plaintext: wipe it before the heap block is freed.
+        for b in scratchpad.iter_mut() {
+            unsafe { core::ptr::write_volatile(b, 0) };
+        }
     }
 
     Ok(plaintext)
