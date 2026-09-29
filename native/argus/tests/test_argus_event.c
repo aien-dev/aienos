@@ -76,6 +76,35 @@ static int is_known_kind(unsigned k)
     return 0;
 }
 
+/* Independent restatement of the per-kind class floor (argus_abi.h hostile-review rules). */
+static unsigned floor_of(unsigned k)
+{
+    static const uint16_t crit[] = { 60, 61, 62, 63, 80, 42, 31, 32, 71, 72, 4, 12, 21, 52 };
+    static const uint16_t sec[]  = { 1, 3, 10, 20, 22, 30, 40, 41, 50, 51, 70 };
+    static const uint16_t aud[]  = { 2, 11, 43 };
+    for (size_t i = 0; i < sizeof crit / sizeof crit[0]; i++) if (crit[i] == k) return 1;
+    for (size_t i = 0; i < sizeof sec / sizeof sec[0]; i++) if (sec[i] == k) return 2;
+    for (size_t i = 0; i < sizeof aud / sizeof aud[0]; i++) if (aud[i] == k) return 3;
+    return 0;
+}
+
+/* Reference oracle: the result argus_event_validate must give. */
+static int oracle(const ArgusEvent *e)
+{
+    if (e->version != 1) return ARGUS_ERR_VERSION;
+    if (e->class_ < 1 || e->class_ > 4) return ARGUS_ERR_MALFORMED;
+    if (!is_known_kind(e->kind)) return ARGUS_ERR_MALFORMED;
+    if (e->class_ > floor_of(e->kind)) return ARGUS_ERR_MALFORMED;
+    if (e->effect_class > 3) return ARGUS_ERR_MALFORMED;
+    if (e->outcome < 1 || e->outcome > 3) return ARGUS_ERR_MALFORMED;
+    if (e->flags & ~3u) return ARGUS_ERR_MALFORMED;
+    if (((e->flags & 2u) != 0) != (e->kind == 80)) return ARGUS_ERR_MALFORMED;
+    if (e->cap_id >= 256) return ARGUS_ERR_MALFORMED;
+    if (e->sequence == 0 || e->sequence == UINT64_MAX) return ARGUS_ERR_MALFORMED;
+    if (e->kind >= 50 && e->kind <= 52 && e->effect_class != 3) return ARGUS_ERR_MALFORMED;
+    return ARGUS_OK;
+}
+
 static ArgusEvent fixed_event(void)
 {
     ArgusEvent e;
@@ -100,6 +129,24 @@ static ArgusEvent fixed_event(void)
         e.evidence_digest[i] = (uint8_t)(0xC0 + i);
     }
     return e;
+}
+
+/* fixed_event is the known-answer sample (its bytes and digests are pinned; encode
+ * never validates). Its cap_id is out of range, so the validity tests start from
+ * this valid variant instead. */
+static ArgusEvent valid_event(void)
+{
+    ArgusEvent e = fixed_event();
+    e.cap_id = 0x34;
+    return e;
+}
+
+/* Make e valid for its kind: class at the floor, CONSUMER iff TELEMETRY_DROPPED, EXTERNAL for effects. */
+static void fit_kind(ArgusEvent *e)
+{
+    e->class_ = (uint8_t)floor_of(e->kind);
+    e->flags = (uint16_t)((e->flags & ARGUS_FLAG_SYNTHETIC) | (e->kind == ARGUS_EV_TELEMETRY_DROPPED ? ARGUS_FLAG_CONSUMER : 0));
+    if (e->kind >= 50 && e->kind <= 52) e->effect_class = ARGUS_EFFECT_EXTERNAL;
 }
 
 static ArgusFinding fixed_finding(void)
@@ -209,21 +256,26 @@ static void test_known_answers(void)
     }
 }
 
-/* ---- round trip, every kind ---- */
+/* ---- round trip, every kind, every class it allows ---- */
 static void test_round_trip(void)
 {
     uint8_t b[ARGUS_EVENT_SIZE], b2[ARGUS_EVENT_SIZE];
     size_t n = 0;
     for (size_t i = 0; i < N_KINDS; i++) {
-        for (uint8_t cls = 1; cls <= ARGUS_CLASS_MAX; cls++) {
-            ArgusEvent e = fixed_event(), d;
+        unsigned fl = floor_of(all_kinds[i]);
+        CHECK(fl >= 1 && fl <= 3);
+        CHECK(argus_event_min_class(all_kinds[i]) == fl);
+        for (uint8_t cls = 1; cls <= fl; cls++) {
+            ArgusEvent e = valid_event(), d;
             e.kind = all_kinds[i];
-            e.class_ = cls;
             e.effect_class = (uint8_t)(i % 4);
             e.outcome = (uint8_t)(1 + i % 3);
-            e.flags = (uint16_t)(i % 4);
+            e.flags = (uint16_t)(i % 2);
+            fit_kind(&e);
+            e.class_ = cls;
             e.sequence = 1 + i * 7 + cls;
             e.code = (int32_t)(0 - (int32_t)i);
+            e.cap_id = (uint32_t)(i * 9 % ARGUS_CAP_MAX);
             CHECK(argus_event_validate(&e) == ARGUS_OK);
             CHECK(argus_event_encode(&e, b) == ARGUS_OK);
             memset(&d, 0x5A, sizeof d);
@@ -235,13 +287,14 @@ static void test_round_trip(void)
         }
     }
     CHECK(N_KINDS == 28);
-    printf("round trip: %zu kinds x 4 classes = %zu events OK\n", N_KINDS, n);
+    CHECK(n == 14 * 1 + 11 * 2 + 3 * 3);
+    printf("round trip: %zu kinds x every class at or above the kind's floor = %zu events OK\n", N_KINDS, n);
 }
 
 /* ---- malformed fields ---- */
 static int decode_mut(size_t off, uint8_t v)
 {
-    ArgusEvent e = fixed_event(), out, sentinel;
+    ArgusEvent e = valid_event(), out, sentinel;
     uint8_t b[ARGUS_EVENT_SIZE];
     argus_event_encode(&e, b);
     b[off] = v;
@@ -262,74 +315,140 @@ static void expect_struct(ArgusEvent e, int want)
     CHECK(argus_event_decode(b, &out) == want);
 }
 
+/* Byte-level check: e encoded, decode must agree with the oracle. */
+static void expect_oracle(ArgusEvent e)
+{
+    expect_struct(e, oracle(&e));
+}
+
 static void test_malformed(void)
 {
     size_t n = 0;
+    CHECK(oracle(&(ArgusEvent){0}) == ARGUS_ERR_VERSION);
+    { ArgusEvent v = valid_event(); CHECK(oracle(&v) == ARGUS_OK); expect_struct(v, ARGUS_OK); }
     /* version: anything but 1 -> VERSION (checked first) */
     for (unsigned v = 0; v < 256; v++) {
         if (v == 1) continue;
         CHECK(decode_mut(0, (uint8_t)v) == ARGUS_ERR_VERSION);
-        ArgusEvent e = fixed_event(); e.version = (uint8_t)v; expect_struct(e, ARGUS_ERR_VERSION);
+        ArgusEvent e = valid_event(); e.version = (uint8_t)v; expect_struct(e, ARGUS_ERR_VERSION);
         n++;
     }
-    /* class: only 1..4 */
+    /* class: only 1..4, and no weaker than the kind floor (CAPABILITY_USED: AUDIT) */
     for (unsigned v = 0; v < 256; v++) {
-        int want = (v >= 1 && v <= 4) ? ARGUS_OK : ARGUS_ERR_MALFORMED;
+        int want = (v >= 1 && v <= 3) ? ARGUS_OK : ARGUS_ERR_MALFORMED;
         CHECK(decode_mut(1, (uint8_t)v) == want);
-        ArgusEvent e = fixed_event(); e.class_ = (uint8_t)v; expect_struct(e, want);
+        ArgusEvent e = valid_event(); e.class_ = (uint8_t)v; expect_struct(e, want);
         n++;
     }
-    /* kind: only the enumerated set (0 = NONE rejected); every 16-bit value */
+    /* class x kind: every class byte against every known kind (fitted otherwise valid) */
+    for (size_t i = 0; i < N_KINDS; i++) {
+        for (unsigned v = 0; v < 256; v++) {
+            ArgusEvent e = valid_event(); e.kind = all_kinds[i]; fit_kind(&e); e.class_ = (uint8_t)v;
+            int want = (v >= 1 && v <= floor_of(all_kinds[i])) ? ARGUS_OK : ARGUS_ERR_MALFORMED;
+            CHECK(oracle(&e) == want);
+            expect_struct(e, want);
+            n++;
+        }
+    }
+    /* kind: every 16-bit value. min_class is 0 exactly for unknown kinds.
+     * (a) the valid base as is (AUDIT, no CONSUMER, EXTERNAL) -> oracle decides;
+     * (b) fitted to the kind -> OK iff the kind is known. */
+    size_t known = 0;
     for (unsigned v = 0; v < 65536; v++) {
+        CHECK((argus_event_min_class((uint16_t)v) != 0) == is_known_kind(v));
+        CHECK(argus_event_min_class((uint16_t)v) == floor_of(v));
+        ArgusEvent e = valid_event(); e.kind = (uint16_t)v; expect_oracle(e);
+        ArgusEvent f = valid_event(); f.kind = (uint16_t)v; if (is_known_kind(v)) fit_kind(&f);
         int want = is_known_kind(v) ? ARGUS_OK : ARGUS_ERR_MALFORMED;
-        ArgusEvent e = fixed_event(); e.kind = (uint16_t)v; expect_struct(e, want);
+        CHECK(oracle(&f) == want);
+        expect_struct(f, want);
         uint8_t b[ARGUS_EVENT_SIZE]; ArgusEvent out;
-        argus_event_encode(&(ArgusEvent){ .version = 1, .class_ = 1, .kind = 1, .outcome = 1, .sequence = 1 }, b);
+        argus_event_encode(&f, b);
         b[2] = (uint8_t)v; b[3] = (uint8_t)(v >> 8);
         CHECK(argus_event_decode(b, &out) == want);
+        known += is_known_kind(v);
         n++;
     }
+    CHECK(known == N_KINDS);
     CHECK(decode_mut(3, 1) == ARGUS_ERR_MALFORMED);   /* high byte of kind */
-    /* effect_class 0..3 */
+    /* effect_class 0..3 (CAPABILITY_USED: any); EXTERNAL_EFFECT_*: only EXTERNAL */
     for (unsigned v = 0; v < 256; v++) {
         int want = v <= 3 ? ARGUS_OK : ARGUS_ERR_MALFORMED;
         CHECK(decode_mut(4, (uint8_t)v) == want);
-        ArgusEvent e = fixed_event(); e.effect_class = (uint8_t)v; expect_struct(e, want);
+        ArgusEvent e = valid_event(); e.effect_class = (uint8_t)v; expect_struct(e, want);
+        for (uint16_t k = 50; k <= 52; k++) {
+            ArgusEvent x = valid_event(); x.kind = k; fit_kind(&x); x.effect_class = (uint8_t)v;
+            expect_struct(x, v == ARGUS_EFFECT_EXTERNAL ? ARGUS_OK : ARGUS_ERR_MALFORMED);
+            n++;
+        }
         n++;
     }
     /* outcome 1..3 */
     for (unsigned v = 0; v < 256; v++) {
         int want = (v >= 1 && v <= 3) ? ARGUS_OK : ARGUS_ERR_MALFORMED;
         CHECK(decode_mut(5, (uint8_t)v) == want);
-        ArgusEvent e = fixed_event(); e.outcome = (uint8_t)v; expect_struct(e, want);
+        ArgusEvent e = valid_event(); e.outcome = (uint8_t)v; expect_struct(e, want);
         n++;
     }
-    /* flags: subset of KNOWN; every 16-bit value */
+    /* flags: every 16-bit value, on a producer kind and on TELEMETRY_DROPPED.
+     * Producer kind: only 0 and SYNTHETIC. TELEMETRY_DROPPED: only CONSUMER (+SYNTHETIC). */
     for (unsigned v = 0; v < 65536; v++) {
-        int want = (v & ~ARGUS_FLAG_KNOWN) ? ARGUS_ERR_MALFORMED : ARGUS_OK;
-        ArgusEvent e = fixed_event(); e.flags = (uint16_t)v; expect_struct(e, want);
-        n++;
+        int want_p = (v == 0 || v == ARGUS_FLAG_SYNTHETIC) ? ARGUS_OK : ARGUS_ERR_MALFORMED;
+        int want_t = (v == ARGUS_FLAG_CONSUMER || v == ARGUS_FLAG_KNOWN) ? ARGUS_OK : ARGUS_ERR_MALFORMED;
+        ArgusEvent e = valid_event(); e.flags = (uint16_t)v;
+        CHECK(oracle(&e) == want_p);
+        expect_struct(e, want_p);
+        ArgusEvent t = valid_event(); t.kind = ARGUS_EV_TELEMETRY_DROPPED; fit_kind(&t); t.flags = (uint16_t)v;
+        CHECK(oracle(&t) == want_t);
+        expect_struct(t, want_t);
+        n += 2;
     }
     CHECK(decode_mut(6, 0x04) == ARGUS_ERR_MALFORMED);
+    CHECK(decode_mut(6, 0x03) == ARGUS_ERR_MALFORMED);   /* CONSUMER on a producer kind */
     CHECK(decode_mut(7, 0x80) == ARGUS_ERR_MALFORMED);
-    /* sequence 0 */
+    /* cap_id: < ARGUS_CAP_MAX only; boundary and every high byte */
     {
-        ArgusEvent e = fixed_event(); e.sequence = 0; expect_struct(e, ARGUS_ERR_MALFORMED);
+        static const uint32_t ok_ids[] = { 0, 1, 255 };
+        static const uint32_t bad_ids[] = { 256, 257, 300, 0x10000, 0x7FFFFFFFu, 0xFFFFFFFFu };
+        for (size_t i = 0; i < 3; i++) { ArgusEvent e = valid_event(); e.cap_id = ok_ids[i]; expect_struct(e, ARGUS_OK); n++; }
+        for (size_t i = 0; i < 6; i++) { ArgusEvent e = valid_event(); e.cap_id = bad_ids[i]; expect_struct(e, ARGUS_ERR_MALFORMED); n++; }
+        for (unsigned v = 0; v < 256; v++) {
+            CHECK(decode_mut(33, (uint8_t)v) == (v == 0 ? ARGUS_OK : ARGUS_ERR_MALFORMED));
+            n++;
+        }
+    }
+    /* sequence: 0 and UINT64_MAX rejected, UINT64_MAX-1 accepted */
+    {
+        ArgusEvent e = valid_event(); e.sequence = 0; expect_struct(e, ARGUS_ERR_MALFORMED);
+        e.sequence = UINT64_MAX; expect_struct(e, ARGUS_ERR_MALFORMED);
+        e.sequence = UINT64_MAX - 1; expect_struct(e, ARGUS_OK);
         uint8_t b[ARGUS_EVENT_SIZE]; ArgusEvent out;
         e.sequence = 1; argus_event_encode(&e, b); b[8] = 0;
         CHECK(argus_event_decode(b, &out) == ARGUS_ERR_MALFORMED);
+        memset(b + 8, 0xFF, 8);
+        CHECK(argus_event_decode(b, &out) == ARGUS_ERR_MALFORMED);
+        n += 5;
+    }
+    /* The ring's own drop report must be a valid event (CRITICAL, CONSUMER). */
+    {
+        ArgusEvent t = { .version = 1, .class_ = ARGUS_CLASS_CRITICAL, .kind = ARGUS_EV_TELEMETRY_DROPPED,
+                         .outcome = ARGUS_OUTCOME_ERROR, .flags = ARGUS_FLAG_CONSUMER, .sequence = 1,
+                         .code = ARGUS_ERR_FULL, .object_id = ARGUS_CLASS_AUDIT, .resource = 3 };
+        expect_struct(t, ARGUS_OK);
+        t.class_ = ARGUS_CLASS_SECURITY; expect_struct(t, ARGUS_ERR_MALFORMED);
         n += 2;
     }
     /* NULL arguments */
     {
-        uint8_t b[ARGUS_EVENT_SIZE]; ArgusEvent e = fixed_event();
+        uint8_t b[ARGUS_EVENT_SIZE]; ArgusEvent e = valid_event();
         CHECK(argus_event_validate(NULL) == ARGUS_ERR_ARG);
         CHECK(argus_event_encode(NULL, b) == ARGUS_ERR_ARG);
         CHECK(argus_event_encode(&e, NULL) == ARGUS_ERR_ARG);
         CHECK(argus_event_decode(NULL, &e) == ARGUS_ERR_ARG);
         CHECK(argus_event_decode(b, NULL) == ARGUS_ERR_ARG);
     }
-    printf("malformed: %zu field values checked (version, class, every kind, effect, outcome, every flags, sequence)\n", n);
+    printf("malformed: %zu field values checked (version, class, class x kind floor, every kind, effect incl. "
+           "EXTERNAL_EFFECT_*, outcome, every flags x {producer, TELEMETRY_DROPPED}, cap_id bound, sequence 0/max)\n", n);
 }
 
 /* ---- forward compatibility ---- */
