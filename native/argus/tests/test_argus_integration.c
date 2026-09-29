@@ -20,6 +20,8 @@
 #include "../capability/aienos_capability.h"   /* header only: ARGUS-1 mirror constants (never linked) */
 
 #include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdarg.h>
@@ -31,7 +33,16 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <time.h>
+
+/* Advance an snprintf append offset without ever passing the end of the buffer:
+ * on truncation (or error) the offset is clamped so later appends get size 0. */
+static size_t snprintf_advance(size_t off, size_t cap, int n)
+{
+    if (n < 0 || off >= cap) return off < cap ? off : cap;
+    return ((size_t)n >= cap - off) ? cap : off + (size_t)n;
+}
 
 #define N_CORPUS      5000u     /* lane E validated the hostile corpus at this size */
 #define N_PROBE      10000u     /* capacity probe only (reported, not a gate) */
@@ -266,12 +277,20 @@ static int scan_tree(const char *dir, const char *word, const char *cap_len, int
         if (strcmp(dir, ".") == 0 && strcmp(de->d_name, "out") == 0) continue;
         char path[1024];
         snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
+        /* Open first, then fstat the descriptor (no check-then-use race).
+         * O_NOFOLLOW: a symlink fails with ELOOP and is skipped, as before;
+         * O_NONBLOCK: a FIFO cannot hang the scan (it is skipped below). */
+        int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+        if (fd < 0) {
+            if (errno == ELOOP || errno == ENXIO) continue;   /* symlink / socket: not scanned */
+            err = -1; continue;
+        }
         struct stat st;
-        if (lstat(path, &st) != 0) { err = -1; continue; }
-        if (S_ISDIR(st.st_mode)) { if (scan_tree(path, word, cap_len, files, hits, dirs)) err = -1; continue; }
-        if (!S_ISREG(st.st_mode)) continue;
-        FILE *fp = fopen(path, "r");
-        if (!fp) { err = -1; continue; }
+        if (fstat(fd, &st) != 0) { close(fd); err = -1; continue; }
+        if (S_ISDIR(st.st_mode)) { close(fd); if (scan_tree(path, word, cap_len, files, hits, dirs)) err = -1; continue; }
+        if (!S_ISREG(st.st_mode)) { close(fd); continue; }
+        FILE *fp = fdopen(fd, "r");
+        if (!fp) { close(fd); err = -1; continue; }
         (*files)++;
         char line[4096];
         int lineno = 0;
@@ -811,7 +830,7 @@ static void explain_unexpected(const char *label, const ArgusEvent *ev, size_t n
     size_t off = 0;
     for (unsigned k = 0; k <= ARGUS_EV_KIND_MAX; k++)
         if (full_kind[k])
-            off += (size_t)snprintf(fk + off, sizeof fk - off, " kind%u=%llu", k, (unsigned long long)full_kind[k]);
+            off = snprintf_advance(off, sizeof fk, snprintf(fk + off, sizeof fk - off, " kind%u=%llu", k, (unsigned long long)full_kind[k]));
     printf("EXPLAIN %s: unexpected code 6 %llu, of which %llu on a lease id REVOKED then CREATED again earlier "
            "(core keeps it REVOKED, argus_core.c:427; corpus reuses lease ids); unexpected code 4 %llu, of which %llu "
            "on an artifact whose ADMITTED/REJECTED hit ARGUS_ERR_FULL (ARGUS_CORE_ARTIFACTS 64 < corpus G_ARTIFACTS 96); "
@@ -872,8 +891,8 @@ static void gate_hard_invariants(void)
     size_t off = 0;
     for (unsigned c = 1; c <= ARGUS_F_MAX; c++)
         if (hard_code(c))
-            off += (size_t)snprintf(table + off, sizeof table - off, "%s%u:%llu/%llu", c > 1 ? " " : "", c,
-                                (unsigned long long)det_by[c], (unsigned long long)exp_by[c]);
+            off = snprintf_advance(off, sizeof table, snprintf(table + off, sizeof table - off, "%s%u:%llu/%llu", c > 1 ? " " : "", c,
+                                (unsigned long long)det_by[c], (unsigned long long)exp_by[c]));
     /* 12 on strictly increasing per-stream sequences is an integration bug; 11 means shadow tables overflowed */
     int seq_ok = !(seq12 > 0 && incr == 1);
     if (unexpected_hard || loss11 || seq12) explain_unexpected("hostile seed 1", hostile, n_hostile, 1);
@@ -915,7 +934,7 @@ static void gate_false_positive(void)
         total += r.nf;
         full += r.rc_full;
         events += n;
-        off += (size_t)snprintf(per_seed + off, sizeof per_seed - off, "%s%zu", seed > 1 ? "," : "", r.nf);
+        off = snprintf_advance(off, sizeof per_seed, snprintf(per_seed + off, sizeof per_seed - off, "%s%zu", seed > 1 ? "," : "", r.nf));
         run_free(&r);
     }
     /* restore seed-1 benign corpus for the timing below */
@@ -973,7 +992,7 @@ static void gate_memory(int nobj, char **objs)
             char probe[1100];
             snprintf(probe, sizeof probe, " %s ", imports);
             if (!strstr(probe, key) && ioff + strlen(s) + 2 < sizeof imports)
-                ioff += (size_t)snprintf(imports + ioff, sizeof imports - ioff, "%s%s", ioff ? " " : "", s);
+                ioff = snprintf_advance(ioff, sizeof imports, snprintf(imports + ioff, sizeof imports - ioff, "%s%s", ioff ? " " : "", s));
         }
         if (pclose(p) != 0) nm_err++;
         checked++;

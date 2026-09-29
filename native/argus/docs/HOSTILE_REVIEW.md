@@ -694,3 +694,23 @@ Some EXPECTED-FAIL tests encode a judgment the integrator may reject (for exampl
 `unattributed_grant_masks_forged_use` cannot pass without producer identity, and
 `world_repeat_silent` depends on whether the ADR or the detector is right). Flipping one
 to a documented accepted risk is fine; deleting it silently is not.
+
+## Post-review note (2026-09-29): RX_ARGUS_CONSUMER_CPU
+
+Added after this review (omega `feat/argus-producer`, fix `ec87160`, measured in speed
+round 2 at `cf6f45d`), so no hostile test above covers it. It is a new configuration
+surface: an environment variable that chooses where the omega ARGUS consumer thread runs.
+- Values: `auto` (default: pin to the online CPUs outside the process affinity mask; unpinned
+  if the mask already covers every CPU), `none` (never pin), or an explicit CPU list (pin
+  exactly there).
+- Who can set it: whoever sets the process environment of the omega runtime, i.e. the
+  operator who starts it. The agent does not set it, and no ARGUS event, finding or ring
+  message can change it.
+- Worst case of a hostile or wrong value: a slowdown (the consumer shares a core with the
+  workload; measured R8 +5.3% unpinned vs +3.9% with a spare core) or the consumer running
+  unpinned. It never changes correctness or detection: events are never dropped or sampled
+  because of placement, and any refusal, loss or late event still shows up in the
+  refused/lost/late counters, which remain the evidence.
+- It cannot widen ARGUS's authority: it only moves a thread between CPUs; ARGUS still mints,
+  grants and revokes nothing. Note that `auto` deliberately places the consumer outside the
+  CPU mask the operator gave the process (see PERFORMANCE_GATE limits in `ARGUS0_GATES.md`).
