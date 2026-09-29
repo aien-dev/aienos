@@ -278,7 +278,7 @@ typedef struct {
 typedef struct {
     uint8_t  machine_id[ARGUS_MACHINE_ID_LEN];
     uint32_t trust;             /* ARGUS_TRUST_* */
-    uint64_t joined_sequence;   /* 0 = not joined (REMOVED drops the entry) */
+    uint64_t joined_sequence;   /* 0 = not joined or tombstoned by REMOVED (trust preserved) */
     uint64_t changed_sequence;
 } ArgusMachineShadow;
 
