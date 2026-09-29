@@ -339,7 +339,7 @@ int aienos_contain_create(AienosContain **g, void *mem, size_t bytes, AienosCapA
 int aienos_contain_submit(AienosContain *g, const AienosContainRequest *r,
                           const uint8_t request_digest[32], AienosContainDecision *out);
 int aienos_contain_resolve(AienosContain *g, uint64_t decision_id, int approve,
-                           const uint8_t *office_token);   /* ESCALATE -> GRANT/DENY, human only */
+                           const uint8_t *office_secret);   /* ESCALATE -> GRANT/DENY, human only */
 int aienos_contain_execute(AienosContain *g, uint64_t decision_id, AienosContainResult *out);
 int aienos_contain_set_sink(AienosContain *g, AienosContainSink fn, void *ctx);  /* 91/92 */
 void aienos_contain_lineage_observe(AienosContain *g, uint32_t op, const AienosCapEntry *e,
@@ -379,8 +379,8 @@ void aienos_contain_lineage_observe(AienosContain *g, uint32_t op, const AienosC
 - Budget (I3.b): at most AIENOS_CONTAIN_BUDGET 8 executed revocations per 64 decisions; beyond
   that every request is ESCALATE (WHY 1107).
 - SATURATION-flagged requests and every non-RevokeCapability type: never GRANT without resolve.
-- `resolve` requires the office token (`aienos_cap_authorize`, constant time); wrong token =
-  refused and announced. In ARGUS-1 the "human" is a test stub holding the token (D2).
+- `resolve` requires the office secret (`aienos_cap_authorize`, constant time); wrong secret =
+  refused and announced. In ARGUS-1 the "human" is a test stub holding the secret (D2).
 - Non-LIVE types: `execute` returns UNAVAILABLE. Tests may install a test executor that
   announces DONE with the SYNTHETIC flag (I2).
 - Revoke's observer snapshot uses ~23 KB of stack; the bridge thread must allow it.
@@ -389,7 +389,7 @@ void aienos_contain_lineage_observe(AienosContain *g, uint32_t op, const AienosC
 
 1100 POLICY_GRANT, 1101 POLICY_DENY, 1102 POLICY_ESCALATE, 1103 PROTECTED_TARGET,
 1104 TARGET_NOT_LIVE, 1105 SUBJECT_MISMATCH, 1106 REPLAYED_REQUEST, 1107 BUDGET,
-1108 BAD_REQUEST, 1109 NO_EXECUTOR, 1110 HUMAN_DENY, 1111 HUMAN_GRANT, 1112 BAD_TOKEN,
+1108 BAD_REQUEST, 1109 NO_EXECUTOR, 1110 HUMAN_DENY, 1111 HUMAN_GRANT, 1112 BAD_SECRET,
 1113 DECISION_REPLAY, 1114 NOT_LEAF, 1115 LINEAGE_UNTRUSTED, 1116 NOT_AUTO_ELIGIBLE.
 
 ### 5.3 Recovery path (I1.f)
@@ -397,7 +397,7 @@ void aienos_contain_lineage_observe(AienosContain *g, uint32_t op, const AienosC
 An automatic revoke is undone only through the authoritative control path: the operator, holding
 the office, mints a fresh cap for the same subject, resource and rights (new slot or new
 generation). ARGUS and the gate have no recovery API (I3, I5). ESCALATE decisions are resolved
-by the operator with the office token. There is no automatic un-revoke.
+by the operator with the office secret. There is no automatic un-revoke.
 
 ## 6. The bridge (`native/argus/bridge/argus_aegis_bridge.{c,h}`)
 
@@ -419,7 +419,7 @@ milestone (false positives, latency, authority identity/restart semantics, perfo
 | G1 | ABI v1.2 round trip | 10,000 random request encode/decode round trips byte-identical; >= 4 known-answer request digests; every decode rejection (bad type, version, reserved, request_id 0, finding_sequence 0) rejected; kinds 90-93 validate rules each accept + reject, incl. non-SYNTHETIC DONE for a SYNTH type rejected (I2); `offsetof` equality ArgusContainmentRequest vs AienosContainRequest; ARGUS-0 event digest and chain vectors unchanged; secret-negative scan 0 hits. |
 | G2 | Proposal determinism | Same stream (benign + hostile + a recorded bridge stream with 91/92/4) replayed twice and split into 1/7/64/4096-event chunks: byte-identical requests, request digests, core chain, core state digest, contain state digest. Every finding code yields exactly the type in 2.1 or none. |
 | G3 | Accepted path, LIVE (I1) | Real authority + observer + gate (table policy) + bridge + ARGUS. Injected trigger: code 2 on a LIVE, non-privileged LEAF cap (no descendants) of a subject that holds no privileged rights. Assert: 90 -> 91 GRANT -> exactly one kind 4 (the target) -> 92 DONE with resource low32 = 1; chain order exactly 90, 91, 4, 92; request CONFIRMED; old ref validates ERR_REVOKED (-3); ARGUS shadow REVOKED; every other slot unchanged (inspect snapshot); 90 carries finding_sequence and finding_digest that recompute (I1.c). Recovery (I1.f): operator re-mints via the office, validate on the new ref OK for the subject, no new proposal for it. 100 seeds, all pass. |
-| G4 | Denied / escalated path | For each of: protected target, privileged target, subject holding privileged rights, target not LIVE / wrong generation, subject mismatch, policy DENY, budget: 91 DENY or ESCALATE with the expected WHY; authority table (lineage-index snapshot + inspect of every known ref) identical before/after; zero kind 4; no re-proposal inside cooldown. **Target has one live descendant -> 91 ESCALATE WHY 1114, zero kind 4, table unchanged** (I1). Descendant minted between decide and execute (test seam) -> re-check DENY 1114, zero kind 4. ESCALATE: resolve GRANT with the right token -> executes (G3 assertions); resolve DENY -> DENIED; wrong token -> refused, stays ESCALATED, then EXPIRED code 20. Each of the 9 SYNTH types: one GRANT (test executor, SYNTHETIC) and one DENY; live gate UNAVAILABLE. |
+| G4 | Denied / escalated path | For each of: protected target, privileged target, subject holding privileged rights, target not LIVE / wrong generation, subject mismatch, policy DENY, budget: 91 DENY or ESCALATE with the expected WHY; authority table (lineage-index snapshot + inspect of every known ref) identical before/after; zero kind 4; no re-proposal inside cooldown. **Target has one live descendant -> 91 ESCALATE WHY 1114, zero kind 4, table unchanged** (I1). Descendant minted between decide and execute (test seam) -> re-check DENY 1114, zero kind 4. ESCALATE: resolve GRANT with the right secret -> executes (G3 assertions); resolve DENY -> DENIED; wrong secret -> refused, stays ESCALATED, then EXPIRED code 20. Each of the 9 SYNTH types: one GRANT (test executor, SYNTHETIC) and one DENY; live gate UNAVAILABLE. |
 | G5 | Refusal tolerance, no retry storm (I3.b) | 100,000-event stream, >= 50,000 eligible findings on 256 keys, authorizer denying all: proposals <= 16 per 4096-event window, <= 2 per key; authorizer calls == proposals; core findings identical to the same stream with containment detached; pending never > 32; suppression counters exact. Authorizer that never answers: all EXPIRED code 20, pending drains, ingest continues. |
 | G6 | Evidence completeness, attributability, recoverability | Offline checker reading only the chain and the observer-origin kinds 1/4 (never health counters or 92 claims; I5.d): every 90 recomputes from its finding at finding_sequence (digest match: attributable, I1.c); every 91 matches a 90 (request_id + digest + target echo); every 92 matches a GRANT 91; every 92 DONE preceded on the bridge stream by exactly one kind 4 for (cap_id, generation) = the request target (generation-bound + scope, I1.b/d); every DENY/ESCALATE has a WHY; every request ends CONFIRMED/DENIED/FAILED/FAILED_SCOPE/EXPIRED/UNAVAILABLE or is listed open; every observer REVOKE matched to one GRANT (else code 18); zero observer MINT for AIENOS_CONTAIN_SUBJ or parent = executor after create; for every CONFIRMED revoke in the G3 run, a later operator MINT for the same subject is followed by a successful validate (recoverable, I1.f). Ring saturated during a containment: every 90-92 delivered, or the sticky CRITICAL overflow + TELEMETRY_LOSS present; never silent. |
 | G7 | Bounded memory | `nm`: argus_contain.o and aienos_contain.o have no malloc/calloc/realloc/free/clock_gettime/time/gettimeofday; footprints argus_contain <= 24 KiB, gate <= 24 KiB (incl. 256-slot lineage index); 1,000,000-event soak: footprint constant, tables within size. libargus objects reference no `aienos_cap_*` symbol. |
@@ -450,7 +450,7 @@ Spark; G12 over everything. No gate runs before ARGUS_PERFORMANCE_GATE passes.
 - The authority does not protect REVOKE-only caps (incl. the executor) from the executor; layers
   1 and 2 do.
 - The trigger in the live accepted path is injected; the "human" resolving ESCALATE is a test
-  stub holding the office token (no operator surface yet).
+  stub holding the office secret (no operator surface yet).
 - No producer identity (G-5): a trusted producer can frame a principal. Bounded, not closed.
 - No synchronous refusal is wired (I4). No performance claim beyond G8 non-regression.
 - Omega not wired for containment, except lane O's labelled binding. Restart mid-containment

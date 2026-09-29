@@ -60,7 +60,7 @@ table saturation, and a benign stream with healthy grant/revoke churn (G10). No 
 
 G: New AEGIS containment gate per spec §5 inside native/capability (authority file untouched):
 authorizer interface + table policy, REVOKE-only executor cap minted at create, protected
-list, request_id/decision_id rules, budget, token-gated resolve, UNAVAILABLE for non-LIVE types,
+list, request_id/decision_id rules, budget, secret-gated resolve, UNAVAILABLE for non-LIVE types,
 sink, lineage index fed by the observer (leaf check, I1), re-check before revoke. Test seams to
 disable the protected list (for G9's layer tests) and to mint a child between decide and execute. The layout twin
 AienosContainRequest + an offsetof test. Validate instruction count re-checked (179).
