@@ -179,7 +179,7 @@ static void test_drain_drops(void)
     CHECK(argus_ring_drain_drops(r, out, 1, &seq) == 1);   /* max honoured: AUDIT first (higher class), INFO stays pending */
     CHECK(seq == 2 && out[0].sequence == 1);
     CHECK(out[0].kind == ARGUS_EV_TELEMETRY_DROPPED && out[0].class_ == ARGUS_CLASS_CRITICAL);   /* floor of TELEMETRY_DROPPED */
-    CHECK(out[0].flags == ARGUS_FLAG_CONSUMER && out[0].object_id == ARGUS_CLASS_AUDIT && out[0].resource == 1);
+    CHECK(out[0].flags == ARGUS_FLAG_CONSUMER && out[0].object_id == ARGUS_CLASS_AUDIT && out[0].resource == 1 && out[0].cap_id == ARGUS_CAP_NONE);
     CHECK(argus_event_validate(&out[0]) == ARGUS_OK);
     CHECK(argus_ring_drain_drops(r, out, 8, &seq) == 1);
     CHECK(out[0].object_id == ARGUS_CLASS_INFORMATIONAL && out[0].resource == 3 && out[0].sequence == 2);

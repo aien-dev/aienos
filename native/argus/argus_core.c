@@ -22,8 +22,10 @@
  *     event_digest stamped), is counted in events_rejected, is NOT applied, NOT
  *     chained, does not touch the producer table, and ingest returns
  *     ARGUS_ERR_MALFORMED. A cap_id out of range is therefore never "table full".
- *  1. Sequence check per producer stream, keyed by (machine_id, flags &
- *     ARGUS_FLAG_CONSUMER). A sequence <= the stream's high-water mark raises
+ *  1. Sequence check per producer stream, keyed by (machine_id,
+ *     ARGUS_STREAM_OF(flags), flags & ARGUS_FLAG_CONSUMER) (v1.1: one stream per
+ *     producer thread/ring; ARGUS_CORE_PRODUCERS streams in total). A sequence
+ *     <= the stream's high-water mark raises
  *     ARGUS_F_SEQUENCE_ANOMALY (HIGH, prior_sequence = high-water mark); the
  *     event is detected (lane E runs) but NOT applied; the mark never moves
  *     backwards. Gaps are not findings. With the producer table full, a new
@@ -44,9 +46,10 @@
  *       LEASE_CREATED       on a LIVE or REVOKED lease id: not applied (lease ids
  *                           are never reused; lane E raises code 6).
  *       LEASE_REVOKED       on an unknown lease id: not applied, no entry.
- *       WORLD_COMMITTED     adopted iff world_generation == shadow+1, or shadow == 0
- *                           (first commit). Same generation + same digest is an
- *                           idempotent no-op. Anything else is not adopted (lane E
+ *       WORLD_COMMITTED     per store (object_id = store id, v1.1): adopted iff
+ *                           world_generation == that store's shadow+1, or the store
+ *                           has no commit yet (first commit). Same generation +
+ *                           same digest is an idempotent no-op. Anything else is not adopted (lane E
  *                           raises code 9). world_generation 0 (= unknown) is a no-op.
  *       MACHINE_TRUST_CHANGED unknown machine: not applied, no entry (lane E: code 7).
  *                           A move UP the rank order is not applied (lane E: code 15);
@@ -71,7 +74,8 @@
  * ---- Field conventions ------------------------------------------------------
  *   CAPABILITY_GRANTED   resource = authority resource, object_id = rights mask,
  *                        principal = subject, (cap_id, cap_generation) = the ref.
- *                        cap_id 0 = none (no update).
+ *                        cap_id ARGUS_CAP_NONE = none (no update). cap_id 0 is
+ *                        the authority OFFICE slot and is tracked like any other (v1.1).
  *   CREDENTIAL_LEASE_*   lease id = object_id (0 = none). CREATED: subject =
  *                        principal, scope = resource, LIVE. REVOKED: REVOKED.
  *   ARTIFACT_*           keyed by evidence_digest (all-zero = none). ADMITTED:
@@ -94,7 +98,11 @@
  *   PROVIDER_*           keyed by evidence_digest. DISCOVERED: LIVE if new; a
  *                        rediscovery never clears a quarantine. QUARANTINED:
  *                        REVOKED (created if unseen).
- *   WORLD_COMMITTED      world_generation + evidence_digest (rules above).
+ *   WORLD_COMMITTED      object_id = store id; world_generation + evidence_digest
+ *                        per store (rules above). ARGUS_CORE_WORLDS (8) stores, kept
+ *                        sorted by store_id; a 9th store is table-full (step 4).
+ *   CAPABILITY_USE_SUMMARY  (v1.1) applies nothing; it is sequence-checked, detected
+ *                        (lane E treats it as a USED) and chained like any event.
  *   POLICY_CHANGED / RUNTIME_BUILD_CHANGED  evidence_digest = expected digest.
  *   TELEMETRY_DROPPED    object_id = class, resource = count.
  *
@@ -124,12 +132,13 @@
 #error "ARGUS_CORE_CAPS must equal ARGUS_CAP_MAX (== AIENOS_CAP_MAX)"
 #endif
 
-#define CORE_MAGIC 0x3053554752410002ull   /* "ARGUS0" + layout 2 */
+#define CORE_MAGIC 0x3053554752410003ull   /* "ARGUS0" + layout 3 (v1.1: streams, per-store worlds) */
 #define CORE_RESERVED_SLOTS 2u              /* telemetry-drop + table-full findings */
 
 typedef struct {
     uint8_t  machine_id[ARGUS_MACHINE_ID_LEN];
-    uint32_t consumer;          /* 0 = live producer, 1 = ring consumer stream */
+    uint16_t stream;            /* ARGUS_STREAM_OF(flags), v1.1 */
+    uint16_t consumer;          /* 0 = live producer, 1 = ring consumer stream */
     uint64_t last_sequence;
 } CoreProducer;
 
@@ -146,17 +155,17 @@ struct ArgusStateView {
     ArgusArtifactShadow artifacts[ARGUS_CORE_ARTIFACTS];
     ArgusLeaseShadow    leases[ARGUS_CORE_LEASES];
     ArgusProviderShadow providers[ARGUS_CORE_PROVIDERS];
-    ArgusWorldShadow    world;
+    ArgusWorldShadow    worlds[ARGUS_CORE_WORLDS];         /* sorted by store_id */
     uint8_t  policy_digest[ARGUS_DIGEST_LEN];
     uint8_t  runtime_digest[ARGUS_DIGEST_LEN];
     uint32_t n_caps_live;       /* slots not UNSEEN */
-    uint32_t n_machines, n_artifacts, n_leases, n_providers;
+    uint32_t n_machines, n_artifacts, n_leases, n_providers, n_worlds;
 };
 
 struct ArgusCore {
     uint64_t magic;
     struct ArgusStateView view;
-    CoreProducer producers[ARGUS_CORE_PRODUCERS];           /* sorted by (machine_id, consumer) */
+    CoreProducer producers[ARGUS_CORE_PRODUCERS];           /* sorted by (machine_id, stream, consumer) */
     CoreIncident incidents[ARGUS_CORE_INCIDENTS];
     uint32_t n_producers, n_incidents;
     uint64_t incidents_untracked, producers_untracked;
@@ -238,6 +247,22 @@ static int find_provider(const struct ArgusStateView *v, const uint8_t id[ARGUS_
     return -1;
 }
 
+/* Binary search over the (tiny) store table: index if found, else -(insertion point) - 1. */
+static int find_world(const struct ArgusStateView *v, uint32_t store_id)
+{
+    uint32_t lo = 0, hi = v->n_worlds;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2u;
+        if (v->worlds[mid].store_id == store_id)
+            return (int)mid;
+        if (v->worlds[mid].store_id < store_id)
+            lo = mid + 1u;
+        else
+            hi = mid;
+    }
+    return -(int)lo - 1;
+}
+
 /* ---- ops vtable (what detectors may ask) ---------------------------------- */
 
 static int op_cap(const ArgusStateView *v, uint32_t cap_id, ArgusCapShadow *out)
@@ -295,13 +320,14 @@ static int op_provider(const ArgusStateView *v, const uint8_t id[ARGUS_DIGEST_LE
     return ARGUS_OK;
 }
 
-static int op_world(const ArgusStateView *v, ArgusWorldShadow *out)
+static int op_world(const ArgusStateView *v, uint32_t store_id, ArgusWorldShadow *out)
 {
     if (!v || !out)
         return ARGUS_ERR_ARG;
-    if (v->world.generation == 0)
+    int i = find_world(v, store_id);
+    if (i < 0 || v->worlds[i].generation == 0)
         return ARGUS_ERR_STATE;
-    *out = v->world;
+    *out = v->worlds[i];
     return ARGUS_OK;
 }
 
@@ -433,7 +459,7 @@ static int event_well_formed(const ArgusEvent *ev)
 {
     if (argus_event_validate(ev) != ARGUS_OK)
         return 0;
-    if (ev->cap_id >= ARGUS_CAP_MAX)            /* header rule; never "table full" */
+    if (ev->cap_id >= ARGUS_CAP_MAX && ev->cap_id != ARGUS_CAP_NONE)   /* header rule; never "table full" */
         return 0;
     if (ev->sequence == UINT64_MAX)             /* header rule; high-water poison */
         return 0;
@@ -442,11 +468,13 @@ static int event_well_formed(const ArgusEvent *ev)
 
 /* ---- sequence check ------------------------------------------------------- */
 
-static int producer_cmp(const CoreProducer *p, const uint8_t id[ARGUS_MACHINE_ID_LEN], uint32_t consumer)
+static int producer_cmp(const CoreProducer *p, const uint8_t id[ARGUS_MACHINE_ID_LEN], uint16_t stream, uint16_t consumer)
 {
     int c = memcmp(p->machine_id, id, ARGUS_MACHINE_ID_LEN);
     if (c)
         return c;
+    if (p->stream != stream)
+        return p->stream < stream ? -1 : 1;
     return p->consumer < consumer ? -1 : p->consumer > consumer;
 }
 
@@ -454,11 +482,12 @@ static int producer_cmp(const CoreProducer *p, const uint8_t id[ARGUS_MACHINE_ID
  * table is full (stream not tracked). Advances the high-water mark. */
 static int sequence_check(struct ArgusCore *c, const ArgusEvent *ev, uint64_t *prior)
 {
-    uint32_t consumer = (ev->flags & ARGUS_FLAG_CONSUMER) ? 1u : 0u;
+    uint16_t consumer = (ev->flags & ARGUS_FLAG_CONSUMER) ? 1u : 0u;
+    uint16_t stream = ARGUS_STREAM_OF(ev->flags);
     uint32_t lo = 0, hi = c->n_producers;
     while (lo < hi) {
         uint32_t mid = lo + (hi - lo) / 2u;
-        int r = producer_cmp(&c->producers[mid], ev->machine_id, consumer);
+        int r = producer_cmp(&c->producers[mid], ev->machine_id, stream, consumer);
         if (r == 0) {
             CoreProducer *p = &c->producers[mid];
             if (ev->sequence <= p->last_sequence) {
@@ -481,6 +510,7 @@ static int sequence_check(struct ArgusCore *c, const ArgusEvent *ev, uint64_t *p
     CoreProducer *p = &c->producers[lo];
     memset(p, 0, sizeof *p);
     memcpy(p->machine_id, ev->machine_id, ARGUS_MACHINE_ID_LEN);
+    p->stream = stream;
     p->consumer = consumer;
     p->last_sequence = ev->sequence;
     return 0;
@@ -497,8 +527,8 @@ static int apply_verdict(const struct ArgusStateView *v, const ArgusEvent *ev, u
     switch (ev->kind) {
     case ARGUS_EV_CAPABILITY_GRANTED:
     case ARGUS_EV_CAPABILITY_REVOKED: {
-        if (ev->cap_id == 0)
-            return V_APPLY;
+        if (ev->cap_id == ARGUS_CAP_NONE)
+            return V_APPLY;                    /* no capability: apply_cap is a no-op */
         const ArgusCapShadow *s = &v->caps[ev->cap_id];
         if (ev->kind == ARGUS_EV_CAPABILITY_GRANTED) {
             if (s->state == ARGUS_SHADOW_UNSEEN || ev->cap_generation > s->generation)
@@ -517,15 +547,18 @@ static int apply_verdict(const struct ArgusStateView *v, const ArgusEvent *ev, u
         if (ev->object_id != 0 && find_lease(v, ev->object_id) < 0)
             return V_SKIP;                     /* unknown lease: no entry */
         return V_APPLY;
-    case ARGUS_EV_WORLD_COMMITTED:
+    case ARGUS_EV_WORLD_COMMITTED: {             /* per store: object_id = store id (v1.1) */
         if (ev->world_generation == 0)
             return V_NOOP;
-        if (v->world.generation == 0 || ev->world_generation == v->world.generation + 1u)
-            return V_APPLY;
-        if (ev->world_generation == v->world.generation &&
-            memcmp(ev->evidence_digest, v->world.digest, ARGUS_DIGEST_LEN) == 0)
+        int wi = find_world(v, ev->object_id);
+        const ArgusWorldShadow *w = wi >= 0 ? &v->worlds[wi] : NULL;
+        if (!w || w->generation == 0 || ev->world_generation == w->generation + 1u)
+            return V_APPLY;                    /* first commit of this store, or +1 */
+        if (ev->world_generation == w->generation &&
+            memcmp(ev->evidence_digest, w->digest, ARGUS_DIGEST_LEN) == 0)
             return V_NOOP;                     /* idempotent repeat */
         return V_SKIP;
+    }
     case ARGUS_EV_MACHINE_TRUST_CHANGED: {
         int i = find_machine(v, ev->machine_id);
         if (i < 0)
@@ -546,8 +579,8 @@ static int apply_verdict(const struct ArgusStateView *v, const ArgusEvent *ev, u
 
 static int apply_cap(struct ArgusStateView *v, const ArgusEvent *ev, int revoke)
 {
-    if (ev->cap_id == 0 || ev->cap_id >= ARGUS_CORE_CAPS)
-        return ARGUS_OK;                       /* out of range cannot reach here (malformed) */
+    if (ev->cap_id >= ARGUS_CORE_CAPS)
+        return ARGUS_OK;                       /* ARGUS_CAP_NONE: no capability; cap_id 0 is a real slot */
     ArgusCapShadow *s = &v->caps[ev->cap_id];
     if (revoke) {
         s->state = ARGUS_SHADOW_REVOKED;       /* verdict: slot LIVE at this generation */
@@ -685,6 +718,29 @@ static int apply_provider(struct ArgusStateView *v, const ArgusEvent *ev, int qu
     return ARGUS_OK;
 }
 
+/* verdict: first commit of the store or shadow+1. A new store needs a table slot;
+ * with ARGUS_CORE_WORLDS stores taken the update is dropped (ERR_FULL). */
+static int apply_world(struct ArgusStateView *v, const ArgusEvent *ev)
+{
+    int i = find_world(v, ev->object_id);
+    if (i < 0) {
+        if (v->n_worlds >= ARGUS_CORE_WORLDS)
+            return ARGUS_ERR_FULL;
+        uint32_t at = (uint32_t)(-(i + 1));
+        if (at < v->n_worlds)
+            memmove(&v->worlds[at + 1u], &v->worlds[at], (v->n_worlds - at) * sizeof v->worlds[0]);
+        v->n_worlds++;
+        i = (int)at;
+        memset(&v->worlds[i], 0, sizeof v->worlds[i]);
+        v->worlds[i].store_id = ev->object_id;
+    }
+    ArgusWorldShadow *w = &v->worlds[i];
+    w->generation = ev->world_generation;
+    memcpy(w->digest, ev->evidence_digest, ARGUS_DIGEST_LEN);
+    w->sequence = ev->sequence;
+    return ARGUS_OK;
+}
+
 static int apply_event(struct ArgusStateView *v, const ArgusEvent *ev)
 {
     int ok = ev->outcome == ARGUS_OUTCOME_OK;
@@ -710,12 +766,7 @@ static int apply_event(struct ArgusStateView *v, const ArgusEvent *ev)
     case ARGUS_EV_PROVIDER_QUARANTINED:
         return ok ? apply_provider(v, ev, 1) : ARGUS_OK;
     case ARGUS_EV_WORLD_COMMITTED:
-        if (ok) {                              /* verdict: first commit or shadow+1 */
-            v->world.generation = ev->world_generation;
-            memcpy(v->world.digest, ev->evidence_digest, ARGUS_DIGEST_LEN);
-            v->world.sequence = ev->sequence;
-        }
-        return ARGUS_OK;
+        return ok ? apply_world(v, ev) : ARGUS_OK;
     case ARGUS_EV_POLICY_CHANGED:
         if (ok)
             memcpy(v->policy_digest, ev->evidence_digest, ARGUS_DIGEST_LEN);
@@ -825,19 +876,22 @@ int argus_core_ingest(ArgusCore *core, const ArgusEvent *ev, ArgusFinding *out, 
  *   tag 1 header: object_id=n_caps, cap_id=n_machines, principal=n_artifacts,
  *                 cap_generation=(n_leases<<32)|n_providers,
  *                 resource=(n_producers<<32)|n_incidents, tick=incidents_untracked,
- *                 world_generation=producers_untracked
- *   tag 2 cap, 3 machine, 4 artifact, 5 lease, 6 provider, 7 world,
- *   tag 8 policy, 9 runtime, 10 producer, 11 incident
+ *                 world_generation=producers_untracked, sequence=n_worlds
+ *   tag 2 cap, 3 machine, 4 artifact, 5 lease, 6 provider,
+ *   tag 7 world (one per store: object_id=store_id; v1.1),
+ *   tag 8 policy, 9 runtime, 10 producer (object_id=consumer, principal=stream; v1.1),
+ *   tag 11 incident
  * Machines are folded in machine_id order (the table is kept sorted), so the
- * digest depends on the set of machines, not on their join order. Producers are
- * sorted likewise. Other tables fold in insertion order (replay-deterministic).
+ * digest depends on the set of machines, not on their join order. Producers
+ * (machine_id, stream, consumer) and World stores (store_id) are sorted likewise.
+ * Other tables fold in insertion order (replay-deterministic).
  * Counters (received/rejected/findings/tables_full/not_applied) and the event
  * chain are not state and are excluded. */
 
 #define STATE_REC_VERSION 0xA5u
 static const uint8_t STATE_DOMAIN[ARGUS_DIGEST_LEN] = {
     'A', 'R', 'G', 'U', 'S', '-', '0', ' ', 'c', 'o', 'r', 'e', ' ', 's', 't', 'a',
-    't', 'e', ' ', 'd', 'i', 'g', 'e', 's', 't', ' ', 'v', '2', 0xA5, 0x5A, 0xA5, 0x5A
+    't', 'e', ' ', 'd', 'i', 'g', 'e', 's', 't', ' ', 'v', '3', 0xA5, 0x5A, 0xA5, 0x5A
 };
 
 static void rec_init(ArgusEvent *r, uint16_t kind, int32_t tag)
@@ -871,6 +925,7 @@ void argus_core_state_digest(const ArgusCore *core, uint8_t out[ARGUS_DIGEST_LEN
     r.resource = ((uint64_t)core->n_producers << 32) | core->n_incidents;
     r.tick = core->incidents_untracked;
     r.world_generation = core->producers_untracked;
+    r.sequence = v->n_worlds;
     argus_chain_extend(out, &r);
 
     for (uint32_t i = 0; i < ARGUS_CORE_CAPS; i++) {
@@ -923,11 +978,15 @@ void argus_core_state_digest(const ArgusCore *core, uint8_t out[ARGUS_DIGEST_LEN
         r.sequence = s->sequence;
         argus_chain_extend(out, &r);
     }
-    rec_init(&r, ARGUS_EV_WORLD_COMMITTED, 7);
-    r.world_generation = v->world.generation;
-    memcpy(r.evidence_digest, v->world.digest, ARGUS_DIGEST_LEN);
-    r.sequence = v->world.sequence;
-    argus_chain_extend(out, &r);
+    for (uint32_t i = 0; i < v->n_worlds; i++) {
+        const ArgusWorldShadow *w = &v->worlds[i];
+        rec_init(&r, ARGUS_EV_WORLD_COMMITTED, 7);
+        r.object_id = w->store_id;
+        r.world_generation = w->generation;
+        memcpy(r.evidence_digest, w->digest, ARGUS_DIGEST_LEN);
+        r.sequence = w->sequence;
+        argus_chain_extend(out, &r);
+    }
 
     rec_init(&r, ARGUS_EV_POLICY_CHANGED, 8);
     memcpy(r.evidence_digest, v->policy_digest, ARGUS_DIGEST_LEN);
@@ -942,6 +1001,7 @@ void argus_core_state_digest(const ArgusCore *core, uint8_t out[ARGUS_DIGEST_LEN
         rec_init(&r, ARGUS_EV_STALE_GENERATION, 10);
         memcpy(r.machine_id, p->machine_id, ARGUS_MACHINE_ID_LEN);
         r.object_id = p->consumer;
+        r.principal = p->stream;
         r.sequence = p->last_sequence;
         argus_chain_extend(out, &r);
     }

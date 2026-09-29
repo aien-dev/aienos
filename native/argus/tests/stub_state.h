@@ -32,7 +32,8 @@ typedef struct {
     size_t              n_leases;
     ArgusProviderShadow providers[STUB_MAX_PROVIDERS];
     size_t              n_providers;
-    ArgusWorldShadow    world;
+    ArgusWorldShadow    worlds[ARGUS_WORLD_STORES];   /* per store (v1.1), insertion order */
+    size_t              n_worlds;
     uint8_t             policy[ARGUS_DIGEST_LEN];
     uint8_t             runtime[ARGUS_DIGEST_LEN];
 } StubState;
@@ -47,7 +48,8 @@ int stub_put_machine(StubState *s, const ArgusMachineShadow *m);
 int stub_put_artifact(StubState *s, const ArgusArtifactShadow *a);
 int stub_put_lease(StubState *s, const ArgusLeaseShadow *l);
 int stub_put_provider(StubState *s, const ArgusProviderShadow *p);
-void stub_set_world(StubState *s, uint64_t generation, const uint8_t digest[ARGUS_DIGEST_LEN], uint64_t sequence);
+/* Set (insert or replace) the World shadow of one store. ARGUS_ERR_FULL when ARGUS_WORLD_STORES are taken. */
+int stub_set_world(StubState *s, uint32_t store_id, uint64_t generation, const uint8_t digest[ARGUS_DIGEST_LEN], uint64_t sequence);
 
 /* Reference apply of one event AFTER detection, following the argus_abi.h apply
  * rules and machine lifecycle (see stub_state.c). */
@@ -72,7 +74,7 @@ typedef struct {
 size_t argus_corpus_benign(ArgusEvent *out, size_t max, uint64_t seed);
 
 /* The same legal day with violations injected on a fixed cadence (one every
- * ARGUS_CORPUS_HOSTILE_EVERY events, cycling through 24 injection types that
+ * ARGUS_CORPUS_HOSTILE_EVERY events, cycling through 28 injection types that
  * cover all twelve detectors, codes 1..10, 14 and 15).
  * Each injected event triggers exactly one finding; the (sequence, code)
  * pairs are written to `expect` (up to expect_max, count in *n_expect).

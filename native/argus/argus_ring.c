@@ -38,7 +38,7 @@
  *   The consumer calls argus_ring_drain_drops to turn the pending counts into
  *   ARGUS_EV_TELEMETRY_DROPPED events (flag ARGUS_FLAG_CONSUMER,
  *   object_id = the class that lost events, resource = how many, outcome
- *   ERROR, code ARGUS_ERR_FULL), one per class with a nonzero pending count,
+ *   ERROR, code ARGUS_ERR_FULL, cap_id ARGUS_CAP_NONE, stream 0), one per class with a nonzero pending count,
  *   CRITICAL first. It resets exactly the pending counts it reported
  *   (atomic exchange, so refusals racing with the drain are never lost; they
  *   show up in the next drain). Every synthesized event has class CRITICAL,
@@ -222,6 +222,7 @@ size_t argus_ring_drain_drops(ArgusRing *r, ArgusEvent *out, size_t max, uint64_
         e->flags = ARGUS_FLAG_CONSUMER;
         e->sequence = (*next_sequence)++;
         e->code = ARGUS_ERR_FULL;
+        e->cap_id = ARGUS_CAP_NONE;          /* v1.1: cap_id 0 is a real slot */
         e->object_id = cls;
         e->resource = count;
     }

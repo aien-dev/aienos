@@ -28,8 +28,9 @@
  *   MACHINE_REMOVED      tombstone: joined_sequence 0, trust preserved.
  *   PROVIDER_DISCOVERED  new provider: LIVE; rediscovery never clears quarantine.
  *   PROVIDER_QUARANTINED provider: REVOKED (quarantined), sequence.
- *   WORLD_COMMITTED      adopted only when shadow generation is 0 or
- *                        world_generation == shadow + 1.
+ *   WORLD_COMMITTED      per store (object_id = store id, v1.1): adopted only
+ *                        when the store has no commit yet or world_generation ==
+ *                        its shadow + 1; world_generation 0 is a no-op.
  *   POLICY_CHANGED / RUNTIME_BUILD_CHANGED  expected digest = evidence_digest.
  *
  * The corpora also follow the validate rules of argus_abi.h: class never
@@ -86,13 +87,17 @@ static int op_provider(const ArgusStateView *v, const uint8_t id[ARGUS_DIGEST_LE
     return ARGUS_ERR_STATE;
 }
 
-static int op_world(const ArgusStateView *v, ArgusWorldShadow *out)
+static int op_world(const ArgusStateView *v, uint32_t store_id, ArgusWorldShadow *out)
 {
     const StubState *s = S(v);
-    if (s->world.generation == 0 && s->world.sequence == 0)
-        return ARGUS_ERR_STATE;
-    *out = s->world;
-    return ARGUS_OK;
+    for (size_t i = 0; i < s->n_worlds; i++)
+        if (s->worlds[i].store_id == store_id) {
+            if (s->worlds[i].generation == 0 && s->worlds[i].sequence == 0)
+                return ARGUS_ERR_STATE;
+            *out = s->worlds[i];
+            return ARGUS_OK;
+        }
+    return ARGUS_ERR_STATE;
 }
 
 static int op_policy(const ArgusStateView *v, uint8_t out[ARGUS_DIGEST_LEN])
@@ -162,18 +167,27 @@ int stub_put_provider(StubState *s, const ArgusProviderShadow *p)
     return ARGUS_OK;
 }
 
-void stub_set_world(StubState *s, uint64_t generation, const uint8_t digest[ARGUS_DIGEST_LEN], uint64_t sequence)
+int stub_set_world(StubState *s, uint32_t store_id, uint64_t generation, const uint8_t digest[ARGUS_DIGEST_LEN], uint64_t sequence)
 {
-    s->world.generation = generation;
-    memcpy(s->world.digest, digest, ARGUS_DIGEST_LEN);
-    s->world.sequence = sequence;
+    size_t i = 0;
+    while (i < s->n_worlds && s->worlds[i].store_id != store_id)
+        i++;
+    if (i == s->n_worlds) {
+        if (s->n_worlds >= ARGUS_WORLD_STORES) return ARGUS_ERR_FULL;
+        s->n_worlds++;
+    }
+    s->worlds[i].store_id = store_id;
+    s->worlds[i].generation = generation;
+    memcpy(s->worlds[i].digest, digest, ARGUS_DIGEST_LEN);
+    s->worlds[i].sequence = sequence;
+    return ARGUS_OK;
 }
 
 
 /* ---- per-kind minimum class (local copy of lane B's table) ----------------- *
  * CRITICAL: 4, 12, 21, 31, 32, 42, 52, 60-63, 71, 72, 80
  * SECURITY: 1, 3, 10, 20, 22, 30, 40, 41, 50, 51, 70
- * AUDIT:    2, 11, 43
+ * AUDIT:    2, 11, 43, 81
  * Anything else (not a kind in ABI v1): 0, as in lane B's table. */
 uint8_t stub_min_class(uint16_t kind)
 {
@@ -208,6 +222,7 @@ uint8_t stub_min_class(uint16_t kind)
     case ARGUS_EV_CAPABILITY_USED:
     case ARGUS_EV_CREDENTIAL_LEASE_USED:
     case ARGUS_EV_PROVIDER_USED:
+    case ARGUS_EV_CAPABILITY_USE_SUMMARY:
         return ARGUS_CLASS_AUDIT;
     default:
         return 0;
@@ -235,6 +250,7 @@ int stub_state_apply(StubState *s, const ArgusEvent *ev)
         return ARGUS_OK;
     switch (ev->kind) {
     case ARGUS_EV_CAPABILITY_GRANTED: {
+        if (ev->cap_id == ARGUS_CAP_NONE) return ARGUS_OK;               /* no capability: no entry */
         ArgusCapShadow c = {0};
         int seen = op_cap(v, ev->cap_id, &c) == ARGUS_OK && c.state != ARGUS_SHADOW_UNSEEN;
         if (seen && ev->cap_generation <= c.generation) return ARGUS_OK;   /* replay: not applied */
@@ -315,11 +331,15 @@ int stub_state_apply(StubState *s, const ArgusEvent *ev)
         p.sequence = ev->sequence;
         return stub_put_provider(s, &p);
     }
-    case ARGUS_EV_WORLD_COMMITTED:
-        if (s->world.generation == 0 ||
-            (s->world.generation != UINT64_MAX && ev->world_generation == s->world.generation + 1u))
-            stub_set_world(s, ev->world_generation, ev->evidence_digest, ev->sequence);
+    case ARGUS_EV_WORLD_COMMITTED: {       /* per store: object_id = store id (v1.1) */
+        if (ev->world_generation == 0) return ARGUS_OK;
+        ArgusWorldShadow w = {0};
+        int known = op_world(v, ev->object_id, &w) == ARGUS_OK;
+        if (!known || w.generation == 0 ||
+            (w.generation != UINT64_MAX && ev->world_generation == w.generation + 1u))
+            return stub_set_world(s, ev->object_id, ev->world_generation, ev->evidence_digest, ev->sequence);
         return ARGUS_OK;
+    }
     case ARGUS_EV_POLICY_CHANGED:
         memcpy(s->policy, ev->evidence_digest, ARGUS_DIGEST_LEN);
         return ARGUS_OK;
@@ -341,7 +361,7 @@ int stub_state_apply(StubState *s, const ArgusEvent *ev)
  * followed by the model, so later legal events stay legal.
  * Cap/right/result numbers below mirror native/capability (see argus_detect.h). */
 
-#define G_SLOTS          48    /* cap ids 1..48; ids 200..255 are never granted */
+#define G_SLOTS          48    /* cap ids 0..47 (v1.1: 0 = the office slot, a real cap); ids 200..255 are never granted */
 #define G_UNSEEN_CAP    200u
 #define G_LEASES         12    /* concurrent lease slots */
 #define G_LEASE_IDS      56    /* distinct lease ids per stream, below the core's 64-entry table */
@@ -351,6 +371,9 @@ int stub_state_apply(StubState *s, const ArgusEvent *ev)
 #define G_QM              3    /* machine quarantined from 2/5 of the day on (no legal release in v1) */
 #define G_QP              2    /* provider quarantined in the second half */
 #define G_DOWN            1    /* machine whose trust steps down during the day */
+#define G_STREAMS         3    /* v1.1: producer stream ids 0..2, every machine uses all of them */
+#define G_STORES          2    /* v1.1: World stores committed interleaved */
+static const uint32_t g_store_id[G_STORES] = { 0, 5 };
 
 #define R_READ   0x1u
 #define R_WRITE  0x2u
@@ -377,8 +400,8 @@ typedef struct {
     uint8_t  artifact[G_ARTIFACTS][ARGUS_DIGEST_LEN];
     uint32_t a_state[G_ARTIFACTS];
     size_t   n_art;
-    uint64_t world_gen;
-    uint8_t  world_digest[ARGUS_DIGEST_LEN];
+    uint64_t world_gen[G_STORES];
+    uint8_t  world_digest[G_STORES][ARGUS_DIGEST_LEN];
     uint8_t  policy[ARGUS_DIGEST_LEN];
     uint8_t  runtime[ARGUS_DIGEST_LEN];
     int      policy_tampered;
@@ -427,9 +450,13 @@ static ArgusEvent *emit_ev(Gen *g, uint16_t kind, uint8_t outcome, int32_t code)
     e->kind = kind;
     e->outcome = outcome;
     e->code = code;
-    e->flags = ARGUS_FLAG_SYNTHETIC;
+    e->cap_id = ARGUS_CAP_NONE;       /* v1.1: no capability unless fill_cap sets one (0 is a real slot) */
+    /* v1.1: stream id in flag bits 2-15. The sequence stays the global index, so it is
+     * strictly increasing within every (machine, stream) as well (gaps are legal). */
+    e->flags = (uint16_t)(ARGUS_FLAG_SYNTHETIC | ((g->n % G_STREAMS) << ARGUS_FLAG_STREAM_SHIFT));
     e->sequence = (uint64_t)g->n;   /* 1-based, strictly increasing */
-    e->tick = (uint64_t)g->n;
+    /* hot-path rule: USED and summaries carry tick 0 (no clock read on validate) */
+    e->tick = (kind == ARGUS_EV_CAPABILITY_USED || kind == ARGUS_EV_CAPABILITY_USE_SUMMARY) ? 0 : (uint64_t)g->n;
     return e;
 }
 
@@ -461,13 +488,27 @@ static int find_slot(Gen *g, uint32_t state, uint32_t need_rights, uint32_t lack
 
 static void fill_cap(ArgusEvent *e, Gen *g, int i, uint64_t gen)
 {
-    e->cap_id = (uint32_t)i + 1u;
+    e->cap_id = (uint32_t)i;          /* slot 0 = cap 0, the office capability */
     e->cap_generation = gen;
     e->principal = g->slot[i].subject;
     e->resource = g->slot[i].resource;
 }
 
 /* ---- legal operations ---- */
+
+static void grant_slot(Gen *g, uint32_t i)
+{
+    ArgusEvent *e = emit_ev(g, ARGUS_EV_CAPABILITY_GRANTED, ARGUS_OUTCOME_OK, 0);
+    if (!e) return;
+    g->slot[i].gen += 1;                        /* strictly above the last grant of this slot */
+    g->slot[i].state = ARGUS_SHADOW_LIVE;
+    g->slot[i].subject = 1u + rn(g, 8);
+    g->slot[i].rights = R_READ | (rn(g, 4) ? R_WRITE : 0u) | (rn(g, 2) ? R_EFFECT : 0u);
+    g->slot[i].resource = 0x1000u + i;
+    fill_cap(e, g, (int)i, g->slot[i].gen);
+    e->object_id = g->slot[i].rights;
+    attach_ok(g, e);
+}
 
 static void gop_grant(Gen *g)
 {
@@ -476,16 +517,7 @@ static void gop_grant(Gen *g)
         uint32_t i = (start + k) % G_SLOTS;
         if (g->slot[i].state == ARGUS_SHADOW_LIVE)
             continue;
-        ArgusEvent *e = emit_ev(g, ARGUS_EV_CAPABILITY_GRANTED, ARGUS_OUTCOME_OK, 0);
-        if (!e) return;
-        g->slot[i].gen += 1;                    /* strictly above the last grant of this slot */
-        g->slot[i].state = ARGUS_SHADOW_LIVE;
-        g->slot[i].subject = 1u + rn(g, 8);
-        g->slot[i].rights = R_READ | (rn(g, 4) ? R_WRITE : 0u) | (rn(g, 2) ? R_EFFECT : 0u);
-        g->slot[i].resource = 0x1000u + i;
-        fill_cap(e, g, (int)i, g->slot[i].gen);
-        e->object_id = g->slot[i].rights;
-        attach_ok(g, e);
+        grant_slot(g, i);
         return;
     }
 }
@@ -503,6 +535,24 @@ static void gop_use(Gen *g)
         e->effect_class = ARGUS_EFFECT_EVIDENCE;
     else
         e->effect_class = ARGUS_EFFECT_EPHEMERAL;
+    attach_ok(g, e);
+}
+
+/* v1.1 hot path: a producer thread's flushed use table, one summary per touched
+ * slot. Legal only for a LIVE slot by its subject, with min == max == the current
+ * generation: the producer flushes a slot's pending summary BEFORE it emits a
+ * transition (REVOKED/GRANTED) for that slot, so a summary never spans a
+ * revocation or a re-grant (see the header proposal in the lane report). */
+static void gop_summary(Gen *g)
+{
+    int i = find_slot(g, ARGUS_SHADOW_LIVE, 0, 0, 0);
+    if (i < 0) { gop_grant(g); return; }
+    ArgusEvent *e = emit_ev(g, ARGUS_EV_CAPABILITY_USE_SUMMARY, ARGUS_OUTCOME_OK, 0);
+    if (!e) return;
+    fill_cap(e, g, i, g->slot[i].gen);
+    e->object_id = (uint32_t)g->slot[i].gen;   /* MIN generation seen */
+    e->resource = 1u + rn(g, 4096);            /* count */
+    e->effect_class = ARGUS_EFFECT_NONE;
     attach_ok(g, e);
 }
 
@@ -596,17 +646,21 @@ static void gop_effect(Gen *g)
     attach_ok(g, e);
 }
 
-/* World generations advance by exactly one; no repeats (header apply rule). */
-static void gop_world(Gen *g)
+/* World generations advance by exactly one per store; no repeats (header apply
+ * rule). v1.1: two stores (object_id = store id) interleave. */
+static void world_commit(Gen *g, uint32_t k)
 {
     ArgusEvent *e = emit_ev(g, ARGUS_EV_WORLD_COMMITTED, ARGUS_OUTCOME_OK, 0);
     if (!e) return;
-    g->world_gen += 1;
-    fresh_digest(g, 0x57, g->world_digest);
-    e->world_generation = g->world_gen;
-    memcpy(e->evidence_digest, g->world_digest, ARGUS_DIGEST_LEN);
+    g->world_gen[k] += 1;
+    fresh_digest(g, 0x57, g->world_digest[k]);
+    e->object_id = g_store_id[k];
+    e->world_generation = g->world_gen[k];
+    memcpy(e->evidence_digest, g->world_digest[k], ARGUS_DIGEST_LEN);
     attach_ok(g, e);
 }
+
+static void gop_world(Gen *g) { world_commit(g, rn(g, G_STORES)); }
 
 static void lease_fill(ArgusEvent *e, Gen *g, uint32_t i)
 {
@@ -853,14 +907,17 @@ static int inject(Gen *g, unsigned type)
         attach_ok(g, e);
         expect_code(g, e->sequence, ARGUS_F_EFFECT_CLASS_UNAUTHORIZED);
         return 1;
-    case 11:  /* 9: World generation skipped; the core does not adopt it, nor does the model */
-        if (g->world_gen == 0) return 0;
+    case 11: { /* 9: World generation skipped on one store; the core does not adopt it, nor does the model */
+        uint32_t k = rn(g, G_STORES);
+        if (g->world_gen[k] == 0) return 0;
         if (!(e = emit_ev(g, ARGUS_EV_WORLD_COMMITTED, ARGUS_OUTCOME_OK, 0))) return 0;
-        e->world_generation = g->world_gen + 2;
+        e->object_id = g_store_id[k];
+        e->world_generation = g->world_gen[k] + 2;
         fresh_digest(g, 0x58, e->evidence_digest);
         attach_ok(g, e);
         expect_code(g, e->sequence, ARGUS_F_WORLD_PROVENANCE_INCONSISTENT);
         return 1;
+    }
     case 12:  /* 10: quarantined provider used with outcome OK */
         if (!g->p_quar[G_QP]) return 0;
         if (!(e = emit_ev(g, ARGUS_EV_PROVIDER_USED, ARGUS_OUTCOME_OK, 0))) return 0;
@@ -951,11 +1008,44 @@ static int inject(Gen *g, unsigned type)
         e->object_id = ARGUS_TRUST_RESTRICTED;
         expect_code(g, e->sequence, ARGUS_F_MACHINE_IDENTITY_MISMATCH);
         return 1;
+    case 24:  /* 3: use summary whose MAX generation hits a revoked slot (v1.1) */
+        if ((i = find_slot(g, ARGUS_SHADOW_REVOKED, 0, 0, 1)) < 0) return 0;
+        if (!(e = emit_ev(g, ARGUS_EV_CAPABILITY_USE_SUMMARY, ARGUS_OUTCOME_OK, 0))) return 0;
+        fill_cap(e, g, i, g->slot[i].gen);
+        e->object_id = (uint32_t)g->slot[i].gen; e->resource = 1u + rn(g, 64);
+        attach_ok(g, e);
+        expect_code(g, e->sequence, ARGUS_F_REVOKED_CAPABILITY_USED);
+        return 1;
+    case 25:  /* 2: use summary whose MIN generation is stale (v1.1) */
+        if ((i = find_slot(g, ARGUS_SHADOW_LIVE, 0, 0, 2)) < 0) return 0;
+        if (!(e = emit_ev(g, ARGUS_EV_CAPABILITY_USE_SUMMARY, ARGUS_OUTCOME_OK, 0))) return 0;
+        fill_cap(e, g, i, g->slot[i].gen);
+        e->object_id = (uint32_t)(g->slot[i].gen - 1); e->resource = 2u + rn(g, 64);
+        attach_ok(g, e);
+        expect_code(g, e->sequence, ARGUS_F_STALE_GENERATION);
+        return 1;
+    case 26:  /* 14: cap 0 (the office capability) used OK by the wrong subject (v1.1) */
+        if (g->slot[0].state != ARGUS_SHADOW_LIVE) return 0;
+        if (!(e = emit_ev(g, ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0))) return 0;
+        fill_cap(e, g, 0, g->slot[0].gen);
+        e->principal = g->slot[0].subject + 1000u;
+        e->effect_class = ARGUS_EFFECT_EPHEMERAL;
+        attach_ok(g, e);
+        expect_code(g, e->sequence, ARGUS_F_SUBJECT_MISMATCH);
+        return 1;
+    case 27:  /* 1 only: summary ABOVE a revoked generation (never minted; detector 3 stays quiet, v1.1) */
+        if ((i = find_slot(g, ARGUS_SHADOW_REVOKED, 0, 0, 1)) < 0) return 0;
+        if (!(e = emit_ev(g, ARGUS_EV_CAPABILITY_USE_SUMMARY, ARGUS_OUTCOME_OK, 0))) return 0;
+        fill_cap(e, g, i, g->slot[i].gen + 1);
+        e->object_id = (uint32_t)(g->slot[i].gen + 1); e->resource = 1;
+        attach_ok(g, e);
+        expect_code(g, e->sequence, ARGUS_F_FORGED_CAPABILITY);
+        return 1;
     default:
         return 0;
     }
 }
-#define G_INJECT_TYPES 24u
+#define G_INJECT_TYPES 28u
 
 static void maybe_inject(Gen *g)
 {
@@ -998,7 +1088,9 @@ static size_t generate(Gen *g, uint64_t seed)
         memcpy(e->evidence_digest, k ? g->runtime : g->policy, ARGUS_DIGEST_LEN);
         attach_ok(g, e);
     }
-    gop_world(g);
+    for (uint32_t k = 0; k < G_STORES; k++)
+        world_commit(g, k);
+    grant_slot(g, 0);                           /* the office capability, cap 0 (v1.1) */
     g->next_inject = g->n + ARGUS_CORPUS_HOSTILE_EVERY / 2;
 
     while (g->n < g->max) {
@@ -1020,7 +1112,8 @@ static size_t generate(Gen *g, uint64_t seed)
         }
         uint32_t r = rn(g, 100);
         if (r < 15) gop_grant(g);
-        else if (r < 40) gop_use(g);
+        else if (r < 33) gop_use(g);
+        else if (r < 40) gop_summary(g);
         else if (r < 50) gop_denied(g);
         else if (r < 55) gop_revoke(g);
         else if (r < 62) gop_effect(g);

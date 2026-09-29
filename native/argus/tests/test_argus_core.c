@@ -59,7 +59,7 @@ static void t_malformed(void)
     CHECK(f[0].detector == ARGUS_F_MALFORMED_EVENT && f[0].cap_id == 3 && f[0].confidence == ARGUS_CONF_DETERMINISTIC);
     uint8_t ed[32]; argus_event_digest(&e, ed);
     CHECK(memcmp(f[0].event_digest, ed, 32) == 0);
-    e = ev_make(ARGUS_EV_CAPABILITY_GRANTED, 1); e.cap_id = 3; e.flags = 0x80;
+    e = ev_make(ARGUS_EV_CAPABILITY_GRANTED, 1); e.cap_id = 3; e.outcome = 9;   /* v1.1: flag 0x80 is stream 0x20, valid */
     CHECK(ing(c, &e, f, &n) == ARGUS_ERR_MALFORMED && n == 1);
     e = ev_make(99, 1);
     CHECK(ing(c, &e, f, &n) == ARGUS_ERR_MALFORMED && n == 1);
@@ -110,9 +110,13 @@ static void t_caps(void)
     /* denied grant ignored */
     e = ev_make(ARGUS_EV_CAPABILITY_GRANTED, 4); e.cap_id = 8; e.outcome = ARGUS_OUTCOME_DENIED;
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->cap(v, 8, &s) == ARGUS_ERR_STATE);
-    /* cap_id 0 = none: no update, no error */
-    e = ev_make(ARGUS_EV_CAPABILITY_GRANTED, 5); e.cap_id = 0;
+    /* v1.1: ARGUS_CAP_NONE = none: no update, no error; cap_id 0 is the office slot and applies */
+    e = ev_make(ARGUS_EV_CAPABILITY_GRANTED, 5); e.cap_id = ARGUS_CAP_NONE; e.cap_generation = 1;
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0 && o->cap(v, 0, &s) == ARGUS_ERR_STATE);
+    CHECK(o->cap(v, ARGUS_CAP_NONE, &s) == ARGUS_ERR_STATE);
+    e = ev_make(ARGUS_EV_CAPABILITY_GRANTED, 6); e.cap_id = 0; e.cap_generation = 1; e.principal = 3; e.object_id = 0x7;
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0 && o->cap(v, 0, &s) == ARGUS_OK);
+    CHECK(s.cap_id == 0 && s.state == ARGUS_SHADOW_LIVE && s.subject == 3 && s.generation == 1 && s.rights == 0x7);
     /* revoke above the live generation: replay, not applied */
     e = ev_make(ARGUS_EV_CAPABILITY_REVOKED, 21); e.cap_id = 7; e.cap_generation = 5;
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 1 && f[0].code == ARGUS_F_AUTHORITY_REPLAY && f[0].prior_sequence == 1);
@@ -344,27 +348,27 @@ static void t_providers_world_policy(void)
     e = ev_make(ARGUS_EV_PROVIDER_DISCOVERED, seq++); dg(e.evidence_digest, 999);
     CHECK(ing(c, &e, f, &n) == ARGUS_ERR_FULL && n == 1);
 
-    CHECK(o->world(v, &w) == ARGUS_ERR_STATE);
+    CHECK(o->world(v, 0, &w) == ARGUS_ERR_STATE);
     e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.world_generation = 0x100000003ull; dg(e.evidence_digest, 31);
-    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, &w) == ARGUS_OK && w.generation == 0x100000003ull && memcmp(w.digest, e.evidence_digest, 32) == 0);
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, 0, &w) == ARGUS_OK && w.generation == 0x100000003ull && memcmp(w.digest, e.evidence_digest, 32) == 0);
     uint64_t wseq = e.sequence;
     ArgusCoreHealth h0, h1; argus_core_health(c, &h0);
     e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.world_generation = 2; dg(e.evidence_digest, 32);      /* rollback */
-    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, &w) == ARGUS_OK && w.generation == 0x100000003ull && w.sequence == wseq);
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, 0, &w) == ARGUS_OK && w.generation == 0x100000003ull && w.sequence == wseq);
     e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.world_generation = UINT64_MAX; dg(e.evidence_digest, 33); /* skip */
-    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, &w) == ARGUS_OK && w.generation == 0x100000003ull);
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, 0, &w) == ARGUS_OK && w.generation == 0x100000003ull);
     e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.world_generation = 0x100000003ull; dg(e.evidence_digest, 34); /* conflict */
-    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, &w) == ARGUS_OK && w.digest[0] == 31 && w.sequence == wseq);
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, 0, &w) == ARGUS_OK && w.digest[0] == 31 && w.sequence == wseq);
     argus_core_health(c, &h1);
     CHECK(h1.events_not_applied == h0.events_not_applied + 3);
     e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.world_generation = 0x100000003ull; dg(e.evidence_digest, 31); /* idempotent */
-    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, &w) == ARGUS_OK && w.sequence == wseq);
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, 0, &w) == ARGUS_OK && w.sequence == wseq);
     e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.world_generation = 0; dg(e.evidence_digest, 35);            /* unknown */
-    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, &w) == ARGUS_OK && w.sequence == wseq);
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, 0, &w) == ARGUS_OK && w.sequence == wseq);
     argus_core_health(c, &h1);
     CHECK(h1.events_not_applied == h0.events_not_applied + 3);
     e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.world_generation = 0x100000004ull; dg(e.evidence_digest, 36); /* +1 */
-    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, &w) == ARGUS_OK && w.generation == 0x100000004ull && w.sequence == e.sequence);
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, 0, &w) == ARGUS_OK && w.generation == 0x100000004ull && w.sequence == e.sequence);
 
     CHECK(o->policy_digest(v, d) == ARGUS_OK && memcmp(d, z, 32) == 0);
     e = ev_make(ARGUS_EV_POLICY_CHANGED, seq++); dg(e.evidence_digest, 41);
@@ -654,7 +658,7 @@ static void t_hostile_rules(void)
     ing(c, &e, f, &n);
     e = ev_make(ARGUS_EV_WORLD_COMMITTED, 3); e.world_generation = 2; dg(e.evidence_digest, 2);
     ing(c, &e, f, &n);
-    CHECK(o->world(argus_core_view(c), &w) == ARGUS_OK && w.generation == 2 && w.sequence == 3);
+    CHECK(o->world(argus_core_view(c), 0, &w) == ARGUS_OK && w.generation == 2 && w.sequence == 3);
     /* G-8: quarantine survives remove + rejoin */
     c = fresh();
     ArgusMachineShadow ms;
@@ -683,6 +687,173 @@ static void t_hostile_rules(void)
     CHECK(h.producers_untracked == 0);
 }
 
+/* ---- v1.1: streams, cap 0 / CAP_NONE, USE_SUMMARY, per-store Worlds ---- */
+static ArgusEvent ev_stream(uint16_t kind, uint64_t seq, uint32_t machine, uint16_t stream)
+{
+    ArgusEvent e = ev_make(kind, seq);
+    mid(e.machine_id, machine);
+    e.flags = (uint16_t)(ARGUS_FLAG_SYNTHETIC | (stream << ARGUS_FLAG_STREAM_SHIFT));
+    return e;
+}
+
+static void t_v11_streams(void)
+{
+    ArgusCore *c = fresh();
+    ArgusFinding f[16]; size_t n;
+    /* three streams on one machine keep independent high-water marks */
+    for (uint16_t s = 0; s < 3; s++) {
+        ArgusEvent e = ev_stream(ARGUS_EV_CAPABILITY_DENIED, 10, 1, s);
+        CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0);
+    }
+    ArgusEvent e = ev_stream(ARGUS_EV_CAPABILITY_DENIED, 5, 1, 1);        /* below stream 1's mark */
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 1 && f[0].code == ARGUS_F_SEQUENCE_ANOMALY && f[0].prior_sequence == 10);
+    e = ev_stream(ARGUS_EV_CAPABILITY_DENIED, 11, 1, 1);
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0);
+    e = ev_stream(ARGUS_EV_CAPABILITY_DENIED, 1, 1, 7);                   /* new stream starts anywhere */
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0);
+    e = ev_stream(ARGUS_EV_CAPABILITY_DENIED, 1, 1, (uint16_t)(ARGUS_STREAM_MAX - 1u));
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0);
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 1 && f[0].code == ARGUS_F_SEQUENCE_ANOMALY);
+    /* the CONSUMER bit stays part of the key: stream 0 consumer vs producer */
+    e = ev_stream(ARGUS_EV_TELEMETRY_DROPPED, 1, 1, 0); e.flags = ARGUS_FLAG_CONSUMER;
+    e.object_id = ARGUS_CLASS_AUDIT; e.resource = 1;
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0);
+    ArgusCoreHealth h; argus_core_health(c, &h);
+    CHECK(h.producers_untracked == 0);
+
+    /* the producer table holds ARGUS_CORE_PRODUCERS streams in total, across machines x streams */
+    c = fresh();
+    for (uint32_t k = 0; k < ARGUS_CORE_PRODUCERS; k++) {
+        e = ev_stream(ARGUS_EV_CAPABILITY_DENIED, 1, 100 + k / 16u, (uint16_t)(k % 16u));
+        CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0);
+    }
+    e = ev_stream(ARGUS_EV_CAPABILITY_DENIED, 1, 100, 16);                /* 257th stream */
+    CHECK(ing(c, &e, f, &n) == ARGUS_ERR_FULL && n == 1 && f[0].code == ARGUS_F_TELEMETRY_LOSS && f[0].severity == ARGUS_SEV_CRITICAL);
+    e.sequence = 2;
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0);                        /* later untracked: counted only */
+    argus_core_health(c, &h);
+    CHECK(h.producers_untracked == 2 && h.tables_full == 1);
+    e = ev_stream(ARGUS_EV_CAPABILITY_DENIED, 1, 100, 15);                /* tracked stream: replay flagged */
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 1 && f[0].code == ARGUS_F_SEQUENCE_ANOMALY);
+
+    /* the state digest depends on the stream id */
+    uint8_t d1[32], d2[32];
+    c = fresh(); e = ev_stream(ARGUS_EV_CAPABILITY_DENIED, 1, 1, 2); ing(c, &e, f, &n); argus_core_state_digest(c, d1);
+    c = fresh(); e = ev_stream(ARGUS_EV_CAPABILITY_DENIED, 1, 1, 3); ing(c, &e, f, &n); argus_core_state_digest(c, d2);
+    CHECK(memcmp(d1, d2, 32) != 0);
+}
+
+static void t_v11_caps_summary(void)
+{
+    ArgusCore *c = fresh();
+    const ArgusStateOps *o = argus_core_ops(); const ArgusStateView *v = argus_core_view(c);
+    ArgusFinding f[16]; size_t n; ArgusCapShadow s;
+    /* cap 0 lifecycle: grant, replay, revoke, regrant above */
+    ArgusEvent e = ev_make(ARGUS_EV_CAPABILITY_GRANTED, 1); e.cap_id = 0; e.cap_generation = 1; e.principal = 4;
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0 && o->cap(v, 0, &s) == ARGUS_OK && s.state == ARGUS_SHADOW_LIVE);
+    e = ev_make(ARGUS_EV_CAPABILITY_GRANTED, 2); e.cap_id = 0; e.cap_generation = 1; e.principal = 9;
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 1 && f[0].code == ARGUS_F_AUTHORITY_REPLAY && f[0].cap_id == 0);
+    CHECK(o->cap(v, 0, &s) == ARGUS_OK && s.subject == 4);
+    e = ev_make(ARGUS_EV_CAPABILITY_REVOKED, 3); e.cap_id = 0; e.cap_generation = 1;
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0 && o->cap(v, 0, &s) == ARGUS_OK && s.state == ARGUS_SHADOW_REVOKED);
+    e = ev_make(ARGUS_EV_CAPABILITY_GRANTED, 4); e.cap_id = 0; e.cap_generation = 2; e.principal = 4;
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0 && o->cap(v, 0, &s) == ARGUS_OK && s.state == ARGUS_SHADOW_LIVE && s.generation == 2);
+    /* CAP_NONE on REVOKED: no-op, never a replay finding */
+    e = ev_make(ARGUS_EV_CAPABILITY_REVOKED, 5); e.cap_id = ARGUS_CAP_NONE;
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0);
+    /* cap ids in (ARGUS_CAP_MAX, CAP_NONE) stay malformed */
+    e = ev_make(ARGUS_EV_CAPABILITY_GRANTED, 6); e.cap_id = ARGUS_CAP_NONE - 1u;
+    CHECK(ing(c, &e, f, &n) == ARGUS_ERR_MALFORMED && n == 1 && f[0].code == ARGUS_F_MALFORMED_EVENT);
+
+    /* USE_SUMMARY applies nothing, is sequence-checked, detected and chained */
+    uint8_t d0[32], d1[32]; ArgusCoreHealth h0, h1;
+    argus_core_state_digest(c, d0); argus_core_health(c, &h0);
+    e = ev_make(ARGUS_EV_CAPABILITY_USE_SUMMARY, 7); e.class_ = ARGUS_CLASS_AUDIT;
+    e.cap_id = 0; e.cap_generation = 2; e.object_id = 2; e.resource = 4096; e.principal = 4;
+    stub_detect_mode = 3;                                                  /* detector ran: probes cap 0 */
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0 && stub_probe_rc == ARGUS_OK && stub_probe_cap.generation == 2);
+    stub_detect_mode = 1;
+    argus_core_state_digest(c, d1); argus_core_health(c, &h1);
+    CHECK(memcmp(h0.chain, h1.chain, 32) != 0 && h1.events_not_applied == h0.events_not_applied);
+    CHECK(o->cap(v, 0, &s) == ARGUS_OK && s.generation == 2 && s.state == ARGUS_SHADOW_LIVE && s.granted_sequence == 4);
+    /* state digest changes only through the producer high-water mark (tag 10), not a table */
+    c = fresh();
+    e = ev_make(ARGUS_EV_CAPABILITY_DENIED, 7); ing(c, &e, f, &n);
+    uint8_t d2[32]; argus_core_state_digest(c, d2);
+    ArgusCore *c2 = fresh();                                               /* same buffer: c is gone */
+    e = ev_make(ARGUS_EV_CAPABILITY_USE_SUMMARY, 7); e.class_ = ARGUS_CLASS_AUDIT; e.cap_id = 3; e.cap_generation = 1; e.object_id = 1; e.resource = 1;
+    ing(c2, &e, f, &n);
+    uint8_t d3[32]; argus_core_state_digest(c2, d3);
+    CHECK(memcmp(d2, d3, 32) == 0);                                        /* summary == any non-applying event */
+    e = ev_make(ARGUS_EV_CAPABILITY_USE_SUMMARY, 7); e.class_ = ARGUS_CLASS_AUDIT;
+    CHECK(ing(c2, &e, f, &n) == ARGUS_OK && n == 1 && f[0].code == ARGUS_F_SEQUENCE_ANOMALY);   /* replay */
+    e.outcome = ARGUS_OUTCOME_DENIED; e.sequence = 8;
+    CHECK(ing(c2, &e, f, &n) == ARGUS_ERR_MALFORMED && n == 1 && f[0].code == ARGUS_F_MALFORMED_EVENT);
+}
+
+static void t_v11_worlds(void)
+{
+    ArgusCore *c = fresh();
+    const ArgusStateOps *o = argus_core_ops(); const ArgusStateView *v = argus_core_view(c);
+    ArgusFinding f[16]; size_t n; ArgusWorldShadow w;
+    uint64_t seq = 1;
+    /* two stores interleaved, each +1 on its own lineage */
+    for (uint64_t g = 1; g <= 5; g++) {
+        for (uint32_t st = 7; st <= 8; st++) {
+            ArgusEvent e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.object_id = st;
+            e.world_generation = st == 7 ? g : 100 + g; dg(e.evidence_digest, st * 1000 + (uint32_t)g);
+            CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0);
+        }
+    }
+    CHECK(o->world(v, 7, &w) == ARGUS_OK && w.store_id == 7 && w.generation == 5 && w.digest[0] == (uint8_t)(7005 & 0xFF));
+    CHECK(o->world(v, 8, &w) == ARGUS_OK && w.store_id == 8 && w.generation == 105);
+    CHECK(o->world(v, 0, &w) == ARGUS_ERR_STATE);
+    /* a skip on store 7 is not adopted and does not touch store 8 */
+    ArgusEvent e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.object_id = 7; e.world_generation = 9; dg(e.evidence_digest, 1);
+    ArgusCoreHealth h0, h1; argus_core_health(c, &h0);
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK);
+    argus_core_health(c, &h1);
+    CHECK(h1.events_not_applied == h0.events_not_applied + 1);
+    CHECK(o->world(v, 7, &w) == ARGUS_OK && w.generation == 5);
+    CHECK(o->world(v, 8, &w) == ARGUS_OK && w.generation == 105);
+    /* 8 stores fit; the 9th is table-full: dropped, ERR_FULL + CRITICAL loss, counted */
+    for (uint32_t st = 20; st < 26; st++) {
+        e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.object_id = st; e.world_generation = 1; dg(e.evidence_digest, st);
+        CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0);
+    }
+    e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.object_id = 99; e.world_generation = 1; dg(e.evidence_digest, 99);
+    CHECK(ing(c, &e, f, &n) == ARGUS_ERR_FULL && n == 1 && f[0].code == ARGUS_F_TELEMETRY_LOSS && f[0].severity == ARGUS_SEV_CRITICAL);
+    CHECK(o->world(v, 99, &w) == ARGUS_ERR_STATE);
+    argus_core_health(c, &h1);
+    CHECK(h1.tables_full == 1);
+    /* known stores still advance with the table full */
+    e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.object_id = 20; e.world_generation = 2; dg(e.evidence_digest, 2020);
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0 && o->world(v, 20, &w) == ARGUS_OK && w.generation == 2);
+    /* world_generation 0 on a new store: no entry */
+    c = fresh(); v = argus_core_view(c);
+    e = ev_make(ARGUS_EV_WORLD_COMMITTED, 1); e.object_id = 3; e.world_generation = 0;
+    CHECK(ing(c, &e, f, &n) == ARGUS_OK && o->world(v, 3, &w) == ARGUS_ERR_STATE);
+    /* the state digest includes the store id and does not depend on store arrival order */
+    uint8_t d1[32], d2[32], d3[32];
+    c = fresh();
+    e = ev_make(ARGUS_EV_WORLD_COMMITTED, 1); e.object_id = 1; e.world_generation = 1; dg(e.evidence_digest, 5); ing(c, &e, f, &n);
+    argus_core_state_digest(c, d1);
+    c = fresh();
+    e = ev_make(ARGUS_EV_WORLD_COMMITTED, 1); e.object_id = 2; e.world_generation = 1; dg(e.evidence_digest, 5); ing(c, &e, f, &n);
+    argus_core_state_digest(c, d2);
+    CHECK(memcmp(d1, d2, 32) != 0);
+    c = fresh();
+    e = ev_stream(ARGUS_EV_WORLD_COMMITTED, 5, 1, 1); e.object_id = 1; e.world_generation = 1; dg(e.evidence_digest, 5); ing(c, &e, f, &n);
+    e = ev_stream(ARGUS_EV_WORLD_COMMITTED, 6, 1, 2); e.object_id = 2; e.world_generation = 1; dg(e.evidence_digest, 6); ing(c, &e, f, &n);
+    argus_core_state_digest(c, d1);
+    c = fresh();
+    e = ev_stream(ARGUS_EV_WORLD_COMMITTED, 6, 1, 2); e.object_id = 2; e.world_generation = 1; dg(e.evidence_digest, 6); ing(c, &e, f, &n);
+    e = ev_stream(ARGUS_EV_WORLD_COMMITTED, 5, 1, 1); e.object_id = 1; e.world_generation = 1; dg(e.evidence_digest, 5); ing(c, &e, f, &n);
+    argus_core_state_digest(c, d3);
+    CHECK(memcmp(d1, d3, 32) == 0);
+}
+
+
 int main(void)
 {
     t_init();
@@ -701,6 +872,9 @@ int main(void)
     t_digest_domain_and_order();
     t_incidents();
     t_hostile_rules();
+    t_v11_streams();
+    t_v11_caps_summary();
+    t_v11_worlds();
     printf("test_argus_core: %d passed, %d failed (footprint %zu bytes)\n", t_pass, t_fail, argus_core_footprint());
     return t_fail ? 1 : 0;
 }

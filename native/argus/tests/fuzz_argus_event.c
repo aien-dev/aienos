@@ -21,7 +21,7 @@ static uint64_t rnd(void)
 }
 
 static const uint16_t kinds[] = { 1, 2, 3, 4, 10, 11, 12, 20, 21, 22, 30, 31, 32, 40, 41, 42, 43,
-                                  50, 51, 52, 60, 61, 62, 63, 70, 71, 72, 80 };
+                                  50, 51, 52, 60, 61, 62, 63, 70, 71, 72, 80, 81 };
 
 /* Class floor per kind (argus_abi.h hostile-review rules): 1 CRITICAL, 2 SECURITY, 3 AUDIT, 0 unknown. */
 static unsigned floor_of(unsigned k)
@@ -30,7 +30,7 @@ static unsigned floor_of(unsigned k)
     case 60: case 61: case 62: case 63: case 80: case 42: case 31: case 32:
     case 71: case 72: case 4: case 12: case 21: case 52: return 1;
     case 1: case 3: case 10: case 20: case 22: case 30: case 40: case 41: case 50: case 51: case 70: return 2;
-    case 2: case 11: case 43: return 3;
+    case 2: case 11: case 43: case 81: return 3;
     default: return 0;
     }
 }
@@ -46,9 +46,10 @@ static int oracle_bytes(const uint8_t b[ARGUS_EVENT_SIZE])
     if (b[0] != 1) return ARGUS_ERR_VERSION;
     unsigned f = floor_of(kind);
     if (cls < 1 || cls > 4 || f == 0 || cls > f) return ARGUS_ERR_MALFORMED;
-    if (eff > 3 || out < 1 || out > 3 || (fl & ~3u)) return ARGUS_ERR_MALFORMED;
+    if (eff > 3 || out < 1 || out > 3) return ARGUS_ERR_MALFORMED;   /* v1.1: flag bits 2-15 = stream id */
     if (((fl & 2u) != 0) != (kind == 80)) return ARGUS_ERR_MALFORMED;
-    if (le32(b + 32) >= 256) return ARGUS_ERR_MALFORMED;
+    if (le32(b + 32) >= 256 && le32(b + 32) != 0xFFFFFFFFu) return ARGUS_ERR_MALFORMED;   /* CAP_NONE ok */
+    if (kind == 81 && out != 1) return ARGUS_ERR_MALFORMED;                                /* summary: OK only */
     if (seq == 0 || seq == UINT64_MAX) return ARGUS_ERR_MALFORMED;
     if (kind >= 50 && kind <= 52 && eff != 3) return ARGUS_ERR_MALFORMED;
     return ARGUS_OK;
@@ -64,9 +65,10 @@ static void valid_event(uint8_t b[ARGUS_EVENT_SIZE])
     e.kind = kinds[rnd() % (sizeof kinds / sizeof kinds[0])];
     e.class_ = (uint8_t)(1 + rnd() % floor_of(e.kind));
     e.effect_class = (e.kind >= 50 && e.kind <= 52) ? ARGUS_EFFECT_EXTERNAL : (uint8_t)(rnd() % 4);
-    e.outcome = (uint8_t)(1 + rnd() % 3);
-    e.flags = (uint16_t)((rnd() % 2) | (e.kind == ARGUS_EV_TELEMETRY_DROPPED ? ARGUS_FLAG_CONSUMER : 0));
-    e.cap_id = (uint32_t)(rnd() % ARGUS_CAP_MAX);
+    e.outcome = e.kind == ARGUS_EV_CAPABILITY_USE_SUMMARY ? ARGUS_OUTCOME_OK : (uint8_t)(1 + rnd() % 3);
+    e.flags = (uint16_t)((rnd() % 2) | ((rnd() % ARGUS_STREAM_MAX) << ARGUS_FLAG_STREAM_SHIFT) |
+                         (e.kind == ARGUS_EV_TELEMETRY_DROPPED ? ARGUS_FLAG_CONSUMER : 0));
+    e.cap_id = rnd() % 8 == 0 ? ARGUS_CAP_NONE : (uint32_t)(rnd() % ARGUS_CAP_MAX);
     if (e.sequence == 0 || e.sequence == UINT64_MAX) e.sequence = 1;
     if (argus_event_encode(&e, b) != ARGUS_OK || argus_event_validate(&e) != ARGUS_OK) {
         fprintf(stderr, "FAIL: generated valid event did not validate/encode\n");

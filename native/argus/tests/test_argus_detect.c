@@ -102,7 +102,7 @@ static void reset(void)
     memcpy(p.provider_id, PQ, 32); p.state = ARGUS_SHADOW_REVOKED; p.sequence = 71;
     stub_put_provider(&st, &p);
 
-    stub_set_world(&st, 5, WD, 80);
+    stub_set_world(&st, 0, 5, WD, 80);
 }
 
 static uint64_t next_seq = 1000;
@@ -117,6 +117,7 @@ static ArgusEvent mk(uint16_t kind, uint8_t outcome, int32_t code)
     e.outcome = outcome;
     e.code = code;
     e.flags = ARGUS_FLAG_SYNTHETIC;
+    e.cap_id = ARGUS_CAP_NONE;   /* v1.1: cap_id 0 is the office slot, "none" is CAP_NONE */
     e.sequence = ++next_seq;
     e.tick = e.sequence;
     return e;
@@ -233,9 +234,7 @@ static void t_forged(void)
     expect_only(1, &e, "future generation used OK (G-4)");
     CHECK(F[0].prior_sequence == 10 && F[0].containment == ARGUS_CONTAIN_FREEZE_PRINCIPAL, "d1 future fields");
     e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 2, 5);
-    run(&e);
-    CHECK(NF == 2 && F[0].code == 1 && F[1].code == 3, "future gen of a revoked slot: 1 then 3 (%zu)", NF);
-    pos[1]++;
+    expect_only(1, &e, "future gen of a revoked slot: 1 only (v1.1: 3 needs gen <= shadow)");
     e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, AIENOS_CAP_ERR_BOUNDS, 1, 3);
     expect_only(1, &e, "OK with ERR_BOUNDS");
     e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, AIENOS_CAP_ERR_CHAIN, 1, 3);
@@ -254,7 +253,7 @@ static void t_forged(void)
     CHECK(step(&e) == 0, "grant step");
     e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 99, 1);
     expect_none(1, &e, "use after grant");
-    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 0, 0);
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, ARGUS_CAP_NONE, 0);
     expect_none(1, &e, "use with no cap reference");
     e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_STALE_GEN, 1, 4);
     expect_none(1, &e, "future generation refused");
@@ -543,7 +542,7 @@ static void t_effect(void)
     expect_only(8, &e, "committed without effect right");
     CHECK(F[0].prior_sequence == 30 && F[0].severity == ARGUS_SEV_CRITICAL &&
           F[0].containment == ARGUS_CONTAIN_PAUSE_EXTERNAL_EFFECTS, "d8 fields");
-    e = use(ARGUS_EV_EXTERNAL_EFFECT_REQUESTED, ARGUS_OUTCOME_OK, 0, 0, 0);
+    e = use(ARGUS_EV_EXTERNAL_EFFECT_REQUESTED, ARGUS_OUTCOME_OK, 0, ARGUS_CAP_NONE, 0);
     e.effect_class = ARGUS_EFFECT_EXTERNAL;
     expect_only(8, &e, "external effect with no cap");
     e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 3, 1);
@@ -564,7 +563,7 @@ static void t_effect(void)
     expect_none(8, &e, "ephemeral use without effect right");
 
     /* G-24: the kind wins over the label; EVIDENCE needs WRITE */
-    e = use(ARGUS_EV_EXTERNAL_EFFECT_COMMITTED, ARGUS_OUTCOME_OK, 0, 0, 0);
+    e = use(ARGUS_EV_EXTERNAL_EFFECT_COMMITTED, ARGUS_OUTCOME_OK, 0, ARGUS_CAP_NONE, 0);
     e.effect_class = ARGUS_EFFECT_NONE;
     expect_only(8, &e, "EXTERNAL_EFFECT_COMMITTED labelled NONE, no cap");
     e = use(ARGUS_EV_EXTERNAL_EFFECT_REQUESTED, ARGUS_OUTCOME_OK, 0, 3, 1);
@@ -588,7 +587,7 @@ static void t_effect(void)
     e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_RIGHTS, 3, 1);
     e.effect_class = ARGUS_EFFECT_EVIDENCE;
     expect_none(8, &e, "EVIDENCE write refused");
-    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 0, 0);
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, ARGUS_CAP_NONE, 0);
     e.effect_class = ARGUS_EFFECT_EVIDENCE;
     expect_none(8, &e, "EVIDENCE with no capability is out of scope");
 }
@@ -615,7 +614,7 @@ static void t_world(void)
     expect_only(9, &e, "same gen, different digest");
     e = world_ev(ARGUS_OUTCOME_OK, 0x100000006ull, WX);
     expect_only(9, &e, "64-bit: high bits differ");
-    stub_set_world(&st, UINT64_MAX, WD, 81);
+    stub_set_world(&st, 0, UINT64_MAX, WD, 81);
     e = world_ev(ARGUS_OUTCOME_OK, 0, WX);
     expect_only(9, &e, "wrap at UINT64_MAX");
 
@@ -632,7 +631,7 @@ static void t_world(void)
     CHECK(step(&e) == 0, "first commit step");
     e = world_ev(ARGUS_OUTCOME_OK, 43, WD);
     expect_none(9, &e, "then +1");
-    stub_set_world(&st, 0xFFFFFFFFull, WD, 90);
+    stub_set_world(&st, 0, 0xFFFFFFFFull, WD, 90);
     e = world_ev(ARGUS_OUTCOME_OK, 0x100000000ull, WX);
     expect_none(9, &e, "64-bit: +1 across 2^32");
 }
@@ -839,10 +838,10 @@ static void t_apply(void)
     CHECK(OPS->lease(V, 2, &ls) == ARGUS_OK && ls.state == ARGUS_SHADOW_REVOKED, "REVOKED lease not revived");
     e = world_ev(ARGUS_OUTCOME_OK, 7, WX);
     stub_state_apply(&st, &e);
-    CHECK(OPS->world(V, &ws) == ARGUS_OK && ws.generation == 5, "skipping commit not adopted");
+    CHECK(OPS->world(V, 0, &ws) == ARGUS_OK && ws.generation == 5, "skipping commit not adopted");
     e = world_ev(ARGUS_OUTCOME_OK, 6, WX);
     stub_state_apply(&st, &e);
-    CHECK(OPS->world(V, &ws) == ARGUS_OK && ws.generation == 6, "+1 commit adopted");
+    CHECK(OPS->world(V, 0, &ws) == ARGUS_OK && ws.generation == 6, "+1 commit adopted");
     e = mk(ARGUS_EV_PROVIDER_DISCOVERED, ARGUS_OUTCOME_OK, 0);
     memcpy(e.evidence_digest, PQ, 32);
     stub_state_apply(&st, &e);
@@ -927,6 +926,138 @@ static void t_runner(void)
     CHECK(argus_detect_run(OPS, V, &e, F, 1, &n) == ARGUS_ERR_OVERFLOW && n == 1 && F[0].code == 1, "truncated at 1");
 }
 
+/* ---- v1.1: cap 0, CAP_NONE, CAPABILITY_USE_SUMMARY, per-store World -------- */
+
+static ArgusEvent summ(uint32_t cap_id, uint64_t max_gen, uint32_t min_gen, uint32_t principal)
+{
+    ArgusEvent e = use(ARGUS_EV_CAPABILITY_USE_SUMMARY, ARGUS_OUTCOME_OK, 0, cap_id, max_gen);
+    e.class_ = ARGUS_CLASS_AUDIT;
+    e.tick = 0;
+    e.object_id = min_gen;
+    e.resource = 4096;
+    e.principal = principal;
+    return e;
+}
+
+static void expect_codes(const ArgusEvent *e, uint16_t a, uint16_t b, const char *what)
+{
+    int rc = run(e);
+    size_t want = (a ? 1u : 0u) + (b ? 1u : 0u);
+    CHECK(rc == ARGUS_OK && NF == want, "[%s] expected %zu findings, got %zu (first %u)", what, want, NF, NF ? F[0].code : 0);
+    if (a && NF >= 1) CHECK(F[0].code == a, "[%s] first code %u want %u", what, F[0].code, a);
+    if (b && NF >= 2) CHECK(F[1].code == b, "[%s] second code %u want %u", what, F[1].code, b);
+}
+
+static void t_v11_cap0(void)
+{
+    ArgusEvent e;
+    reset();
+    ArgusCapShadow c = {0};
+    c.cap_id = 0; c.generation = 2; c.state = ARGUS_SHADOW_LIVE; c.subject = 7;
+    c.rights = AIENOS_CAP_RIGHT_READ; c.granted_sequence = 9;
+    stub_put_cap(&st, &c);
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 0, 2);
+    expect_codes(&e, 0, 0, "cap 0 used by its subject");
+    neg[1]++; neg[14]++;
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 0, 2); e.principal = 8;
+    expect_only(14, &e, "cap 0 used by the wrong subject");
+    CHECK(F[0].cap_id == 0 && F[0].prior_sequence == 9, "d14 on cap 0 fields");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 0, 3);
+    expect_only(1, &e, "cap 0 above its generation");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 0, 1);
+    expect_only(2, &e, "cap 0 stale generation");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 0, 2); e.effect_class = ARGUS_EFFECT_EVIDENCE;
+    expect_only(8, &e, "cap 0 EVIDENCE without WRITE");
+    e = use(ARGUS_EV_CAPABILITY_REVOKED, ARGUS_OUTCOME_OK, 0, 0, 2);
+    CHECK(step(&e) == 0, "revoke cap 0");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 0, 2);
+    expect_only(3, &e, "revoked cap 0 accepted");
+    /* cap 0 unseen: a use is a forgery like any other slot */
+    reset();
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 0, 1);
+    expect_only(1, &e, "unseen cap 0 used");
+    /* CAP_NONE: not a capability use (1, 2, 3, 14 silent) */
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, ARGUS_CAP_NONE, 5);
+    expect_none(1, &e, "CAP_NONE use");
+    e = summ(ARGUS_CAP_NONE, 5, 1, 99);
+    expect_none(14, &e, "CAP_NONE summary");
+    /* USED above a REVOKED generation: detector 1 only (v1.1 precision rule) */
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 2, 2);
+    expect_only(1, &e, "use above the revoked generation");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, AIENOS_CAP_ERR_REVOKED, 2, 2);
+    expect_codes(&e, 1, 3, "above revoked + ERR_REVOKED contradiction still 3");
+}
+
+static void t_v11_summary(void)
+{
+    ArgusEvent e;
+    reset();
+    /* cap 1 LIVE gen 3 subject 7; cap 2 REVOKED gen 1; cap 3 LIVE gen 1 rights R */
+    e = summ(1, 3, 3, 7);
+    expect_codes(&e, 0, 0, "consistent summary");
+    neg[1]++; neg[2]++; neg[3]++; neg[14]++;
+    e = summ(3, 1, 1, 7); e.effect_class = ARGUS_EFFECT_NONE;
+    expect_none(8, &e, "summary with no effect class");
+    e = summ(1, 4, 3, 7);
+    expect_only(1, &e, "summary max above shadow");
+    CHECK(F[0].cap_generation == 4 && F[0].prior_sequence == 10, "d1 summary fields");
+    e = summ(1, 3, 2, 7);
+    expect_only(2, &e, "summary min stale");
+    CHECK(F[0].prior_sequence == 10 && F[0].containment == ARGUS_CONTAIN_REVOKE_CAPABILITY, "d2 summary fields");
+    e = summ(1, 4, 2, 7);
+    expect_codes(&e, 1, 2, "summary above and below");
+    e = summ(2, 1, 1, 7);
+    expect_only(3, &e, "summary max hits revoked slot");
+    CHECK(F[0].prior_sequence == 20, "d3 summary prior = revocation");
+    e = summ(2, 2, 2, 7);
+    expect_only(1, &e, "summary above revoked generation: 1, not 3");
+    e = summ(2, 1, 0, 7);
+    expect_codes(&e, 2, 3, "summary on revoked slot spanning an older generation");
+    e = summ(1, 3, 3, 8);
+    expect_only(14, &e, "summary by the wrong subject");
+    e = summ(150, 1, 1, 7);
+    expect_only(1, &e, "summary of a slot never granted");
+    e = summ(3, 1, 1, 7); e.effect_class = ARGUS_EFFECT_EXTERNAL;
+    expect_only(8, &e, "summary labelled EXTERNAL without EFFECT right");
+    e = summ(1, 3, 3, 7); e.outcome = ARGUS_OUTCOME_DENIED;
+    expect_none(1, &e, "non-OK summary (malformed for validate) is not a use");
+    e = summ(1, 3, 3, 7); memcpy(e.machine_id, MQ, 32);
+    expect_only(10, &e, "summary from a quarantined machine");
+    e = summ(1, 3, 3, 7); memcpy(e.machine_id, MU, 32);
+    expect_only(7, &e, "summary from an unknown machine");
+    /* stub apply: a summary changes nothing */
+    StubState before = st;
+    e = summ(1, 3, 3, 7);
+    CHECK(stub_state_apply(&st, &e) == ARGUS_OK && memcmp(&before, &st, sizeof st) == 0, "summary applies nothing");
+}
+
+static void t_v11_world_stores(void)
+{
+    ArgusEvent e;
+    reset();   /* store 0 at gen 5 */
+    e = world_ev(ARGUS_OUTCOME_OK, 1, WX); e.object_id = 3;
+    expect_none(9, &e, "first commit of another store");
+    CHECK(step(&e) == 0, "store 3 first commit");
+    e = world_ev(ARGUS_OUTCOME_OK, 6, WD); e.object_id = 0;
+    expect_none(9, &e, "store 0 +1 while store 3 exists");
+    CHECK(step(&e) == 0, "store 0 advances");
+    e = world_ev(ARGUS_OUTCOME_OK, 2, WD); e.object_id = 3;
+    expect_none(9, &e, "store 3 +1 interleaved");
+    CHECK(step(&e) == 0, "store 3 advances");
+    e = world_ev(ARGUS_OUTCOME_OK, 3, WX); e.object_id = 0;
+    expect_only(9, &e, "store 0 rollback (store 3 is at 2, irrelevant)");
+    e = world_ev(ARGUS_OUTCOME_OK, 7, WX); e.object_id = 3;
+    expect_only(9, &e, "store 3 skip");
+    ArgusWorldShadow w;
+    CHECK(OPS->world(V, 0, &w) == ARGUS_OK && w.generation == 6 && w.store_id == 0, "store 0 shadow");
+    CHECK(OPS->world(V, 3, &w) == ARGUS_OK && w.generation == 2 && w.store_id == 3, "store 3 shadow");
+    CHECK(OPS->world(V, 4, &w) == ARGUS_ERR_STATE, "unknown store");
+    /* stub table: ARGUS_WORLD_STORES stores, then FULL */
+    for (uint32_t s = 10; s < 10 + ARGUS_WORLD_STORES - 2; s++)
+        CHECK(stub_set_world(&st, s, 1, WD, 100 + s) == ARGUS_OK, "store %u fits", s);
+    CHECK(stub_set_world(&st, 99, 1, WD, 200) == ARGUS_ERR_FULL, "9th store is FULL");
+}
+
 /* ---- corpora ---------------------------------------------------------------- */
 
 #define CORPUS_N 5000
@@ -964,16 +1095,33 @@ static void check_stream_shape(const ArgusEvent *evs, size_t n, int benign)
     static uint8_t lease_seen[1u << 16];
     memset(lease_seen, 0, sizeof lease_seen);
     static const uint8_t zero[ARGUS_MACHINE_ID_LEN];
-    size_t bad = 0, lease_reuse = 0, lease_ids = 0;
+    size_t bad = 0, lease_reuse = 0, lease_ids = 0, n_summary = 0, n_cap0 = 0, n_store[2] = {0, 0}, n_mach = 0;
+    static uint8_t mach[16][32];
+    uint32_t streams[16] = {0};
     for (size_t i = 0; i < n; i++) {
         const ArgusEvent *e = &evs[i];
         int ok = e->version == ARGUS_ABI_VERSION && e->sequence == i + 1 && e->kind != 0 &&
-                 e->outcome >= 1 && e->outcome <= ARGUS_OUTCOME_MAX && e->flags == ARGUS_FLAG_SYNTHETIC &&
-                 e->class_ >= 1 && e->class_ <= stub_min_class(e->kind) && e->cap_id < ARGUS_CAP_MAX &&
+                 e->outcome >= 1 && e->outcome <= ARGUS_OUTCOME_MAX &&
+                 (e->flags & (uint16_t)~ARGUS_FLAG_STREAM_MASK) == ARGUS_FLAG_SYNTHETIC &&
+                 e->class_ >= 1 && e->class_ <= stub_min_class(e->kind) &&
+                 (e->cap_id < ARGUS_CAP_MAX || e->cap_id == ARGUS_CAP_NONE) &&
                  memcmp(e->machine_id, zero, sizeof zero) != 0;
         if ((e->kind == ARGUS_EV_EXTERNAL_EFFECT_REQUESTED || e->kind == ARGUS_EV_EXTERNAL_EFFECT_DENIED ||
              e->kind == ARGUS_EV_EXTERNAL_EFFECT_COMMITTED) && e->effect_class != ARGUS_EFFECT_EXTERNAL)
             ok = 0;
+        /* v1.1: summaries are outcome OK with tick 0 and min <= max; USED carries tick 0 */
+        if (e->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY &&
+            (e->outcome != ARGUS_OUTCOME_OK || e->tick != 0 || e->resource == 0 || e->object_id > e->cap_generation))
+            ok = 0;
+        if (e->kind == ARGUS_EV_CAPABILITY_USED && e->tick != 0)
+            ok = 0;
+        if (e->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY) n_summary++;
+        if (e->cap_id == 0 && e->kind == ARGUS_EV_CAPABILITY_GRANTED) n_cap0++;
+        if (e->kind == ARGUS_EV_WORLD_COMMITTED) { if (e->object_id == 0) n_store[0]++; else if (e->object_id == 5) n_store[1]++; }
+        for (size_t m = 0; m < n_mach; m++)
+            if (memcmp(mach[m], e->machine_id, 32) == 0) { streams[m] |= 1u << (ARGUS_STREAM_OF(e->flags) & 31u); goto seen; }
+        if (n_mach < 16) { memcpy(mach[n_mach], e->machine_id, 32); streams[n_mach++] = 1u << (ARGUS_STREAM_OF(e->flags) & 31u); }
+    seen:;
         if (!ok && bad++ < 5)
             CHECK(0, "stream shape at %zu (kind %u class %u)", i, e->kind, e->class_);
         if (e->kind == ARGUS_EV_CREDENTIAL_LEASE_CREATED && e->outcome == ARGUS_OUTCOME_OK) {
@@ -986,6 +1134,11 @@ static void check_stream_shape(const ArgusEvent *evs, size_t n, int benign)
         }
     }
     CHECK(bad == 0, "%zu events break the stream shape", bad);
+    CHECK(n_summary > 0 && n_cap0 > 0 && n_store[0] > 1 && n_store[1] > 1,
+          "v1.1 content: %zu summaries, %zu cap-0 grants, stores %zu/%zu", n_summary, n_cap0, n_store[0], n_store[1]);
+    size_t multi = 0;
+    for (size_t m = 0; m < n_mach; m++) multi += __builtin_popcount(streams[m]) >= 3;
+    CHECK(multi >= 3, "only %zu machines use >= 3 streams", multi);
     CHECK(lease_ids <= 56, "distinct lease ids %zu exceed the core's table margin", lease_ids);
     if (benign)
         CHECK(lease_reuse == 0, "benign stream re-uses %zu lease ids (ruling A)", lease_reuse);
@@ -1019,7 +1172,7 @@ static void t_benign(void)
         CHECK(f == 0, "benign corpus seed %llu: %zu findings", (unsigned long long)seed, f);
         /* the same day from a live producer (no SYNTHETIC flag): the zero
          * machine_id rule must not fire, every event is attributed */
-        for (size_t i = 0; i < n; i++) corpus[i].flags = 0;
+        for (size_t i = 0; i < n; i++) corpus[i].flags &= (uint16_t)~ARGUS_FLAG_SYNTHETIC;   /* keep stream ids */
         size_t fl = replay(corpus, n, NULL, 0, NULL);
         CHECK(fl == 0, "benign corpus seed %llu as live producer: %zu findings", (unsigned long long)seed, fl);
         printf("benign seed %llu: %zu events, %zu findings (synthetic), %zu findings (live flags)\n",
@@ -1044,6 +1197,17 @@ static void t_hostile(void)
     check_stream_shape(corpus, n, 0);
     size_t exp_codes[ARGUS_F_MAX + 1] = {0}, got_codes[ARGUS_F_MAX + 1] = {0};
     for (size_t i = 0; i < nex; i++) exp_codes[ex[i].code]++;
+    /* v1.1 injections present: summaries hitting codes 1, 2, 3 and cap 0 used by the wrong subject */
+    size_t sum_code[ARGUS_F_MAX + 1] = {0}, cap0_14 = 0;
+    for (size_t i = 0; i < nex && i < 512; i++) {
+        const ArgusEvent *ie = &corpus[ex[i].sequence - 1];
+        if (ie->kind == ARGUS_EV_CAPABILITY_USE_SUMMARY) sum_code[ex[i].code]++;
+        if (ie->cap_id == 0 && ex[i].code == ARGUS_F_SUBJECT_MISMATCH) cap0_14++;
+    }
+    CHECK(sum_code[1] > 0 && sum_code[2] > 0 && sum_code[3] > 0 && cap0_14 > 0,
+          "v1.1 hostile injections: summary codes 1:%zu 2:%zu 3:%zu, cap-0 code 14: %zu", sum_code[1], sum_code[2], sum_code[3], cap0_14);
+    printf("hostile v1.1 injections: summaries -> code 1:%zu 2:%zu 3:%zu; cap 0 wrong subject -> 14:%zu\n",
+           sum_code[1], sum_code[2], sum_code[3], cap0_14);
     size_t nf = replay(corpus, n, hf1, 512, got_codes);
     CHECK(nf == nex, "hostile: expected %zu findings, detected %zu", nex, nf);
     size_t match = 0;
@@ -1094,6 +1258,9 @@ int main(void)
     t_subject();
     t_trust();
     t_apply();
+    t_v11_cap0();
+    t_v11_summary();
+    t_v11_world_stores();
     t_benign();
     t_hostile();
 
