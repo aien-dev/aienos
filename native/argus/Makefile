@@ -85,7 +85,7 @@ LANE_B_SAN =
 endif
 
 .PHONY: all lib test test-lanes test-integration test-hostile bench sanitize clean \
-        test-argus1 test-contain test-e2e test-contain-hostile bench-contain sanitize-argus1
+        test-argus1 test-contain test-e2e test-contain-hostile test-contain-fp bench-contain sanitize-argus1
 
 all: lib
 lib: $(LIB)
