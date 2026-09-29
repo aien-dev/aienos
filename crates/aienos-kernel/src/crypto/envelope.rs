@@ -265,7 +265,9 @@ pub fn encrypt_envelope(
 
     let header_bytes = header.encode();
     debug_assert!(plaintext.len() as u64 <= MAX_ENVELOPE_PLAINTEXT);
-    let capacity = header.expected_envelope_len().unwrap_or(ENVELOPE_HEADER_LEN);
+    let capacity = header
+        .expected_envelope_len()
+        .unwrap_or(ENVELOPE_HEADER_LEN);
     let mut out = Vec::with_capacity(capacity);
     out.extend_from_slice(&header_bytes);
 
@@ -553,7 +555,10 @@ mod tests {
             total_plaintext_len: u64::MAX,
             ..valid
         };
-        assert_eq!(header.expected_envelope_len(), Err(EnvelopeError::LengthOverflow));
+        assert_eq!(
+            header.expected_envelope_len(),
+            Err(EnvelopeError::LengthOverflow)
+        );
 
         // Largest chunks: the tag term fits but adding the plaintext length overflows.
         let header = EnvelopeHeader {
@@ -561,7 +566,10 @@ mod tests {
             total_plaintext_len: u64::MAX - 8,
             ..valid
         };
-        assert_eq!(header.expected_envelope_len(), Err(EnvelopeError::LengthOverflow));
+        assert_eq!(
+            header.expected_envelope_len(),
+            Err(EnvelopeError::LengthOverflow)
+        );
 
         // A hand-built zero chunk size must not divide by zero.
         let header = EnvelopeHeader {
@@ -569,6 +577,9 @@ mod tests {
             total_plaintext_len: 1,
             ..valid
         };
-        assert_eq!(header.expected_envelope_len(), Err(EnvelopeError::InvalidChunkSize(0)));
+        assert_eq!(
+            header.expected_envelope_len(),
+            Err(EnvelopeError::InvalidChunkSize(0))
+        );
     }
 }
