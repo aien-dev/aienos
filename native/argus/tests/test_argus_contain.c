@@ -135,6 +135,64 @@ int main(void)
     CHECK(budget_health.requested==ARGUS_CONTAIN_WINDOW_MAX && budget_health.suppressed_budget==1);
     free(budget_mem);
 
+    /* Pending-table overflow reports one explicit CRITICAL telemetry event. */
+    void *full_mem=calloc(1,argus_contain_footprint()); ArgusContain *full_state=NULL;
+    CHECK(full_mem && argus_contain_init(&full_state,full_mem,argus_contain_footprint())==ARGUS_OK);
+    ArgusFinding batch[ARGUS_CONTAIN_WINDOW_MAX]; ArgusContainmentRequest batch_req[ARGUS_CONTAIN_WINDOW_MAX];
+    ArgusEvent batch_events[ARGUS_CONTAIN_WINDOW_MAX];
+    for(unsigned window=0;window<2;window++) {
+        for(size_t i=0;i<ARGUS_CONTAIN_WINDOW_MAX;i++) {
+            memset(&batch[i],0,sizeof batch[i]); batch[i].code=ARGUS_F_CREDENTIAL_SCOPE_VIOLATION;
+            batch[i].severity=ARGUS_SEV_HIGH; batch[i].confidence=ARGUS_CONF_DETERMINISTIC;
+            batch[i].containment=ARGUS_CONTAIN_REVOKE_CREDENTIAL_LEASE;
+            batch[i].sequence=500+window*100+i; batch[i].principal=500+(uint32_t)(window*100+i);
+            batch[i].machine_id[0]=0xA5;
+        }
+        size_t batch_n=0;
+        CHECK(argus_contain_propose(full_state,core,batch,ARGUS_CONTAIN_WINDOW_MAX,&trigger,
+              batch_req,ARGUS_CONTAIN_WINDOW_MAX,batch_events,ARGUS_CONTAIN_WINDOW_MAX,&batch_n)==ARGUS_OK);
+        CHECK(batch_n==ARGUS_CONTAIN_WINDOW_MAX);
+        for(size_t i=0;i<batch_n;i++) CHECK(argus_contain_observe(full_state,core,&batch_events[i],scratch,ARGUS_CORE_MAX_FINDINGS,&nfind)==ARGUS_OK);
+        if(window==0) for(uint64_t i=0;i<4090;i++) {
+            ArgusEvent tick=event(ARGUS_EV_TELEMETRY_DROPPED,1000+i);
+            if(argus_contain_observe(full_state,core,&tick,scratch,ARGUS_CORE_MAX_FINDINGS,&nfind)!=ARGUS_OK) failures++;
+        }
+    }
+    for(uint64_t i=0;i<4080;i++) {
+        ArgusEvent tick=event(ARGUS_EV_TELEMETRY_DROPPED,6000+i);
+        if(argus_contain_observe(full_state,core,&tick,scratch,ARGUS_CORE_MAX_FINDINGS,&nfind)!=ARGUS_OK) failures++;
+    }
+    ArgusFinding overflow_f=batch[0]; overflow_f.principal=900; overflow_f.sequence=9000;
+    size_t overflow_n=0;
+    CHECK(argus_contain_propose(full_state,core,&overflow_f,1,&trigger,batch_req,ARGUS_CONTAIN_WINDOW_MAX,
+          batch_events,ARGUS_CONTAIN_WINDOW_MAX,&overflow_n)==ARGUS_OK && overflow_n==0);
+    ArgusEvent loss={0}; CHECK(argus_contain_take_overflow_event(full_state,&loss)==ARGUS_OK);
+    CHECK(loss.kind==ARGUS_EV_TELEMETRY_DROPPED && loss.class_==ARGUS_CLASS_CRITICAL && loss.resource==1);
+    CHECK(argus_event_validate(&loss)==ARGUS_OK);
+    CHECK(argus_contain_take_overflow_event(full_state,&loss)==ARGUS_ERR_STATE);
+    free(full_mem);
+
+    /* ESCALATE permits one follow-up decision; DENY closes and cools down the key. */
+    void *deny_mem=calloc(1,argus_contain_footprint()); ArgusContain *deny_state=NULL;
+    CHECK(deny_mem && argus_contain_init(&deny_state,deny_mem,argus_contain_footprint())==ARGUS_OK);
+    f.code=ARGUS_F_STALE_GENERATION; f.containment=ARGUS_CONTAIN_REVOKE_CAPABILITY;
+    f.cap_id=5; f.sequence=10000; f.severity=ARGUS_SEV_HIGH; f.confidence=ARGUS_CONF_DETERMINISTIC;
+    trigger.sequence=f.sequence;
+    np=0; CHECK(argus_contain_propose(deny_state,core,&f,1,&trigger,req,4,prop,4,&np)==ARGUS_OK && np==1);
+    CHECK(argus_contain_observe(deny_state,core,&prop[0],scratch,ARGUS_CORE_MAX_FINDINGS,&nfind)==ARGUS_OK);
+    decision=event(ARGUS_EV_CONTAINMENT_DECIDED,10001); decision.class_=ARGUS_CLASS_CRITICAL;
+    decision.world_generation=req[0].request_id; decision.object_id=ARGUS_CONTAIN_PACK(req[0].containment,ARGUS_CSTATUS_ESCALATE,req[0].finding_code);
+    decision.cap_id=req[0].target.cap_id; decision.cap_generation=req[0].target.generation;
+    memcpy(decision.machine_id,req[0].machine_id,ARGUS_MACHINE_ID_LEN); argus_contain_request_digest(&req[0],decision.evidence_digest);
+    CHECK(argus_contain_observe(deny_state,core,&decision,scratch,ARGUS_CORE_MAX_FINDINGS,&nfind)==ARGUS_OK && nfind==0);
+    decision.sequence++; decision.object_id=ARGUS_CONTAIN_PACK(req[0].containment,ARGUS_CSTATUS_DENY,req[0].finding_code);
+    decision.outcome=ARGUS_OUTCOME_DENIED;
+    CHECK(argus_contain_observe(deny_state,core,&decision,scratch,ARGUS_CORE_MAX_FINDINGS,&nfind)==ARGUS_OK && nfind==0);
+    argus_contain_health(deny_state,&h); CHECK(h.escalated==1 && h.denied==1);
+    np=0; CHECK(argus_contain_propose(deny_state,core,&f,1,&trigger,req,4,prop,4,&np)==ARGUS_OK && np==0);
+    argus_contain_health(deny_state,&h); CHECK(h.suppressed_cooldown==1);
+    free(deny_mem);
+
     printf("ARGUS-1 containment: %d checks, %d failures; state bytes=%zu\n",checks,failures,argus_contain_footprint());
     free(smem); free(cmem); return failures?1:0;
 }

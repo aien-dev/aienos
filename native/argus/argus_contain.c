@@ -26,7 +26,8 @@ struct ArgusContain {
     uint64_t events, next_request_id, next_proposal_sequence, window_start;
     uint32_t window_count;
     uint32_t executor_cap_id;
-    uint8_t overflow_reported;
+    uint8_t overflow_reported, overflow_pending;
+    uint8_t overflow_machine_id[ARGUS_MACHINE_ID_LEN];
     Pending pending[ARGUS_CONTAIN_PENDING];
     Recent recent[ARGUS_CONTAIN_RECENT];
     ArgusContainHealth health;
@@ -302,7 +303,10 @@ int argus_contain_propose(ArgusContain *s, const ArgusCore *core,
         int ix=pending_slot(s);
         if(ix<0) {
             s->health.pending_full++;
-            if(!s->overflow_reported) { s->overflow_reported=1; /* visible via health; caller reports telemetry loss */ }
+            if(!s->overflow_reported) {
+                s->overflow_reported=1; s->overflow_pending=1;
+                memcpy(s->overflow_machine_id,f->machine_id,ARGUS_MACHINE_ID_LEN);
+            }
             continue;
         }
         if(n>=rcap || n>=ecap) return ARGUS_ERR_OVERFLOW;
@@ -321,13 +325,26 @@ int argus_contain_propose(ArgusContain *s, const ArgusCore *core,
 void argus_contain_health(const ArgusContain *s, ArgusContainHealth *out)
 { if(s&&out) *out=s->health; }
 
+int argus_contain_take_overflow_event(ArgusContain *s, ArgusEvent *out)
+{
+    if(!s || !out) return ARGUS_ERR_ARG;
+    if(!s->overflow_pending) return ARGUS_ERR_STATE;
+    if(s->next_proposal_sequence==0 || s->next_proposal_sequence==UINT64_MAX) return ARGUS_ERR_FULL;
+    memset(out,0,sizeof *out); out->version=ARGUS_ABI_VERSION; out->class_=ARGUS_CLASS_CRITICAL;
+    out->kind=ARGUS_EV_TELEMETRY_DROPPED; out->effect_class=ARGUS_EFFECT_NONE; out->outcome=ARGUS_OUTCOME_ERROR;
+    out->flags=ARGUS_FLAG_CONSUMER; out->sequence=s->next_proposal_sequence++;
+    out->code=ARGUS_ERR_FULL; out->cap_id=ARGUS_CAP_NONE; out->object_id=ARGUS_CLASS_CRITICAL; out->resource=1;
+    memcpy(out->machine_id,s->overflow_machine_id,ARGUS_MACHINE_ID_LEN); s->overflow_pending=0;
+    return ARGUS_OK;
+}
+
 void argus_contain_state_digest(const ArgusContain *s, uint8_t out[ARGUS_DIGEST_LEN])
 {
     if(!out) return;
     if(!s) {memset(out,0,ARGUS_DIGEST_LEN);return;}
     uint8_t b[ARGUS_CONTAIN_PENDING*(ARGUS_CONTAIN_REQUEST_SIZE+56)+ARGUS_CONTAIN_RECENT*80+256]; size_t n=0;
     static const uint8_t domain[]="AIENOS-ARGUS-CONTAIN-STATE-V1\0"; memcpy(b+n,domain,sizeof domain);n+=sizeof domain;
-    wr64(b+n,s->events);n+=8; wr64(b+n,s->next_request_id);n+=8; wr64(b+n,s->next_proposal_sequence);n+=8; wr64(b+n,s->window_start);n+=8; wr32(b+n,s->window_count);n+=4; wr32(b+n,s->executor_cap_id);n+=4; b[n++]=s->overflow_reported;
+    wr64(b+n,s->events);n+=8; wr64(b+n,s->next_request_id);n+=8; wr64(b+n,s->next_proposal_sequence);n+=8; wr64(b+n,s->window_start);n+=8; wr32(b+n,s->window_count);n+=4; wr32(b+n,s->executor_cap_id);n+=4; b[n++]=s->overflow_reported; b[n++]=s->overflow_pending; memcpy(b+n,s->overflow_machine_id,ARGUS_MACHINE_ID_LEN);n+=ARGUS_MACHINE_ID_LEN;
     for(size_t i=0;i<ARGUS_CONTAIN_PENDING;i++) { const Pending *p=&s->pending[i]; b[n++]=p->state; if(p->state==ST_FREE) continue;
         uint8_t enc[ARGUS_CONTAIN_REQUEST_SIZE]; (void)argus_contain_request_encode(&p->req,enc); memcpy(b+n,enc,sizeof enc);n+=sizeof enc;
         memcpy(b+n,p->digest,ARGUS_DIGEST_LEN);n+=ARGUS_DIGEST_LEN; b[n++]=p->kind4_count; wr64(b+n,p->entered);n+=8;wr64(b+n,p->decision_id);n+=8; }

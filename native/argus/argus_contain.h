@@ -27,4 +27,8 @@ void argus_contain_health(const ArgusContain *state, ArgusContainHealth *out);
 void argus_contain_state_digest(const ArgusContain *state,
                                 uint8_t out[ARGUS_DIGEST_LEN]);
 
+/* Pending-table overflow is reported once per lifetime. Drain the resulting
+ * CRITICAL telemetry-loss event after propose; ARGUS_ERR_STATE means none waits. */
+int argus_contain_take_overflow_event(ArgusContain *state, ArgusEvent *out);
+
 #endif
