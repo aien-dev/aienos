@@ -97,6 +97,12 @@ int main(void)
     argus_contain_state_digest(state,dig2);
     CHECK(memcmp(dig1,dig2,sizeof dig1)==0);
 
+    /* Non-live containment types remain explicitly synthetic in the request. */
+    f.containment=ARGUS_CONTAIN_FREEZE_PRINCIPAL; f.code=ARGUS_F_FORGED_CAPABILITY;
+    f.sequence=20001; np=0;
+    CHECK(argus_contain_propose(state,core,&f,1,req,4,prop,4,&np)==ARGUS_OK && np==1);
+    CHECK(req[0].flags==ARGUS_CREQ_SYNTHETIC && req[0].target.cap_id==ARGUS_CAP_NONE);
+
     printf("ARGUS-1 containment: %d checks, %d failures; state bytes=%zu\n",checks,failures,argus_contain_footprint());
     free(smem); free(cmem); return failures?1:0;
 }

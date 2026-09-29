@@ -281,6 +281,7 @@ int argus_contain_propose(ArgusContain *s, const ArgusCore *core,
         q.principal=(f->containment==ARGUS_CONTAIN_REVOKE_CAPABILITY)?c.subject:f->principal;
         q.target.cap_id=(f->containment==ARGUS_CONTAIN_REVOKE_CAPABILITY)?f->cap_id:ARGUS_CAP_NONE;
         q.target.generation=(f->containment==ARGUS_CONTAIN_REVOKE_CAPABILITY)?c.generation:0;
+        if (q.containment!=ARGUS_CONTAIN_LIVE_TYPE) q.flags=ARGUS_CREQ_SYNTHETIC;
         memcpy(q.machine_id,f->machine_id,ARGUS_MACHINE_ID_LEN); argus_finding_digest(f,q.finding_digest);
         q.request_id=s->next_request_id; q.finding_sequence=f->sequence; q.version=ARGUS_CONTAIN_REQUEST_VERSION;
         int duplicate=0;
