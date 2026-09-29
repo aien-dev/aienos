@@ -49,8 +49,13 @@ int stub_put_lease(StubState *s, const ArgusLeaseShadow *l);
 int stub_put_provider(StubState *s, const ArgusProviderShadow *p);
 void stub_set_world(StubState *s, uint64_t generation, const uint8_t digest[ARGUS_DIGEST_LEN], uint64_t sequence);
 
-/* Reference apply of one event AFTER detection (the lane E proposal for lane D). */
+/* Reference apply of one event AFTER detection, following the argus_abi.h apply
+ * rules and machine lifecycle (see stub_state.c). */
 int stub_state_apply(StubState *s, const ArgusEvent *ev);
+
+/* Local copy of lane B's argus_event_min_class table (weakest legal class per
+ * kind) used by the corpus generators until integration. */
+uint8_t stub_min_class(uint16_t kind);
 
 /* ---- corpora ---------------------------------------------------------------- */
 
@@ -60,12 +65,15 @@ typedef struct {
 } ArgusExpectedFinding;
 
 /* Deterministic synthetic "legal day": exactly `max` events (sequence 1..max),
- * every one legal. Replayed through detect-then-apply it must yield ZERO
- * findings (ARGUS_FALSE_POSITIVE_BASELINE, synthetic). Returns events written. */
+ * every one legal under the argus_abi.h validate and apply rules, every one
+ * attributed to a joined machine, lease ids never reused. Replayed through
+ * detect-then-apply it must yield ZERO findings (ARGUS_FALSE_POSITIVE_BASELINE,
+ * synthetic). Returns events written. */
 size_t argus_corpus_benign(ArgusEvent *out, size_t max, uint64_t seed);
 
 /* The same legal day with violations injected on a fixed cadence (one every
- * ARGUS_CORPUS_HOSTILE_EVERY events, cycling through all ten detectors).
+ * ARGUS_CORPUS_HOSTILE_EVERY events, cycling through 24 injection types that
+ * cover all twelve detectors, codes 1..10, 14 and 15).
  * Each injected event triggers exactly one finding; the (sequence, code)
  * pairs are written to `expect` (up to expect_max, count in *n_expect).
  * Returns events written (exactly `max`). */

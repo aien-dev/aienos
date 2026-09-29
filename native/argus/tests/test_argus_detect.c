@@ -142,19 +142,32 @@ static int run(const ArgusEvent *e)
     return rc;
 }
 
-/* Exactly one finding, with code `det`; checks the common fields. */
-static void expect_only(uint16_t det, const ArgusEvent *e, const char *what)
+/* Table entry for a finding code (ids are 1..10, 14, 15; not index + 1). */
+static const ArgusDetector *det_of(uint16_t id)
+{
+    for (size_t i = 0; i < argus_hard_detector_count; i++)
+        if (argus_hard_detectors[i].id == id)
+            return &argus_hard_detectors[i];
+    return NULL;
+}
+
+/* Exactly one finding, with code `det`; checks the common fields. sync/contain
+ * < 0 means "the detector table default". */
+static void expect_only_as(uint16_t det, const ArgusEvent *e, const char *what, int sync, int contain)
 {
     int rc = run(e);
     CHECK(rc == ARGUS_OK, "[%u %s] rc %d", det, what, rc);
-    CHECK(NF == 1, "[%u %s] expected 1 finding, got %zu", det, what, NF);
-    if (NF >= 1) {
+    CHECK(NF == 1, "[%u %s] expected 1 finding, got %zu (first code %u)", det, what, NF, NF ? F[0].code : 0);
+    const ArgusDetector *d = det_of(det);
+    CHECK(d != NULL, "[%u %s] no detector", det, what);
+    if (NF >= 1 && d != NULL) {
         const ArgusFinding *f = &F[0];
-        const ArgusDetector *d = &argus_hard_detectors[det - 1];
         CHECK(f->code == det, "[%u %s] code %u", det, what, f->code);
         CHECK(f->detector == det, "[%u %s] detector %u", det, what, f->detector);
         CHECK(f->confidence == ARGUS_CONF_DETERMINISTIC, "[%u %s] confidence", det, what);
-        CHECK(f->sync_allowed == d->sync_allowed, "[%u %s] sync", det, what);
+        CHECK(f->sync_allowed == (sync < 0 ? d->sync_allowed : sync), "[%u %s] sync %u", det, what, f->sync_allowed);
+        if (contain >= 0)
+            CHECK(f->containment == contain, "[%u %s] containment %u", det, what, f->containment);
         CHECK(f->sequence == e->sequence, "[%u %s] sequence", det, what);
         CHECK(f->principal == e->principal, "[%u %s] principal", det, what);
         CHECK(f->cap_id == e->cap_id && f->cap_generation == e->cap_generation, "[%u %s] cap", det, what);
@@ -163,6 +176,17 @@ static void expect_only(uint16_t det, const ArgusEvent *e, const char *what)
         CHECK(memcmp(f->event_digest, zero, 32) == 0, "[%u %s] event_digest must stay zero", det, what);
     }
     pos[det]++;
+}
+
+static void expect_only(uint16_t det, const ArgusEvent *e, const char *what)
+{
+    expect_only_as(det, e, what, -1, -1);
+}
+
+/* Self-report without shadow corroboration (G-2): sync 0, containment NONE. */
+static void expect_hearsay(uint16_t det, const ArgusEvent *e, const char *what)
+{
+    expect_only_as(det, e, what, 0, ARGUS_CONTAIN_NONE);
 }
 
 static void expect_none(uint16_t det, const ArgusEvent *e, const char *what)
@@ -192,7 +216,26 @@ static void t_forged(void)
     expect_only(1, &e, "unseen ref used OK");
     CHECK(F[0].severity == ARGUS_SEV_CRITICAL && F[0].containment == ARGUS_CONTAIN_FREEZE_PRINCIPAL, "d1 sev/contain");
     e = mk(ARGUS_EV_FORGED_CAPABILITY, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_BOUNDS);
-    expect_only(1, &e, "producer reports forgery");
+    expect_hearsay(1, &e, "producer reports forgery, no ref");
+    e = use(ARGUS_EV_FORGED_CAPABILITY, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_BOUNDS, 99, 1);
+    e.principal = 1;
+    expect_hearsay(1, &e, "forgery report names unseen slot + victim (G-2)");
+    e = use(ARGUS_EV_FORGED_CAPABILITY, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_BOUNDS, 1, 9);
+    e.principal = 8;
+    expect_hearsay(1, &e, "forgery report, principal is not the slot's subject");
+    e = use(ARGUS_EV_FORGED_CAPABILITY, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_BOUNDS, 1, 3);
+    expect_hearsay(1, &e, "forgery report at the minted generation");
+    e = use(ARGUS_EV_FORGED_CAPABILITY, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_BOUNDS, 1, 9);
+    expect_only_as(1, &e, "forgery report corroborated (subject's slot, unminted gen)", 1,
+                   ARGUS_CONTAIN_FREEZE_PRINCIPAL);
+    CHECK(F[0].prior_sequence == 10, "d1 corroborated prior = grant");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 1, 4);
+    expect_only(1, &e, "future generation used OK (G-4)");
+    CHECK(F[0].prior_sequence == 10 && F[0].containment == ARGUS_CONTAIN_FREEZE_PRINCIPAL, "d1 future fields");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 2, 5);
+    run(&e);
+    CHECK(NF == 2 && F[0].code == 1 && F[1].code == 3, "future gen of a revoked slot: 1 then 3 (%zu)", NF);
+    pos[1]++;
     e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, AIENOS_CAP_ERR_BOUNDS, 1, 3);
     expect_only(1, &e, "OK with ERR_BOUNDS");
     e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, AIENOS_CAP_ERR_CHAIN, 1, 3);
@@ -213,6 +256,11 @@ static void t_forged(void)
     expect_none(1, &e, "use after grant");
     e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 0, 0);
     expect_none(1, &e, "use with no cap reference");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_STALE_GEN, 1, 4);
+    expect_none(1, &e, "future generation refused");
+    e = use(ARGUS_EV_CAPABILITY_GRANTED, ARGUS_OUTCOME_OK, 0, 1, 4);
+    e.object_id = AIENOS_CAP_RIGHT_READ;
+    expect_none(1, &e, "re-grant at a higher generation");
 }
 
 static void t_stale(void)
@@ -224,7 +272,12 @@ static void t_stale(void)
     CHECK(F[0].prior_sequence == 10 && F[0].severity == ARGUS_SEV_HIGH &&
           F[0].containment == ARGUS_CONTAIN_REVOKE_CAPABILITY, "d2 fields");
     e = mk(ARGUS_EV_STALE_GENERATION, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_STALE_GEN);
-    expect_only(2, &e, "producer reports stale gen");
+    expect_hearsay(2, &e, "producer reports stale gen, no ref");
+    e = use(ARGUS_EV_STALE_GENERATION, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_STALE_GEN, 1, 2);
+    e.principal = 9;
+    expect_hearsay(2, &e, "stale report names another principal");
+    e = use(ARGUS_EV_STALE_GENERATION, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_STALE_GEN, 1, 2);
+    expect_only_as(2, &e, "stale report corroborated", 1, ARGUS_CONTAIN_REVOKE_CAPABILITY);
     e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, AIENOS_CAP_ERR_STALE_GEN, 1, 3);
     expect_only(2, &e, "OK with ERR_STALE_GEN");
 
@@ -302,13 +355,46 @@ static void t_signature(void)
     ArgusEvent e;
     reset();
     e = mk(ARGUS_EV_SIGNATURE_FAILURE, ARGUS_OUTCOME_DENIED, 0);
-    expect_only(5, &e, "signature failure (denied)");
-    CHECK(F[0].severity == ARGUS_SEV_HIGH && F[0].containment == ARGUS_CONTAIN_REJECT_ARTIFACT, "d5 fields");
+    expect_hearsay(5, &e, "signature failure (denied)");
+    CHECK(F[0].severity == ARGUS_SEV_HIGH, "d5 severity");
     e = mk(ARGUS_EV_SIGNATURE_FAILURE, ARGUS_OUTCOME_OK, 0);
-    expect_only(5, &e, "signature failure (ok)");
+    expect_hearsay(5, &e, "signature failure (ok)");
     e = mk(ARGUS_EV_ARTIFACT_ADMITTED, ARGUS_OUTCOME_OK, AIENOS_CAP_ERR_RIGHTS);
     memcpy(e.evidence_digest, AU, 32);
-    expect_only(5, &e, "admitted despite error code");
+    expect_only_as(5, &e, "admitted despite error code", 1, ARGUS_CONTAIN_REJECT_ARTIFACT);
+    e = mk(ARGUS_EV_INTEGRITY_VIOLATION, ARGUS_OUTCOME_ERROR, 0);
+    expect_hearsay(5, &e, "integrity violation reported (G-14)");
+    e = mk(ARGUS_EV_INTEGRITY_VIOLATION, ARGUS_OUTCOME_DENIED, 0);
+    expect_hearsay(5, &e, "integrity violation reported, denied");
+    /* stored policy / runtime digests (G-14) */
+    memcpy(st.policy, WD, 32);
+    memcpy(st.runtime, AL, 32);
+    e = mk(ARGUS_EV_POLICY_CHANGED, ARGUS_OUTCOME_OK, 0);
+    memcpy(e.evidence_digest, WX, 32);
+    expect_hearsay(5, &e, "policy digest replaced");
+    e = mk(ARGUS_EV_RUNTIME_BUILD_CHANGED, ARGUS_OUTCOME_OK, 0);
+    memcpy(e.evidence_digest, WX, 32);
+    expect_hearsay(5, &e, "runtime digest replaced");
+
+    e = mk(ARGUS_EV_POLICY_CHANGED, ARGUS_OUTCOME_OK, 0);
+    memcpy(e.evidence_digest, WD, 32);
+    expect_none(5, &e, "policy re-announced unchanged");
+    e = mk(ARGUS_EV_RUNTIME_BUILD_CHANGED, ARGUS_OUTCOME_OK, 0);
+    memcpy(e.evidence_digest, AL, 32);
+    expect_none(5, &e, "runtime re-announced unchanged");
+    e = mk(ARGUS_EV_POLICY_CHANGED, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_UNAUTHORIZED);
+    memcpy(e.evidence_digest, WX, 32);
+    expect_none(5, &e, "policy change refused");
+    memset(st.policy, 0, 32);
+    memset(st.runtime, 0, 32);
+    e = mk(ARGUS_EV_POLICY_CHANGED, ARGUS_OUTCOME_OK, 0);
+    memcpy(e.evidence_digest, WX, 32);
+    expect_none(5, &e, "first policy announcement (nothing stored)");
+    e = mk(ARGUS_EV_RUNTIME_BUILD_CHANGED, ARGUS_OUTCOME_OK, 0);
+    memcpy(e.evidence_digest, WX, 32);
+    expect_none(5, &e, "first runtime announcement (nothing stored)");
+    CHECK(step(&e) == 0, "announce runtime");
+    CHECK(memcmp(st.runtime, WX, 32) == 0, "runtime digest stored");
 
     e = mk(ARGUS_EV_ARTIFACT_ADMITTED, ARGUS_OUTCOME_OK, 0);
     memcpy(e.evidence_digest, AU, 32);
@@ -344,6 +430,18 @@ static void t_lease(void)
     expect_only(6, &e, "revoked lease");
     e = lease_ev(ARGUS_EV_CREDENTIAL_LEASE_USED, ARGUS_OUTCOME_OK, 0, 9, 7, 0x10);
     expect_only(6, &e, "unknown lease");
+    e = lease_ev(ARGUS_EV_CREDENTIAL_LEASE_CREATED, ARGUS_OUTCOME_OK, 0, 1, 9, UINT64_MAX);
+    expect_only(6, &e, "CREATED re-uses a LIVE lease id (G-26)");
+    CHECK(F[0].prior_sequence == 60, "d6 recreate prior = existing lease");
+    CHECK(step(&e) == 1, "recreate step");
+    e = lease_ev(ARGUS_EV_CREDENTIAL_LEASE_USED, ARGUS_OUTCOME_OK, 0, 1, 9, 0xFF);
+    expect_only(6, &e, "hijacker's use after a refused re-create");
+    e = lease_ev(ARGUS_EV_CREDENTIAL_LEASE_CREATED, ARGUS_OUTCOME_OK, 0, 2, 7, 0x10);
+    expect_only(6, &e, "CREATED re-uses a REVOKED lease id (ruling A)");
+    CHECK(F[0].prior_sequence == 61, "d6 revive prior = revocation");
+    CHECK(step(&e) == 1, "revive step");
+    e = lease_ev(ARGUS_EV_CREDENTIAL_LEASE_USED, ARGUS_OUTCOME_OK, 0, 2, 7, 0x10);
+    expect_only(6, &e, "revoked lease stays revoked after a refused re-create");
 
     e = lease_ev(ARGUS_EV_CREDENTIAL_LEASE_USED, ARGUS_OUTCOME_OK, 0, 1, 7, 0x30);
     expect_none(6, &e, "in scope by holder");
@@ -356,6 +454,10 @@ static void t_lease(void)
     CHECK(step(&e) == 0, "create step");
     e = lease_ev(ARGUS_EV_CREDENTIAL_LEASE_USED, ARGUS_OUTCOME_OK, 0, 9, 3, 0x0F);
     expect_none(6, &e, "use after creation");
+    e = lease_ev(ARGUS_EV_CREDENTIAL_LEASE_CREATED, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_UNAUTHORIZED, 1, 9, 0xFF);
+    expect_none(6, &e, "re-create refused by the authority");
+    e = lease_ev(ARGUS_EV_CREDENTIAL_LEASE_CREATED, ARGUS_OUTCOME_OK, 0, 10, 7, 0xFF);
+    expect_none(6, &e, "fresh lease id");
 }
 
 static void t_machine(void)
@@ -378,8 +480,37 @@ static void t_machine(void)
     memcpy(e.evidence_digest, WX, 32);
     memcpy(e.machine_id, MA, 32);
     expect_only(7, &e, "removed machine acts");
+    e = mk(ARGUS_EV_MACHINE_TRUST_CHANGED, ARGUS_OUTCOME_OK, 0);
+    memcpy(e.machine_id, MU, 32);
+    e.object_id = ARGUS_TRUST_RESTRICTED;
+    expect_only(7, &e, "TRUST_CHANGED for an unknown machine (G-10)");
+    CHECK(step(&e) == 1, "unknown trust change step");
+    ArgusMachineShadow ms;
+    CHECK(OPS->machine(V, MU, &ms) != ARGUS_OK, "unknown machine gets no entry from TRUST_CHANGED");
+    e.object_id = ARGUS_TRUST_TRUSTED;
+    expect_only(7, &e, "upward TRUST_CHANGED for an unknown machine is 7, not 15");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 1, 3);
+    e.flags = 0;
+    expect_only(7, &e, "live producer event with zero machine_id (G-8)");
+    CHECK(F[0].prior_sequence == 0, "d7 zero id prior");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_RIGHTS, 1, 3);
+    e.flags = 0;
+    expect_only(7, &e, "live refused event with zero machine_id");
+    e = mk(ARGUS_EV_MACHINE_JOINED, ARGUS_OUTCOME_OK, 0);
+    e.flags = 0;
+    expect_only(7, &e, "live JOINED with zero machine_id");
 
     reset();
+    e = mk(ARGUS_EV_TELEMETRY_DROPPED, ARGUS_OUTCOME_OK, 0);
+    e.flags = ARGUS_FLAG_CONSUMER;
+    e.class_ = ARGUS_CLASS_CRITICAL;
+    e.object_id = ARGUS_CLASS_SECURITY;
+    e.resource = 3;
+    expect_none(7, &e, "ARGUS's own TELEMETRY_DROPPED has no machine");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 1, 3);
+    e.flags = 0;
+    memcpy(e.machine_id, MA, 32);
+    expect_none(7, &e, "live producer event attributed to a joined machine");
     e = mk(ARGUS_EV_MACHINE_JOINED, ARGUS_OUTCOME_OK, 0);
     memcpy(e.machine_id, MU, 32);
     expect_none(7, &e, "new machine joins");
@@ -431,6 +562,35 @@ static void t_effect(void)
     e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 3, 1);
     e.effect_class = ARGUS_EFFECT_EPHEMERAL;
     expect_none(8, &e, "ephemeral use without effect right");
+
+    /* G-24: the kind wins over the label; EVIDENCE needs WRITE */
+    e = use(ARGUS_EV_EXTERNAL_EFFECT_COMMITTED, ARGUS_OUTCOME_OK, 0, 0, 0);
+    e.effect_class = ARGUS_EFFECT_NONE;
+    expect_only(8, &e, "EXTERNAL_EFFECT_COMMITTED labelled NONE, no cap");
+    e = use(ARGUS_EV_EXTERNAL_EFFECT_REQUESTED, ARGUS_OUTCOME_OK, 0, 3, 1);
+    e.effect_class = ARGUS_EFFECT_EVIDENCE;
+    expect_only(8, &e, "EXTERNAL_EFFECT_REQUESTED labelled EVIDENCE, cap without EFFECT");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 3, 1);
+    e.effect_class = ARGUS_EFFECT_EVIDENCE;
+    expect_only(8, &e, "EVIDENCE write under READ-only cap");
+    CHECK(F[0].prior_sequence == 30, "d8 evidence prior = grant");
+    e = use(ARGUS_EV_PROVIDER_USED, ARGUS_OUTCOME_OK, 0, 3, 1);
+    memcpy(e.evidence_digest, PL, 32);
+    e.effect_class = ARGUS_EFFECT_EVIDENCE;
+    expect_only(8, &e, "provider use writes EVIDENCE under READ-only cap");
+
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 1, 3);
+    e.effect_class = ARGUS_EFFECT_EVIDENCE;
+    expect_none(8, &e, "EVIDENCE write under WRITE cap");
+    e = use(ARGUS_EV_EXTERNAL_EFFECT_COMMITTED, ARGUS_OUTCOME_OK, 0, 1, 3);
+    e.effect_class = ARGUS_EFFECT_NONE;
+    expect_none(8, &e, "mislabelled commit under EFFECT cap");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_RIGHTS, 3, 1);
+    e.effect_class = ARGUS_EFFECT_EVIDENCE;
+    expect_none(8, &e, "EVIDENCE write refused");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 0, 0);
+    e.effect_class = ARGUS_EFFECT_EVIDENCE;
+    expect_none(8, &e, "EVIDENCE with no capability is out of scope");
 }
 
 static ArgusEvent world_ev(uint8_t outcome, uint64_t gen, const uint8_t *digest)
@@ -509,8 +669,22 @@ static void t_quarantine(void)
     expect_none(10, &e, "quarantined machine refused");
     e = mk(ARGUS_EV_MACHINE_TRUST_CHANGED, ARGUS_OUTCOME_OK, 0);
     memcpy(e.machine_id, MQ, 32);
+    e.object_id = ARGUS_TRUST_UNTRUSTED;
+    expect_none(10, &e, "quarantined machine lowered further (lifecycle exempt)");
     e.object_id = ARGUS_TRUST_TRUSTED;
-    expect_none(10, &e, "release from quarantine");
+    run(&e);
+    CHECK(NF == 1 && F[0].code == ARGUS_F_TRUST_ESCALATION, "self-release from quarantine is 15, not 10 (%zu)", NF);
+    neg[10]++;
+    e = mk(ARGUS_EV_PROVIDER_USED, ARGUS_OUTCOME_OK, 0);
+    memcpy(e.evidence_digest, PN, 32);
+    expect_only_as(10, &e, "never-discovered provider used (G-9)", 0, ARGUS_CONTAIN_QUARANTINE_PROVIDER);
+    CHECK(F[0].severity == ARGUS_SEV_HIGH && F[0].prior_sequence == 0, "d10 unseen provider fields");
+    e = mk(ARGUS_EV_PROVIDER_USED, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_UNAUTHORIZED);
+    memcpy(e.evidence_digest, PN, 32);
+    expect_none(10, &e, "never-discovered provider refused");
+    e = mk(ARGUS_EV_PROVIDER_CHANGED, ARGUS_OUTCOME_OK, 0);
+    memcpy(e.evidence_digest, PN, 32);
+    expect_none(10, &e, "PROVIDER_CHANGED is observation only");
     /* provider used before quarantine: silent; after: fires */
     e = mk(ARGUS_EV_PROVIDER_DISCOVERED, ARGUS_OUTCOME_OK, 0);
     memcpy(e.evidence_digest, PN, 32);
@@ -526,25 +700,189 @@ static void t_quarantine(void)
     expect_only(10, &e, "provider used after quarantine");
 }
 
+static void t_subject(void)
+{
+    ArgusEvent e;
+    reset();
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 1, 3);
+    e.principal = 8;
+    expect_only(14, &e, "live ref used OK by another principal (G-3)");
+    CHECK(F[0].prior_sequence == 10 && F[0].severity == ARGUS_SEV_HIGH &&
+          F[0].containment == ARGUS_CONTAIN_FREEZE_PRINCIPAL, "d14 fields");
+    e = use(ARGUS_EV_EXTERNAL_EFFECT_COMMITTED, ARGUS_OUTCOME_OK, 0, 1, 3);
+    e.effect_class = ARGUS_EFFECT_EXTERNAL;
+    e.principal = 8;
+    expect_only(14, &e, "effect committed by another principal");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 2, 1);
+    e.principal = 8;
+    run(&e);
+    CHECK(NF == 2 && F[0].code == 3 && F[1].code == 14, "revoked ref by another principal: 3 then 14 (%zu)", NF);
+    pos[14]++;
+
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 1, 3);
+    expect_none(14, &e, "used by its subject");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_SUBJECT, 1, 3);
+    e.principal = 8;
+    expect_none(14, &e, "other principal refused by the authority");
+    e = use(ARGUS_EV_CAPABILITY_DENIED, ARGUS_OUTCOME_DENIED, AIENOS_CAP_ERR_SUBJECT, 1, 3);
+    e.principal = 8;
+    expect_none(14, &e, "CAPABILITY_DENIED for another principal");
+    e = use(ARGUS_EV_CAPABILITY_GRANTED, ARGUS_OUTCOME_OK, 0, 1, 4);
+    e.principal = 8;
+    e.object_id = AIENOS_CAP_RIGHT_READ;
+    expect_none(14, &e, "re-grant to a new subject");
+    CHECK(step(&e) == 0, "re-grant step");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 1, 4);
+    e.principal = 8;
+    expect_none(14, &e, "new subject uses its grant");
+    e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 99, 1);
+    e.principal = 8;
+    run(&e);
+    CHECK(NF == 1 && F[0].code == 1, "unseen slot is detector 1's only (%zu)", NF);
+    neg[14]++;
+}
+
+static ArgusEvent trust_ev(uint16_t kind, const uint8_t *id, uint32_t trust)
+{
+    ArgusEvent e = mk(kind, ARGUS_OUTCOME_OK, 0);
+    memcpy(e.machine_id, id, 32);
+    e.object_id = trust;
+    return e;
+}
+
+static void t_trust(void)
+{
+    ArgusEvent e;
+    ArgusMachineShadow ms;
+    reset();
+    e = trust_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, MQ, ARGUS_TRUST_TRUSTED);
+    expect_only(15, &e, "QUARANTINED -> TRUSTED (G-8)");
+    CHECK(F[0].prior_sequence == 40 && F[0].sync_allowed == 0 &&
+          F[0].containment == ARGUS_CONTAIN_REQUIRE_REATTESTATION, "d15 fields");
+    CHECK(step(&e) == 1, "escalation step");
+    CHECK(OPS->machine(V, MQ, &ms) == ARGUS_OK && ms.trust == ARGUS_TRUST_QUARANTINED, "escalation ignored by apply");
+    e = trust_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, MQ, ARGUS_TRUST_REATTESTATION_REQUIRED);
+    expect_only(15, &e, "QUARANTINED -> REATTESTATION_REQUIRED (rank, not enum order)");
+    e = trust_ev(ARGUS_EV_MACHINE_JOINED, MU, ARGUS_TRUST_TRUSTED);
+    expect_only(15, &e, "new machine declares itself TRUSTED (G-10)");
+    CHECK(F[0].prior_sequence == 0, "d15 new machine prior");
+    CHECK(step(&e) == 1, "declared join step");
+    CHECK(OPS->machine(V, MU, &ms) == ARGUS_OK && ms.trust == ARGUS_TRUST_OBSERVED && ms.joined_sequence != 0,
+          "JOINED capped at OBSERVED");
+    e = mk(ARGUS_EV_MACHINE_REMOVED, ARGUS_OUTCOME_OK, 0);
+    memcpy(e.machine_id, MQ, 32);
+    CHECK(step(&e) == 0, "remove quarantined machine");
+    CHECK(OPS->machine(V, MQ, &ms) == ARGUS_OK && ms.joined_sequence == 0 && ms.trust == ARGUS_TRUST_QUARANTINED,
+          "tombstone keeps quarantine");
+    e = trust_ev(ARGUS_EV_MACHINE_JOINED, MQ, ARGUS_TRUST_OBSERVED);
+    expect_only(15, &e, "re-join over a quarantined tombstone claims OBSERVED (G-8)");
+    CHECK(F[0].prior_sequence == 40, "d15 tombstone prior");
+
+    reset();
+    e = trust_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, MQ, ARGUS_TRUST_UNTRUSTED);
+    expect_none(15, &e, "downward move");
+    e = trust_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, MQ, ARGUS_TRUST_QUARANTINED);
+    expect_none(15, &e, "same trust");
+    e = trust_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, MQ, 0);
+    expect_none(15, &e, "UNKNOWN value ignored");
+    e = trust_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, MQ, 7);
+    expect_none(15, &e, "out-of-range value ignored");
+    e = trust_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, MA, ARGUS_TRUST_OBSERVED);
+    expect_none(15, &e, "TRUSTED -> OBSERVED");
+    e = trust_ev(ARGUS_EV_MACHINE_TRUST_CHANGED, MQ, ARGUS_TRUST_TRUSTED);
+    e.outcome = ARGUS_OUTCOME_DENIED;
+    expect_none(15, &e, "upward move refused");
+    e = trust_ev(ARGUS_EV_MACHINE_JOINED, MU, 0);
+    expect_none(15, &e, "join with no claim");
+    e = trust_ev(ARGUS_EV_MACHINE_JOINED, MU, ARGUS_TRUST_OBSERVED);
+    expect_none(15, &e, "join claiming OBSERVED");
+    e = trust_ev(ARGUS_EV_MACHINE_JOINED, MU, ARGUS_TRUST_RESTRICTED);
+    expect_none(15, &e, "join claiming RESTRICTED");
+    e = trust_ev(ARGUS_EV_MACHINE_JOINED, MU, ARGUS_TRUST_TRUSTED);
+    e.outcome = ARGUS_OUTCOME_DENIED;
+    expect_none(15, &e, "refused join claiming TRUSTED");
+    e = trust_ev(ARGUS_EV_MACHINE_JOINED, MA, ARGUS_TRUST_TRUSTED);
+    run(&e);
+    CHECK(NF == 1 && F[0].code == 7, "re-join of a joined machine is 7 only (%zu)", NF);
+    neg[15]++;
+    e = mk(ARGUS_EV_MACHINE_REMOVED, ARGUS_OUTCOME_OK, 0);
+    memcpy(e.machine_id, MQ, 32);
+    CHECK(step(&e) == 0, "remove quarantined machine");
+    e = trust_ev(ARGUS_EV_MACHINE_JOINED, MQ, 0);
+    expect_none(15, &e, "re-join over tombstone without a claim");
+    CHECK(step(&e) == 0, "re-join step");
+    CHECK(OPS->machine(V, MQ, &ms) == ARGUS_OK && ms.trust == ARGUS_TRUST_QUARANTINED && ms.joined_sequence != 0,
+          "re-join does not launder the quarantine");
+}
+
+/* Stub apply follows the argus_abi.h apply rules (so stub-clean == core-clean). */
+static void t_apply(void)
+{
+    ArgusEvent e;
+    ArgusCapShadow cs;
+    ArgusLeaseShadow ls;
+    ArgusWorldShadow ws;
+    ArgusProviderShadow ps;
+    reset();
+    e = use(ARGUS_EV_CAPABILITY_GRANTED, ARGUS_OUTCOME_OK, 0, 2, 1);   /* replay of the revoked grant */
+    e.object_id = AIENOS_CAP_RIGHT_READ;
+    stub_state_apply(&st, &e);
+    CHECK(OPS->cap(V, 2, &cs) == ARGUS_OK && cs.state == ARGUS_SHADOW_REVOKED, "GRANTED at shadow gen not applied");
+    e = use(ARGUS_EV_CAPABILITY_REVOKED, ARGUS_OUTCOME_OK, 0, 77, UINT64_MAX);
+    stub_state_apply(&st, &e);
+    CHECK(OPS->cap(V, 77, &cs) != ARGUS_OK, "REVOKED of an unseen slot creates nothing");
+    e = lease_ev(ARGUS_EV_CREDENTIAL_LEASE_CREATED, ARGUS_OUTCOME_OK, 0, 1, 9, UINT64_MAX);
+    stub_state_apply(&st, &e);
+    CHECK(OPS->lease(V, 1, &ls) == ARGUS_OK && ls.subject == 7 && ls.scope == 0xF0, "LIVE lease not rewritten");
+    e = lease_ev(ARGUS_EV_CREDENTIAL_LEASE_CREATED, ARGUS_OUTCOME_OK, 0, 2, 7, 1);
+    stub_state_apply(&st, &e);
+    CHECK(OPS->lease(V, 2, &ls) == ARGUS_OK && ls.state == ARGUS_SHADOW_REVOKED, "REVOKED lease not revived");
+    e = world_ev(ARGUS_OUTCOME_OK, 7, WX);
+    stub_state_apply(&st, &e);
+    CHECK(OPS->world(V, &ws) == ARGUS_OK && ws.generation == 5, "skipping commit not adopted");
+    e = world_ev(ARGUS_OUTCOME_OK, 6, WX);
+    stub_state_apply(&st, &e);
+    CHECK(OPS->world(V, &ws) == ARGUS_OK && ws.generation == 6, "+1 commit adopted");
+    e = mk(ARGUS_EV_PROVIDER_DISCOVERED, ARGUS_OUTCOME_OK, 0);
+    memcpy(e.evidence_digest, PQ, 32);
+    stub_state_apply(&st, &e);
+    CHECK(OPS->provider(V, PQ, &ps) == ARGUS_OK && ps.state == ARGUS_SHADOW_REVOKED, "rediscovery keeps quarantine");
+    CHECK(stub_min_class(ARGUS_EV_CAPABILITY_REVOKED) == ARGUS_CLASS_CRITICAL &&
+          stub_min_class(ARGUS_EV_WORLD_COMMITTED) == ARGUS_CLASS_SECURITY &&
+          stub_min_class(ARGUS_EV_PROVIDER_USED) == ARGUS_CLASS_AUDIT &&
+          stub_min_class(ARGUS_EV_POLICY_CHANGED) == ARGUS_CLASS_CRITICAL, "min class table spot checks");
+}
+
 /* ---- table, mirrors, runner ------------------------------------------------ */
 
 static void t_table(void)
 {
-    static const uint8_t sync[11] = { 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1 };
-    static const uint8_t contain[11] = {
-        0, ARGUS_CONTAIN_FREEZE_PRINCIPAL, ARGUS_CONTAIN_REVOKE_CAPABILITY, ARGUS_CONTAIN_FREEZE_PRINCIPAL,
+    static const uint16_t ids[ARGUS_HARD_DETECTOR_COUNT] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15 };
+    static const uint8_t sync[ARGUS_HARD_DETECTOR_COUNT] = { 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0 };
+    static const uint8_t contain[ARGUS_HARD_DETECTOR_COUNT] = {
+        ARGUS_CONTAIN_FREEZE_PRINCIPAL, ARGUS_CONTAIN_REVOKE_CAPABILITY, ARGUS_CONTAIN_FREEZE_PRINCIPAL,
         ARGUS_CONTAIN_REJECT_ARTIFACT, ARGUS_CONTAIN_REJECT_ARTIFACT, ARGUS_CONTAIN_REVOKE_CREDENTIAL_LEASE,
         ARGUS_CONTAIN_REQUIRE_REATTESTATION, ARGUS_CONTAIN_PAUSE_EXTERNAL_EFFECTS, ARGUS_CONTAIN_RAISE_EFFECT_CLASS,
-        ARGUS_CONTAIN_QUARANTINE_PROVIDER,
+        ARGUS_CONTAIN_QUARANTINE_PROVIDER, ARGUS_CONTAIN_FREEZE_PRINCIPAL, ARGUS_CONTAIN_REQUIRE_REATTESTATION,
     };
-    CHECK(argus_hard_detector_count == 10, "detector count %zu", argus_hard_detector_count);
+    CHECK(argus_hard_detector_count == ARGUS_HARD_DETECTOR_COUNT && argus_hard_detector_count == 12,
+          "detector count %zu", argus_hard_detector_count);
     for (size_t i = 0; i < argus_hard_detector_count; i++) {
         const ArgusDetector *d = &argus_hard_detectors[i];
-        CHECK(d->id == i + 1, "table order at %zu", i);
-        CHECK(d->sync_allowed == sync[i + 1], "sync_allowed of %u", d->id);
-        CHECK(d->containment == contain[i + 1], "containment of %u", d->id);
+        CHECK(d->id == ids[i], "table order at %zu (id %u)", i, d->id);
+        CHECK(d->id != ARGUS_F_TELEMETRY_LOSS && d->id != ARGUS_F_SEQUENCE_ANOMALY &&
+              d->id != ARGUS_F_AUTHORITY_REPLAY && d->id != ARGUS_F_MALFORMED_EVENT, "core-only code %u in table", d->id);
+        CHECK(d->sync_allowed == sync[i], "sync_allowed of %u", d->id);
+        CHECK(d->containment == contain[i], "containment of %u", d->id);
         CHECK(d->name != NULL && d->fn != NULL, "name/fn of %u", d->id);
     }
+    CHECK(argus_trust_rank(ARGUS_TRUST_TRUSTED) < argus_trust_rank(ARGUS_TRUST_OBSERVED) &&
+          argus_trust_rank(ARGUS_TRUST_OBSERVED) < argus_trust_rank(ARGUS_TRUST_REATTESTATION_REQUIRED) &&
+          argus_trust_rank(ARGUS_TRUST_REATTESTATION_REQUIRED) < argus_trust_rank(ARGUS_TRUST_RESTRICTED) &&
+          argus_trust_rank(ARGUS_TRUST_RESTRICTED) < argus_trust_rank(ARGUS_TRUST_QUARANTINED) &&
+          argus_trust_rank(ARGUS_TRUST_QUARANTINED) < argus_trust_rank(ARGUS_TRUST_UNTRUSTED) &&
+          argus_trust_rank(ARGUS_TRUST_UNKNOWN) < 0 && argus_trust_rank(7) < 0, "trust rank order (header)");
+    CHECK(ARGUS_AUTH_RIGHT_WRITE == AIENOS_CAP_RIGHT_WRITE, "mirror RIGHT_WRITE");
     CHECK(ARGUS_AUTH_OK == AIENOS_CAP_OK, "mirror OK");
     CHECK(ARGUS_AUTH_ERR_BOUNDS == AIENOS_CAP_ERR_BOUNDS, "mirror BOUNDS");
     CHECK(ARGUS_AUTH_ERR_STALE_GEN == AIENOS_CAP_ERR_STALE_GEN, "mirror STALE_GEN");
@@ -568,6 +906,12 @@ static void t_runner(void)
     ArgusStateOps holed = *OPS;
     holed.lease = NULL;
     CHECK(argus_detect_run(&holed, V, &e, F, 4, &n) == ARGUS_ERR_ARG, "missing op");
+    holed = *OPS;
+    holed.policy_digest = NULL;
+    CHECK(argus_detect_run(&holed, V, &e, F, 4, &n) == ARGUS_ERR_ARG, "missing policy_digest op");
+    holed = *OPS;
+    holed.runtime_digest = NULL;
+    CHECK(argus_detect_run(&holed, V, &e, F, 4, &n) == ARGUS_ERR_ARG, "missing runtime_digest op");
     CHECK(argus_detect_run(OPS, V, &e, NULL, 0, &n) == ARGUS_OK && n == 0, "clean event, no room needed");
 
     e = use(ARGUS_EV_CAPABILITY_USED, ARGUS_OUTCOME_OK, 0, 99, 1);
@@ -611,13 +955,40 @@ static size_t replay(const ArgusEvent *evs, size_t n, ArgusFinding *all, size_t 
     return total;
 }
 
-static void check_stream_shape(const ArgusEvent *evs, size_t n)
+/* Stream obeys the argus_abi.h validate rules and the corpus conventions:
+ * class never weaker than the kind minimum, no CONSUMER flag, cap_id <
+ * ARGUS_CAP_MAX, EXTERNAL_EFFECT_* labelled EXTERNAL, every event attributed
+ * to a machine, and (benign only) every LEASE_CREATED on a fresh id. */
+static void check_stream_shape(const ArgusEvent *evs, size_t n, int benign)
 {
+    static uint8_t lease_seen[1u << 16];
+    memset(lease_seen, 0, sizeof lease_seen);
+    static const uint8_t zero[ARGUS_MACHINE_ID_LEN];
+    size_t bad = 0, lease_reuse = 0, lease_ids = 0;
     for (size_t i = 0; i < n; i++) {
-        CHECK(evs[i].version == ARGUS_ABI_VERSION && evs[i].sequence == i + 1 && evs[i].kind != 0 &&
-              evs[i].outcome >= 1 && evs[i].outcome <= ARGUS_OUTCOME_MAX && evs[i].flags == ARGUS_FLAG_SYNTHETIC,
-              "stream shape at %zu", i);
+        const ArgusEvent *e = &evs[i];
+        int ok = e->version == ARGUS_ABI_VERSION && e->sequence == i + 1 && e->kind != 0 &&
+                 e->outcome >= 1 && e->outcome <= ARGUS_OUTCOME_MAX && e->flags == ARGUS_FLAG_SYNTHETIC &&
+                 e->class_ >= 1 && e->class_ <= stub_min_class(e->kind) && e->cap_id < ARGUS_CAP_MAX &&
+                 memcmp(e->machine_id, zero, sizeof zero) != 0;
+        if ((e->kind == ARGUS_EV_EXTERNAL_EFFECT_REQUESTED || e->kind == ARGUS_EV_EXTERNAL_EFFECT_DENIED ||
+             e->kind == ARGUS_EV_EXTERNAL_EFFECT_COMMITTED) && e->effect_class != ARGUS_EFFECT_EXTERNAL)
+            ok = 0;
+        if (!ok && bad++ < 5)
+            CHECK(0, "stream shape at %zu (kind %u class %u)", i, e->kind, e->class_);
+        if (e->kind == ARGUS_EV_CREDENTIAL_LEASE_CREATED && e->outcome == ARGUS_OUTCOME_OK) {
+            CHECK(e->object_id != 0 && e->object_id < (1u << 16), "lease id range at %zu", i);
+            if (e->object_id < (1u << 16)) {
+                if (lease_seen[e->object_id]) lease_reuse++;
+                else lease_ids++;
+                lease_seen[e->object_id] = 1;
+            }
+        }
     }
+    CHECK(bad == 0, "%zu events break the stream shape", bad);
+    CHECK(lease_ids <= 56, "distinct lease ids %zu exceed the core's table margin", lease_ids);
+    if (benign)
+        CHECK(lease_reuse == 0, "benign stream re-uses %zu lease ids (ruling A)", lease_reuse);
 }
 
 static size_t benign_findings_seed1;
@@ -628,7 +999,7 @@ static void t_benign(void)
     size_t outcomes[4] = {0};
     size_t n = argus_corpus_benign(corpus, CORPUS_N, 1);
     CHECK(n == CORPUS_N, "benign size %zu", n);
-    check_stream_shape(corpus, n);
+    check_stream_shape(corpus, n, 1);
     for (size_t i = 0; i < n; i++) { kinds[corpus[i].kind]++; outcomes[corpus[i].outcome]++; }
     size_t codes[ARGUS_F_MAX + 1] = {0};
     benign_findings_seed1 = replay(corpus, n, NULL, 0, codes);
@@ -641,10 +1012,18 @@ static void t_benign(void)
     for (int k = 0; k <= ARGUS_EV_KIND_MAX; k++)
         if (kinds[k]) { printf(" %d:%zu", k, kinds[k]); distinct++; }
     printf(" (%zu distinct)\n", distinct);
-    for (uint64_t seed = 2; seed <= 9; seed++) {
+    for (uint64_t seed = 1; seed <= 9; seed++) {
         n = argus_corpus_benign(corpus, CORPUS_N, seed);
+        check_stream_shape(corpus, n, 1);
         size_t f = replay(corpus, n, NULL, 0, NULL);
         CHECK(f == 0, "benign corpus seed %llu: %zu findings", (unsigned long long)seed, f);
+        /* the same day from a live producer (no SYNTHETIC flag): the zero
+         * machine_id rule must not fire, every event is attributed */
+        for (size_t i = 0; i < n; i++) corpus[i].flags = 0;
+        size_t fl = replay(corpus, n, NULL, 0, NULL);
+        CHECK(fl == 0, "benign corpus seed %llu as live producer: %zu findings", (unsigned long long)seed, fl);
+        printf("benign seed %llu: %zu events, %zu findings (synthetic), %zu findings (live flags)\n",
+               (unsigned long long)seed, n, f, fl);
     }
     /* determinism of the generator */
     argus_corpus_benign(corpus, CORPUS_N, 7);
@@ -662,7 +1041,7 @@ static void t_hostile(void)
     size_t nex = 0;
     size_t n = argus_corpus_hostile(corpus, CORPUS_N, 1, ex, 512, &nex);
     CHECK(n == CORPUS_N, "hostile size");
-    check_stream_shape(corpus, n);
+    check_stream_shape(corpus, n, 0);
     size_t exp_codes[ARGUS_F_MAX + 1] = {0}, got_codes[ARGUS_F_MAX + 1] = {0};
     for (size_t i = 0; i < nex; i++) exp_codes[ex[i].code]++;
     size_t nf = replay(corpus, n, hf1, 512, got_codes);
@@ -674,9 +1053,11 @@ static void t_hostile(void)
                    (unsigned long long)hf1[i].sequence, hf1[i].code, (unsigned long long)ex[i].sequence, ex[i].code);
     }
     printf("hostile corpus seed 1: %zu events, expected %zu, detected %zu, exact matches %zu; per code:", n, nex, nf, match);
-    for (int c = 1; c <= 10; c++) {
-        printf(" %d:%zu/%zu", c, got_codes[c], exp_codes[c]);
-        CHECK(exp_codes[c] > 0, "hostile corpus injects code %d", c);
+    for (size_t k = 0; k < argus_hard_detector_count; k++) {
+        uint16_t c = argus_hard_detectors[k].id;
+        printf(" %u:%zu/%zu", c, got_codes[c], exp_codes[c]);
+        CHECK(exp_codes[c] > 0, "hostile corpus injects code %u", c);
+        CHECK(got_codes[c] == exp_codes[c], "hostile code %u: detected %zu expected %zu", c, got_codes[c], exp_codes[c]);
     }
     printf("\n");
     /* determinism: same stream twice -> byte-identical findings */
@@ -710,13 +1091,17 @@ int main(void)
     t_effect();
     t_world();
     t_quarantine();
+    t_subject();
+    t_trust();
+    t_apply();
     t_benign();
     t_hostile();
 
     printf("per-detector cases (positive/negative):\n");
-    for (int d = 1; d <= 10; d++) {
-        printf("  %2d %-30s %d/%d\n", d, argus_hard_detectors[d - 1].name, pos[d], neg[d]);
-        CHECK(pos[d] >= 1 && neg[d] >= 2, "coverage for detector %d", d);
+    for (size_t k = 0; k < argus_hard_detector_count; k++) {
+        uint16_t d = argus_hard_detectors[k].id;
+        printf("  %2u %-30s %d/%d\n", d, argus_hard_detectors[k].name, pos[d], neg[d]);
+        CHECK(pos[d] >= 1 && neg[d] >= 2, "coverage for detector %u", d);
     }
     printf("%d checks, %d failures\n", checks, failures);
     if (failures) {
