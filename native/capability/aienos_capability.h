@@ -5,10 +5,11 @@
  * reaction world is given the view. Cognition has no path to the admin.
  *
  * Slot rules: a reference is an index plus a generation, a reused slot does
- * not honor the old reference, generation never wraps, delegation can only
- * narrow rights, and revoking an ancestor revokes the descendants. Each
- * entry carries its subject, epoch, lease, full 64-bit resource, and office
- * rights that cannot be delegated.
+ * not honor the old reference, generation is 64 bits and never wraps, a
+ * restarted table starts above every generation the old table used,
+ * delegation can only narrow rights, and revoking an ancestor revokes the
+ * descendants. Each entry carries its subject, epoch, lease, full 64-bit
+ * resource, and office rights that cannot be delegated.
  *
  * The declarations below match omega/src/runtime/aienos_cap.h in name and
  * layout, so the reaction world links this file without change.
@@ -73,12 +74,12 @@ typedef struct AienosCapView AienosCapView;
 
 typedef struct {
     uint32_t cap_id;
-    uint32_t generation;
+    uint64_t generation;
 } AienosCapRef;
 
 typedef struct {
     uint32_t cap_id;
-    uint32_t generation;
+    uint64_t generation;
     uint32_t state;
     uint32_t issuer;
     uint32_t subject;
@@ -87,9 +88,9 @@ typedef struct {
     uint64_t epoch;
     uint64_t lease_expiry;
     uint32_t parent_id;
-    uint32_t parent_generation;
+    uint64_t parent_generation;
     uint32_t minted_by_id;
-    uint32_t minted_by_generation;
+    uint64_t minted_by_generation;
 } AienosCapEntry;
 
 typedef struct {
@@ -120,10 +121,13 @@ int aienos_cap_cognition_mint(const AienosCapView *view, const AienosCapMint *re
                              const uint8_t *token);
 int aienos_cap_cognition_admin(const AienosCapView *view, uint32_t op, AienosCapRef authority,
                               AienosCapRef target);
-int aienos_cap_force_generation(AienosCapAdmin *admin, uint32_t cap_id, uint32_t generation);
-int aienos_cap_generation_advance(uint32_t generation, uint32_t *out);
+int aienos_cap_force_generation(AienosCapAdmin *admin, uint32_t cap_id, uint64_t generation);
+int aienos_cap_generation_advance(uint64_t generation, uint64_t *out);
 
-/* Office token check, constant time. The token never enters the table. */
+/* Office token check, constant time. The token never enters the table.
+ * Nothing in this library calls it: admin operations are gated by holding
+ * the admin handle plus a live reference with the matching office right.
+ * The token is kept for a caller that wants a second factor. */
 int aienos_cap_authorize(const AienosCapAdmin *admin, const uint8_t *presented);
 
 #endif

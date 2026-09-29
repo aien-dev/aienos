@@ -5,7 +5,7 @@
  * the clock, or change the epoch. Those operations take AienosCapAdmin, and
  * they refuse to run unless the caller presents a live reference holding the
  * matching office right. The office token is held beside the table, never in
- * it.
+ * it; no operation here checks it (see aienos_cap_authorize).
  */
 #include "aienos_capability.h"
 
@@ -15,9 +15,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef struct {
-    uint32_t boot_gen;
+    uint64_t boot_gen;
     uint64_t epoch;
     uint64_t clock;
     AienosCapEntry entries[AIENOS_CAP_MAX];
@@ -42,24 +43,42 @@ struct AienosCapView {
 };
 
 /* A later authority starts higher, so a reference from a stopped authority
- * cannot validate against the new one. */
-static atomic_uint next_boot_gen = 1;
+ * cannot validate against the new one. The start is the largest of: one
+ * past the last start handed out in this process, one past every
+ * generation the replaced table used (`floor`), and the time since boot in
+ * nanoseconds shifted left by 8. The time term keeps a new process above an
+ * old one on the same boot: a slot would need more than 256 reclaims per
+ * nanosecond to catch up with it. */
+static _Atomic uint64_t last_boot_gen = 0;
 
-static int take_boot_gen(uint32_t *out) {
-    unsigned cur = atomic_load_explicit(&next_boot_gen, memory_order_relaxed);
+static uint64_t boot_time_seed(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_BOOTTIME, &ts) != 0) return 0;
+    uint64_t ns = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+    if (ns > (UINT64_MAX >> 9)) return 0;
+    return ns << 8;
+}
+
+static int take_boot_gen(uint64_t floor, uint64_t *out) {
+    uint64_t seed = boot_time_seed();
+    uint64_t cur = atomic_load_explicit(&last_boot_gen, memory_order_relaxed);
     for (;;) {
-        if (cur == 0 || cur == UINT32_MAX) return AIENOS_CAP_ERR_EXHAUSTED;
-        if (atomic_compare_exchange_weak_explicit(&next_boot_gen, &cur, cur + 1,
+        if (cur == UINT64_MAX) return AIENOS_CAP_ERR_EXHAUSTED;
+        uint64_t next = cur + 1;
+        if (floor > next) next = floor;
+        if (seed > next) next = seed;
+        if (next == UINT64_MAX) return AIENOS_CAP_ERR_EXHAUSTED;
+        if (atomic_compare_exchange_weak_explicit(&last_boot_gen, &cur, next,
                                                   memory_order_acq_rel,
                                                   memory_order_relaxed)) {
-            *out = cur;
+            *out = next;
             return AIENOS_CAP_OK;
         }
     }
 }
 
-int aienos_cap_generation_advance(uint32_t generation, uint32_t *out) {
-    if (generation == UINT32_MAX) return AIENOS_CAP_ERR_EXHAUSTED;
+int aienos_cap_generation_advance(uint64_t generation, uint64_t *out) {
+    if (generation == UINT64_MAX) return AIENOS_CAP_ERR_EXHAUSTED;
     if (out) *out = generation + 1;
     return AIENOS_CAP_OK;
 }
@@ -74,8 +93,21 @@ static bool expired(const CapState *s, const AienosCapEntry *e) {
     return e->lease_expiry != 0 && s->clock >= e->lease_expiry;
 }
 
-static int bootstrap(CapState *s, uint32_t boot_gen) {
-    if (boot_gen == 0 || boot_gen == UINT32_MAX) return AIENOS_CAP_ERR_EXHAUSTED;
+/* One past the largest generation anywhere in the table, including the
+ * generations recorded for parents and minters. */
+static uint64_t table_floor(const CapState *s) {
+    uint64_t top = s->boot_gen;
+    for (uint32_t i = 0; i < AIENOS_CAP_MAX; i++) {
+        const AienosCapEntry *e = &s->entries[i];
+        if (e->generation > top) top = e->generation;
+        if (e->parent_generation > top) top = e->parent_generation;
+        if (e->minted_by_generation > top) top = e->minted_by_generation;
+    }
+    return top == UINT64_MAX ? UINT64_MAX : top + 1;
+}
+
+static int bootstrap(CapState *s, uint64_t boot_gen) {
+    if (boot_gen == 0 || boot_gen == UINT64_MAX) return AIENOS_CAP_ERR_EXHAUSTED;
     memset(s, 0, sizeof *s);
     s->boot_gen = boot_gen;
     s->epoch = 1;
@@ -233,7 +265,7 @@ static int state_mint(CapState *s, const AienosCapMint *r, AienosCapRef *out) {
     for (uint32_t i = 0; i < AIENOS_CAP_MAX; i++) {
         AienosCapEntry *e = &s->entries[i];
         if (e->state != AIENOS_CAP_STATE_FREE) continue;
-        if (e->generation == UINT32_MAX) {
+        if (e->generation == UINT64_MAX) {
             saw_exhausted = true;
             continue;
         }
@@ -299,7 +331,7 @@ static int state_reclaim(CapState *s, AienosCapRef authority, uint32_t cap_id) {
     if (cap_id >= AIENOS_CAP_MAX) return AIENOS_CAP_ERR_BOUNDS;
     AienosCapEntry *e = &s->entries[cap_id];
     if (e->state != AIENOS_CAP_STATE_REVOKED) return AIENOS_CAP_ERR_STATE;
-    uint32_t next;
+    uint64_t next;
     rc = aienos_cap_generation_advance(e->generation, &next);
     if (rc != AIENOS_CAP_OK) return rc;
     e->generation = next;
@@ -329,9 +361,9 @@ static int state_bump_epoch(CapState *s, AienosCapRef authority) {
 }
 
 /* Test seam. Puts a free or revoked slot on a chosen generation so the
- * exhaustion rule can be shown without four billion reclamations. Refuses a
+ * exhaustion rule can be shown without 2^64 reclamations. Refuses a
  * live slot, so it cannot mint a forged generation. */
-static int state_force_generation(CapState *s, uint32_t cap_id, uint32_t generation) {
+static int state_force_generation(CapState *s, uint32_t cap_id, uint64_t generation) {
     if (cap_id >= AIENOS_CAP_MAX) return AIENOS_CAP_ERR_BOUNDS;
     AienosCapEntry *e = &s->entries[cap_id];
     if (e->state == AIENOS_CAP_STATE_LIVE) return AIENOS_CAP_ERR_STATE;
@@ -367,8 +399,8 @@ static void release(CapShared *shared) {
 
 int aienos_cap_start(AienosCapAdmin **admin_out, AienosCapView **view_out) {
     if (!admin_out || !view_out) return AIENOS_CAP_ERR_STATE;
-    uint32_t boot;
-    int rc = take_boot_gen(&boot);
+    uint64_t boot;
+    int rc = take_boot_gen(0, &boot);
     if (rc != AIENOS_CAP_OK) return rc;
     CapShared *shared = calloc(1, sizeof *shared);
     AienosCapAdmin *admin = calloc(1, sizeof *admin);
@@ -456,32 +488,33 @@ int aienos_cap_kill(AienosCapAdmin *admin) {
     return AIENOS_CAP_OK;
 }
 
-/* Replace the table with the next boot generation. Outstanding references
- * fail against the new table. The office token is replaced. */
+/* Replace the table with the next boot generation. The new table starts
+ * above every generation the old one used, so outstanding references fail
+ * against it even after reclaims. The office token is replaced. */
 int aienos_cap_restart(AienosCapAdmin *admin) {
     if (!admin) return AIENOS_CAP_ERR_STATE;
-    uint32_t boot;
-    int rc = take_boot_gen(&boot);
-    if (rc != AIENOS_CAP_OK) return rc;
     CapState *fresh = malloc(sizeof *fresh);
     if (!fresh) return AIENOS_CAP_ERR_IO;
-    rc = bootstrap(fresh, boot);
     uint8_t token[AIENOS_CAP_TOKEN_LEN];
-    if (rc == AIENOS_CAP_OK && !fill_token(token)) rc = AIENOS_CAP_ERR_IO;
-    if (rc != AIENOS_CAP_OK) {
+    if (!fill_token(token)) {
         free(fresh);
-        return rc;
+        return AIENOS_CAP_ERR_IO;
     }
     CapShared *sh = admin->shared;
     pthread_mutex_lock(&sh->state_lock);
-    sh->state = *fresh;
+    uint64_t boot;
+    int rc = take_boot_gen(table_floor(&sh->state), &boot);
+    if (rc == AIENOS_CAP_OK) rc = bootstrap(fresh, boot);
+    if (rc == AIENOS_CAP_OK) sh->state = *fresh;
     pthread_mutex_unlock(&sh->state_lock);
     free(fresh);
-    pthread_mutex_lock(&sh->token_lock);
-    memcpy(sh->token, token, sizeof token);
-    pthread_mutex_unlock(&sh->token_lock);
+    if (rc == AIENOS_CAP_OK) {
+        pthread_mutex_lock(&sh->token_lock);
+        memcpy(sh->token, token, sizeof token);
+        pthread_mutex_unlock(&sh->token_lock);
+    }
     memset(token, 0, sizeof token);
-    return AIENOS_CAP_OK;
+    return rc;
 }
 
 int aienos_cap_validate(const AienosCapView *view, AienosCapRef cap, uint32_t subject,
@@ -530,7 +563,7 @@ int aienos_cap_cognition_admin(const AienosCapView *view, uint32_t op, AienosCap
     return AIENOS_CAP_ERR_UNAUTHORIZED;
 }
 
-int aienos_cap_force_generation(AienosCapAdmin *admin, uint32_t cap_id, uint32_t generation) {
+int aienos_cap_force_generation(AienosCapAdmin *admin, uint32_t cap_id, uint64_t generation) {
     if (!admin) return AIENOS_CAP_ERR_STATE;
     return LOCKED(admin->shared,
                   state_force_generation(&admin->shared->state, cap_id, generation));
