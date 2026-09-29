@@ -6,3 +6,4 @@ __pycache__/
 .agents/
 native/argus/out/
 native/argus/out-d/
+native/argus/out-*/
