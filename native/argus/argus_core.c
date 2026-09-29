@@ -60,8 +60,13 @@
  *     events_not_applied.
  *  3. Detectors (lane E) on the PRE-update state, into the scratch after the
  *     core's step-1/2 finding (at most one: anomaly and verdict are exclusive).
- *  4. Apply (if allowed). Table full: update dropped, ERR_FULL + one CRITICAL
- *     ARGUS_F_TELEMETRY_LOSS (the shadow can no longer mirror the authority).
+ *  4. Apply (if allowed). Table full (machines, leases, providers, artifacts,
+ *     worlds): update dropped, ERR_FULL, counted in tables_full AND
+ *     events_not_applied. Loud once PER TABLE (ruling a): the first overflow of
+ *     each table adds one CRITICAL ARGUS_F_TELEMETRY_LOSS (the shadow can no
+ *     longer mirror the authority); later overflows of that table add no
+ *     finding (no per-event CRITICAL amplifier). ARGUS-1 turns a saturated
+ *     table into a ContainmentRequest.
  *  5. TELEMETRY_DROPPED class CRITICAL -> TELEMETRY_LOSS CRITICAL, class
  *     SECURITY -> HIGH. Lane E must not raise this code for TELEMETRY_DROPPED.
  *  6. Chain: every well-formed event (applied or not) extends the chain.
@@ -132,7 +137,7 @@
 #error "ARGUS_CORE_CAPS must equal ARGUS_CAP_MAX (== AIENOS_CAP_MAX)"
 #endif
 
-#define CORE_MAGIC 0x3053554752410003ull   /* "ARGUS0" + layout 3 (v1.1: streams, per-store worlds) */
+#define CORE_MAGIC 0x3053554752410004ull   /* "ARGUS0" + layout 4 (v1.1: streams, per-store worlds; per-table loud-once) */
 #define CORE_RESERVED_SLOTS 2u              /* telemetry-drop + table-full findings */
 
 typedef struct {
@@ -171,6 +176,7 @@ struct ArgusCore {
     uint64_t incidents_untracked, producers_untracked;
     uint64_t events_received, events_rejected, findings_emitted;
     uint64_t tables_full, events_not_applied;
+    uint32_t full_reported;     /* CORE_TBL_* bits: tables whose first overflow was already reported */
     uint8_t  chain[ARGUS_DIGEST_LEN];
     ArgusFinding scratch[ARGUS_CORE_MAX_FINDINGS];
 };
@@ -780,6 +786,28 @@ static int apply_event(struct ArgusStateView *v, const ArgusEvent *ev)
     }
 }
 
+/* Shadow tables that can overflow (caps are a direct index and cannot). */
+enum { CORE_TBL_MACHINES = 1u, CORE_TBL_LEASES = 2u, CORE_TBL_PROVIDERS = 4u, CORE_TBL_ARTIFACTS = 8u,
+       CORE_TBL_WORLDS = 16u };
+
+static uint32_t table_of(uint16_t kind)
+{
+    switch (kind) {
+    case ARGUS_EV_MACHINE_JOINED: case ARGUS_EV_MACHINE_TRUST_CHANGED: case ARGUS_EV_MACHINE_REMOVED:
+        return CORE_TBL_MACHINES;
+    case ARGUS_EV_CREDENTIAL_LEASE_CREATED: case ARGUS_EV_CREDENTIAL_LEASE_REVOKED:
+        return CORE_TBL_LEASES;
+    case ARGUS_EV_PROVIDER_DISCOVERED: case ARGUS_EV_PROVIDER_QUARANTINED:
+        return CORE_TBL_PROVIDERS;
+    case ARGUS_EV_ARTIFACT_ADMITTED: case ARGUS_EV_ARTIFACT_REJECTED:
+        return CORE_TBL_ARTIFACTS;
+    case ARGUS_EV_WORLD_COMMITTED:
+        return CORE_TBL_WORLDS;
+    default:
+        return 0;
+    }
+}
+
 /* ---- ingest --------------------------------------------------------------- */
 
 int argus_core_ingest(ArgusCore *core, const ArgusEvent *ev, ArgusFinding *out, size_t cap, size_t *n_out)
@@ -800,7 +828,7 @@ int argus_core_ingest(ArgusCore *core, const ArgusEvent *ev, ArgusFinding *out, 
     }
 
     size_t n = 0;
-    int full = 0, apply = 1;
+    int full = 0, loud = 0, apply = 1;
 
     /* 1. per-producer sequence check (lane E cannot see history). */
     uint64_t prior = 0;
@@ -810,7 +838,7 @@ int argus_core_ingest(ArgusCore *core, const ArgusEvent *ev, ArgusFinding *out, 
         apply = 0;
     } else if (sq < 0) {
         if (c->producers_untracked++ == 0)
-            full = 1;                          /* reported once, not per event */
+            full = loud = 1;                   /* reported once, not per event */
     }
 
     /* 2. apply verdict on the pre-state. */
@@ -836,8 +864,19 @@ int argus_core_ingest(ArgusCore *core, const ArgusEvent *ev, ArgusFinding *out, 
     n += dn;
 
     /* 4. apply the event's own update. */
-    if (apply && apply_event(&c->view, ev) == ARGUS_ERR_FULL)
+    if (apply && apply_event(&c->view, ev) == ARGUS_ERR_FULL) {
+        /* ruling (a), loud once PER TABLE: the first overflow of a table raises one
+         * CRITICAL TELEMETRY_LOSS; later overflows of the same table return
+         * ERR_FULL with no finding. Every overflow is counted (tables_full and
+         * events_not_applied): the update was dropped. */
+        uint32_t t = table_of(ev->kind);
         full = 1;
+        c->events_not_applied++;
+        if (!(c->full_reported & t)) {
+            c->full_reported |= t;
+            loud = 1;
+        }
+    }
 
     /* 5. evidence gaps. */
     if (ev->kind == ARGUS_EV_TELEMETRY_DROPPED &&
@@ -845,10 +884,10 @@ int argus_core_ingest(ArgusCore *core, const ArgusEvent *ev, ArgusFinding *out, 
         uint8_t sev = ev->object_id == ARGUS_CLASS_CRITICAL ? ARGUS_SEV_CRITICAL : ARGUS_SEV_HIGH;
         core_finding(&sf[n++], ARGUS_F_TELEMETRY_LOSS, sev, ev, 0);
     }
-    if (full) {
+    if (loud)
         core_finding(&sf[n++], ARGUS_F_TELEMETRY_LOSS, ARGUS_SEV_CRITICAL, ev, 0);
+    if (full)
         c->tables_full++;
-    }
 
     /* 6. chain. */
     argus_chain_extend(c->chain, ev);

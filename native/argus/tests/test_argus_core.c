@@ -200,13 +200,19 @@ static void t_leases(void)
     e = ev_make(ARGUS_EV_CREDENTIAL_LEASE_CREATED, seq++); e.object_id = 5000;
     CHECK(ing(c, &e, f, &n) == ARGUS_ERR_FULL && n == 1 && f[0].code == ARGUS_F_TELEMETRY_LOSS && f[0].severity == ARGUS_SEV_CRITICAL);
     CHECK(o->lease(v, 5000, &s) == ARGUS_ERR_STATE);
+    /* ruling (a): later overflows of the same table: ERR_FULL, no finding, counted */
+    { ArgusCoreHealth ha, hb; argus_core_health(c, &ha);
+      e = ev_make(ARGUS_EV_CREDENTIAL_LEASE_CREATED, seq++); e.object_id = 5001;
+      CHECK(ing(c, &e, f, &n) == ARGUS_ERR_FULL && n == 0 && o->lease(v, 5001, &s) == ARGUS_ERR_STATE);
+      argus_core_health(c, &hb);
+      CHECK(hb.tables_full == ha.tables_full + 1 && hb.events_not_applied == ha.events_not_applied + 1); }
     /* existing lease still updatable when full */
     e = ev_make(ARGUS_EV_CREDENTIAL_LEASE_REVOKED, seq++); e.object_id = 100;
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0);
     ArgusCoreHealth h; argus_core_health(c, &h);
     uint8_t z[32] = {0};
     CHECK(memcmp(h.chain, z, 32) != 0);
-    CHECK(h.tables_full == 1);
+    CHECK(h.tables_full == 2);
 }
 
 static void t_artifacts(void)
@@ -236,6 +242,9 @@ static void t_artifacts(void)
     }
     e = ev_make(ARGUS_EV_ARTIFACT_ADMITTED, seq++); dg(e.evidence_digest, 9999);
     CHECK(ing(c, &e, f, &n) == ARGUS_ERR_FULL && n == 1 && f[0].code == ARGUS_F_TELEMETRY_LOSS);
+    e = ev_make(ARGUS_EV_ARTIFACT_REJECTED, seq++); dg(e.evidence_digest, 9998);   /* same table, second overflow: quiet */
+    CHECK(ing(c, &e, f, &n) == ARGUS_ERR_FULL && n == 0);
+    { ArgusCoreHealth h; argus_core_health(c, &h); CHECK(h.tables_full == 2 && h.events_not_applied == 2); }
 }
 
 static void t_machines(void)
@@ -317,6 +326,8 @@ static void t_machines(void)
     e = ev_make(ARGUS_EV_MACHINE_JOINED, 1); mid(e.machine_id, 500);
     CHECK(ing(c, &e, f, &n) == ARGUS_ERR_FULL && n == 1 && f[0].code == ARGUS_F_TELEMETRY_LOSS);
     CHECK(o->machine(v, e.machine_id, &s) == ARGUS_ERR_STATE);
+    e = ev_make(ARGUS_EV_MACHINE_JOINED, 2); mid(e.machine_id, 500);   /* second overflow: quiet, counted */
+    CHECK(ing(c, &e, f, &n) == ARGUS_ERR_FULL && n == 0 && o->machine(v, e.machine_id, &s) == ARGUS_ERR_STATE);
     for (uint32_t m = 1; m <= 6; m++) {
         mid(e.machine_id, m);
         CHECK(o->machine(v, e.machine_id, &s) == ARGUS_OK);
@@ -324,7 +335,7 @@ static void t_machines(void)
     mid(e.machine_id, 1000 + ARGUS_CORE_MACHINES);
     CHECK(o->machine(v, e.machine_id, &s) == ARGUS_OK && s.trust == ARGUS_TRUST_OBSERVED);
     argus_core_health(c, &h);
-    CHECK(h.tables_full == 1);
+    CHECK(h.tables_full == 2);
 }
 
 static void t_providers_world_policy(void)
@@ -347,6 +358,9 @@ static void t_providers_world_policy(void)
     }
     e = ev_make(ARGUS_EV_PROVIDER_DISCOVERED, seq++); dg(e.evidence_digest, 999);
     CHECK(ing(c, &e, f, &n) == ARGUS_ERR_FULL && n == 1);
+    CHECK(f[0].code == ARGUS_F_TELEMETRY_LOSS && f[0].severity == ARGUS_SEV_CRITICAL);
+    e = ev_make(ARGUS_EV_PROVIDER_QUARANTINED, seq++); dg(e.evidence_digest, 998);   /* second overflow: quiet */
+    CHECK(ing(c, &e, f, &n) == ARGUS_ERR_FULL && n == 0);
 
     CHECK(o->world(v, 0, &w) == ARGUS_ERR_STATE);
     e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.world_generation = 0x100000003ull; dg(e.evidence_digest, 31);
@@ -769,7 +783,7 @@ static void t_v11_caps_summary(void)
     uint8_t d0[32], d1[32]; ArgusCoreHealth h0, h1;
     argus_core_state_digest(c, d0); argus_core_health(c, &h0);
     e = ev_make(ARGUS_EV_CAPABILITY_USE_SUMMARY, 7); e.class_ = ARGUS_CLASS_AUDIT;
-    e.cap_id = 0; e.cap_generation = 2; e.object_id = 2; e.resource = 4096; e.principal = 4;
+    e.cap_id = 0; e.cap_generation = 2; e.world_generation = 2; e.resource = 4096; e.principal = 4;
     stub_detect_mode = 3;                                                  /* detector ran: probes cap 0 */
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0 && stub_probe_rc == ARGUS_OK && stub_probe_cap.generation == 2);
     stub_detect_mode = 1;
@@ -781,7 +795,7 @@ static void t_v11_caps_summary(void)
     e = ev_make(ARGUS_EV_CAPABILITY_DENIED, 7); ing(c, &e, f, &n);
     uint8_t d2[32]; argus_core_state_digest(c, d2);
     ArgusCore *c2 = fresh();                                               /* same buffer: c is gone */
-    e = ev_make(ARGUS_EV_CAPABILITY_USE_SUMMARY, 7); e.class_ = ARGUS_CLASS_AUDIT; e.cap_id = 3; e.cap_generation = 1; e.object_id = 1; e.resource = 1;
+    e = ev_make(ARGUS_EV_CAPABILITY_USE_SUMMARY, 7); e.class_ = ARGUS_CLASS_AUDIT; e.cap_id = 3; e.cap_generation = 1; e.world_generation = 1; e.resource = 1;
     ing(c2, &e, f, &n);
     uint8_t d3[32]; argus_core_state_digest(c2, d3);
     CHECK(memcmp(d2, d3, 32) == 0);                                        /* summary == any non-applying event */
@@ -826,6 +840,19 @@ static void t_v11_worlds(void)
     CHECK(o->world(v, 99, &w) == ARGUS_ERR_STATE);
     argus_core_health(c, &h1);
     CHECK(h1.tables_full == 1);
+    /* ruling (a): a 10th store is quiet (ERR_FULL, no finding), counted in both counters */
+    { ArgusCoreHealth h2;
+      e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.object_id = 98; e.world_generation = 1; dg(e.evidence_digest, 98);
+      CHECK(ing(c, &e, f, &n) == ARGUS_ERR_FULL && n == 0 && o->world(v, 98, &w) == ARGUS_ERR_STATE);
+      argus_core_health(c, &h2);
+      CHECK(h2.tables_full == 2 && h2.events_not_applied == h1.events_not_applied + 1); }
+    /* a different table still reports its own first overflow (per-table, not global) */
+    for (uint32_t m = 0; m < ARGUS_CORE_MACHINES; m++) {
+        e = ev_make(ARGUS_EV_MACHINE_JOINED, 1); mid(e.machine_id, 3000 + m); e.flags = 0;
+        ing(c, &e, f, &n);
+    }
+    e = ev_make(ARGUS_EV_MACHINE_JOINED, 1); mid(e.machine_id, 2999);
+    CHECK(ing(c, &e, f, &n) == ARGUS_ERR_FULL && n == 1 && f[0].code == ARGUS_F_TELEMETRY_LOSS && f[0].severity == ARGUS_SEV_CRITICAL);
     /* known stores still advance with the table full */
     e = ev_make(ARGUS_EV_WORLD_COMMITTED, seq++); e.object_id = 20; e.world_generation = 2; dg(e.evidence_digest, 2020);
     CHECK(ing(c, &e, f, &n) == ARGUS_OK && n == 0 && o->world(v, 20, &w) == ARGUS_OK && w.generation == 2);
