@@ -99,7 +99,7 @@ static void test_class_floor(void)
         for (unsigned c = 0; c < 256; c++) {
             ArgusEvent e = mk((uint8_t)c, 1, 0), o;
             e.kind = (uint16_t)k;
-            int want = (c >= 1 && c <= 4 && (fl == 0 || c <= fl)) ? ARGUS_OK : ARGUS_ERR_MALFORMED;
+            int want = (c >= 1 && c <= 4 && (fl == 0 || c <= fl) && k != 90) ? ARGUS_OK : ARGUS_ERR_MALFORMED;   /* v1.2: 90 refused */
             int rc = argus_ring_push(r, &e);
             CHECK(rc == want);
             attempts++;
@@ -120,6 +120,32 @@ static void test_class_floor(void)
     e.class_ = ARGUS_CLASS_CRITICAL; CHECK(argus_ring_push(r, &e) == ARGUS_OK);
     e.kind = ARGUS_EV_PROVIDER_USED; e.class_ = ARGUS_CLASS_INFORMATIONAL; CHECK(argus_ring_push(r, &e) == ARGUS_ERR_MALFORMED);
     e.class_ = ARGUS_CLASS_AUDIT; CHECK(argus_ring_push(r, &e) == ARGUS_OK);
+    /* v1.2 (ARGUS1_SPEC 3): kind 90 is refused at every class, CONSUMER flag or not; 91-93 are
+     * CRITICAL-floor transport. None of this is telemetry loss. */
+    {
+        ArgusRingStats s0, s1; argus_ring_stats(r, &s0);
+        ArgusEvent p = mk(ARGUS_CLASS_CRITICAL, 1, 0), o;
+        while (argus_ring_pop(r, &o) == ARGUS_OK) { }   /* the named cases above left events queued */ p.kind = ARGUS_EV_CONTAINMENT_PROPOSED;
+        CHECK(argus_ring_push(r, &p) == ARGUS_ERR_MALFORMED);
+        p.flags = ARGUS_FLAG_CONSUMER; CHECK(argus_ring_push(r, &p) == ARGUS_ERR_MALFORMED);
+        argus_ring_stats(r, &s1);
+        CHECK(s1.refused[0] == s0.refused[0] + 2 && s1.pushed == s0.pushed);
+        for (uint16_t k = ARGUS_EV_CONTAINMENT_DECIDED; k <= ARGUS_EV_AUTHORITY_ESCALATED; k++) {
+            ArgusEvent q = mk(ARGUS_CLASS_CRITICAL, 1, 0); q.kind = k;
+            CHECK(argus_ring_push(r, &q) == ARGUS_OK && argus_ring_pop(r, &o) == ARGUS_OK && o.kind == k);
+            q.class_ = ARGUS_CLASS_SECURITY; CHECK(argus_ring_push(r, &q) == ARGUS_ERR_MALFORMED);
+        }
+        CHECK(argus_ring_drain_drops(r, d, 8, &seq) == 0);
+    }
+    {   /* a full ring never drops 91-93 silently: sticky critical_overflow */
+        void *m2; ArgusRing *r2 = new_ring(16, &m2);
+        ArgusEvent q = mk(ARGUS_CLASS_CRITICAL, 1, 0); q.kind = ARGUS_EV_CONTAINMENT_EXECUTED;
+        int rc = ARGUS_OK; unsigned pushed = 0;
+        while ((rc = argus_ring_push(r2, &q)) == ARGUS_OK && pushed < 64) pushed++;
+        ArgusRingStats s2; argus_ring_stats(r2, &s2);
+        CHECK(rc == ARGUS_ERR_FULL && s2.critical_overflow == 1 && s2.refused[0] == 0);
+        free(m2);
+    }
     free(mem);
     printf("class floor: %llu pushes (every kind x every class byte), %llu MALFORMED counted in refused[0], "
            "none drained\n", (unsigned long long)attempts, (unsigned long long)bad);

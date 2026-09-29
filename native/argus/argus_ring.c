@@ -7,8 +7,12 @@
  *   capacity refusals per class) when class_ is outside 1..ARGUS_CLASS_MAX or
  *   is weaker than argus_event_min_class(kind). A kind the ring does not know
  *   (min class 0) has no floor here: the ring is transport, the core runs the
- *   full argus_event_validate. Malformed pushes are not telemetry loss: they
- *   are never drained as TELEMETRY_DROPPED. Conservation still holds:
+ *   full argus_event_validate. v1.2 (spec section 3): kind 90 CONTAINMENT_PROPOSED is
+ *   always refused MALFORMED here; only the consumer synthesizes proposals and ingests
+ *   them directly. Kinds 91-93 are CRITICAL, so a full ring counts them in the sticky
+ *   critical_overflow (never dropped silently), like every CRITICAL kind.
+ *   Malformed pushes are not telemetry loss: they are
+ *   never drained as TELEMETRY_DROPPED. Conservation still holds:
  *   attempts = accepted + refused[0..4] + critical_overflow.
  *
  * One producer thread calls argus_ring_push. One consumer thread calls
@@ -136,7 +140,8 @@ int argus_ring_push(ArgusRing *r, const ArgusEvent *ev)
     if (!r || !ev) return ARGUS_ERR_ARG;
     unsigned cls = ev->class_;
     unsigned min = argus_event_min_class(ev->kind);
-    if (cls < ARGUS_CLASS_CRITICAL || cls > ARGUS_CLASS_MAX || (min != 0 && cls > min)) {
+    if (cls < ARGUS_CLASS_CRITICAL || cls > ARGUS_CLASS_MAX || (min != 0 && cls > min) ||
+        ev->kind == ARGUS_EV_CONTAINMENT_PROPOSED) {   /* v1.2: only the consumer makes 90 */
         bump(&r->refused[0]);   /* index 0 = malformed (see top of file); not a drop, never drained */
         return ARGUS_ERR_MALFORMED;
     }
