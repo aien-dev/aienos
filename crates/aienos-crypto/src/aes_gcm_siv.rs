@@ -24,14 +24,12 @@ pub struct AuthenticationError;
 
 /// Derive the 128-bit authentication key and 256-bit encryption key per RFC 8452 Section 4.
 ///
-/// The returned arrays are secret key material and are not wiped automatically;
-/// callers must wipe them. `encrypt` and `decrypt` do not use this function:
-/// they derive straight into self-wiping buffers.
-pub fn derive_keys(key: &[u8; 32], nonce: &[u8; 12]) -> ([u8; 16], [u8; 32]) {
+/// Both returned buffers wipe themselves on drop, including caller error paths.
+pub fn derive_keys(key: &[u8; 32], nonce: &[u8; 12]) -> (Secret<16>, Secret<32>) {
     let mut auth_key = Secret::<16>::zeroed();
     let mut enc_key = Secret::<32>::zeroed();
     derive_keys_into(key, nonce, &mut auth_key.0, &mut enc_key.0);
-    (auth_key.0, enc_key.0)
+    (auth_key, enc_key)
 }
 
 /// Derive both per-nonce keys into caller-owned buffers. The scratch block is wiped.
@@ -249,6 +247,24 @@ pub fn decrypt(
 mod tests {
     use super::*;
     use std::vec;
+
+    #[test]
+    fn public_derived_keys_are_guarded_and_redacted() {
+        let key = [0x31; KEY_LEN];
+        let nonce = [0x72; NONCE_LEN];
+        let (auth, enc) = derive_keys(&key, &nonce);
+        let mut expected_auth = [0; 16];
+        let mut expected_enc = [0; 32];
+        derive_keys_into(&key, &nonce, &mut expected_auth, &mut expected_enc);
+        assert_eq!(*auth, expected_auth);
+        assert_eq!(*enc, expected_enc);
+        assert_eq!(
+            std::format!("{auth:?} {enc:?}"),
+            "Secret([REDACTED]) Secret([REDACTED])"
+        );
+        crate::wipe(&mut expected_auth);
+        crate::wipe(&mut expected_enc);
+    }
 
     fn hex_to_vec(hex: &str) -> std::vec::Vec<u8> {
         let mut v = std::vec::Vec::new();

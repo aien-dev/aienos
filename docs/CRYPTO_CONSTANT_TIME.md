@@ -18,8 +18,9 @@ kernel envelope decrypt scratchpad. All code is in-house; no outside crates.
   place in the returned key object; encryption works in the caller's buffer
   with no extra state copy. The kernel envelope decrypt scratchpad is wiped
   after its plaintext is copied out.
-- The public `derive_keys` still returns plain arrays; its callers must wipe
-  them. `encrypt`/`decrypt` do not use it.
+- The public `derive_keys` returns self-wiping buffers with redacted debug
+  output. Callers borrow the contained arrays; explicit copies remain the
+  caller's responsibility.
 
 ## What is and is not claimed
 
@@ -27,8 +28,9 @@ kernel envelope decrypt scratchpad. All code is in-house; no outside crates.
   disassembly spot-check of the S-box routine (no conditional branches, no
   data-indexed loads).
 - **Not measured** on hardware. **No independent side-channel review.**
-- Known remaining gap: the envelope's growing plaintext `Vec` may leave
-  copies of earlier plaintext in freed heap blocks when it reallocates.
+- Envelope storage is reserved once after the first chunk authenticates the
+  complete bounded header. Later chunks cannot trigger growth that leaves
+  plaintext in freed heap blocks. Allocation failures wipe the temporary chunk.
 - Existing FIPS 197 and RFC 8452 known-answer vectors pass unchanged; a new
   test checks the computed S-box against the standard table for all 256 inputs.
 

@@ -62,6 +62,21 @@ pub enum EnvelopeError {
     PlaintextTooLarge(u64),
     /// Expected envelope length overflows the platform integer range.
     LengthOverflow,
+    /// Allocation failed after the envelope header was authenticated.
+    AllocationFailed,
+}
+
+/// Temporary plaintext is wiped even when allocation or authentication fails.
+struct PlaintextScratch(Vec<u8>);
+
+impl Drop for PlaintextScratch {
+    fn drop(&mut self) {
+        for byte in &mut self.0 {
+            // SAFETY: exclusive reference to a live initialized byte.
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 /// Fixed 64-byte authenticated envelope header.
@@ -331,7 +346,8 @@ pub fn decrypt_envelope(
 
     let chunk_size = header.chunk_size as usize;
     let chunk_count = header.chunk_count();
-    // Grow per authenticated chunk; never reserve the header's claimed total up front.
+    // Reserve only after the first chunk authenticates the complete header.
+    // One reservation prevents plaintext copies being left in freed growth buffers.
     let mut plaintext = Vec::new();
 
     let mut cursor = ENVELOPE_HEADER_LEN;
@@ -369,8 +385,8 @@ pub fn decrypt_envelope(
         );
 
         // Verification scratchpad: verified before writing to caller buffer
-        let mut scratchpad = alloc::vec![0u8; pt_chunk_len];
-        if raw_decrypt(key, &nonce, &aad, ct_chunk, &mut scratchpad).is_err() {
+        let mut scratchpad = PlaintextScratch(alloc::vec![0u8; pt_chunk_len]);
+        if raw_decrypt(key, &nonce, &aad, ct_chunk, &mut scratchpad.0).is_err() {
             // Scratchpad was wiped by raw_decrypt on failure; wipe and drop plaintext
             for b in plaintext.iter_mut() {
                 unsafe { core::ptr::write_volatile(b, 0) };
@@ -378,11 +394,12 @@ pub fn decrypt_envelope(
             return Err(EnvelopeError::AuthenticationFailed);
         }
 
-        plaintext.extend_from_slice(&scratchpad);
-        // The scratchpad held verified plaintext: wipe it before the heap block is freed.
-        for b in scratchpad.iter_mut() {
-            unsafe { core::ptr::write_volatile(b, 0) };
+        if i == 0 {
+            plaintext
+                .try_reserve_exact(header.total_plaintext_len as usize)
+                .map_err(|_| EnvelopeError::AllocationFailed)?;
         }
+        plaintext.extend_from_slice(&scratchpad.0);
     }
 
     Ok(plaintext)

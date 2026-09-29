@@ -32,7 +32,27 @@ pub(crate) fn wipe(buf: &mut [u8]) {
 }
 
 /// Fixed-size secret byte buffer that is wiped on drop, on every exit path.
-pub(crate) struct Secret<const N: usize>(pub(crate) [u8; N]);
+pub struct Secret<const N: usize>(pub(crate) [u8; N]);
+
+impl<const N: usize> core::ops::Deref for Secret<N> {
+    type Target = [u8; N];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<const N: usize> core::ops::DerefMut for Secret<N> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<const N: usize> core::fmt::Debug for Secret<N> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("Secret([REDACTED])")
+    }
+}
 
 impl<const N: usize> Secret<N> {
     #[inline(always)]
