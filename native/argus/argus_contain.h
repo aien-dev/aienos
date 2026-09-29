@@ -18,6 +18,7 @@ int argus_contain_observe(ArgusContain *state, const ArgusCore *core,
  * ingests returned events directly into the core, then hands requests to AEGIS. */
 int argus_contain_propose(ArgusContain *state, const ArgusCore *core,
                           const ArgusFinding *findings, size_t finding_count,
+                          const ArgusEvent *trigger_event,
                           ArgusContainmentRequest *requests, size_t request_cap,
                           ArgusEvent *proposed_events, size_t event_cap,
                           size_t *proposal_count);

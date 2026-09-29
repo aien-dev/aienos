@@ -260,11 +260,11 @@ static int never_propose(uint16_t code)
 { return code==11 || code==12 || code==13 || code==16 || (code>=17 && code<=21); }
 
 int argus_contain_propose(ArgusContain *s, const ArgusCore *core,
-                          const ArgusFinding *findings, size_t nf,
+                          const ArgusFinding *findings, size_t nf, const ArgusEvent *trigger,
                           ArgusContainmentRequest *requests, size_t rcap,
                           ArgusEvent *events, size_t ecap, size_t *n_out)
 {
-    if(!s || !core || (nf && !findings) || !n_out || (rcap && !requests) || (ecap && !events)) return ARGUS_ERR_ARG;
+    if(!s || !core || (nf && (!findings || !trigger)) || !n_out || (rcap && !requests) || (ecap && !events)) return ARGUS_ERR_ARG;
     size_t n=0; const ArgusStateOps *ops=argus_core_ops(); const ArgusStateView *view=argus_core_view(core);
     for(size_t j=0;j<nf;j++) {
         const ArgusFinding *f=&findings[j];
@@ -282,6 +282,9 @@ int argus_contain_propose(ArgusContain *s, const ArgusCore *core,
         q.target.cap_id=(f->containment==ARGUS_CONTAIN_REVOKE_CAPABILITY)?f->cap_id:ARGUS_CAP_NONE;
         q.target.generation=(f->containment==ARGUS_CONTAIN_REVOKE_CAPABILITY)?c.generation:0;
         if (q.containment!=ARGUS_CONTAIN_LIVE_TYPE) q.flags=ARGUS_CREQ_SYNTHETIC;
+        if (trigger && q.containment==ARGUS_CONTAIN_REVOKE_CREDENTIAL_LEASE) q.target_object=trigger->object_id;
+        if (trigger && (q.containment==ARGUS_CONTAIN_REJECT_ARTIFACT || q.containment==ARGUS_CONTAIN_QUARANTINE_PROVIDER))
+            memcpy(q.target_digest,trigger->evidence_digest,ARGUS_DIGEST_LEN);
         memcpy(q.machine_id,f->machine_id,ARGUS_MACHINE_ID_LEN); argus_finding_digest(f,q.finding_digest);
         q.request_id=s->next_request_id; q.finding_sequence=f->sequence; q.version=ARGUS_CONTAIN_REQUEST_VERSION;
         int duplicate=0;
