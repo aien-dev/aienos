@@ -204,6 +204,11 @@ int argus_contain_observe(ArgusContain *s, const ArgusCore *core, const ArgusEve
         int ix=find_pending(s,ev->world_generation);
         if (ix>=0 && s->pending[ix].state==ST_PROPOSED && echo_matches(&s->pending[ix],ev))
             s->pending[ix].entered=s->events;
+        else if(cap) {
+            int rc=push_finding(s,out,cap,&n,ARGUS_F_CONTAINMENT_DECISION_UNMATCHED,
+                ARGUS_SEV_HIGH,ev,ev->principal,ev->cap_id,ev->cap_generation);
+            if(rc)return rc;
+        }
     } else if (ev->kind==ARGUS_EV_CAPABILITY_GRANTED && ev->principal==43u) {
         s->executor_cap_id=ev->cap_id;
     } else if (ev->kind==ARGUS_EV_CAPABILITY_REVOKED) {

@@ -99,6 +99,13 @@ int main(void)
     CHECK(argus_contain_observe(state,core,&foreign,scratch,ARGUS_CORE_MAX_FINDINGS,&nfind)==ARGUS_OK);
     CHECK(nfind==1 && scratch[0].code==ARGUS_F_CONTAINMENT_DECISION_UNMATCHED);
     argus_contain_health(state,&h); CHECK(h.decisions_unmatched==1);
+    ArgusEvent foreign_proposal=event(ARGUS_EV_CONTAINMENT_PROPOSED,7); foreign_proposal.class_=ARGUS_CLASS_CRITICAL;
+    foreign_proposal.flags=ARGUS_FLAG_CONSUMER; foreign_proposal.world_generation=777;
+    foreign_proposal.object_id=ARGUS_CONTAIN_PACK(ARGUS_CONTAIN_REVOKE_CAPABILITY,ARGUS_CSTATUS_PROPOSED,ARGUS_F_STALE_GENERATION);
+    foreign_proposal.cap_id=5; foreign_proposal.cap_generation=9; foreign_proposal.resource=2;
+    CHECK(argus_contain_observe(state,core,&foreign_proposal,scratch,ARGUS_CORE_MAX_FINDINGS,&nfind)==ARGUS_OK);
+    CHECK(nfind==1 && scratch[0].code==ARGUS_F_CONTAINMENT_DECISION_UNMATCHED);
+    argus_contain_health(state,&h); CHECK(h.decisions_unmatched==2);
 
     /* A stale protected target is suppressed, even when the finding asks for revoke. */
     f.cap_id=0; f.sequence=8; np=99;
