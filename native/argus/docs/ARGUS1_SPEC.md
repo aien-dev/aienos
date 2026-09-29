@@ -1,8 +1,8 @@
 # ARGUS-1 Containment: pre-registered specification
 
-Pre-registered 2026-09-29; base = ARGUS-0 closing commit a64bc55; code held until ARGUS_PERFORMANCE_GATE passes.
+Pre-registered 2026-09-29; base = ARGUS-0 closing commit a64bc55 (gates doc finalised at c30f168). Code released 2026-09-29 after ARGUS_PERFORMANCE_GATE reached PASS-WITH-DOCUMENTED-LIMITS (omega cf6f45d: R8 +3.87% with the consumer on a spare core).
 
-Status: pre-registration, no code. At a64bc55 ARGUS_PERFORMANCE_GATE is FAIL (R8 wall +6.2%).
+Status: spec frozen; lane L0 (header v1.2) implemented; other lanes per ARGUS1_PLAN.md. Performance history: FAIL (+6.2%) at a64bc55, PASS-WITH-DOCUMENTED-LIMITS at omega cf6f45d.
 Changing any invariant or gate criterion = a new spec commit + a full rerun of every gate. The
 authority observer hook (`12add16`, `feat/capability-observer`, not in a64bc55) must be merged
 or pinned by commit before any ARGUS-1 code. C only. Owner decisions D1-D5 = invariants I1-I5.
