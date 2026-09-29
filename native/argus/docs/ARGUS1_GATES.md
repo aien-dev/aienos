@@ -49,3 +49,27 @@ The current hostile containment suite reports 103 checks, 0 failures. See the co
 section in `HOSTILE_REVIEW.md` for defended cases and limits. Correct-secret human resolve
 remains untested because the office secret is not exposed to the harness. Producer
 attestation and validator enforcement of reserved stream 16383 remain outside ARGUS-1.
+
+## G11 — synchronous policy and dependency direction: implementation check PASS
+
+The full `make test` integration run reports the sync table equal to its ratified mask:
+`0x453e == 0x453e`. The dependency-direction check runs through
+`make -C native/argus test-contain-symbols`; it inspects the event, ring, and capability
+authority objects and reports `GATE ARGUS1_AUTHORITY_DIRECTION PASS`. The authority, event,
+and ring objects have no references into detection, containment, the gate, or bridge. The
+capability gate's own `contain-checks` also verifies the opposite direction.
+
+## G12 — regression and sanitizers: Linux PASS, Mac pending
+
+On the DGX Spark, `make -C native/argus test` and `make -C native/argus sanitize` both pass,
+including the authority containment suite, ARGUS containment tests, bridge tests, and hostile
+tests. The sanitizer run includes ASan/UBSan and TSan; the bridge TSan run passed. The separate
+capability suite passes 664 checks in regular and ASan/UBSan builds. The registered Mac `make
+test` run has not been performed, so G12 is not yet closed.
+
+## G13 — invariants I1–I5: partial, dependency G6 open
+
+`make -C native/capability test-contain` prints PASS for its implemented I1/I2/I3/I4/I5
+checks and reports 664 checks with 0 failures. I1.c/I1.d evidence correlation and I5.d's
+observer-only independent audit still depend on the unimplemented G6 offline checker. G13
+therefore remains open until G6 is delivered and the full invariant set is rerun together.

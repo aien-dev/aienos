@@ -1152,12 +1152,12 @@ static void gate_abi_v12(void)
     for (size_t i = 0; i < argus_hard_detector_count; i++)
         if (argus_hard_detectors[i].sync_allowed) mask |= 1u << argus_hard_detectors[i].id;
     int sync_ok = mask == ARGUS_SYNC_RATIFIED_MASK;
-    /* TODO(L0, G11 symbol half, after lanes C/G/X): nm check that argus_ring.o, argus_event.o and
-     *   aienos_capability.o reference no symbol defined in argus_detect.o, argus_contain.o,
-     *   aienos_contain.o or the bridge (I4). */
+    /* G11 symbol direction is checked by check_argus1_symbols.sh from the
+     * test-argus1 target; this table half must agree with that result. */
     /* TODO(L0, G12, wave 3): full `make test` + `make sanitize` on the Spark incl. test-argus1
      *   and sanitize-argus1; `make test` on the Mac. */
-    /* TODO(L0, after X): G2 recorded-bridge-stream replay and G6 end-to-end runs with GATE lines. */
+    /* TODO(L0): G6 needs an independent offline checker over a complete chain
+     * transcript plus authority observer records before evidence is auditable. */
     gate("ARGUS1_ABI_V12_HEADER", kinds_ok && codes_ok && det_ok && pack_ok && sync_ok,
          "static: event 128 B + 17 v1.1 offsets pinned, request wire %u B (field sum), request v%u, ABI minor %u; "
          "kinds 90-93 above 81 distinct=%d; codes 17-21 above 16 distinct=%d; no detector raises 17-21=%d; "
