@@ -1,5 +1,5 @@
 /*
- * argus_core.c -- ARGUS-0 resident deterministic state engine (lane D).
+ * argus_core.c -- ARGUS resident deterministic state engine (lane D; ARGUS-0, v1.2 additive).
  *
  * The core keeps fixed-capacity shadow tables of what the authority and the
  * other producers have announced, runs the hard-invariant detectors against
@@ -71,6 +71,22 @@
  *     SECURITY -> HIGH. Lane E must not raise this code for TELEMETRY_DROPPED.
  *  6. Chain: every well-formed event (applied or not) extends the chain.
  *  7. Stamp event_digest on every finding, note incidents, copy out.
+ *
+ * v1.2 containment kinds 90-93 (ARGUS1_SPEC section 3; additive). Once validate
+ * accepts one (lane B rules), the core treats it like any other well-formed
+ * event in steps 0, 1, 6 and 7 (sequence-checked on its stream, counted in
+ * events_received, chained) with two differences: step 2/4 apply nothing (no
+ * shadow change; they fall through the default verdict/apply as no-ops) and
+ * step 3 is SKIPPED: the detectors never see a 90-93 as a trigger, so no code
+ * 1-16 detector fires on ARGUS's own containment record. Codes 17-21 are raised
+ * by argus_contain (lane C), never by the core. No new core state: the layout,
+ * CORE_MAGIC and state digest (v3) are unchanged, and an ARGUS-0 stream (which
+ * cannot contain a valid 90-93) replays to byte-identical digests.
+ *
+ * argus_core_incident (v1.2) is a read-only lookup of the incident table:
+ * first_sequence of the tracked (principal, code) pair (severity >= HIGH).
+ * Incidents are already part of the state digest (tag 11) and are derived
+ * only from ingested events, so the value replays exactly.
  *
  * Outcome gating. A state update is applied only when outcome == OK, except
  * ARTIFACT_REJECTED, which applies on OK or DENIED (the rejection is itself
@@ -460,6 +476,12 @@ static size_t deliver(struct ArgusCore *c, const ArgusEvent *ev, size_t n, Argus
 }
 
 /* ---- well-formedness ------------------------------------------------------ */
+
+/* v1.2: containment lifecycle kinds 90-93 (never detector triggers, no shadow change). */
+static int is_containment_kind(uint16_t kind)
+{
+    return kind >= ARGUS_EV_CONTAINMENT_PROPOSED && kind <= ARGUS_EV_AUTHORITY_ESCALATED;
+}
 
 static int event_well_formed(const ArgusEvent *ev)
 {
@@ -855,13 +877,17 @@ int argus_core_ingest(ArgusCore *core, const ArgusEvent *ev, ArgusFinding *out, 
         c->events_not_applied++;
     }
 
-    /* 3. detectors on PRE-update state; two slots stay reserved for the core. */
-    size_t dcap = ARGUS_CORE_MAX_FINDINGS - CORE_RESERVED_SLOTS - n;
-    size_t dn = 0;
-    int drc = argus_detect_run(&core_ops, &c->view, ev, &sf[n], dcap, &dn);
-    if (dn > dcap)
-        dn = dcap;
-    n += dn;
+    /* 3. detectors on PRE-update state; two slots stay reserved for the core.
+     *    v1.2: containment kinds 90-93 are never detector triggers (spec 3). */
+    int drc = ARGUS_OK;
+    if (!is_containment_kind(ev->kind)) {
+        size_t dcap = ARGUS_CORE_MAX_FINDINGS - CORE_RESERVED_SLOTS - n;
+        size_t dn = 0;
+        drc = argus_detect_run(&core_ops, &c->view, ev, &sf[n], dcap, &dn);
+        if (dn > dcap)
+            dn = dcap;
+        n += dn;
+    }
 
     /* 4. apply the event's own update. */
     if (apply && apply_event(&c->view, ev) == ARGUS_ERR_FULL) {
@@ -1072,4 +1098,23 @@ void argus_core_health(const ArgusCore *core, ArgusCoreHealth *out)
     out->tables_full = core->tables_full;
     out->events_not_applied = core->events_not_applied;
     memcpy(out->chain, core->chain, ARGUS_DIGEST_LEN);
+}
+
+/* v1.2 (spec 4): first_sequence of the tracked (principal, code) incident.
+ * ARGUS_OK and *first_sequence set when the pair is in the incident table;
+ * ARGUS_ERR_STATE when it is not (never raised, below HIGH, or untracked
+ * because the table was full); ARGUS_ERR_ARG on a bad core or NULL output.
+ * Read-only, bounded scan (ARGUS_CORE_INCIDENTS), no new state. */
+int argus_core_incident(const ArgusCore *core, uint32_t principal, uint16_t code, uint64_t *first_sequence)
+{
+    if (!core || core->magic != CORE_MAGIC || !first_sequence)
+        return ARGUS_ERR_ARG;
+    for (uint32_t i = 0; i < core->n_incidents; i++) {
+        const CoreIncident *in = &core->incidents[i];
+        if (in->principal == principal && in->code == code) {
+            *first_sequence = in->first_sequence;
+            return ARGUS_OK;
+        }
+    }
+    return ARGUS_ERR_STATE;
 }

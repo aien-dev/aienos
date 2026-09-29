@@ -13,6 +13,11 @@
  * buffer, and all must reach the same state digest.
  *
  * Timing numbers use the STUB hash (FNV), not SHA-256: provisional, Mac only.
+ *
+ * v1.2 (ARGUS-1): after the ARGUS-0 part (unchanged, same stream, same output
+ * lines), argus1_containment_determinism() replays recorded containment fixtures
+ * (kinds 90-93, one per code 17-21 plus a happy path; see the fixture block) and
+ * the ARGUS-0 stream + all fixtures, with known-answer digests (stub hash).
  */
 #define _GNU_SOURCE
 #include "test_common_d.h"
@@ -161,6 +166,358 @@ static int cmp_u64(const void *a, const void *b)
     return x < y ? -1 : x > y;
 }
 
+/* ======================================================================== *
+ * ARGUS-1 (v1.2) containment fixtures, lane D.  RECORDED FOR REUSE by lanes
+ * C (argus_contain unit tests), H (hostile) and X (bridge e2e): each fixture is
+ * the event pattern spec section 3/4.1 says argus_contain must turn into the
+ * listed code (fx_expect[]). The core itself raises none of 17-21: it only
+ * validates, sequence-checks, counts and chains 90-93, applies no shadow
+ * change for them and never runs a detector on them (spec section 3, lane D).
+ *
+ * Encoding per spec section 3 so the streams also pass lane B's real v1.2
+ * validate: version 1, class CRITICAL, effect NONE, object_id =
+ * ARGUS_CONTAIN_PACK(type, status, finding_code), outcome paired with status,
+ * world_generation = request_id (!= 0), CONSUMER only on 90, resource =
+ * finding_sequence (90) / decision_id (91) / slots revoked (92); kind 4 class CRITICAL
+ * (its real floor). Lanes C/H/X: treat the EVENT PATTERN as canonical, not the digests
+ * (evidence_digest changes once fx_request_digest becomes lane B's SHA-256).
+ *
+ * Fixture k uses machine 200+k (authority stream 0, bridge stream 1, Omega
+ * stream 2, consumer stream 0 + CONSUMER), caps 200+2k / 201+2k, principal
+ * 100+k, so all fixtures can be concatenated into one coherent stream.
+ * Event 0 joins machine 200+k (so the real code-7 detector stays quiet), events
+ * 1-2 grant the target and a descendant, and the trigger (event 3) is a stale-generation USED: the stub detector raises
+ * code 2 STALE_GENERATION HIGH (the ARGUS-1 LIVE RevokeCapability trigger).
+ *
+ * fx_request_digest is a TEST-ONLY stand-in (152-byte canonical encoding per
+ * spec section 2, folded with the stub FNV-style hash); replace it with lane B's
+ * argus_contain_request_digest (SHA-256) when argus_event.c lands. Known-answer
+ * digests below are under the lane-D STUB hash, not SHA-256; the SHA-256 pins
+ * belong in L0's integration test once lane B merges.
+ * ======================================================================== */
+
+enum { FX_HAPPY = 0, FX_C17, FX_C18, FX_C19, FX_C20, FX_C21, FX_COUNT };
+static const char *const fx_name[FX_COUNT] = {
+    "happy: 90 -> 91 GRANT -> one kind 4 -> 92 DONE (+93)",
+    "code17: 91 GRANT for an unknown request_id",
+    "code18: 92 DONE while the request is only PROPOSED",
+    "code19: 91 GRANT -> 92 DONE with no kind 4",
+    "code20: 91 ESCALATE then no next step for TIMEOUT_EVENTS+1 events",
+    "code21: 91 GRANT -> two kind 4 (cascade) -> 92 FAILED_SCOPE low32=2",
+};
+/* Code argus_contain must raise for the fixture (0 = none) and the index of the
+ * event on which it is due (code 20: the last event, once the timeout elapsed). */
+static const uint16_t fx_expect[FX_COUNT] = { 0, 17, 18, 19, 20, 21 };
+static size_t fx_trigger[FX_COUNT];
+
+#define FX_MAX (ARGUS_CONTAIN_TIMEOUT_EVENTS + 64u)
+static ArgusEvent fx_ev[FX_COUNT][FX_MAX];
+static size_t fx_n[FX_COUNT];
+static ArgusContainmentRequest fx_req[FX_COUNT];
+
+static void fx_put(uint8_t *p, uint64_t v, int n) { for (int i = 0; i < n; i++) p[i] = (uint8_t)(v >> (8 * i)); }
+
+/* TEST-ONLY canonical 152-byte encoding (spec section 2 offsets), to be replaced by lane B's encoder. */
+static void fx_request_encode(const ArgusContainmentRequest *r, uint8_t b[ARGUS_CONTAIN_REQUEST_SIZE])
+{
+    memset(b, 0, ARGUS_CONTAIN_REQUEST_SIZE);
+    fx_put(b + 0, r->incident_id, 8); b[8] = r->containment; b[9] = r->severity;
+    fx_put(b + 10, r->finding_code, 2); fx_put(b + 12, r->principal, 4);
+    fx_put(b + 16, r->target.cap_id, 4); fx_put(b + 20, r->target.generation, 8);
+    memcpy(b + 28, r->machine_id, ARGUS_MACHINE_ID_LEN); memcpy(b + 60, r->finding_digest, ARGUS_DIGEST_LEN);
+    fx_put(b + 92, r->request_id, 8); fx_put(b + 100, r->finding_sequence, 8);
+    fx_put(b + 108, r->target_object, 4); fx_put(b + 112, r->target_rights, 4);
+    memcpy(b + 116, r->target_digest, ARGUS_DIGEST_LEN);
+    fx_put(b + 148, r->flags, 2); b[150] = r->version; b[151] = r->reserved;
+}
+
+/* TEST-ONLY digest stand-in (not SHA-256). */
+static void fx_request_digest(const ArgusContainmentRequest *r, uint8_t out[ARGUS_DIGEST_LEN])
+{
+    uint8_t b[ARGUS_CONTAIN_REQUEST_SIZE];
+    fx_request_encode(r, b);
+    for (int lane = 0; lane < 4; lane++) {
+        uint64_t h = 0xcbf29ce484222325ull ^ ((uint64_t)(lane + 7) * 0x9e3779b97f4a7c15ull);
+        for (size_t i = 0; i < sizeof b; i++) { h ^= b[i]; h *= 0x100000001b3ull; }
+        fx_put(out + 8 * lane, h, 8);
+    }
+}
+
+static ArgusEvent fx_base(uint16_t kind, uint32_t k, uint16_t stream, uint64_t seq)
+{
+    ArgusEvent e = ev_make(kind, seq);
+    mid(e.machine_id, 200u + k);
+    e.flags = (uint16_t)(ARGUS_FLAG_SYNTHETIC | (stream << ARGUS_FLAG_STREAM_SHIFT));
+    return e;
+}
+
+/* 90-92 record for fixture k's request (spec section 3 field table). */
+static ArgusEvent fx_contain(uint16_t kind, uint32_t k, uint64_t seq, uint8_t status, uint8_t outcome,
+                             uint64_t request_id, uint64_t resource, int32_t code, uint64_t tick)
+{
+    const ArgusContainmentRequest *r = &fx_req[k];
+    ArgusEvent e = fx_base(kind, k, kind == ARGUS_EV_CONTAINMENT_PROPOSED ? 0 : 1, seq);
+    e.flags = kind == ARGUS_EV_CONTAINMENT_PROPOSED ? ARGUS_FLAG_CONSUMER
+                                                    : (uint16_t)(1u << ARGUS_FLAG_STREAM_SHIFT);
+    e.class_ = ARGUS_CLASS_CRITICAL;
+    e.effect_class = ARGUS_EFFECT_NONE;
+    e.outcome = outcome;
+    e.code = code;
+    e.principal = r->principal;
+    e.cap_id = r->target.cap_id;
+    e.cap_generation = r->target.generation;
+    e.object_id = ARGUS_CONTAIN_PACK(r->containment, status, r->finding_code);
+    e.world_generation = request_id;
+    e.resource = resource;
+    e.tick = tick;
+    memcpy(e.machine_id, r->machine_id, ARGUS_MACHINE_ID_LEN);
+    fx_request_digest(r, e.evidence_digest);
+    return e;
+}
+
+/* Builds fixture k while ingesting it into a scratch core, so the request's
+ * finding_digest / incident_id come from the finding the core really emitted. */
+static void fx_build(uint32_t k, ArgusCore *c)
+{
+    ArgusEvent *s = fx_ev[k];
+    size_t n = 0;
+    uint32_t cap = 200u + 2u * k, child = cap + 1u, P = 100u + k;
+    ArgusFinding f[ARGUS_CORE_MAX_FINDINGS];
+    size_t nf;
+    stub_detect_mode = 0;
+
+    ArgusEvent e = fx_base(ARGUS_EV_MACHINE_JOINED, k, 0, 1);  /* joined, so real detectors raise no code 7 */
+    s[n++] = e;
+    e = fx_base(ARGUS_EV_CAPABILITY_GRANTED, k, 0, 2);
+    e.principal = P; e.cap_id = cap; e.cap_generation = 3; e.object_id = 0x1; e.resource = 0x77;
+    s[n++] = e;
+    e = fx_base(ARGUS_EV_CAPABILITY_GRANTED, k, 0, 3);       /* a descendant, used by the cascade fixture */
+    e.principal = P; e.cap_id = child; e.cap_generation = 1; e.object_id = 0x1; e.resource = 0x77;
+    s[n++] = e;
+    e = fx_base(ARGUS_EV_CAPABILITY_USED, k, 0, 4);          /* stale generation -> code 2 HIGH (stub) */
+    e.principal = P; e.cap_id = cap; e.cap_generation = 2;
+    s[n++] = e;
+    for (size_t i = 0; i < n; i++)
+        argus_core_ingest(c, &s[i], f, ARGUS_CORE_MAX_FINDINGS, &nf);
+    CHECK(nf == 1 && f[0].code == ARGUS_F_STALE_GENERATION && f[0].sequence == 4);
+
+    ArgusContainmentRequest *r = &fx_req[k];
+    memset(r, 0, sizeof *r);
+    uint64_t first = 0;
+    CHECK(argus_core_incident(c, P, ARGUS_F_STALE_GENERATION, &first) == ARGUS_OK && first == 4);
+    r->incident_id = first;
+    r->containment = ARGUS_CONTAIN_REVOKE_CAPABILITY;
+    r->severity = f[0].severity;
+    r->finding_code = f[0].code;
+    r->principal = P;
+    r->target.cap_id = cap;
+    r->target.generation = 3;                              /* ARGUS shadow generation (I1.d) */
+    memcpy(r->machine_id, f[0].machine_id, ARGUS_MACHINE_ID_LEN);
+    argus_finding_digest(&f[0], r->finding_digest);
+    r->request_id = 1;
+    r->finding_sequence = f[0].sequence;
+    r->version = ARGUS_CONTAIN_REQUEST_VERSION;
+
+    size_t first_tail = n;
+    s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_PROPOSED, k, 1, ARGUS_CSTATUS_PROPOSED, ARGUS_OUTCOME_OK, 1,
+                        r->finding_sequence, 0, 0);
+    uint64_t bs = 1;                                       /* bridge stream sequence */
+    ArgusEvent rv;
+    switch (k) {
+    case FX_HAPPY:
+        s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_DECIDED, k, bs++, ARGUS_CSTATUS_GRANT, ARGUS_OUTCOME_OK, 1, 1, 0, 10);
+        rv = fx_base(ARGUS_EV_CAPABILITY_REVOKED, k, 1, bs++);
+        rv.flags = (uint16_t)(1u << ARGUS_FLAG_STREAM_SHIFT);
+        rv.class_ = ARGUS_CLASS_CRITICAL;                  /* real validate floor for kind 4 */
+        rv.principal = P; rv.cap_id = cap; rv.cap_generation = 3; rv.tick = 11;
+        s[n++] = rv;
+        s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_EXECUTED, k, bs++, ARGUS_CSTATUS_DONE, ARGUS_OUTCOME_OK, 1, 1, 0, 12);
+        e = fx_base(ARGUS_EV_AUTHORITY_ESCALATED, k, 2, 1);
+        e.flags = (uint16_t)(2u << ARGUS_FLAG_STREAM_SHIFT);
+        e.class_ = ARGUS_CLASS_CRITICAL; e.effect_class = ARGUS_EFFECT_NONE;
+        e.principal = P; e.cap_id = cap; e.cap_generation = 3; e.code = 7; e.resource = 0x77; e.tick = 13;
+        s[n++] = e;
+        fx_trigger[k] = 0;
+        break;
+    case FX_C17:
+        fx_trigger[k] = n;
+        s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_DECIDED, k, bs++, ARGUS_CSTATUS_GRANT, ARGUS_OUTCOME_OK, 99, 1, 0, 10);
+        break;
+    case FX_C18:
+        fx_trigger[k] = n;
+        s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_EXECUTED, k, bs++, ARGUS_CSTATUS_DONE, ARGUS_OUTCOME_OK, 1, 1, 0, 10);
+        break;
+    case FX_C19:
+        s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_DECIDED, k, bs++, ARGUS_CSTATUS_GRANT, ARGUS_OUTCOME_OK, 1, 1, 0, 10);
+        fx_trigger[k] = n;
+        s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_EXECUTED, k, bs++, ARGUS_CSTATUS_DONE, ARGUS_OUTCOME_OK, 1, 1, 0, 11);
+        break;
+    case FX_C20:
+        s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_DECIDED, k, bs++, ARGUS_CSTATUS_ESCALATE, ARGUS_OUTCOME_ERROR, 1, 1,
+                            1114, 10);
+        for (uint32_t i = 0; i <= ARGUS_CONTAIN_TIMEOUT_EVENTS; i++) {   /* benign: valid use of the live cap */
+            e = fx_base(ARGUS_EV_CAPABILITY_USED, k, 0, 5u + i);
+            e.principal = P; e.cap_id = cap; e.cap_generation = 3; e.tick = 11u + i;
+            s[n++] = e;
+        }
+        fx_trigger[k] = n - 1;
+        break;
+    case FX_C21:
+        s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_DECIDED, k, bs++, ARGUS_CSTATUS_GRANT, ARGUS_OUTCOME_OK, 1, 1, 0, 10);
+        rv = fx_base(ARGUS_EV_CAPABILITY_REVOKED, k, 1, bs++);
+        rv.flags = (uint16_t)(1u << ARGUS_FLAG_STREAM_SHIFT);
+        rv.class_ = ARGUS_CLASS_CRITICAL;                  /* real validate floor for kind 4 */
+        rv.principal = P; rv.cap_id = cap; rv.cap_generation = 3; rv.tick = 11;
+        s[n++] = rv;
+        rv.sequence = bs++; rv.cap_id = child; rv.cap_generation = 1; rv.tick = 11;
+        fx_trigger[k] = n;                                 /* the second kind 4 */
+        s[n++] = rv;
+        s[n++] = fx_contain(ARGUS_EV_CONTAINMENT_EXECUTED, k, bs++, ARGUS_CSTATUS_FAILED_SCOPE, ARGUS_OUTCOME_ERROR, 1,
+                            2, 0, 12);
+        break;
+    default:
+        break;
+    }
+    for (size_t i = first_tail; i < n; i++)
+        argus_core_ingest(c, &s[i], f, ARGUS_CORE_MAX_FINDINGS, &nf);
+    fx_n[k] = n;
+}
+
+typedef struct { uint8_t chain[32], state[32]; uint64_t ffold, nfind, rcfold, contain_events, contain_findings, det_calls_on_contain, codes_17_21; } FxRun;
+
+static int fx_is_contain(uint16_t kind) { return kind >= ARGUS_EV_CONTAINMENT_PROPOSED && kind <= ARGUS_EV_AUTHORITY_ESCALATED; }
+
+/* Replays s[0..n) into a fresh core at mem, byte-copying the core to mem2 (and back) at
+ * every `chunk` boundary (0 = no copies). */
+static void fx_replay(const ArgusEvent *s, size_t n, uint8_t *m1, uint8_t *m2, size_t chunk, FxRun *o)
+{
+    ArgusCore *c = NULL;
+    uint8_t *cur = m1, *other = m2;
+    memset(o, 0, sizeof *o);
+    o->ffold = o->rcfold = 0xcbf29ce484222325ull;
+    stub_detect_mode = 0;
+    CHECK(argus_core_init(&c, cur, 1 << 17) == ARGUS_OK);
+    static ArgusFinding f[ARGUS_CORE_MAX_FINDINGS];
+    for (size_t i = 0; i < n; i++) {
+        if (chunk && i && i % chunk == 0) {
+            memcpy(other, cur, argus_core_footprint());
+            memset(cur, 0xEE, argus_core_footprint());
+            uint8_t *t = cur; cur = other; other = t;
+            c = (ArgusCore *)(void *)cur;
+        }
+        size_t nf = 0;
+        uint64_t calls = stub_detect_calls;
+        int rc = argus_core_ingest(c, &s[i], f, ARGUS_CORE_MAX_FINDINGS, &nf);
+        int32_t r = rc;
+        fold_bytes(&o->rcfold, &r, sizeof r);
+        fold_bytes(&o->ffold, f, nf * sizeof f[0]);
+        o->nfind += nf;
+        for (size_t j = 0; j < nf; j++)
+            o->codes_17_21 += f[j].code >= ARGUS_F_CONTAINMENT_DECISION_UNMATCHED;   /* core never raises 17-21 */
+        if (fx_is_contain(s[i].kind)) {
+            o->contain_events++;
+            o->contain_findings += nf;
+            o->det_calls_on_contain += stub_detect_calls - calls;
+        }
+    }
+    ArgusCoreHealth h;
+    argus_core_state_digest(c, o->state);
+    argus_core_health(c, &h);
+    memcpy(o->chain, h.chain, 32);
+}
+
+static int fx_same(const FxRun *a, const FxRun *b)
+{
+    return !memcmp(a->chain, b->chain, 32) && !memcmp(a->state, b->state, 32) && a->ffold == b->ffold &&
+           a->nfind == b->nfind && a->rcfold == b->rcfold;
+}
+
+static uint64_t fx_head(const uint8_t d[32])
+{
+    uint64_t v = 0;
+    for (int i = 0; i < 8; i++) v = (v << 8) | d[i];
+    return v;
+}
+
+/* Known answers (lane-D STUB hash, first 8 bytes of chain / state digest). */
+static const uint64_t fx_ka_chain[FX_COUNT] = {
+    0xec4418b4ad3dc77aull, 0x04bde290d9a3a1c9ull, 0x8b75181dd4693465ull,
+    0xcaeca58f278dd4ebull, 0x2ddc5ad172df4b13ull, 0x9c663317ef8c91fcull };
+static const uint64_t fx_ka_state[FX_COUNT] = {
+    0x96dbf6bf7e4b4dedull, 0x79d4c68ed2abd306ull, 0x40ed0cc6ee771388ull,
+    0xcd7d14bef7d4e43cull, 0x8b8523ec8118a375ull, 0xb156623776adf070ull };
+
+static ArgusEvent fx_all[N_EVENTS + FX_COUNT * FX_MAX];
+
+static void argus1_containment_determinism(void)
+{
+    static _Alignas(16) uint8_t m1[1 << 17], m2[1 << 17];
+    ArgusCore *c = NULL;
+    int ka_ok = 1;
+    for (uint32_t k = 0; k < FX_COUNT; k++) {
+        CHECK(argus_core_init(&c, m1, sizeof m1) == ARGUS_OK);
+        fx_build(k, c);
+        ArgusCoreHealth hb; argus_core_health(c, &hb);
+        uint8_t sb[32]; argus_core_state_digest(c, sb);
+        FxRun a, b, d;
+        fx_replay(fx_ev[k], fx_n[k], m1, m2, 0, &a);
+        fx_replay(fx_ev[k], fx_n[k], m1, m2, 0, &b);
+        fx_replay(fx_ev[k], fx_n[k], m1, m2, 2, &d);          /* byte-copy every 2 events */
+        CHECK(fx_same(&a, &b) && fx_same(&a, &d));
+        CHECK(!memcmp(a.chain, hb.chain, 32) && !memcmp(a.state, sb, 32));   /* build run == replays */
+        CHECK(a.contain_events > 0 && a.contain_findings == 0 && a.det_calls_on_contain == 0 && a.codes_17_21 == 0);
+        CHECK(hb.events_received == fx_n[k] && hb.events_rejected == 0);
+        CHECK(fx_expect[k] == 0 || fx_trigger[k] < fx_n[k]);
+        int ok = fx_head(a.chain) == fx_ka_chain[k] && fx_head(a.state) == fx_ka_state[k];
+        ka_ok &= ok;
+        printf("argus1 fixture %u [%s]: %zu events (%llu of kinds 90-93, 0 core findings on them), expects code %u "
+               "at event %zu; chain %016llx state %016llx (stub hash) known-answer %s\n",
+               k, fx_name[k], fx_n[k], (unsigned long long)a.contain_events, fx_expect[k], fx_trigger[k],
+               (unsigned long long)fx_head(a.chain), (unsigned long long)fx_head(a.state), ok ? "OK" : "MISMATCH");
+    }
+    CHECK(ka_ok);
+
+    /* Cap-shadow effect of the happy path: 90-93 change nothing, the kind 4 revokes exactly as ARGUS-0. */
+    CHECK(argus_core_init(&c, m1, sizeof m1) == ARGUS_OK);
+    ArgusCapShadow before, after;
+    ArgusFinding f[ARGUS_CORE_MAX_FINDINGS]; size_t nf;
+    for (size_t i = 0; i < fx_n[FX_HAPPY]; i++) {
+        const ArgusEvent *e = &fx_ev[FX_HAPPY][i];
+        argus_core_ops()->cap(argus_core_view(c), 200, &before);
+        argus_core_ingest(c, e, f, ARGUS_CORE_MAX_FINDINGS, &nf);
+        argus_core_ops()->cap(argus_core_view(c), 200, &after);
+        if (fx_is_contain(e->kind))
+            CHECK(!memcmp(&before, &after, sizeof before) && nf == 0);
+        if (e->kind == ARGUS_EV_CAPABILITY_REVOKED)
+            CHECK(before.state == ARGUS_SHADOW_LIVE && after.state == ARGUS_SHADOW_REVOKED &&
+                  after.revoked_sequence == e->sequence && nf == 0);
+    }
+
+    /* Mixed stream: the ARGUS-0 10,000-event stream followed by every fixture, replayed twice
+     * and with byte-copies at 1/7/64/4096-event chunk boundaries: identical everywhere. */
+    size_t n = 0;
+    memcpy(fx_all, stream, sizeof stream); n = N_EVENTS;
+    for (uint32_t k = 0; k < FX_COUNT; k++) { memcpy(&fx_all[n], fx_ev[k], fx_n[k] * sizeof fx_all[0]); n += fx_n[k]; }
+    FxRun r0, r1;
+    fx_replay(fx_all, n, m1, m2, 0, &r0);
+    fx_replay(fx_all, n, m1, m2, 0, &r1);
+    CHECK(fx_same(&r0, &r1));
+    static const size_t chunks[] = { 1, 7, 64, 4096 };
+    int chunk_ok = 1;
+    for (size_t i = 0; i < sizeof chunks / sizeof chunks[0]; i++) {
+        FxRun rc; fx_replay(fx_all, n, m1, m2, chunks[i], &rc);
+        chunk_ok &= fx_same(&r0, &rc);
+    }
+    CHECK(chunk_ok);
+    CHECK(r0.contain_findings == 0 && r0.det_calls_on_contain == 0 && r0.codes_17_21 == 0);
+    int mixed_ok = fx_head(r0.chain) == 0x0f2acd9c89ce80a7ull && fx_head(r0.state) == 0x12d3aff9edb6513dull;
+    CHECK(mixed_ok);
+    printf("argus1 mixed stream: %zu events (%llu of kinds 90-93), replayed twice + chunks 1/7/64/4096 %s; "
+           "chain %016llx state %016llx (stub hash) known-answer %s\n",
+           n, (unsigned long long)r0.contain_events, chunk_ok ? "identical" : "DIFFER",
+           (unsigned long long)fx_head(r0.chain), (unsigned long long)fx_head(r0.state), mixed_ok ? "OK" : "MISMATCH");
+}
+
 #define BATCH 64u
 #define PASSES 20u
 static uint64_t batch_samples[PASSES * (N_EVENTS / BATCH + 1)];
@@ -172,7 +529,7 @@ int main(void)
     stub_detect_mode = 0;
 
     /* coverage of the generator */
-    int seen[81] = {0};
+    int seen[ARGUS_EV_KIND_MAX + 1] = {0};   /* was [81]: kind 81 wrote out of bounds (UBSan) */
     for (uint32_t i = 0; i < N_EVENTS; i++) seen[stream[i].kind] = 1;
     int covered = 1;
     for (size_t k = 0; k < N_KINDS; k++) covered &= seen[kinds[k]];
@@ -302,6 +659,9 @@ int main(void)
     double hash_ns = (double)(now_ns() - h0) / (PASSES * (double)N_EVENTS);
     printf("bench: stub chain_extend alone %.1f ns/event (hc %02x) => core excl. hash ~%.1f ns/event\n",
            hash_ns, hc[0], (double)total_ns / (PASSES * (double)N_EVENTS) - hash_ns);
+
+    /* v1.2 (ARGUS-1 lane D): containment fixtures + mixed-stream replay. */
+    argus1_containment_determinism();
 
     printf("test_argus_determinism: %d passed, %d failed\n", t_pass, t_fail);
     return t_fail ? 1 : 0;
