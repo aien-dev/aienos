@@ -58,7 +58,7 @@
 enum {
     TS_OK = 0,          /* a committed record was recovered */
     TS_EMPTY = 1,       /* no record was ever committed: slot B never written, slot A blank or torn first write */
-    TS_CORRUPT = -1,    /* no valid slot and damage a crash cannot produce */
+    TS_CORRUPT = -1,    /* damage or a slot state that crashes cannot produce (see ts_recover) */
     TS_CONFLICT = -2,   /* two valid slots claim the same seq (media damage) */
     TS_EIO = -3,        /* the device reported an error */
     TS_EGEOMETRY = -4,  /* unsupported block size or region too small */

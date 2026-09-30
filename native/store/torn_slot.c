@@ -192,9 +192,23 @@ int ts_recover(ts_region *r, uint8_t out[TS_RECORD_BYTES], uint64_t *seq_out,
     }
     if (slot_states) { slot_states[0] = st[0]; slot_states[1] = st[1]; }
 
+    /* Lineage rules. The first commit goes to slot A with seq 1 and each
+     * commit goes to the slot not holding the newest record with seq + 1, so
+     * slot A only ever holds odd seqs and slot B even ones, two valid slots
+     * differ by exactly 1, and slot B is valid only after slot A was
+     * written (a written commit unit never tears back to all zero: its magic
+     * bytes are nonzero in both the old and the new header). A valid slot
+     * that breaks these was not made by this protocol plus crashes, so
+     * recovery fails closed. Each rule line carries a GUARD tag; the mutant
+     * test removes each one in turn and expects the suite to fail. */
+    if (st[0] == TS_SLOT_VALID && st[1] == TS_SLOT_VALID && seq[0] == seq[1]) return TS_CONFLICT;
+    if (st[0] == TS_SLOT_VALID && (seq[0] & 1) != 1) return TS_CORRUPT; /* GUARD:parity-a */
+    if (st[1] == TS_SLOT_VALID && (seq[1] & 1) != 0) return TS_CORRUPT; /* GUARD:parity-b */
+    if (st[1] == TS_SLOT_VALID && st[0] == TS_SLOT_BLANK) return TS_CORRUPT; /* GUARD:b-needs-a */
+
     int pick = -1;
     if (st[0] == TS_SLOT_VALID && st[1] == TS_SLOT_VALID) {
-        if (seq[0] == seq[1]) return TS_CONFLICT;
+        if (seq[0] - seq[1] != 1 && seq[1] - seq[0] != 1) return TS_CORRUPT; /* GUARD:adjacent */
         pick = seq[0] > seq[1] ? 0 : 1;
     } else if (st[0] == TS_SLOT_VALID) {
         pick = 0;
@@ -211,12 +225,12 @@ int ts_recover(ts_region *r, uint8_t out[TS_RECORD_BYTES], uint64_t *seq_out,
         int plausible = 0;
         int e = unfinished_first_commit(r, &plausible);
         if (e) return e;
-        if (!plausible) return TS_CORRUPT;
+        if (!plausible) return TS_CORRUPT; /* GUARD:first-remnant */
         r->known = 1;
         return TS_EMPTY;
     }
     /* A valid slot A beside a blank slot B can only be the first commit. */
-    if (pick == 0 && st[1] == TS_SLOT_BLANK && seq[0] != 1) return TS_CORRUPT;
+    if (pick == 0 && st[1] == TS_SLOT_BLANK && seq[0] != 1) return TS_CORRUPT; /* GUARD:a-alone-seq1 */
     memcpy(out, body[pick], TS_RECORD_BYTES);
     if (seq_out) *seq_out = seq[pick];
     r->newest_slot = pick;

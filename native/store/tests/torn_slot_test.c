@@ -605,10 +605,10 @@ static void rule_tests(void)
     CHECK(ts_recover(&r, got, &seq, st) == TS_CONFLICT);
 
     /* A header copied into the other slot fails the slot id check. */
-    ts_encode_commit(e.media + 1 * TS_RECORD_BYTES, 0, 8, e.media);
+    ts_encode_commit(e.media + 1 * TS_RECORD_BYTES, 0, 9, e.media);
     memcpy(e.media + 3 * TS_RECORD_BYTES, e.media + 1 * TS_RECORD_BYTES, TS_RECORD_BYTES);
     memcpy(e.media + 2 * TS_RECORD_BYTES, e.media, TS_RECORD_BYTES);
-    CHECK(ts_recover(&r, got, &seq, st) == TS_OK && seq == 8 && st[1] == TS_SLOT_INVALID);
+    CHECK(ts_recover(&r, got, &seq, st) == TS_OK && seq == 9 && st[1] == TS_SLOT_INVALID);
 
     /* Read error is EIO, never a verdict about the media. */
     e.fail_read_at = (int)e.reads;
@@ -650,15 +650,83 @@ static void rule_tests(void)
     free(e.media);
 }
 
-int main(void)
+/* ---------------- impossible slot states ---------------- */
+
+/* Region at LBA 0: unit u starts at byte u * 4096 for either block size. */
+static void forge_slot(uint8_t *media, int slot, uint64_t seq, unsigned gen)
+{
+    uint8_t *body = media + (size_t)(2 * slot) * TS_RECORD_BYTES;
+    make_record(body, gen);
+    ts_encode_commit(media + (size_t)(2 * slot + 1) * TS_RECORD_BYTES, slot, seq, body);
+}
+
+static void damage_slot(uint8_t *media, int slot, uint64_t seq)
+{
+    forge_slot(media, slot, seq, 9);
+    media[(size_t)(2 * slot + 1) * TS_RECORD_BYTES + 60] ^= 0x01; /* header digest */
+}
+
+/* Slot states no sequence of commits and crashes can produce, each built so
+ * that exactly one lineage rule in ts_recover refuses it. Recovery must fail
+ * closed and a commit after it must be refused. Run at 512 and 4096. */
+static void impossible_states(uint32_t bs)
+{
+    for (int c = 0; c < 6; c++) {
+        emu e;
+        emu_init(&e, bs, (uint64_t)TS_UNITS * (TS_RECORD_BYTES / bs));
+        ts_device d = emu_dev(&e);
+        ts_region r;
+        uint8_t got[TS_RECORD_BYTES], rec[TS_RECORD_BYTES];
+        uint64_t seq = 0;
+        CHECK(ts_open(&r, &d, 0) == TS_OK);
+        /* Start from a real lineage: two commits through the protocol. */
+        CHECK(ts_recover(&r, got, &seq, NULL) == TS_EMPTY);
+        make_record(rec, 1); CHECK(ts_commit(&r, rec) == TS_OK);
+        make_record(rec, 2); CHECK(ts_commit(&r, rec) == TS_OK);
+        CHECK(ts_recover(&r, got, &seq, NULL) == TS_OK && seq == 2);
+        switch (c) {
+        case 0: /* b-needs-a: slot A wiped back to blank, slot B valid */
+            memset(e.media, 0, 2 * TS_RECORD_BYTES);
+            break;
+        case 1: /* b-needs-a: only A's commit unit wiped */
+            memset(e.media + TS_RECORD_BYTES, 0, TS_RECORD_BYTES);
+            break;
+        case 2: /* parity-b: B holds an odd seq, A damaged (not blank) */
+            damage_slot(e.media, 0, 1);
+            forge_slot(e.media, 1, 3, 7);
+            break;
+        case 3: /* parity-a: A holds an even seq, B damaged (not blank) */
+            forge_slot(e.media, 0, 4, 7);
+            damage_slot(e.media, 1, 2);
+            break;
+        case 4: /* adjacent: both valid, right parity, seqs 5 and 2 */
+            forge_slot(e.media, 0, 5, 7);
+            break;
+        case 5: /* a-alone-seq1: A valid with seq 3 beside a blank B */
+            forge_slot(e.media, 0, 3, 7);
+            memset(e.media + 2 * TS_RECORD_BYTES, 0, 2 * TS_RECORD_BYTES);
+            break;
+        }
+        int rc = ts_recover(&r, got, &seq, NULL);
+        if (rc != TS_CORRUPT) printf("  impossible state %d bs=%u: recover returned %d\n", c, bs, rc);
+        CHECK(rc == TS_CORRUPT);
+        CHECK(ts_commit(&r, rec) == TS_ESTATE);
+        free(e.media);
+    }
+}
+
+int main(int argc, char **argv)
 {
     xs_state = 0x243F6A8885A308D3ull;
     int all_ok = 1;
 
     rule_tests();
+    impossible_states(512);
+    impossible_states(4096);
     unsigned long long rule_fail = failures;
     printf("TORN_SLOT_RULES: %s (%llu checks)\n", rule_fail ? "FAIL" : "PASS", checks);
     all_ok &= rule_fail == 0;
+    if (argc > 1 && strcmp(argv[1], "--rules-only") == 0) return rule_fail ? 1 : 0;
 
     unsigned long long n512 = naive_control(512), n4096 = naive_control(4096);
     printf("NAIVE_IN_PLACE_CONTROL: mixed records found bs=512: %llu, bs=4096: %llu (expected > 0)\n",

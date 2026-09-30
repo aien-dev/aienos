@@ -6,6 +6,7 @@
 #   make test       rule tests + exhaustive torn-write fault injection
 #                   (host block-device emulation, not QEMU)
 #   make sanitize   the same test under ASan+UBSan (Linux)
+#   make mutants    remove each lineage rule in turn; the rule tests must fail
 #   make clean
 
 CC ?= cc
@@ -51,7 +52,23 @@ else
 	@echo "sanitize: Linux only"
 endif
 
+
+# Mutants: remove each GUARD-tagged lineage rule from torn_slot.c in turn.
+# The rule tests must fail for every mutant, or that rule is not tested.
+GUARDS = parity-a parity-b b-needs-a adjacent first-remnant a-alone-seq1
+
+mutants: | $(OUT)
+	@fail=0; for g in $(GUARDS); do \
+	  grep -q "GUARD:$$g \*/" torn_slot.c || { echo "mutant $$g: guard tag missing"; fail=1; continue; }; \
+	  sed "/GUARD:$$g \*\//d" torn_slot.c > $(OUT)/mut_$$g.c; \
+	  $(CC) $(CFLAGS) -Wno-error -I. -o $(OUT)/mut_$$g tests/torn_slot_test.c $(OUT)/mut_$$g.c ../argus/sha256.c || { fail=1; continue; }; \
+	  if ./$(OUT)/mut_$$g --rules-only > $(OUT)/mut_$$g.log 2>&1; then \
+	    echo "mutant $$g: SURVIVED (FAIL)"; fail=1; \
+	  else echo "mutant $$g: killed"; fi; \
+	done; \
+	if [ $$fail -eq 0 ]; then echo "TORN_SLOT_MUTANTS: PASS"; else echo "TORN_SLOT_MUTANTS: FAIL"; exit 1; fi
+
 clean:
 	rm -rf $(OUT)
 
-.PHONY: all test lib-checks sanitize clean
+.PHONY: all test lib-checks sanitize mutants clean
