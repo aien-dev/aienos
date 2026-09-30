@@ -28,5 +28,8 @@ jobs:
       - name: Build and test native C capability authority
         run: make -C native/capability test
 
+      - name: Build and test torn-write-safe Store record (host fault injection)
+        run: make -C native/store test
+
       - name: Run verification harness and QEMU boot test
         run: bash scripts/verify_all.sh
