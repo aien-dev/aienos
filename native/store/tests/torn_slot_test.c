@@ -191,6 +191,7 @@ static unsigned epoch_writes(const emu *e, uint32_t epoch)
 typedef struct {
     unsigned long long cases, as_old, as_new, mixed, bad_code, relive_fail;
     unsigned long long prefix_cases, subset_cases, torn_prefix_cases, torn_word_cases, nested_cases;
+    unsigned long long nested_after_keep;
 } tally;
 
 /* Recover from img and classify against old/new. old_gen 0 means "no record". */
@@ -320,9 +321,18 @@ static int campaign(uint32_t bs, uint64_t base, unsigned gens, int nested)
             }
         }
 
-        /* 5. Double crash: crash the commit (prefix cut), recover, retry the
-         *    same commit on the crash image and crash that too (prefix cut). */
+        /* 5. Double crash: crash the commit (prefix cut), recover, then run
+         *    the next commit on the crash image and crash that too (prefix
+         *    cut), and check a further commit sticks. If the first crash lost
+         *    the new record, the next commit retries it (seq g, same slot).
+         *    If the first crash kept it, the next commit is a distinct record
+         *    (seq g+1, opposite slot). */
         if (nested && g >= 2) {
+            uint8_t nextr[TS_RECORD_BYTES];
+            make_record(nextr, g + 20);
+            nextr[7] ^= 0x3C; /* distinct from every campaign record */
+            uint8_t *img3 = malloc(bytes);
+            if (!img3) abort();
             for (uint32_t ep1 = 0; ep1 < 2; ep1++) {
                 for (unsigned k1 = 0; k1 <= m; k1++) {
                     crash_spec c1;
@@ -340,10 +350,11 @@ static int campaign(uint32_t bs, uint64_t base, unsigned gens, int nested)
                     CHECK(ts_open(&vr, &vd, base) == TS_OK);
                     int rc1 = ts_recover(&vr, got, &s1, NULL);
                     CHECK(rc1 == TS_OK);
-                    if (s1 == g) continue; /* first crash already kept the new record */
-                    CHECK(s1 == g - 1);
+                    CHECK(s1 == g - 1 || s1 == g);
+                    const uint8_t *o2 = s1 == g ? newr : oldr;
+                    const uint8_t *n2 = s1 == g ? nextr : newr;
                     v.tracing = 1;
-                    CHECK(ts_commit(&vr, newr) == TS_OK);
+                    CHECK(ts_commit(&vr, n2) == TS_OK);
                     v.tracing = 0;
                     for (uint32_t ep2 = 0; ep2 < 2; ep2++) {
                         for (unsigned k2 = 0; k2 <= m; k2++) {
@@ -351,17 +362,17 @@ static int campaign(uint32_t bs, uint64_t base, unsigned gens, int nested)
                             memset(&c2, 0, sizeof c2);
                             c2.cut_epoch = ep2; c2.n = m;
                             for (unsigned i = 0; i < m; i++) c2.fate[i] = i < k2 ? FATE_NEW : FATE_OLD;
-                            uint8_t *img3 = malloc(bytes);
-                            if (!img3) abort();
                             build_crash(&v, img, img3, &c2);
-                            classify(bs, nblocks, base, img3, oldr, g - 1, newr, g, &t, 0, 0);
+                            classify(bs, nblocks, base, img3, o2, (unsigned)s1, n2, (unsigned)s1 + 1, &t,
+                                     1, g + 60);
                             t.nested_cases++;
-                            free(img3);
+                            if (s1 == g) t.nested_after_keep++;
                         }
                     }
                     emu_clear_trace(&v);
                 }
             }
+            free(img3);
         }
 
         emu_clear_trace(&e);
@@ -380,10 +391,12 @@ static int campaign(uint32_t bs, uint64_t base, unsigned gens, int nested)
     }
 
     printf("  bs=%u base_lba=%" PRIu64 " gens=%u: cases=%llu (prefix=%llu subset=%llu torn_prefix=%llu "
-           "torn_words=%llu nested=%llu) as_old=%llu as_new=%llu mixed=%llu error=%llu relive_fail=%llu\n",
+           "torn_words=%llu nested=%llu nested_after_keep=%llu) as_old=%llu as_new=%llu mixed=%llu error=%llu relive_fail=%llu\n",
            bs, base, gens, t.cases, t.prefix_cases, t.subset_cases, t.torn_prefix_cases,
-           t.torn_word_cases, t.nested_cases, t.as_old, t.as_new, t.mixed, t.bad_code, t.relive_fail);
-    int ok = t.mixed == 0 && t.bad_code == 0 && t.relive_fail == 0 && t.as_old > 0 && t.as_new > 0;
+           t.torn_word_cases, t.nested_cases, t.nested_after_keep, t.as_old, t.as_new, t.mixed, t.bad_code,
+           t.relive_fail);
+    int ok = t.mixed == 0 && t.bad_code == 0 && t.relive_fail == 0 && t.as_old > 0 && t.as_new > 0 &&
+             (!nested || t.nested_after_keep > 0);
     free(pre); free(img); free(img2); free(e.media);
     return ok;
 }
@@ -427,7 +440,7 @@ static int barrier_lost(uint32_t bs, unsigned gens)
         for (uint32_t mask = 0; mask < (1u << (2 * m)); mask++) {
             for (unsigned i = 0; i < 2 * m; i++) c.fate[i] = (mask >> i) & 1 ? FATE_NEW : FATE_OLD;
             build_crash(&e, pre, img, &c);
-            classify(bs, nblocks, base, img, oldr, g - 1, newr, g, &t, 0, 0);
+            classify(bs, nblocks, base, img, oldr, g - 1, newr, g, &t, 1, g + 50);
             t.subset_cases++;
         }
         for (uint32_t mask = 0; mask < (1u << m); mask++) {
@@ -437,7 +450,7 @@ static int barrier_lost(uint32_t bs, unsigned gens)
                 c.fate[m] = FATE_TORN_PREFIX;
                 c.torn_bytes = b;
                 build_crash(&e, pre, img, &c);
-                classify(bs, nblocks, base, img, oldr, g - 1, newr, g, &t, 0, 0);
+                classify(bs, nblocks, base, img, oldr, g - 1, newr, g, &t, 1, g + 50);
                 t.torn_prefix_cases++;
             }
         }
@@ -445,10 +458,10 @@ static int barrier_lost(uint32_t bs, unsigned gens)
         memcpy(oldr, newr, sizeof oldr);
     }
     printf("  barrier lost bs=%u gens=%u: cases=%llu (subset=%llu torn_header=%llu) as_old=%llu as_new=%llu "
-           "mixed=%llu error=%llu\n", bs, gens, t.cases, t.subset_cases, t.torn_prefix_cases, t.as_old,
-           t.as_new, t.mixed, t.bad_code);
+           "mixed=%llu error=%llu relive_fail=%llu\n", bs, gens, t.cases, t.subset_cases, t.torn_prefix_cases, t.as_old,
+           t.as_new, t.mixed, t.bad_code, t.relive_fail);
     free(pre); free(img); free(e.media);
-    return t.mixed == 0 && t.bad_code == 0 && t.as_old > 0 && t.as_new > 0;
+    return t.mixed == 0 && t.bad_code == 0 && t.relive_fail == 0 && t.as_old > 0 && t.as_new > 0;
 }
 
 /* ---------------- negative control ---------------- */
@@ -458,24 +471,55 @@ static int barrier_lost(uint32_t bs, unsigned gens)
  * testing anything. */
 static unsigned long long naive_control(uint32_t bs)
 {
+    /* The naive write goes through the same emulated device, trace and
+     * build_crash() as the protocol campaigns, so this control fails if the
+     * injector stops producing any one kind of tear. */
     unsigned m = TS_RECORD_BYTES / bs;
-    uint8_t oldr[TS_RECORD_BYTES], newr[TS_RECORD_BYTES], img[TS_RECORD_BYTES];
+    uint8_t oldr[TS_RECORD_BYTES], newr[TS_RECORD_BYTES], pre[TS_RECORD_BYTES], img[TS_RECORD_BYTES];
+    emu e;
+    emu_init(&e, bs, m);
     make_record(oldr, 1);
     make_record(newr, 2);
-    unsigned long long mixed = 0;
+    ts_device d = emu_dev(&e);
+    CHECK(d.write(d.ctx, 0, m, oldr) == 0 && d.flush(d.ctx) == 0);
+    memcpy(pre, e.media, sizeof pre);
+    e.tracing = 1;
+    CHECK(d.write(d.ctx, 0, m, newr) == 0);
+    e.tracing = 0;
+    CHECK(e.ntrace == m);
+    crash_spec c;
+    memset(&c, 0, sizeof c);
+    c.cut_epoch = 0;
+    c.n = m;
+    unsigned long long mix_subset = 0, mix_prefix = 0, mix_words = 0;
     for (unsigned mask = 0; mask < (1u << m); mask++) {
-        for (unsigned i = 0; i < m; i++)
-            memcpy(img + i * bs, ((mask >> i) & 1 ? newr : oldr) + i * bs, bs);
-        if (memcmp(img, oldr, sizeof img) && memcmp(img, newr, sizeof img)) mixed++;
+        for (unsigned i = 0; i < m; i++) c.fate[i] = (mask >> i) & 1 ? FATE_NEW : FATE_OLD;
+        build_crash(&e, pre, img, &c);
+        if (memcmp(img, oldr, sizeof img) && memcmp(img, newr, sizeof img)) mix_subset++;
     }
-    for (unsigned k = 0; k < m; k++)
+    for (unsigned k = 0; k < m; k++) {
         for (uint32_t b = 1; b < bs; b++) {
-            memcpy(img, newr, (size_t)k * bs);
-            memcpy(img + k * bs, oldr + k * bs, (size_t)(m - k) * bs);
-            memcpy(img + k * bs, newr + k * bs, b);
-            if (memcmp(img, oldr, sizeof img) && memcmp(img, newr, sizeof img)) mixed++;
+            for (unsigned i = 0; i < m; i++) c.fate[i] = i < k ? FATE_NEW : FATE_OLD;
+            c.fate[k] = FATE_TORN_PREFIX;
+            c.torn_bytes = b;
+            build_crash(&e, pre, img, &c);
+            if (memcmp(img, oldr, sizeof img) && memcmp(img, newr, sizeof img)) mix_prefix++;
         }
-    return mixed;
+        for (unsigned trial = 0; trial < 64; trial++) {
+            for (unsigned i = 0; i < m; i++) c.fate[i] = FATE_OLD;
+            c.fate[k] = FATE_TORN_WORDS;
+            c.word_seed = xs();
+            build_crash(&e, pre, img, &c);
+            if (memcmp(img, oldr, sizeof img) && memcmp(img, newr, sizeof img)) mix_words++;
+        }
+    }
+    emu_clear_trace(&e);
+    free(e.media);
+    printf("  naive bs=%u: mixed subset=%llu torn_prefix=%llu torn_words=%llu\n", bs, mix_subset,
+           mix_prefix, mix_words);
+    /* bs=4096 has one block, so a whole-block subset cannot mix there. */
+    if ((m > 1 && mix_subset == 0) || mix_prefix == 0 || mix_words == 0) return 0;
+    return mix_subset + mix_prefix + mix_words;
 }
 
 /* ---------------- rule tests ---------------- */
@@ -577,8 +621,32 @@ static void rule_tests(void)
     emu_init(&e, 4096, 4); d = emu_dev(&e);
     CHECK(ts_open(&r, &d, 0) == TS_OK);
     ts_encode_commit(e.media + TS_RECORD_BYTES, 0, UINT64_MAX, e.media);
+    ts_encode_commit(e.media + 3 * TS_RECORD_BYTES, 1, UINT64_MAX - 1, e.media + 2 * TS_RECORD_BYTES);
     CHECK(ts_recover(&r, got, &seq, st) == TS_OK && seq == UINT64_MAX);
     CHECK(ts_commit(&r, a) == TS_ESTATE);
+    free(e.media);
+
+    /* EMPTY only for what a crash in the first commit can leave in slot A. */
+    emu_init(&e, 512, 64); d = emu_dev(&e);
+    CHECK(ts_open(&r, &d, 0) == TS_OK);
+    CHECK(ts_recover(&r, got, &seq, st) == TS_EMPTY);
+    CHECK(ts_commit(&r, a) == TS_OK);
+    e.media[TS_RECORD_BYTES + 11] = 1; /* reserved byte: zero before and after */
+    CHECK(ts_recover(&r, got, &seq, st) == TS_CORRUPT);
+    CHECK(ts_commit(&r, a) == TS_ESTATE);
+    e.media[TS_RECORD_BYTES + 11] = 0;
+    e.media[TS_RECORD_BYTES + 200] = 0x77; /* past the header */
+    e.media[TS_RECORD_BYTES + 60] ^= 1;
+    CHECK(ts_recover(&r, got, &seq, st) == TS_CORRUPT);
+    e.media[TS_RECORD_BYTES + 200] = 0;
+    CHECK(ts_recover(&r, got, &seq, st) == TS_EMPTY); /* damaged digest only */
+    memset(e.media + TS_RECORD_BYTES + 40, 0, 48);  /* torn first header */
+    CHECK(ts_recover(&r, got, &seq, st) == TS_EMPTY);
+    /* A valid slot A beside a blank slot B must hold seq 1. */
+    ts_encode_commit(e.media + TS_RECORD_BYTES, 0, 5, e.media);
+    CHECK(ts_recover(&r, got, &seq, st) == TS_CORRUPT);
+    ts_encode_commit(e.media + TS_RECORD_BYTES, 0, 1, e.media);
+    CHECK(ts_recover(&r, got, &seq, st) == TS_OK && seq == 1);
     free(e.media);
 }
 

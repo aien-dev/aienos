@@ -145,6 +145,33 @@ static int check_slot(ts_region *r, int slot, uint8_t body[TS_RECORD_BYTES],
     return TS_OK;
 }
 
+/* With no valid slot and slot B blank, slot A's commit unit must look like
+ * what a crash during the very first commit can leave: every byte either
+ * zero (the blank unit before) or the byte the first header writes. The
+ * fixed fields of that header are known (slot 0, seq 1), so a nonzero byte
+ * that differs from them, or anything past the header, is corruption and
+ * not a torn write. The digest bytes cannot be checked this way; damage
+ * confined to them before any second commit reads as EMPTY. */
+static int unfinished_first_commit(ts_region *r, int *plausible)
+{
+    uint8_t cu[TS_RECORD_BYTES];
+    uint8_t t[OFF_RECDIGEST];
+    *plausible = 0;
+    int e = read_unit(r, 1, cu);
+    if (e) return e;
+    memcpy(t, MAGIC, sizeof MAGIC);
+    put_u16(t + OFF_VERSION, 1);
+    t[OFF_SLOT] = 0;
+    t[OFF_RESERVED] = 0;
+    put_u32(t + OFF_RECBYTES, TS_RECORD_BYTES);
+    put_u64(t + OFF_SEQ, 1);
+    for (unsigned i = 0; i < OFF_RECDIGEST; i++)
+        if (cu[i] != 0 && cu[i] != t[i]) return TS_OK;
+    if (!all_zero(cu + TS_HEADER_BYTES, TS_RECORD_BYTES - TS_HEADER_BYTES)) return TS_OK;
+    *plausible = 1;
+    return TS_OK;
+}
+
 int ts_recover(ts_region *r, uint8_t out[TS_RECORD_BYTES], uint64_t *seq_out,
                ts_slot_state slot_states[2])
 {
@@ -178,11 +205,18 @@ int ts_recover(ts_region *r, uint8_t out[TS_RECORD_BYTES], uint64_t *seq_out,
     if (pick < 0) {
         /* Slot B is only ever written after slot A held a valid record, and
          * a valid newest slot is never rewritten, so "no valid slot" is a
-         * crash outcome only while B is still blank. */
+         * crash outcome only while B is still blank and A holds a possible
+         * remnant of the first commit. Anything else fails closed. */
         if (st[1] != TS_SLOT_BLANK) return TS_CORRUPT;
+        int plausible = 0;
+        int e = unfinished_first_commit(r, &plausible);
+        if (e) return e;
+        if (!plausible) return TS_CORRUPT;
         r->known = 1;
         return TS_EMPTY;
     }
+    /* A valid slot A beside a blank slot B can only be the first commit. */
+    if (pick == 0 && st[1] == TS_SLOT_BLANK && seq[0] != 1) return TS_CORRUPT;
     memcpy(out, body[pick], TS_RECORD_BYTES);
     if (seq_out) *seq_out = seq[pick];
     r->newest_slot = pick;
