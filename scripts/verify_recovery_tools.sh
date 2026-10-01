@@ -84,6 +84,7 @@ check "attended evidence collector packaged on media" "$(have_file usr/local/sbi
 
 echo ""
 echo "-- TRUST-1 Gate 1 items 8, 10, 11-12: TPM, signatures, recovery unlock --"
+# FLAG(sovereignty): tpm2_pcrread expected in the recovery image (outside dep); replace with in-house C PCR reader.
 check "tpm2_pcrread present" "$(have_file bin/tpm2_pcrread)"
 check "tpm2 device transport library packaged (dlopen, not seen by ldd)" \
     "$(compgen -G "${ROOT_DIR}/lib/*-linux-gnu/libtss2-tcti-device.so.0*" >/dev/null && echo 1 || echo 0)"
@@ -120,6 +121,7 @@ closure_ok() { # binary path inside image
     echo 1
 }
 if command -v readelf >/dev/null; then
+    # FLAG(sovereignty): tpm2_pcrread expected in the recovery image; follows the in-house C replacement.
     for t in gocryptfs age sbverify tpm2_pcrread cryptsetup fusermount3 efibootmgr; do
         [[ -e "${ROOT_DIR}/bin/${t}" ]] || continue
         check "${t}: every shared library it needs is inside the image" "$(closure_ok "${ROOT_DIR}/bin/${t}")"

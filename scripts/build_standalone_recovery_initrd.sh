@@ -36,6 +36,7 @@ BINARIES=(
     /usr/bin/sbverify
     # FUSE mount helper; gocryptfs falls back to it if a direct mount fails.
     /usr/bin/fusermount3
+    # FLAG(sovereignty): tpm2_pcrread is copied into the recovery image (outside dep); replace with in-house C PCR reader.
     /usr/bin/tpm2_pcrread
     /usr/bin/efibootmgr
     /usr/bin/findmnt
@@ -98,6 +99,7 @@ if [[ -f "$GOCRYPTFS_BIN" ]]; then
     fi
 fi
 
+# FLAG(sovereignty): tpm2-tools (outside dep) is packaged into the recovery initrd; replace with in-house C PCR reader.
 # tpm2-tools load their transport library at run time (dlopen), so ldd never
 # lists it. Package the device transport so tpm2_pcrread can talk to
 # /dev/tpmrm0 in the rescue shell (Gate 1 item 8).

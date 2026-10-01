@@ -16,6 +16,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 campaign="${repo_root}/scripts/tpm_measurement_campaign.sh"
 credpol="${repo_root}/scripts/trust1_credential_policy.sh"
 
+# FLAG(sovereignty): tpm2-tools (outside dep) required on Linux host; replace with in-house C TPM tool.
 for t in swtpm tpm2_pcrread tpm2_pcrextend tpm2_eventlog xxd; do
     command -v "${t}" >/dev/null || { echo "Error: ${t} not installed" >&2; exit 2; }
 done

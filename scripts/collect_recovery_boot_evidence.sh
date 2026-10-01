@@ -116,6 +116,7 @@ check "encrypted_stores_identified" "$([[ ${stores_seen} -gt 0 ]] && echo 1 || e
 
 echo "== TRUST-1 Gate 1 item 8: PCRs and event log (read-only)"
 export TPM2TOOLS_TCTI="${TPM2TOOLS_TCTI:-device:/dev/tpmrm0}"
+# FLAG(sovereignty): tpm2_pcrread run inside the recovery image; replace with in-house C PCR reader.
 pcrs="$(tpm2_pcrread sha256 2>/dev/null || true)"
 echo "${pcrs}" | sed -n '1,26p'
 check "pcrs_read" "$(grep -qE '^ +7 *:' <<<"${pcrs}" && echo 1 || echo 0)" "tpm2_pcrread sha256"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# FLAG(sovereignty): line ~69 lists /bin/tpm2_pcrread (outside dep) in the recovery-image receipt; follows the in-house C replacement.
 # capture_gate1_receipt.sh: Capture Gate 1 standalone recovery evidence receipt
 # Invariant: NO PLAINTEXT SECRETS IN REPOSITORY OR BUILD ARTIFACTS. Unslop compliant.
 
