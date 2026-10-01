@@ -1,0 +1,38 @@
+{
+  "schema": "aienos.ck_gates.v1",
+  "started_utc": "2026-10-01T08:00:19Z",
+  "finished_utc": "2026-10-01T08:01:32Z",
+  "commit": "43589493c828d9ad3419b61f19a429eed37164d3",
+  "commit_subject": "scripts/ck_gates.sh: read the NVMe DMA mode from the store script's check lines",
+  "tree_clean_before": true,
+  "tree_clean_after": true,
+  "quiet_flag": "/home/drakestapleton/workspace/.spark-quiet",
+  "quiet_flag_present_at_start": false,
+  "host": {"hostname": "spark-b87b", "arch": "aarch64", "kernel": "7.0.0-1019-nvidia", "cpu_model": "Cortex-A725;Cortex-X925"},
+  "qemu": {"binary": "/usr/bin/qemu-system-aarch64", "version": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)"},
+  "firmware": {"aavmf_code": "/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd", "aavmf_code_sha256": "4a4cb7f6d8106bb2a7dd8c763fab14b1810152136fc4304e5b728f0043e84f12", "aavmf_vars": "/usr/share/AAVMF/AAVMF_VARS.fd", "aavmf_vars_sha256": "b3b855c5a80310168051164986855692d1bdb06e67619856177965cd87c6774f"},
+  "nvme_dma_mode": "UnsafeBypass (QEMU-only build, no SMMU confinement); default image denied (NoSmmu)",
+  "children": [
+    {"name": "boot", "script": "scripts/qemu_ck_boot_test.sh", "present": true, "script_sha256": "73a9522aa8dbaf18dcc83be36f136e8251b0ed927e4d0d4de7b84ec902b16c8d", "exit": "0", "seconds": 6, "log_sha256": "d81f052961b30ce95ade1481f136157dda612d7fd4b1c0f27a531b46c377b2b2", "log_lines": 21},
+    {"name": "store", "script": "scripts/qemu_ck_store_test.sh", "present": true, "script_sha256": "4d375242acd3f5a77ded546f9bd2dd1ff407b8313f0ed79e9314d53466b728b0", "exit": "0", "seconds": 67, "log_sha256": "e180f4477203a9f990f223849f93622ace02ecfe58d79be35d3b8727c50c2816", "log_lines": 415}
+  ],
+  "gates": [
+    {"id": "M1", "marker": "AIENOS_CK_M1", "source": "boot", "verdict": "PASS", "reason": "child reported PASS, exit 0"},
+    {"id": "M3", "marker": "AIENOS_CK_M3", "source": "missing", "verdict": "NOT_RUN", "reason": "MISSING_IMPLEMENTATION: no threads, EL0 tasks, preemption, MADT placement or typed IPC in the C kernel"},
+    {"id": "SMMU", "marker": "AIENOS_CK_SMMU", "source": "missing", "verdict": "NOT_RUN", "reason": "MISSING_IMPLEMENTATION: no IORT/SMMUv3 service in ck.h; C NVMe DMA exists only through the QEMU-only unsafe bypass"},
+    {"id": "P2_ARTIFACT", "marker": "AIENOS_CK_P2_ARTIFACT", "source": "missing", "verdict": "NOT_RUN", "reason": "MISSING_IMPLEMENTATION: no signed artifact loader (EL0, W^X, admission receipts) in the C kernel"},
+    {"id": "M0_ROLLBACK", "marker": "AIENOS_CK_M0_ROLLBACK", "source": "missing", "verdict": "NOT_RUN", "reason": "MISSING_IMPLEMENTATION: C loader signatures, A/B, BootNext and rollback are parked (native/boot/README.md)"},
+    {"id": "M4_NVME", "marker": "AIENOS_CK_M4_NVME", "source": "store", "verdict": "PASS", "reason": "QEMU-only unsafe DMA bypass build (make full CK_QEMU_UNSAFE_DMA=1); SMMU-confined NVMe mode NOT_RUN"},
+    {"id": "M4_STORE", "marker": "AIENOS_CK_M4_STORE", "source": "store", "verdict": "PASS", "reason": "child reported PASS, exit 0"},
+    {"id": "M4_STORE_CRASH", "marker": "AIENOS_CK_M4_STORE_CRASH", "source": "missing", "verdict": "NOT_RUN", "reason": "MISSING_IMPLEMENTATION: no C Store crash/kill campaign (4 KiB or 512 B) and no slot reuse (C Store is append-only)"},
+    {"id": "M4_CONTINUITY", "marker": "AIENOS_CK_M4_CONTINUITY", "source": "missing", "verdict": "NOT_RUN", "reason": "MISSING_IMPLEMENTATION: no continuity core (ADR 0016 agent identity and memory) in the C kernel"},
+    {"id": "M4_RECOVERY", "marker": "AIENOS_CK_M4_RECOVERY", "source": "missing", "verdict": "NOT_RUN", "reason": "MISSING_IMPLEMENTATION: no Recovery Core (ADR 0006) in the C kernel"},
+    {"id": "ARGUS1_REVOKE", "marker": "AIENOS_CK_ARGUS1_REVOKE", "source": "store", "verdict": "PASS", "reason": "child reported PASS, exit 0"},
+    {"id": "KEYBOARD", "marker": "AIENOS_CK_KEYBOARD", "source": "missing", "verdict": "NOT_RUN", "reason": "MISSING_IMPLEMENTATION: no xHCI/USB HID keyboard driver in the C kernel"}
+  ],
+  "counts": {"total": 12, "pass": 4, "fail": 0, "not_run": 8},
+  "verdict": "NOT_ALL_GATES_PASS",
+  "parity": "native/kernel/GATES.md",
+  "physical": "NOT_RUN",
+  "physical_statement": "QEMU emulator runs only. Nothing here was run on Machine 1 or any GB10; no physical qualification is claimed."
+}
