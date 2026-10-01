@@ -205,11 +205,12 @@ How the C gate differs from the Rust gate (all apply to rows 33-41):
 
 ## M0 rollback: scripts/qemu_native_rollback_test.sh -> CK `M0_ROLLBACK`
 
-Every M0 rollback check is about the UEFI boot loader (BootNext consumed
-before ExitBootServices, A/B slot choice, fallback to Default), which lives in
-native/boot. ADR 0024 Q3 (aien-architecture) freezes loader expansion: no A/B
+Every M0 rollback check is about UEFI one-time boot: BootNext dispatch of
+the candidate, fallback to Default after a fault, hang, malformed or absent
+candidate, BootNext consumed and Default unchanged. No A/B slot logic exists
+in the script or in crates/aienos-boot. ADR 0024 Q3 (aien-architecture) freezes loader expansion: no A/B
 slots will be added. Rollback is the one-time BootNext rule; under
-`docs/BOOT_HANDOFF_CONTRACT.md` section 7.1 these rows rerun the same script with the C kernel image as the candidate. Until a forge receipt covers them they stay NOT_RUN.
+`docs/BOOT_HANDOFF_CONTRACT.md` section 7.1 these rows run the script with the C kernel image as the candidate, after the script and TEST-build changes listed there. Until a forge receipt covers them they stay NOT_RUN.
 
 | # | Rust check (marker) | CK gate | Status |
 | --- | --- | --- | --- |

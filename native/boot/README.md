@@ -15,8 +15,9 @@ This is the C path's UEFI entry (Lane 18). It is deliberately small:
   `ck_kernel_entry` with a `struct ck_handoff` (`handoff.h`): memory-map
   copy, RSDP, firmware EL, firmware TTBR0/SCTLR, counter, commit.
 
-**Parked, not here:** signature checks, A/B slots, BootNext, rollback and the
-boot-report file. That loader exists in the Rust `aienos-boot` crate and is
+**Parked, not here:** signature checks, BootNext staging, rollback and the
+boot-report file. The Rust `aienos-boot` crate has BootNext staging and a QEMU
+rollback test but no A/B slot selection (ADR 0024 Q3); it is frozen and
 parked for the C path; this stub boots the kernel linked into the same image
 and nothing else.
 

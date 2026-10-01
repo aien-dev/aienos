@@ -109,7 +109,7 @@ little endian). **They are not compiler-checked**: the code cut in section
 | MMU | the firmware's translation regime, unchanged by the stub; its TTBR0/SCTLR are recorded | CODE `efi_main.c:66-72` |
 | Address map | identity (VA = PA) for the image, the record, the map copy and the stack | CODE relies on it (`mm/mmu.c:110-196` uses physical addresses as pointers); UEFI requires an identity map on AArch64 (UEFI spec section 2.3.6, UNVERIFIED in this cut, confidence high) |
 | Caches | firmware state, not changed by the stub; the kernel cleans and invalidates its DMA pool before changing attributes | CODE `mm/mmu.c:173-186` |
-| Interrupts (DAIF) | **not set by the stub** (no `daifset` in `native/boot/`). The kernel masks all four (`msr daifset, #0xf`) only in `ck_enter_el1`/`ck_switch_el1` (`arch/vectors.S:176,233`), after `ck_mm_build`. PROPOSED rule: the loader masks DAIF before the call; the kernel masks DAIF as its first instruction (open item, section 10). | |
+| Interrupts (DAIF) | **not masked by our code before the kernel switches regime**: no `daifset` in `native/boot/`; the actual value at entry is whatever the firmware left (UEFI runs boot services with interrupts enabled, UNVERIFIED in this cut, confidence medium-high). The kernel masks all four (`msr daifset, #0xf`) only in `ck_enter_el1`/`ck_switch_el1` (`arch/vectors.S:176,233`), after `ck_mm_build`. PROPOSED rule: the loader masks DAIF before the call; the kernel masks DAIF as its first instruction (open item, section 10). | |
 | Vectors | the firmware's until the kernel writes `VBAR_EL2`/`VBAR_EL1` | CODE `kmain.c:164-168` |
 | Boot services | gone: `ExitBootServices` succeeded before the call; on failure the stub returns to firmware and never calls the kernel | CODE `efi_main.c:115-144` |
 | Runtime services | not used by the C stub or the kernel (`RuntimeServices` appears only in the type `efi.h:90`) | CODE (grep) |
@@ -148,7 +148,7 @@ the image `[image_base, image_end)`, the record itself, the map copy
    handoff and that point an uncontained device could still write RAM.
    **GAP, MISSING:** PROPOSED rule: the kernel sets `GBPA.ABORT` on every
    SMMU named by the IORT and clears bus master on every PCI function it
-   does not own before the first frame allocation. Until a cut does that,
+   does not own before the first frame allocation. `GBPA` only governs traffic while `CR0.SMMUEN` is 0, so if the firmware left an SMMU enabled the rule must also latch `GBPA.ABORT` and then clear `SMMUEN` (the order `ck_smmu_enable` already uses on its failure path, `core/smmu.c:265-273`). Until a cut does that,
    the contract records the window, it does not claim it closed.
 
 ## 6. What the kernel must refuse, and its serial lines
@@ -198,12 +198,24 @@ persistent default boot path."):
    section 3.3, citing UEFI section 3.1.1).
 3. The candidate is the **C kernel image** (stub + kernel, one PE). It never
    touches UEFI variables: the C path has no runtime-service calls (section
-   4). Every end state resets: normal end `ck_reset` (`kmain.c:157`),
-   refusal or panic `ck_panic` -> `ck_reset` (`core/report.c:63-77`), fault
-   `ck_fault_report` -> `ck_reset` (`core/report.c:79-89`), hang -> external
-   watchdog or operator reset (the stub disables the UEFI watchdog,
-   `efi_main.c:82-83`, so a hang after `ExitBootServices` needs an outside
-   reset).
+   4). Its end states fall in two groups:
+   - **Reset** (after `ExitBootServices`): normal end `ck_reset`
+     (`kmain.c:157`); refusal or panic `ck_panic` -> `ck_reset`
+     (`core/report.c:63-77`); CPU fault `ck_fault_report` -> `ck_reset`
+     (`core/report.c:79-89`); hang -> external watchdog or operator reset
+     (the stub disables the UEFI watchdog, `efi_main.c:82-83`, so a hang
+     after `ExitBootServices` needs an outside reset).
+   - **Return to firmware** (boot services still alive, the kernel never
+     ran): `GetMemoryMap` failure returns its status (`efi_main.c:121-124`);
+     `ExitBootServices` failing 8 times returns its status
+     (`efi_main.c:136-139`); an unexpected relocation type returns
+     `EFI_LOAD_ERROR` from the entry code (`native/boot/efi_entry.S:32-35`).
+     Control goes back to the firmware boot manager, which continues with
+     the next `BootOrder` entry or its boot menu
+     (`docs/NATIVE_BOOT_ROLLBACK_CONTRACT.md` section 3.4, "drops to the
+     next option in `BootOrder` or returns to BDS"). `BootNext` was already
+     consumed (step 2) and nothing was written, so rollback still holds.
+     NOT_RUN: no test drives these three paths today.
 4. The next boot therefore follows the unchanged `BootOrder`: the previous
    default. That **is** the rollback. "Previous good" means "the default
    entry the operator set", nothing the candidate wrote.
@@ -213,22 +225,37 @@ persistent default boot path."):
 ### 7.1 What M0_ROLLBACK rows 42-46 must become
 
 Today they test the Rust mock candidate and are NOT_RUN for the C path
-(`native/kernel/GATES.md` rows 42-46). Under this contract each row runs the
-same six-branch script logic with the **C kernel image** (`native/boot`
-`BOOTAA64.EFI` built by `native/kernel`) as `candidate.efi`, the Rust
-`aienos-rollback-mock` kept only as stager and default entry (Q3: preserve
-the existing tests):
+(`native/kernel/GATES.md` rows 42-46). How the script works now
+(`scripts/qemu_native_rollback_test.sh`): one Rust program,
+`aienos-rollback-mock` (built at line 36), is copied in as stager
+(`BOOTAA64.EFI`), candidate (`candidate.efi`) and default (`default.efi`)
+(e.g. lines 78-80). Each subtest writes a mode word to
+`\EFI\AIENOS\ROLLBACK_MODE.TXT` (lines 81, 128, 160, 221, 250, 277); the
+mock reads it both to stage and to choose how the candidate behaves
+(`crates/aienos-boot/src/rollback_mock.rs:91-93,184-186`). The pass
+conditions grep markers that only the mock prints as candidate:
+`AIENOS_CANDIDATE: NORMAL_TERMINATION_REQUESTED` (line 105),
+`AIENOS_CANDIDATE: INDUCED_FAULT_PANIC` (line 138),
+`ENTERING_HANG_SPIN_LOOP` (line 181, the cue for the forced reset).
 
-| Row | Becomes (PROPOSED) | Needs |
-| --- | --- | --- |
-| 42 | `NATIVE_ROLLBACK_NORMAL`: BootNext starts the C image, it prints the `final` report and resets; next boot is Default | nothing new in the kernel (normal end already resets, `kmain.c:157`) |
-| 43 | `NATIVE_ROLLBACK_FAULT`: the C image panics on a refused handoff (TEST-only build with a corrupted magic, line `panic: handoff: bad magic`) and resets; next boot is Default | a TEST-only build flag refused by `CK_HARDWARE_STAGING` |
-| 44 | `NATIVE_ROLLBACK_TIMEOUT`: TEST-only C image that hangs after `ExitBootServices`, host forces reset; next boot is Default | a TEST-only hang flag refused by `CK_HARDWARE_STAGING` |
-| 45 | `NATIVE_ROLLBACK_REJECTED` and absent image: unchanged logic, the malformed or missing file is now the C image path | nothing new |
-| 46 | `NATIVE_ROLLBACK_BOOTNEXT_CONSUMED` / `_DEFAULT_UNCHANGED`: unchanged NVRAM checks after a C-image candidate | nothing new |
+The C image reads no mode file and prints none of those markers. So the C
+path needs script changes. All of the following is PROPOSED (MISSING in
+code); the Rust mock stays as stager and default (Q3: preserve the existing
+tests, the current Rust-mock run keeps its own markers):
 
-All five stay **NOT_RUN** until a forge receipt covers them. QEMU only;
-Machine 1 is NOT_RUN.
+| Row | Becomes | Script change needed (PROPOSED) | Kernel/build change needed (PROPOSED) |
+| --- | --- | --- | --- |
+| 42 | `NATIVE_ROLLBACK_NORMAL`: BootNext starts the C image, it ends with the `final` report and resets; next boot is Default | copy the normal C image as `candidate.efi`; replace the line 105 grep with C markers (`report_kind: final` and `note: QEMU qualifies nothing physical`, `kmain.c:154-156`) | none; but whether every stage reaches `final` on this script's QEMU line (no NVMe disk, no `iommu=smmuv3`) is UNVERIFIED, the store stage may print `FAIL` (reported, not fatal: `kmain.c:23-36`) |
+| 43 | `NATIVE_ROLLBACK_FAULT`: the C image refuses its handoff and resets; next boot is Default | per-subtest candidate = the TEST bad-magic image; replace the line 138 grep with `report_kind: panic` and `panic: handoff: bad magic` | a TEST-only build flag that corrupts the magic, refused by `CK_HARDWARE_STAGING` |
+| 44 | `NATIVE_ROLLBACK_TIMEOUT`: TEST-only C image hangs after `ExitBootServices`, host forces reset; next boot is Default | per-subtest candidate = the TEST hang image; replace the line 181 cue with a C hang marker printed before the spin | a TEST-only hang flag (prints one marker, then spins with DAIF masked), refused by `CK_HARDWARE_STAGING` |
+| 45 | `NATIVE_ROLLBACK_REJECTED` and absent image | none: the malformed file (line 219, junk bytes) and the absent file never run, so the C image is not involved; the row only moves with the rest of the gate | none |
+| 46 | `NATIVE_ROLLBACK_BOOTNEXT_CONSUMED` / `_DEFAULT_UNCHANGED` | copy the normal C image as `candidate.efi` in subtest 6 (lines 270-276); the pass greps are on Default-boot logs printed by the mock (lines 286-292) and stay | none |
+
+Also PROPOSED for the script: build the C images itself (via
+`native/kernel` make targets) next to the mock build at line 36, and run the
+C variant as a separate labelled mode so the Rust-mock result is not
+replaced. All five rows stay **NOT_RUN** until a forge receipt covers them.
+QEMU only; Machine 1 is NOT_RUN.
 
 ## 8. Frozen forever vs extensible
 
@@ -283,3 +310,7 @@ Layout:
   is not the same as "the disk the firmware booted from".
 - DAIF at entry: neither the stub nor the first kernel instructions mask
   interrupts today (section 4); the PROPOSED rule needs its own small cut.
+- `native/boot/efi_main.c:8-9` (comment) says the Rust `aienos-boot` crate
+  holds "A/B slots"; that contradicts ADR 0024 Q3 and the crate. A code
+  comment, out of scope for this docs change; the follow-up validator cut
+  should correct it.
