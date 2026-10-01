@@ -44,7 +44,7 @@
 #   abort, after the fence and recovery) and "devices: ... virtio_net=selftest-ok".
 #  boot 2  no SMMU, same image: virtio-net DMA must be denied (NoSmmu), no
 #          grant, no datagram sent, and the helper must log nothing new.
-#  boot 3  SMMU on, NIC WITHOUT iommu_platform (QEMU then offers no
+#  boot 3  SMMU on, modern-only NIC WITHOUT iommu_platform (QEMU offers no
 #          ACCESS_PLATFORM and would DMA around the vIOMMU): the driver must
 #          refuse it before FEATURES_OK ("init FAIL (NoAccessPlatform)"), no
 #          attach, no datagram, helper logs nothing new, device released.
@@ -210,7 +210,6 @@ else
     echo "FAIL  guest UDP RX line with this run's token and its own nonce"; failed=1
 fi
 check "round trip reported" "^net: udp round trip ok tx_reclaimed=[1-9][0-9]* rx_frames=[1-9][0-9]*$"
-check "net selftest PASS" "^net: selftest PASS (rc=0)$"
 echo "-- (d) fence: device DMA outside the window"
 win_re='^smmu_dma_window: virtio_net only iova=0x([0-9a-f]+) len=0x([0-9a-f]+) rid=0x[0-9a-f]+ stream_id=0x([0-9a-f]+)$'
 win_line="$(grep -E "${win_re}" "${work}/serial.txt" | head -1 || true)"
@@ -226,7 +225,7 @@ else
     echo "FAIL  probe line (RX descriptors redirected, probe datagram tx=Ok)"; failed=1
 fi
 if [[ -n "${probe}" ]] && grep -qE "^rx from 127\.0\.0\.1:[0-9]+ len=[0-9]+ payload=\"${probe}\"$" "${hlog}" &&
-    [[ "$(grep -cE '^tx to 127\.0\.0\.1:[0-9]+ len=[0-9]+ reply=[0-9]+$' "${hlog}" || true)" -ge 2 ]]; then
+    grep -A1 -F "payload=\"${probe}\"" "${hlog}" | tail -n +2 | grep -qE "^tx to 127\.0\.0\.1:[0-9]+ len=[0-9]+ reply=[0-9]+$"; then
     echo "PASS  host helper received the probe and replied (the device had a frame to write)"
 else
     echo "FAIL  host helper did not log the probe datagram and a reply to it"; failed=1
@@ -246,7 +245,7 @@ else
 fi
 echo "-- (e) recovery inside the window"
 check "device reset + re-init with ACCESS_PLATFORM after the fault" \
-    "^net_smmu_recovery: device reset + reinit ok (Ok) access_platform=yes$"
+    "^net_smmu_recovery: device reset + reinit ok (Ok) access_platform=yes late_probe_faults=[0-9][0-9]*$"
 check "second round trip after the fault, no new SMMU fault" \
     "^net_smmu_recovery: round trip after the fault ok (rc=0 new_faults=0)$"
 if [[ "$(grep -cE "^net: udp rx .* echo_of_ours=yes payload=\"AIENOS-CK-NET pong token=${token} echo=AIENOS-CK-NET ping nonce=[0-9a-f]{8}\"$" "${work}/serial.txt" || true)" -ge 2 ]]; then
@@ -254,6 +253,7 @@ if [[ "$(grep -cE "^net: udp rx .* echo_of_ours=yes payload=\"AIENOS-CK-NET pong
 else
     echo "FAIL  fewer than two parsed helper replies with this run's token"; failed=1
 fi
+check "net selftest PASS (round trip, fence and recovery)" "^net: selftest PASS (rc=0)$"
 echo "-- release"
 check "device reset before the revoke" "^virtio_net: device reset status=0x00 (stopped)$"
 check "virtio-net bus master revoked" "^dma_gate: virtio_net bus master revoked$"
@@ -289,7 +289,7 @@ failed=0
 helper_rx_after_boot2="$(grep -c '^rx from ' "${hlog}" || true)"
 
 # ---- boot 3: SMMU on, NIC without iommu_platform: refused (fail closed) ----
-boot net-noap smmu
+boot net-noap smmu "disable-legacy=on"
 check "SMMU window programmed (the refusal is the driver's, not the SMMU's)" \
     "^smmu_dma_window: virtio_net only iova=0x[0-9a-f]* len=0x[0-9a-f]* rid=0x[0-9a-f]* stream_id=0x[0-9a-f]*$"
 check "driver refuses a NIC that does not offer ACCESS_PLATFORM" "^virtio_net: init FAIL (NoAccessPlatform)$"

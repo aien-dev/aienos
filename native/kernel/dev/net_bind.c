@@ -260,7 +260,8 @@ static int smmu_negative_test(ck_vnet *n, const ck_net_peer *p, uint64_t win_lo,
     unsigned redirected = 0;
     for (uint16_t id = 0; id < q->size; id++) {
         if (!q->posted[id]) continue;
-        memcpy(n->dev.mem + q->desc_off + 16u * id, &cphys, 8); /* descriptor addr, little-endian */
+        /* one 64-bit store: the device may read this descriptor concurrently */
+        *(volatile uint64_t *)(void *)(n->dev.mem + q->desc_off + 16u * id) = cphys;
         redirected++;
     }
     ck_mb(); /* descriptors rewritten before the datagram that draws the reply */
@@ -279,6 +280,7 @@ static int smmu_negative_test(ck_vnet *n, const ck_net_peer *p, uint64_t win_lo,
     while (e == VNET_OK && ck_time_us() - t0 < PROBE_WAIT_US) {
         st = o_read(n, VNET_WIN_COMMON, VNET_CC_STATUS, 1);
         if (st & VNET_S_NEEDS_RESET) break;
+        if (*(volatile uint16_t *)(n->dev.mem + q->used_off + 2) != used0) break; /* RX completed (bounce) */
         ck_udelay(1000);
     }
     ck_udelay(20000); /* let any further event records land */
@@ -305,10 +307,26 @@ static int smmu_negative_test(ck_vnet *n, const ck_net_peer *p, uint64_t win_lo,
 static int recovery(ck_vnet *n, const vnet_ops *ops, const virtio_pci_caps *caps, uint8_t *mem, uint64_t phys,
                     size_t need)
 {
+    /* Stop the device before vnet_init clears the rings it may still be
+     * reading (status 0, wait until it reads back 0). */
+    o_write(n, VNET_WIN_COMMON, VNET_CC_STATUS, 1, 0);
+    uint32_t st = 0xffu;
+    uint64_t t0 = ck_time_us();
+    while ((st = o_read(n, VNET_WIN_COMMON, VNET_CC_STATUS, 1)) != 0 && ck_time_us() - t0 < RESET_WAIT_US)
+        ck_udelay(10);
+    /* Events the refused probe raised after the negative test drained the
+     * queue belong to the probe: drop them (reported) so new_faults below
+     * counts only the second round trip. */
+    int late = ck_dma_faults(n->stream_id, 0);
+    if (st != 0) {
+        ck_printf("net_smmu_recovery: FAIL (device reset timeout status=0x%02x)\n", st);
+        return -1;
+    }
     vnet_err e =
         vnet_init_flags(&n->dev, ops, caps, mem, phys, need, CK_NET_QSIZE, VNET_INIT_REQUIRE_ACCESS_PLATFORM);
-    ck_printf("net_smmu_recovery: device reset + reinit %s (%s) access_platform=%s\n", e == VNET_OK ? "ok" : "FAIL",
-              vnet_err_name(e), (n->dev.features >> VNET_F_ACCESS_PLATFORM & 1) ? "yes" : "no");
+    ck_printf("net_smmu_recovery: device reset + reinit %s (%s) access_platform=%s late_probe_faults=%d\n",
+              e == VNET_OK ? "ok" : "FAIL", vnet_err_name(e),
+              (n->dev.features >> VNET_F_ACCESS_PLATFORM & 1) ? "yes" : "no", late);
     if (e != VNET_OK) return -1;
     ck_net_peer p;
     int rc = roundtrip(n, &p);
