@@ -223,8 +223,8 @@ int m5_evaluate_anti_rollback(const uint8_t k_root_auth[32], uint8_t mode,
                               int allow_genesis, const m5_disk_state *disk);
 
 /* ---- migration manifest (kind 23), C v2 layout, 192 bytes, MAC by the
- * source store's k_root_auth. Owner public-key signature: not implemented
- * (no in-house signature primitive). ---- */
+ * source store's k_root_auth. The owner public-key signature is a separate
+ * record, m5_owner_migration below (native/sig Ed25519). ---- */
 #define M5_MIGRATION_LEN 192
 typedef struct {
     uint8_t identity_class;
@@ -265,5 +265,80 @@ int m5_recover_object(const uint8_t k_root_auth[32], const uint8_t domain_key[32
                       const uint8_t *anchor_buf, size_t anchor_len,
                       const m5_candidate *cands, size_t n_cands,
                       uint8_t *out, size_t out_cap, size_t *out_len, size_t *chosen);
+
+/* ---- owner-signed migration record (C v1), 272 bytes, Ed25519 by the
+ * owner key (native/sig, pure Ed25519, RFC 8032). The 192-byte migration
+ * manifest above is MAC-bound to the source store's K_root_auth, which proves
+ * the store approved the move; this record proves the OWNER approved it.
+ * Layout (little endian, reserved bytes zero):
+ * 0 "AIENOMG1" | 8 version u16 = 1 | 10 flags u16 = 0 | 12 identity_class | 13..16 reserved
+ * | 16 owner_key_id[32] = SHA-256(owner public key)
+ * | 48 agent_root_id[32] | 80 source_store_uuid[16] | 96 dest_store_uuid[16]
+ * | 112 source_store_generation u64 | 120 store_format_version u32
+ * | 124 envelope_count u32 | 128 envelope_set_digest[32]
+ * | 160 migration_manifest_digest[32] = SHA-256 of the 192-byte MAC'd manifest
+ * | 192 migration_counter u64 | 200 owner_hierarchy_generation u64
+ * | 208 signature[64] = Ed25519(owner, "AIENOS-M5-OWNER-MIGRATION-V1\0" || bytes[0..208])
+ * An unsigned body is the same 272 bytes with an all-zero signature. ---- */
+#define M5_OWNER_MIG_LEN 272
+#define M5_OWNER_MIG_BODY_LEN 208
+typedef struct {
+    uint8_t identity_class;
+    uint8_t owner_key_id[32];             /* SHA-256 of the owner public key */
+    uint8_t agent_root_id[32];
+    uint8_t source_store_uuid[16];
+    uint8_t dest_store_uuid[16];
+    uint64_t source_store_generation;
+    uint32_t store_format_version;
+    uint32_t envelope_count;
+    uint8_t envelope_set_digest[32];      /* m5_envelope_set_digest of the migrated ObjectIds */
+    uint8_t migration_manifest_digest[32];
+    uint64_t migration_counter;           /* monotonic; must exceed the last accepted one */
+    uint64_t owner_hierarchy_generation;
+} m5_owner_migration;
+
+/* SHA-256("AIENOS-M5-ENVSET-V1\0" || n u32 || ids[0] || ... || ids[n-1]).
+ * ids must be strictly ascending (canonical set: sorted, no duplicates),
+ * else M5_ERR_FORMAT. ids may be NULL when n is 0. */
+int m5_envelope_set_digest(const uint8_t (*ids)[32], uint32_t n, uint8_t out[32]);
+
+/* Unsigned body for an offline signer: m's fields, owner_key_id computed from
+ * owner_pk (m->owner_key_id is ignored), signature all zero. */
+int m5_owner_migration_body(const m5_owner_migration *m, const uint8_t owner_pk[32],
+                            uint8_t out[M5_OWNER_MIG_LEN]);
+/* Signs an unsigned body in place. Refuses a malformed body, a body whose
+ * signature field is not all zero (M5_ERR_FORMAT) and a key whose public key
+ * does not match owner_key_id (M5_ERR_BINDING). */
+int m5_owner_migration_sign_body(uint8_t rec[M5_OWNER_MIG_LEN], const uint8_t owner_sk[32]);
+/* body + sign in one step (owner_pk derived from owner_sk). */
+int m5_owner_migration_sign(const m5_owner_migration *m, const uint8_t owner_sk[32],
+                            uint8_t out[M5_OWNER_MIG_LEN]);
+/* Verifies a signed record against the trusted owner public key and the
+ * verifier's expectations (every field except owner_key_id and
+ * migration_counter must equal expect's), then refuses a counter not above
+ * last_migration_counter (M5_ERR_REPLAY). Wrong length: M5_ERR_BOUNDS; bad
+ * magic/version/flags/reserved/class: M5_ERR_FORMAT; another class than
+ * mode: M5_ERR_IDENTITY; another owner key or a bad or missing signature:
+ * M5_ERR_AUTH; field mismatch or source == destination: M5_ERR_BINDING.
+ * out is all zero on every error. */
+int m5_owner_migration_verify(const uint8_t *buf, size_t len, const uint8_t owner_pk[32],
+                              uint8_t mode, const m5_owner_migration *expect,
+                              uint64_t last_migration_counter, m5_owner_migration *out);
+/* Full migration authorization: the MAC'd manifest under the source
+ * K_root_auth (m5_migration_authorize) AND the owner signature over a record
+ * that names that exact manifest (digest) with the same identity class,
+ * agent root, source, destination, source store generation, migration
+ * counter and owner hierarchy generation. expect_own supplies the fields the
+ * manifest does not carry (store_format_version, envelope_count,
+ * envelope_set_digest); its other fields are taken from expect_mig. Both
+ * outputs are all zero on every error. */
+int m5_migration_authorize_owner(const uint8_t *mig_buf, size_t mig_len,
+                                 const uint8_t k_root_auth[32],
+                                 const uint8_t *own_buf, size_t own_len,
+                                 const uint8_t owner_pk[32], uint8_t mode,
+                                 const m5_migration *expect_mig,
+                                 const m5_owner_migration *expect_own,
+                                 uint64_t last_migration_counter,
+                                 m5_migration *out_mig, m5_owner_migration *out_own);
 
 #endif /* AIENOS_M5_H */

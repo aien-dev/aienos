@@ -9,8 +9,9 @@ M5 reference in `crates/aienos-kernel/src/crypto/envelope.rs` and
 `docs/M5_KEY_HIERARCHY_DESIGN_TREE.md`.
 
 ```
-make test       # rule tests, corruption matrix, header fuzz; last line M5_NATIVE: PASS
-make sanitize   # same under ASan + UBSan
+make test       # rule tests, corruption matrix, header fuzz, owner-signed migration
+                # (AIENOS_M5_MIGRATION_SIG: PASS, M5_MIGSIG_TOOL: PASS); last line M5_NATIVE: PASS
+make sanitize   # same, and the tool test, under ASan + UBSan
 make mutants    # each GUARD-tagged refusal removed in turn; tests must fail
 make clean
 ```
@@ -29,6 +30,7 @@ or on the Spark, and nothing measures time or energy.
 | Anti-rollback anchors | `m5_anchor_seal/open`, `m5_evaluate_anti_rollback` | `t_anchor_caller_buffer_roundtrip`, `t_rb_*` |
 | Production/test identity separation | identity class in the hierarchy key (so in every object key and K_root_auth MAC), plus an explicit class byte in commit record, anchor and migration; open/verify take a mode | `t_identity_production_refuses_test`, `t_identity_test_refuses_production`, `t_identity_relabel_breaks_mac` |
 | Migration authorization (MAC-bound) | `m5_migration_seal/authorize` | `t_mig_*` |
+| Migration authorization (owner-signed, Ed25519) | `m5_owner_migration_body/sign_body/sign/verify`, `m5_envelope_set_digest`, `m5_migration_authorize_owner`; CLI `tools/m5_migsig.c` | `tests/m5_migsig_test.c` (13 tests, `AIENOS_M5_MIGRATION_SIG: PASS`), `tests/m5_migsig_tool_test.sh` (`M5_MIGSIG_TOOL: PASS`) |
 | Deterministic recovery (object level) | `m5_recover_object` | `t_recovery_*` |
 
 ## Formats and where they differ from the Rust reference
@@ -98,7 +100,34 @@ HMAC-SHA-256 under K_root_auth over `domain || bytes`, compared in constant time
   store generation in it does not conflict with AGENTS.md section 3. Refuses
   wrong key, any binding mismatch, source == destination, and a counter not
   above the last accepted one. The Rust 64-byte `offline_signature` field is
-  dropped (see below).
+  dropped; the owner signature is the separate record below.
+- **Owner-signed migration record** (C only, `AIENOMG1` version 1, 272
+  bytes, layout in `m5.h`): identity class, owner key id (SHA-256 of the
+  owner public key), agent root, source and destination store, source store
+  generation, store format version, envelope count and envelope-set digest
+  (`SHA-256("AIENOS-M5-ENVSET-V1\0" || n || ObjectIds in strictly ascending
+  order)`), SHA-256 of the MAC'd migration manifest, migration counter, owner
+  hierarchy generation, then a pure Ed25519 signature (native/sig) over
+  `"AIENOS-M5-OWNER-MIGRATION-V1\0" || bytes[0..208]`. Verification refuses
+  a wrong length (BOUNDS), bad magic/version/flags/reserved/class (FORMAT,
+  even under a valid signature), another class (IDENTITY), another key, a
+  key id that does not match the trusted key, an unsigned or tampered record
+  (AUTH), any field the verifier does not expect or source == destination
+  (BINDING), and a counter not above the last accepted one (REPLAY).
+  `m5_migration_authorize_owner` requires both records: the manifest MAC
+  under the source K_root_auth and an owner record naming that exact
+  manifest digest and the same counter, stores, agent root and generations.
+- **`tools/m5_migsig`** (hosted CLI): `pubkey`, `body` (from a key=value
+  spec), `sign SECRET_KEY_FILE BODY OUT`, `verify PUBLIC_KEY_FILE RECORD
+  SPEC LAST_COUNTER`. It never creates a key. The secret key is read only
+  from the given path (32 raw bytes, 64 hex digits or unencrypted Ed25519
+  PKCS#8 DER, mode 0600 or tighter), so the real signature can be made only
+  in the offline Gate 3 ceremony, for example after
+  `openssl pkey -in owner_root.pem -outform DER -out <file on tmpfs>`.
+  Tests use freshly generated random keys named `TEST-ONLY-*` and delete
+  them; the tool test also cross-checks the public key and the signature
+  against openssl when it is installed (an outside tool used only as a test
+  oracle, never linked).
 
 ## Host-only, and what remains
 
@@ -107,11 +136,13 @@ HMAC-SHA-256 under K_root_auth over `domain || bytes`, compared in constant time
 - **Sealed volume keys**: keyslot wrap/unwrap is done in software with a
   caller KEK. Real TPM sealing of K_vol (PolicyAuthorize) is TRUST-1 Gate 6
   (policy from Gate 5).
-- **Owner-signature binding: MISSING_IMPLEMENTATION, needs an in-house
-  signature primitive (e.g. Ed25519 in C).** There is none in `native/` or
-  `crates/aienos-crypto` (the artifact tool uses the outside `ed25519_dalek`
-  crate). Migration is MAC-bound only, which proves the holder of the source
-  K_root_auth approved it, not the owner's offline key.
+- **Owner-signature binding: host-tested with TEST keys only; the real
+  owner signature is BLOCKED_OPERATOR on the Gate 3 offline key ceremony.**
+  The signature primitive is `native/sig` (in-house Ed25519, #188). The
+  record and the tool exist and are tested, but no record has been signed
+  with the real owner key, nothing in the Store or boot path calls
+  `m5_migration_authorize_owner` yet (needs the C disk layer), and no
+  trusted owner public key is provisioned anywhere.
 - **Binding to the Gate 3 Owner Root**: the hierarchy carries an owner
   hierarchy generation, but nothing ties K_vol to the Gate 3 Owner Root yet.
 - **Store integration** needs the C disk layer: recovery here works on a
