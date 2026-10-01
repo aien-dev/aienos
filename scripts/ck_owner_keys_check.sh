@@ -145,10 +145,18 @@ for f in "${hw}/aienos-ck.elf" "${hw}/BOOTAA64.EFI"; do
 done
 if [[ -s "${hw}/aienos-ck.elf" ]]; then
     nmtool="${cross}nm"
-    y="$("${nmtool}" "${hw}/aienos-ck.elf" | grep -E ' (ck_store_test_keys|ck_store_test_uuid)$' || true)"
+    # Capture nm fully first: `nm | grep -q` lets grep exit early, nm can die of SIGPIPE, and
+    # pipefail then turns a real match into a FAIL (CK-4 light log 181624).
+    nmout="$("${nmtool}" "${hw}/aienos-ck.elf")"
+    y="$(grep -E ' (ck_store_test_keys|ck_store_test_uuid)$' <<<"${nmout}" || true)"
     [[ -z "${y}" ]] && ok "no TEST Store key symbols in the hardware staging ELF" || bad "TEST symbols: ${y}"
-    "${nmtool}" "${hw}/aienos-ck.elf" | grep -qE ' ck_store_production_keys$' \
+    grep -qE ' ck_store_production_keys$' <<<"${nmout}" \
         && ok "ck_store_production_keys (BLOCKED_OPERATOR seam) is linked" || bad "ck_store_production_keys not linked"
+    # Control: the same match must FAIL on nm text without the symbol and PASS with it.
+    ctl_absent=$'0000 T ck_main\n0001 D ck_other_keys'
+    ctl_present="${ctl_absent}"$'\n0002 D ck_store_production_keys'
+    if grep -qE ' ck_store_production_keys$' <<<"${ctl_absent}"; then bad "control: absent symbol matched"; else ok "control: symbol check fails when the symbol is absent"; fi
+    if grep -qE ' ck_store_production_keys$' <<<"${ctl_present}"; then ok "control: symbol check passes when the symbol is present"; else bad "control: present symbol not matched"; fi
 fi
 
 # ---- 4. control: the default image keeps the labelled TEST keys -----------
