@@ -1,5 +1,16 @@
 # Bootable recovery media for Machine 1
 
+> **Operator doing TRUST-1:** follow
+> [TRUST-1-OPERATOR-STEPS.md](TRUST-1-OPERATOR-STEPS.md) (Step 4 rebuilds the
+> stick, Step 6 boots it and proves the unlock). This page is the technical
+> record of what the stick contains and how it was first proven.
+>
+> **Two places, two sets of tools.** Commands in "Build and verify" run in a
+> normal Ubuntu terminal on the Spark. Commands after "Boot the USB once" run
+> at the recovery prompt on the stick, which only has the tools listed under
+> "What ships". `aien-proof` (the shared test-board tool) is **not** on the
+> stick: use it only from Ubuntu.
+
 This procedure builds and exercises the bootable recovery USB for
 [issue #17](https://github.com/aien-dev/aienos/issues/17) and TRUST-1 Gate 1.
 The physical run on 2026-09-25 booted the USB once, mounted the internal root
@@ -19,9 +30,21 @@ exercise.
   recovery USB (signed shim + GRUB fallback, signed production kernel, and a
   standalone RAM initrd). It refuses the internal NVMe and mounted targets.
 - `scripts/build_standalone_recovery_initrd.sh` builds the RAM rescue
-  environment with BusyBox, filesystem check/repair tools, `chroot`,
-  `efibootmgr`, `findmnt`, and the Machine 1 xHCI/HID/USB-storage/NVMe/dm-crypt
-  modules. Internal storage remains unmounted until the operator mounts it.
+  environment. It contains exactly these programs (the `BINARIES` list in that
+  script, plus gocryptfs):
+  - shell and basics: BusyBox (with its built-in commands), `sh`, `bash`,
+    `mount`, `umount`, `mkdir`, `cat`, `grep`, `sed`, `sha256sum`;
+  - disks: `lsblk`, `blkid`, `findmnt`, `cryptsetup`;
+  - repair and boot entries: `fsck.vfat`, `mkfs.vfat`, `fsck.ext4`, `chroot`,
+    `efibootmgr`;
+  - TRUST-1 Gate 1: `tpm2_pcrread` (startup measurements), `sbverify` (loader
+    signatures), `age` (opens the offline spare), `gocryptfs` and
+    `fusermount3` (open and close the private storage read-only).
+
+  It also packages the Machine 1 xHCI/HID/USB-storage/NVMe/dm-crypt modules.
+  It does **not** contain `aien-proof`, `tpm2_eventlog`, `mokutil`, a
+  repository checkout, or any key. Internal storage remains unmounted until
+  the operator mounts it.
 - The build copies the attended collector into the image at
   `/usr/local/sbin/collect_recovery_boot_evidence`; it does not depend on a
   repository checkout being present in the rescue shell.
@@ -36,8 +59,9 @@ it on exit, including failed builds.
 
 ## Build and verify
 
-On Machine 1 in Linux, identify the dedicated USB target. Do not target the
-internal NVMe or EFI System Partition; the builder rejects them.
+On Machine 1 in Linux (an Ubuntu terminal, where `aien-proof` is installed),
+identify the dedicated USB target. Do not target the internal NVMe or EFI
+System Partition; the builder rejects them.
 
 ```bash
 cd ~/workspace/aienos-recovery-gate
@@ -100,11 +124,12 @@ exercise only reads entries and does not change efivars or BootOrder.
 ## Capture the recovery evidence
 
 Run the collector packaged on the USB, not a copy assumed to exist in the
-repository checkout. Use the exact mount locations above:
+repository checkout. Use the exact mount locations above. Type it as shown,
+with no `aien-proof hold` in front: that tool is not on the stick, and an
+earlier version of this page wrongly said to use it here.
 
 ```sh
-aien-proof hold --resource machine-1 --job recovery-boot-evidence -- \
-    env AIENOS_ESP_MNT=/mnt/esp \
+env AIENOS_ESP_MNT=/mnt/esp \
     /usr/local/sbin/collect_recovery_boot_evidence /mnt/root
 ```
 
@@ -112,13 +137,24 @@ The collector is read-only. A PASS checks removable-media boot, Secure Boot
 byte readability, internal root mount, ESP mount and fallback loader,
 efivarfs presence, and readable boot entries. Preserve its complete output.
 
+For the TRUST-1 Gate 1 round trip (opening the private storage read-only with
+the offline spare), use the longer form with the `AIENOS_UNLOCK_*` settings in
+[TRUST-1-OPERATOR-STEPS.md, Step 6](TRUST-1-OPERATOR-STEPS.md#step-6-boot-the-recovery-stick-with-secure-boot-on-and-prove-the-unlock-gate-1-attended).
+
+The machine-1 test-board record for this boot comes from Ubuntu, not from the
+stick: the `aien-proof hold` around the stick build is the last ledger event
+before the reboot. The 2026-09-25 run had no separate ledger event for the
+attended boot itself (see the evidence record); the collector's printed
+output is the record of the boot.
+
 ## Return to Linux and complete the record
 
 Exit any chroot, unmount `/mnt/esp` and `/mnt/root`, then reboot or power off.
 Confirm Linux returns and record its root/ESP mounts. Record the recovery
 `BootCurrent` and `BootOrder`, the return-to-Linux proof, tool results,
 Secure Boot observations before and after the boot, and the aien-proof events
-in the evidence file. If an abbreviated collector or receipt omitted the
+taken from Ubuntu (the build hold, and anything recorded after return) in the
+evidence file. If an abbreviated collector or receipt omitted the
 Secure Boot byte or post-return state, say so explicitly; do not infer it.
 
 For the 2026-09-25 run, the recovery entry was `Boot0004* UEFI: USB USB Hard
