@@ -1,5 +1,6 @@
 /* store_boot.c -- see store_boot.h. */
 #include "store_boot.h"
+#include "artifact_store.h"
 #include <stddef.h>
 #include "ck.h"
 #include "disk_layout.h"
@@ -120,9 +121,11 @@ int store_boot_run(const disk_dev *d, const ss_keys *keys, const uint8_t uuid[16
     if (!g_ws || !g_ss) return fail(r, "io", "allocate workspace", -1);
     bz(g_ss, sizeof *g_ss);
 
-    st_disk sd;
-    st_dev sdev;
-    ts_device tdev;
+    /* static: the open Store (g_ss) keeps pointers to these devices and is
+     * used after this returns (store_boot_store, the artifact read). */
+    static st_disk sd;
+    static st_dev sdev;
+    static ts_device tdev;
     int rc = st_disk_bind(&sd, d, r->store_base_lba, r->store_units, &sdev);
     if (rc) return fail(r, "geometry", "st_disk_bind", rc);
     ss_ts_device(d, &tdev);
@@ -232,6 +235,7 @@ int ck_stage_store(void)
     const disk_dev *d = ck_dev_boot_disk();
     if (!d) {
         ck_printf("store: REFUSED proof=io step=\"no boot disk\" (NVMe not bound; see nvme/dma_gate lines)\n");
+        ck_art_stage_load(0, "no boot disk");
         return -1;
     }
     ss_keys keys;
@@ -241,6 +245,14 @@ int ck_stage_store(void)
     int rc = store_boot_run(d, &keys, ck_store_test_uuid, commit ? commit : "unknown", &r);
     bz(&keys, sizeof keys);
     store_boot_print(&r);
+    /* Signed artifact candidates live in this Store: read them while the disk
+     * is still bound (the loader verifies them later, as untrusted bytes). */
+    ck_art_stage_load(r.verdict == CK_SB_COMMITTED ? g_ss : 0, r.step);
     ck_dev_nvme_release(); /* last disk user: revoke NVMe bus mastering */
     return rc;
+}
+
+ss_store *store_boot_store(void)
+{
+    return g_ss;
 }

@@ -118,12 +118,14 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     /* M3 isolation checks (core/m3.c), before any stage registers an IRQ. */
     ck_m3_run();
 
-    /* P2 sealed-artifact loader (core/artifact_loader.c). */
-    ck_artifact_run();
-
     run_stage("devices", ck_stage_devices);
     run_stage("security", ck_stage_security);
     run_stage("store", ck_stage_store);
+
+    /* P2 sealed-artifact loader (core/artifact_loader.c). Runs after the store
+     * stage: its default candidate source is the boot disk Store, read by that
+     * stage before the NVMe DMA revoke. No stage registers an IRQ. */
+    ck_artifact_run();
     struct ck_mm_usage mu;
     ck_mm_usage(&mu);
     ck_printf("mm_usage: stack_bytes=%llu stack_used=%llu heap_bytes=%llu heap_free=%llu heap_min_free=%llu\n",

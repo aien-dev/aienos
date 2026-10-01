@@ -15,7 +15,8 @@ STAGE_OUT ?= /tmp/aienos-ck-stage-$(shell id -u)
 # Own sources (image).
 STAGE_OWN_SRCS := $(STAGE_DIR)/dev/pci.c $(STAGE_DIR)/dev/nvme_bind.c $(STAGE_DIR)/dev/nvme_shutdown.c $(STAGE_DIR)/dev/virtio_net.c \
                   $(STAGE_DIR)/dev/net_bind.c $(STAGE_DIR)/dev/net_udp.c \
-                  $(STAGE_DIR)/dev/devices.c $(STAGE_DIR)/svc/security.c $(STAGE_DIR)/svc/store_boot.c
+                  $(STAGE_DIR)/dev/devices.c $(STAGE_DIR)/svc/security.c $(STAGE_DIR)/svc/store_boot.c \
+                  $(STAGE_DIR)/svc/artifact_store.c
 # Native modules, compiled unmodified.
 STAGE_NATIVE_SRCS := \
   $(STAGE_NATIVE)/disk/disk.c $(STAGE_NATIVE)/disk/disk_nvme.c \
@@ -79,7 +80,7 @@ stage-free: $(STAGE_OUT)/stage_all.o
 # ---- host tests ----------------------------------------------------------
 STAGE_HOST_SRCS := $(STAGE_OWN_SRCS) $(STAGE_NATIVE_SRCS) $(STAGE_NATIVE)/disk/disk_file.c \
   $(STAGE_DIR)/svc/tests/ck_host.c $(STAGE_DIR)/svc/tests/stage_test.c
-STAGE_HOST_FLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -pthread
+STAGE_HOST_FLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -pthread -DCK_ART_STORE_WRITER
 STAGE_SAN_FLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
 $(STAGE_OUT)/stage_test: $(STAGE_HOST_SRCS) $(wildcard $(STAGE_DIR)/dev/*.h $(STAGE_DIR)/svc/*.h $(STAGE_DIR)/include/*.h)

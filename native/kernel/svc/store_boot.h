@@ -50,4 +50,7 @@ int store_boot_run(const disk_dev *d, const ss_keys *keys, const uint8_t uuid[16
                    ck_store_report *r);
 /* Print the report lines (also used by the host test). */
 void store_boot_print(const ck_store_report *r);
+/* The open Store of the last store_boot_run (valid only after it returned 0;
+ * host image tool and tests write further objects through it). */
+ss_store *store_boot_store(void);
 #endif
