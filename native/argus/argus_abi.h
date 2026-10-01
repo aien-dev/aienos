@@ -1,5 +1,5 @@
 /*
- * argus_abi.h -- ARGUS security event ABI and core defensive types, version 1.
+ * argus_abi.h -- ARGUS security event ABI and core defensive types, version 1 (event version byte 1; ABI minor 2 = v1.2, see below).
  *
  * ARGUS observes, detects, contains (by request), and defends. It never
  * authorizes. Nothing in this header, or in anything that includes it, may
@@ -106,7 +106,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define ARGUS_ABI_VERSION     1u    /* v1.1: layout-identical; stream id in flag bits, USE_SUMMARY, CAP_NONE, store id */
+#define ARGUS_ABI_VERSION     1u    /* event version byte, unchanged since v1 (v1.1 and v1.2 are layout-identical; see ARGUS_ABI_MINOR) */
 #define ARGUS_ABI_MINOR       2u    /* v1.2: ARGUS-1 containment, additive; the event version byte stays ARGUS_ABI_VERSION */
 #define ARGUS_EVENT_SIZE      128u
 #define ARGUS_DIGEST_LEN      32u
