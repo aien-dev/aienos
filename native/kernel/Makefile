@@ -15,6 +15,8 @@
 #   make sanitize        same under ASan + UBSan    -> CK_CORE_HOST: PASS
 #   make stage-test | stage-sanitize | stage-free   stage host tests (stage.mk)
 #   make print-kcflags   flags stage code must be built with
+#   make udp-echo        host UDP echo helper for scripts/qemu_ck_net_test.sh:
+#                        $(OUT)/host/ck_udp_echo (hosted, test tooling only)
 #
 #   CK_EXTRA_CFLAGS=... extra kernel flags for one-off checks, e.g.
 #                    -DCK_SELFTEST_EL2_FAULT (brk at EL2: the EL2 fatal path)
@@ -197,8 +199,14 @@ sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
 	@fail=0; for t in $^; do ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS (sanitize)"; else echo "CK_CORE_HOST: FAIL (sanitize)"; exit 1; fi
 
+# ---- host tool for the AIENOS_CK_NET gate (scripts/qemu_ck_net_test.sh) ----
+udp-echo: $(OUT)/host/ck_udp_echo
+$(OUT)/host/ck_udp_echo: $(KDIR)/tools/ck_udp_echo.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -o $@ $<
+
 clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize clean print-kcflags FORCE
+.PHONY: all full test sanitize clean print-kcflags udp-echo FORCE

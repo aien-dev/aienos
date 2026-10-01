@@ -16,6 +16,8 @@
 #include "pci.h"
 #include "security.h"
 #include "store_boot.h"
+#include "net_bind.h"
+#include "net_udp.h"
 
 static int checks, failures;
 #define CHECK(c)                                                                 \
@@ -432,6 +434,164 @@ static void test_nvme_shutdown(void)
     CHECK(ck_nvme_disable(&o, 1000, &r) == CK_NVME_SHUT_GONE && m.cc_writes == 0);
     CHECK(ck_nvme_disable(0, 1000, &r) == CK_NVME_SHUT_EARG);
 }
+/* ---------------- virtio-net UDP round trip frames + fail-closed bind ---------------- */
+
+static ck_net_peer peer_guest(void)
+{
+    ck_net_peer p;
+    memset(&p, 0, sizeof p);
+    static const uint8_t mac[6] = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
+    memcpy(p.mac.b, mac, 6);
+    p.ip = (net_ipv4){{10, 0, 2, 15}};
+    p.gw_ip = (net_ipv4){{10, 0, 2, 2}};
+    p.lport = CK_NET_LOCAL_PORT;
+    p.rport = CK_NET_ECHO_PORT;
+    return p;
+}
+static const net_mac k_gw_mac = {{0x52, 0x55, 0x0a, 0x00, 0x02, 0x02}};
+
+/* An ARP frame as the gateway would send it. */
+static size_t gw_arp(uint16_t op, net_mac eth_dst, net_mac smac, net_ipv4 sip, net_mac tmac, net_ipv4 tip,
+                     uint8_t *out, size_t cap)
+{
+    net_arp_packet a = {op, smac, sip, tmac, tip};
+    uint8_t body[64];
+    size_t w = 0, fw = 0;
+    if (net_arp_build(&a, body, sizeof body, &w) != NET_OK) return 0;
+    net_eth_frame f = {eth_dst, smac, NET_ETHERTYPE_ARP, body, w};
+    return net_eth_build(&f, out, cap, &fw) == NET_OK ? fw : 0;
+}
+
+static void test_net_udp(void)
+{
+    ck_net_peer p = peer_guest();
+    static uint8_t f[1600];
+    net_eth_frame e;
+    net_arp_packet a;
+    net_mac m;
+    const uint8_t *pl = 0;
+    size_t pn = 0;
+    int cs = -1;
+
+    /* ARP request: broadcast, who-has gateway tell us. */
+    size_t w = ck_net_arp_request(&p, f, sizeof f);
+    CHECK(w == 42 && net_eth_parse(f, w, &e) == NET_OK && e.ethertype == NET_ETHERTYPE_ARP);
+    CHECK(memcmp(e.destination.b, "\xff\xff\xff\xff\xff\xff", 6) == 0);
+    CHECK(net_arp_parse(e.payload, e.payload_len, &a) == NET_OK && a.operation == NET_ARP_REQUEST &&
+          memcmp(a.target_ip.b, p.gw_ip.b, 4) == 0 && memcmp(a.sender_ip.b, p.ip.b, 4) == 0 &&
+          memcmp(a.sender_mac.b, p.mac.b, 6) == 0);
+    CHECK(ck_net_arp_request(&p, f, 41) == 0);
+
+    /* ARP reply from the gateway is learned; look-alikes are not. */
+    w = gw_arp(NET_ARP_REPLY, p.mac, k_gw_mac, p.gw_ip, p.mac, p.ip, f, sizeof f);
+    memset(&m, 0, sizeof m);
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_ARP_GW && memcmp(m.b, k_gw_mac.b, 6) == 0);
+    CHECK(ck_net_classify(&p, f, w - 1, &m, &a, &pl, &pn, &cs) == CK_NET_IGNORED); /* truncated */
+    net_ipv4 other = {{10, 0, 2, 3}};
+    w = gw_arp(NET_ARP_REPLY, p.mac, k_gw_mac, other, p.mac, p.ip, f, sizeof f);
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_IGNORED); /* not the gateway */
+    net_mac bc = {{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}}, zero = {{0}}, mc = {{0x01, 0, 0x5e, 0, 0, 1}};
+    w = gw_arp(NET_ARP_REPLY, p.mac, bc, p.gw_ip, p.mac, p.ip, f, sizeof f);
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_IGNORED); /* broadcast sender MAC */
+    w = gw_arp(NET_ARP_REPLY, p.mac, zero, p.gw_ip, p.mac, p.ip, f, sizeof f);
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_IGNORED); /* zero sender MAC */
+    w = gw_arp(NET_ARP_REPLY, p.mac, mc, p.gw_ip, p.mac, p.ip, f, sizeof f);
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_IGNORED); /* multicast sender MAC */
+    w = gw_arp(NET_ARP_REPLY, k_gw_mac, k_gw_mac, p.gw_ip, p.mac, p.ip, f, sizeof f);
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_IGNORED); /* not addressed to us */
+    w = gw_arp(NET_ARP_REPLY, bc, k_gw_mac, p.gw_ip, p.mac, p.ip, f, sizeof f);
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_IGNORED); /* broadcast reply */
+
+    /* ARP request for our address is answered to its sender. */
+    w = gw_arp(NET_ARP_REQUEST, bc, k_gw_mac, p.gw_ip, zero, p.ip, f, sizeof f);
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_ARP_ASK);
+    w = ck_net_arp_reply(&p, &a, f, sizeof f);
+    net_arp_packet r;
+    CHECK(w == 42 && net_eth_parse(f, w, &e) == NET_OK && memcmp(e.destination.b, k_gw_mac.b, 6) == 0 &&
+          net_arp_parse(e.payload, e.payload_len, &r) == NET_OK && r.operation == NET_ARP_REPLY &&
+          memcmp(r.target_ip.b, p.gw_ip.b, 4) == 0 && memcmp(r.sender_mac.b, p.mac.b, 6) == 0);
+    w = gw_arp(NET_ARP_REQUEST, bc, k_gw_mac, p.gw_ip, zero, other, f, sizeof f);
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_IGNORED); /* asks for someone else */
+
+    /* UDP out: refused before the gateway MAC is known, then well formed. */
+    static const char ping[] = "AIENOS-CK-NET ping nonce=0123abcd";
+    CHECK(ck_net_udp_frame(&p, 1, (const uint8_t *)ping, sizeof ping - 1, f, sizeof f) == 0);
+    p.gw_mac = k_gw_mac;
+    w = ck_net_udp_frame(&p, 1, (const uint8_t *)ping, sizeof ping - 1, f, sizeof f);
+    CHECK(w == 14 + 20 + 8 + sizeof ping - 1);
+    CHECK(ck_net_udp_frame(&p, 1, f, 1473, f + 0, sizeof f) == 0); /* > 1500-byte IP datagram buffer */
+    net_ipv4_header ih;
+    const uint8_t *ipl = 0;
+    size_t ipn = 0;
+    net_udp_header uh;
+    CHECK(net_eth_parse(f, w, &e) == NET_OK && memcmp(e.destination.b, k_gw_mac.b, 6) == 0 &&
+          net_ipv4_parse(e.payload, e.payload_len, &ih, &ipl, &ipn) == NET_OK && ih.protocol == NET_IPPROTO_UDP &&
+          net_udp_parse(ipl, ipn, p.ip, p.gw_ip, &uh, &pl, &pn) == NET_OK && uh.destination_port == CK_NET_ECHO_PORT &&
+          pn == sizeof ping - 1 && memcmp(pl, ping, pn) == 0);
+
+    /* UDP back: the gateway's reply, built with the roles swapped. */
+    ck_net_peer g;
+    memset(&g, 0, sizeof g);
+    g.mac = k_gw_mac;
+    g.ip = p.gw_ip;
+    g.gw_mac = p.mac;
+    g.gw_ip = p.ip;
+    g.lport = CK_NET_ECHO_PORT;
+    g.rport = CK_NET_LOCAL_PORT;
+    static const char pong[] = "AIENOS-CK-NET pong token=feedf00d echo=AIENOS-CK-NET ping nonce=0123abcd";
+    w = ck_net_udp_frame(&g, 7, (const uint8_t *)pong, sizeof pong - 1, f, sizeof f);
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_UDP_REPLY && cs == 1 &&
+          pn == sizeof pong - 1 && memcmp(pl, pong, pn) == 0);
+    size_t udp_off = 14 + 20;
+    f[udp_off + 8] ^= 1; /* corrupt payload: checksum must refuse it */
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_IGNORED);
+    f[udp_off + 8] ^= 1;
+    f[udp_off + 6] = f[udp_off + 7] = 0; /* no checksum: allowed, reported */
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_UDP_REPLY && cs == 0);
+    g.lport = 9999; /* wrong source port */
+    w = ck_net_udp_frame(&g, 7, (const uint8_t *)pong, sizeof pong - 1, f, sizeof f);
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_IGNORED);
+    g.lport = CK_NET_ECHO_PORT;
+    g.ip = other; /* wrong source address */
+    w = ck_net_udp_frame(&g, 7, (const uint8_t *)pong, sizeof pong - 1, f, sizeof f);
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_IGNORED);
+    g.ip = p.gw_ip;
+    g.gw_mac = k_gw_mac; /* not addressed to our MAC */
+    w = ck_net_udp_frame(&g, 7, (const uint8_t *)pong, sizeof pong - 1, f, sizeof f);
+    CHECK(ck_net_classify(&p, f, w, &m, &a, &pl, &pn, &cs) == CK_NET_IGNORED);
+    CHECK(ck_net_classify(&p, f, 13, &m, &a, &pl, &pn, &cs) == CK_NET_IGNORED);
+
+    char s[8];
+    ck_net_printable((const uint8_t *)"a\"b\\\x01\x7f" "cdef", 10, s, sizeof s);
+    CHECK(strcmp(s, "a'b'..c") == 0);
+
+    /* Bind without an SMMU (host shim: CK_SMMU_ABSENT) fails closed: the
+     * function's command register never gets memory decode or bus master. */
+    static uint8_t cfg[4096];
+    static pci_func vf;
+    memset(cfg, 0, sizeof cfg);
+    memset(&vf, 0, sizeof vf);
+    vf.vendor = 0x1af4;
+    vf.device = 0x1041;
+    vf.cfg = cfg;
+    vf.bar[4].addr = 0x10000000u;
+    vf.bar[4].size = 0x4000u;
+    virtio_pci_caps caps;
+    memset(&caps, 0, sizeof caps);
+    caps.common_cfg = (virtio_pci_region){1, 4, 0, 0x1000};
+    caps.isr_cfg = (virtio_pci_region){1, 4, 0x1000, 0x1000};
+    caps.device_cfg = (virtio_pci_region){1, 4, 0x2000, 0x1000};
+    caps.notify_cfg = (virtio_pci_region){1, 4, 0x3000, 0x1000};
+    caps.has_notify_off_multiplier = 1;
+    caps.notify_off_multiplier = 4;
+    printf("  [virtio-net bind without SMMU, host, not hardware]\n");
+    CHECK(ck_net_bind_selftest(&vf, &caps) == CK_NET_E_DENIED);
+    CHECK((pci_r16(vf.cfg, 4) & 0x6u) == 0); /* no MEM, no BM */
+    CHECK(ck_net_live() == 0);
+    ck_net_release(); /* idempotent */
+    CHECK(ck_net_bind_selftest(NULL, &caps) == CK_NET_E_ARG);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -442,6 +602,7 @@ int main(void)
     test_store();
     test_security();
     test_nvme_shutdown();
+    test_net_udp();
     printf("CK_STAGE_HOST: %s checks=%d failures=%d\n", failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;
 }
