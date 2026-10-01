@@ -4,9 +4,11 @@
 # It refuses a dirty tree, records the exact commit and the machine it ran on
 # (read-only: no sudo, no TPM writes, no efivar or boot-entry writes, no disk
 # writes outside its own output folder), runs every software gate that exists
-# today, lists every operator/hardware/unimplemented gate with an honest
-# BLOCKED_* or MISSING_IMPLEMENTATION verdict (never PASS), and writes one
-# JSON receipt named by the sha256 of its own content.
+# today, lists every operator/hardware/unimplemented gate as NOT_RUN (never
+# PASS) with its blocker class (BLOCKED_OPERATOR, BLOCKED_HARDWARE or
+# MISSING_IMPLEMENTATION) as the reason, and writes one JSON receipt named by
+# the sha256 of its own content. Verdicts are only PASS, FAIL or NOT_RUN: a
+# blocker is the table's reason for not running, never a measured result.
 #
 # Usage: bash scripts/trust1_m5_qualify.sh [--with-qemu] [--out DIR]
 #        bash scripts/trust1_m5_qualify.sh --self-test
@@ -21,7 +23,7 @@
 #
 # Overall verdict: QUALIFIED only if every canonical gate is PASS, otherwise
 # NOT_QUALIFIED with the list of gates that are not PASS.
-# Exit: 0 no software gate FAILed (BLOCKED_*/MISSING/NOT_RUN allowed),
+# Exit: 0 no software gate FAILed (NOT_RUN allowed, whatever its blocker),
 #       1 at least one software gate FAILed or the run dirtied the tree,
 #       2 usage error or dirty tree at start.
 set -uo pipefail
@@ -34,12 +36,12 @@ set -uo pipefail
 # kind:
 #   software  run now; PASS needs exit 0 AND the marker line in the log
 #   cargo     like software, and the log must show N>0 passed, 0 failed
-#   auto      like software if the runner's file exists, else
-#             MISSING_IMPLEMENTATION (being built in parallel)
+#   auto      like software if the runner's file exists, else NOT_RUN
+#             with blocker MISSING_IMPLEMENTATION (being built in parallel)
 #   qemu      software, only with --with-qemu and no .spark-quiet; else NOT_RUN
-#   operator  BLOCKED_OPERATOR, never run, never PASS
-#   hardware  BLOCKED_HARDWARE, never run, never PASS
-#   missing   MISSING_IMPLEMENTATION, never run, never PASS
+#   operator  NOT_RUN, blocker BLOCKED_OPERATOR; never run, never PASS
+#   hardware  NOT_RUN, blocker BLOCKED_HARDWARE; never run, never PASS
+#   missing   NOT_RUN, blocker MISSING_IMPLEMENTATION; never run, never PASS
 # runner: name of a run_* function below ('-' for none).
 # notrun_rc: exit code that means "a tool is missing" -> NOT_RUN ('-' none).
 # marker: extended regex that must match a line of the log ('-' for none).
@@ -62,7 +64,7 @@ qemu_secureboot_signing|qemu|run_qemu_sb|-|^TRUST-1 Gate 4 Secure Boot signing t
 qemu_store_512b_crash|qemu|run_qemu_store512|-|^STORE_512B_CRASH_RECOVERY_QEMU: PASS$|QEMU Store crash recovery on 512-byte blocks
 qemu_native_nvme|qemu|run_qemu_native_nvme|-|^AIENOS_STORE_NVME_QEMU: PASS$|C NVMe driver write/flush/reset/read-back on QEMU virtual NVMe (emulator only)
 ck_m1_boot_qemu|qemu|run_qemu_ck_boot|3|^AIENOS_CK_M1: PASS( .*)?$|C kernel (native/boot + native/kernel, Lane 18) UEFI boot observables on QEMU, scripts/qemu_ck_boot_test.sh (emulator only)
-ck_store_kernel_qemu|qemu|run_qemu_ck_store|3|^AIENOS_CK_M4_STORE: PASS( .*)?$|sealed C Store (native/store + native/m5, TEST keys) in the C kernel boot path on QEMU virtual NVMe with the QEMU-only unsafe DMA bypass, scripts/qemu_ck_store_test.sh (emulator only; not a real device)
+ck_store_kernel_qemu|qemu|run_qemu_ck_store|3|^AIENOS_CK_M4_STORE: PASS( .*)?$|sealed C Store (native/store + native/m5, TEST keys) in the C kernel boot path on QEMU virtual NVMe, DMA confined by the emulated SMMU, scripts/qemu_ck_store_test.sh (emulator only; not a real device, not real keys)
 ck_argus1_revoke_qemu|qemu|run_qemu_ck_argus|3|^AIENOS_CK_ARGUS1_REVOKE: PASS( .*)?$|ARGUS-1 narrow revoke inside the C kernel on QEMU, scripts/qemu_ck_store_test.sh (emulator only)
 t1_gate0_second_offline_location|operator|-|-|-|Gate 0: second offline backup location
 t1_gate0_cold_boot_pcr_stability|hardware|-|-|-|Gate 0: cold-boot PCR stability on Machine 1
@@ -76,9 +78,9 @@ t1_gate8|operator|-|-|-|Gate 8 (attended)
 t1_gate9|operator|-|-|-|Gate 9 (attended)
 m5_sealed_volume_keys_real_tpm|missing|-|-|-|M5: sealed volume keys bound to a real TPM
 m5_store_encrypted_objects|software|run_store_c|-|^STORE_SEALED: PASS$|M5: encrypted objects in the C sealed Store (host file-backed only; not QEMU, not Machine 1)
-m5_store_kernel_binding|missing|-|-|-|M5: sealed C Store bound into the kernel/boot path on a real device
+m5_store_kernel_binding|missing|-|-|-|M5: sealed C Store bound into the kernel boot path on a real device with real keys (the QEMU binding with TEST keys is row ck_store_kernel_qemu; it does not count here)
 m5_owner_signed_chain_machine1|missing|-|-|-|M5: owner-signed trust chain on Machine 1
-m5_production_store_512b|missing|-|-|-|M5: production Store on 512-byte geometry (C engine native/store + C NVMe driver native/disk exist, host/QEMU tested; not bound into the boot path, not qualified on Machine 1)
+m5_production_store_512b|missing|-|-|-|M5: production Store on 512-byte geometry on Machine 1 (C engine native/store + C NVMe driver native/disk are host/QEMU tested and the C kernel loads the Store in QEMU with TEST keys; no real-device run, not qualified on Machine 1)
 t1_gate4_manifest_ab|missing|-|-|-|Gate 4: signed boot manifest + A/B slot selection in the loader (awaits the C/asm loader)
 m5_migration_sig_test_key|auto|run_native_m5_migsig|-|^AIENOS_M5_MIGRATION_SIG: PASS$|M5: owner-signed migration record (native/m5 + native/sig Ed25519), host test with TEST keys only
 m5_migration_owner_signature|operator|-|-|-|M5: migration signed by the real owner key (needs the Gate 3 offline key ceremony)
@@ -219,12 +221,15 @@ evaluate_gate() {
     local id="$1" kind="$2" runner="$3" notrun_rc="$4" marker="$5"
     local verdict reason log="${work_dir}/logs/${id}.log" rc t0 t1 out
     case "${kind}" in
-        operator) results+=("${id}|${kind}|BLOCKED_OPERATOR|needs an attended operator step|-|0|0"); return ;;
-        hardware) results+=("${id}|${kind}|BLOCKED_HARDWARE|needs attended hardware boots on Machine 1|-|0|0"); return ;;
-        missing)  results+=("${id}|${kind}|MISSING_IMPLEMENTATION|no implementation in the repo|-|0|0"); return ;;
+        # Not checked by this script, so the verdict is NOT_RUN. The reason
+        # starts with the blocker class from the table; that is the table's
+        # claim about why, not a measured result.
+        operator) results+=("${id}|${kind}|NOT_RUN|BLOCKED_OPERATOR: needs an attended operator step; this script cannot check it|-|0|0"); return ;;
+        hardware) results+=("${id}|${kind}|NOT_RUN|BLOCKED_HARDWARE: needs attended hardware boots on Machine 1; this script cannot check it|-|0|0"); return ;;
+        missing)  results+=("${id}|${kind}|NOT_RUN|MISSING_IMPLEMENTATION: the gate table lists no implementation to run|-|0|0"); return ;;
         auto)
             if ! auto_present "${runner}"; then
-                results+=("${id}|${kind}|MISSING_IMPLEMENTATION|implementation not present at this commit|-|0|0"); return
+                results+=("${id}|${kind}|NOT_RUN|MISSING_IMPLEMENTATION: runner file not present at this commit|-|0|0"); return
             fi ;;
         qemu)
             if [[ "${with_qemu}" != 1 ]]; then
@@ -262,16 +267,19 @@ run_table() {
 # count_results -> sets n_pass n_fail n_notrun n_blocked n_missing sw_fail
 count_results() {
     n_pass=0; n_fail=0; n_notrun=0; n_blocked=0; n_missing=0; sw_fail=0; n_total=0
-    local r v
+    local r v why
     for r in "${results[@]}"; do
-        IFS='|' read -r _ _ v _ <<<"${r}"
+        IFS='|' read -r _ _ v why _ <<<"${r}"
+        if [[ "${v}" == NOT_RUN ]]; then
+            case "${why}" in BLOCKED_OPERATOR:*|BLOCKED_HARDWARE:*) v=BLOCKED ;; MISSING_IMPLEMENTATION:*) v=MISSING ;; esac
+        fi
         n_total=$((n_total + 1))
         case "${v}" in
             PASS) n_pass=$((n_pass + 1)) ;;
             FAIL) n_fail=$((n_fail + 1)); sw_fail=1 ;;
             NOT_RUN) n_notrun=$((n_notrun + 1)) ;;
-            BLOCKED_OPERATOR|BLOCKED_HARDWARE) n_blocked=$((n_blocked + 1)) ;;
-            MISSING_IMPLEMENTATION) n_missing=$((n_missing + 1)) ;;
+            BLOCKED) n_blocked=$((n_blocked + 1)) ;;
+            MISSING) n_missing=$((n_missing + 1)) ;;
             *) n_fail=$((n_fail + 1)); sw_fail=1 ;;
         esac
     done
@@ -344,15 +352,15 @@ collect_machine() {
 
 # --------------------------------------------------------------- receipt
 write_receipt() {
-    local tmp="${work_dir}/receipt.tmp" i r id kind v reason lsha lines secs first
+    local tmp="${work_dir}/receipt.tmp" i r id kind v reason lsha lines secs first blocker
     {
         echo "{"
-        echo "  \"schema\": \"aienos.trust1_m5_qualification.v1\","
+        echo "  \"schema\": \"aienos.trust1_m5_qualification.v2\","
         echo "  \"started_utc\": $(json_str "${started_utc}"),"
         echo "  \"finished_utc\": $(json_str "$(date -u +%FT%TZ)"),"
         echo "  \"commit\": $(json_str "${head_sha}"),"
         echo "  \"commit_subject\": $(json_str "${head_subject}"),"
-        echo "  \"tree_clean_before\": true,"
+        echo "  \"tree_clean_before\": ${tree_clean_before},"
         echo "  \"tree_clean_after\": ${tree_clean_after},"
         echo "  \"with_qemu_requested\": $([[ ${with_qemu} == 1 ]] && echo true || echo false),"
         echo "  \"quiet_flag_present\": $([[ -e ${QUIET_FLAG} ]] && echo true || echo false),"
@@ -392,8 +400,9 @@ write_receipt() {
         echo "  \"gates\": ["
         for i in "${!results[@]}"; do
             IFS='|' read -r id kind v reason lsha lines secs <<<"${results[$i]}"
-            printf '    {"id": %s, "kind": %s, "verdict": %s, "reason": %s, "description": %s, "log_sha256": %s, "log_lines": %s, "seconds": %s}' \
-                "$(json_str "${id}")" "$(json_str "${kind}")" "$(json_str "${v}")" "$(json_str "${reason}")" \
+            blocker="-"; [[ "${v}" == NOT_RUN && "${reason}" =~ ^(BLOCKED_OPERATOR|BLOCKED_HARDWARE|MISSING_IMPLEMENTATION): ]] && blocker="${BASH_REMATCH[1]}"
+            printf '    {"id": %s, "kind": %s, "verdict": %s, "blocker": %s, "reason": %s, "description": %s, "log_sha256": %s, "log_lines": %s, "seconds": %s}' \
+                "$(json_str "${id}")" "$(json_str "${kind}")" "$(json_str "${v}")" "$(json_str "${blocker}")" "$(json_str "${reason}")" \
                 "$(json_str "${descs[${id}]:-}")" "$(json_str "${lsha}")" "${lines:-0}" "${secs:-0}"
             [[ $i -lt $((${#results[@]} - 1)) ]] && echo "," || echo ""
         done
@@ -448,6 +457,17 @@ self_test() {
         done
         bad "$1 has no result row"
     }
+    expect_why() { # expect_why ID BLOCKER: the NOT_RUN reason names the blocker class
+        local r v why
+        for r in "${results[@]}"; do
+            IFS='|' read -r id _ v why _ <<<"${r}"
+            if [[ "${id}" == "$1" ]]; then
+                [[ "${why}" == "$2:"* ]] && ok "$1 reason names $2" || bad "$1 reason '${why}' does not start with $2:"
+                return
+            fi
+        done
+        bad "$1 has no result row"
+    }
     fake_fail()     { echo "boom"; return 1; }
     fake_nomarker() { echo "all good, honest"; return 0; }
     fake_pass()     { echo "FAKE: ALL PASS"; return 0; }
@@ -479,9 +499,11 @@ self_test() {
     expect neg_fail FAIL; expect neg_nomarker FAIL; expect pos_pass PASS
     expect notrun_rc2 NOT_RUN; expect rc2_not_notrun FAIL
     expect cargo_zero FAIL; expect cargo_ok PASS; expect cargo_badrc FAIL
-    expect auto_absent MISSING_IMPLEMENTATION
-    expect op_never_pass BLOCKED_OPERATOR; expect hw_never_pass BLOCKED_HARDWARE
-    expect miss_never_pass MISSING_IMPLEMENTATION
+    expect auto_absent NOT_RUN
+    expect op_never_pass NOT_RUN; expect hw_never_pass NOT_RUN
+    expect miss_never_pass NOT_RUN
+    expect_why auto_absent MISSING_IMPLEMENTATION; expect_why miss_never_pass MISSING_IMPLEMENTATION
+    expect_why op_never_pass BLOCKED_OPERATOR; expect_why hw_never_pass BLOCKED_HARDWARE
     expect qemu_quiet NOT_RUN; expect qemu_off NOT_RUN
     [[ ! -e "${sentinel}" ]] && ok "blocked/missing/vetoed gates never ran their runner" || bad "a blocked/missing/vetoed runner ran"
 
@@ -498,7 +520,7 @@ self_test() {
     results=("a|software|PASS|x|-|0|0" "b|cargo|PASS|x|-|0|0")
     summarize >/dev/null
     [[ "${overall}" == QUALIFIED ]] && ok "all-PASS table -> QUALIFIED" || bad "all-PASS table -> ${overall}"
-    results=("a|software|PASS|x|-|0|0" "b|operator|BLOCKED_OPERATOR|x|-|0|0")
+    results=("a|software|PASS|x|-|0|0" "b|operator|NOT_RUN|BLOCKED_OPERATOR: x|-|0|0")
     summarize >/dev/null
     count_results
     [[ "${overall}" == NOT_QUALIFIED && ${sw_fail} == 0 ]] && ok "PASS + BLOCKED -> NOT_QUALIFIED, exit 0" || bad "PASS + BLOCKED -> ${overall} sw_fail=${sw_fail}"
@@ -562,7 +584,7 @@ self_test() {
 
     # JSON escaping and receipt naming by content hash.
     out_dir="${tmp}/out"; mkdir -p "${out_dir}"
-    started_utc=x; head_sha=x; head_subject='quote " backslash \ tab	end'; tree_clean_after=true
+    started_utc=x; head_sha=x; head_subject='quote " backslash \ tab	end'; tree_clean_before=true; tree_clean_after=true
     m_host=h; m_machine_id_sha=x; m_product=x; m_board=x; m_serial_sha=x; m_cpu=x; m_kernel=x
     m_bios_version=x; m_bios_date=x; m_sb_efivar=1; m_setup_mode=0; m_sb_mokutil=x; m_tpm_present=no
     m_tpm_mfr=x; m_tpm_vendor=x; m_tpm_fw=x; m_boot_disk=x; m_lbs=512; m_capture=x; pcr_lines=("0 ab" "1 cd")
@@ -574,7 +596,7 @@ self_test() {
         bad "receipt name does not match its content hash"
     fi
     if command -v jq >/dev/null; then
-        jq -e '.verdict == "NOT_QUALIFIED" and .counts.blocked == 1 and .machine.pcr_sha256["1"] == "cd"' "${receipt_path}" >/dev/null \
+        jq -e '.verdict == "NOT_QUALIFIED" and .counts.blocked == 1 and .gates[1].verdict == "NOT_RUN" and .gates[1].blocker == "BLOCKED_OPERATOR" and .gates[0].blocker == "-" and .tree_clean_before == true and .machine.pcr_sha256["1"] == "cd"' "${receipt_path}" >/dev/null \
             && ok "receipt is valid JSON (jq) with expected fields" || bad "receipt is not valid JSON or fields wrong"
     else
         echo "SKIP  jq not installed; JSON validity not machine-checked"
@@ -624,7 +646,7 @@ main() {
             --out) [[ $# -ge 2 ]] || die "--out needs a directory"; out_arg="$2"; shift ;;
             --self-test) mode=self ;;
             --machine-only) mode=machine ;;   # internal: identity + receipt, no gates
-            -h|--help) sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+            -h|--help) sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
             *) die "unknown argument: $1" ;;
         esac
         shift
@@ -635,6 +657,9 @@ main() {
 
     refuse_if_dirty "${repo_root}"
     local before; before="$(tree_state "${repo_root}")"
+    # Measured, not assumed: refuse_if_dirty above exits on a dirty tree, and
+    # this re-reads the state the receipt reports.
+    if [[ -z "${before}" ]]; then tree_clean_before=true; else tree_clean_before=false; fi
     head_sha="$(git -C "${repo_root}" rev-parse HEAD)"
     head_subject="$(git -C "${repo_root}" log -1 --format=%s HEAD)"
     started_utc="$(date -u +%FT%TZ)"

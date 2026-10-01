@@ -1,7 +1,8 @@
 # ARGUS (native, C)
 
 ARGUS is the AIEN defensive plane: it observes, detects, and asks for containment.
-It never authorizes; that is AEGIS (see `../capability`). ARGUS-0 is the
+It never authorizes; that is AEGIS (see `../capability`). ABI: event version byte 1, ABI minor 2
+(v1.2, additive over v1.1; `argus_abi.h` is authoritative). ARGUS-0 is the
 substrate only: event ABI, bounded ring, resident deterministic state,
 hard-invariant detectors, findings.
 

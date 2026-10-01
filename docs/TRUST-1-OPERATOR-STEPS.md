@@ -294,6 +294,35 @@ live):
    manifest, the record) goes back to the Spark. The `private` folder stays
    on the ceremony machine and the two backups.
 
+## Known hardware risk: do not boot the C kernel on a disk that holds data
+
+**Do not boot the C kernel on a disk holding data until CK gate `DISK_LAYOUT`
+is PASS on a forge receipt.** Today that gate is **NOT_RUN
+(MISSING_IMPLEMENTATION, fix in progress)**. Nothing in this document's steps
+boots the C kernel, and none of them may be extended to do so before the gate
+passes.
+
+Why: the C kernel treats the whole NVMe disk as its own and knows nothing about
+partitions. On a real GPT disk such as Machine 1's, that overlaps the disk's
+own partition table:
+
+- It writes the last 4 KiB of the whole disk at every boot (a write, read-back
+  and restore probe), `native/kernel/dev/nvme_bind.c:93-127` (called at line
+  224), sized by `native/kernel/dev/disk_layout.h:6-7`. The last sectors of a GPT
+  disk hold the backup partition table. A power cut during the probe leaves
+  that area with probe data.
+- It uses the first 16 KiB (4 units) as the anti-rollback anchor,
+  `native/kernel/dev/disk_layout.h:3,12` and
+  `native/kernel/svc/store_boot.c:164-170` (`anchor_lba = 0`). Sector 0 is the
+  protective MBR and the next sectors hold the primary GPT.
+- The Store region is everything between those two ends
+  (`native/kernel/dev/disk_layout.h:4`, `store_boot.c:169-170`), so a format
+  of the Store would cover every partition on the disk.
+
+Source: `~/handoffs/2026-10-01-review/track4-aienos-trust.md`, row R2.
+This entry is documentation only. It was not tested, and no hardware result is
+claimed. Host, QEMU and hardware status of the fix: all NOT_RUN.
+
 ## Later gates (no action from you yet)
 
 - **Gate 4** (agents): sign the loader with your Boot Signer in the emulator
