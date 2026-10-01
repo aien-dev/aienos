@@ -20,9 +20,10 @@ Status vocabulary:
 C gates (one line each from `ck_gates.sh`): `M1` and `M3` (from
 `scripts/qemu_ck_boot_test.sh`), `M4_NVME`, `M4_STORE`, `ARGUS1_REVOKE`
 `SMMU`, `NVME_SHUTDOWN` (from `scripts/qemu_ck_store_test.sh`; rows 21-24b, 47-72, 76 and
-96-101 were checked against its exact grep patterns), `NET` (C-only, from
+96-101 were checked against its exact grep patterns), `P2_ARTIFACT` (from
+`scripts/qemu_ck_artifact_test.sh`, rows 33-41), `NET` (C-only, from
 `scripts/qemu_ck_net_test.sh`; rows 102-106), and the NOT_RUN gates
-`P2_ARTIFACT`, `M0_ROLLBACK`, `M4_STORE_CRASH`,
+`M0_ROLLBACK`, `M4_STORE_CRASH`,
 `M4_CONTINUITY`, `M4_RECOVERY`, `KEYBOARD`.
 
 `M4_NVME` and `SMMU` PASS in the SMMU-confined mode (default `make full`
@@ -121,21 +122,63 @@ per-stream page tables, `ck_dma_confine` / `ck_dma_unconfine` /
 | 31 | xHCI bus master revoked after the phase (`dma_gate: xhci bus master revoked`) | KEYBOARD | NOT_RUN (MISSING_IMPLEMENTATION) |
 | 32 | no panic or fault | KEYBOARD | NOT_RUN (MISSING_IMPLEMENTATION) |
 
-## SEED-0B / P2-5 artifact loader: scripts/qemu_artifact_test.sh -> CK `P2_ARTIFACT`
+## SEED-0B / P2-5 artifact loader: scripts/qemu_artifact_test.sh -> CK `P2_ARTIFACT` (scripts/qemu_ck_artifact_test.sh)
+
+The C loader is `native/kernel/core/artifact_loader.c` with the format,
+signature, admission and receipt code in `native/kernel/artifact/` and the
+host tool `native/kernel/tools/ck_artifact_tool.c` (C ports of
+aienos-artifact, admission.rs, receipt.rs and aienos-artifact-tool; the tool's
+pack, sign, negative corpus and expected.txt are byte-identical to the Rust
+tool's). Two boots as in the Rust gate: `make CK_SEED0B_TEST_ANCHOR=1`
+(trusts the RFC 8032 TEST 1 public key only, labelled TEST ONLY) and the
+ordinary build (no anchors). Same QEMU command line plus one `-fw_cfg` file.
+
+How the C gate differs from the Rust gate (all apply to rows 33-41):
+
+- **Candidate source**: one QEMU fw_cfg file `opt/aienos/artifacts` (a
+  bundle: `AIENBND\0`, count, then name/length/bytes per candidate) instead of
+  `\EFI\AIENOS\ARTIFACTS\*.AIEN` read by the UEFI loader. The C boot stub
+  (native/boot) reads no files. The kernel finds the fw_cfg window from the
+  ACPI DSDT (`QEMU0002` device, Memory32Fixed), nothing hard-coded. The
+  640 KiB per-file limit and the input-frame shortage path (FirmwareRead)
+  are applied by the kernel at the same stage (`received`).
+- **Build and tools**: make + gcc and the in-tree C tool, not cargo and the
+  Rust tool; the probe programs are the same committed fixtures packed by
+  the same `pack.sh`. No Machine 1 captured-log mode (stays with the Rust gate).
+- **Address space**: the task runs on ASID 0 with a full TLB flush on every
+  TTBR0 switch (Rust: ASID 2). EL0 FP/SIMD use traps (fault) instead of
+  running with zeroed FP state. One loaded task at a time.
+- **Frames**: content + page-table frames come as one contiguous batch, and
+  the private code-alias (shadow) tables as a second one; absolute free-frame
+  counts differ from the Rust kernel's, the before == after check is the same.
+- **Capabilities**: a 16-slot loader capability table (generation-checked
+  handles `gen << 32 | index`), not the Rust CapabilityTable type.
+- **Signatures**: the C Ed25519 (native/sig) also rejects small-order and
+  non-canonical public keys and R points; no corpus case depends on this.
+- **QEMU exit**: any status other than 0 fails (Rust: only timeout 124).
+- Verdict line `AIENOS_CK_P2_ARTIFACT`; the Rust per-category markers
+  (ARTIFACT_PARSE ... HOSTILE_MATRIX) are not printed, every check counts
+  toward the one verdict.
 
 | # | Rust check (pattern) | CK gate | Status |
 | --- | --- | --- | --- |
-| 33 | common: kernel alive + M3 threads/el0/ipc proofs unchanged | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION: no artifact loader) |
-| 34 | firmware read all candidates (`^artifact_candidates: N$`), report not truncated, final report | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 35 | frames reclaimed (`artifact_frames_free_before` == `_after`) | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 36 | qualification build labelled TEST ONLY, receipt tier line | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 37 | P26SEED read via grant, write/forged denied, granted subset of requested, exactly one capability, receipt | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 38 | P25EXEC / P25WX (W^X fault) / P25SPIN (time budget) / P25TAMP (BadSignature) outcomes + receipts | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION: no EL0 loader, no signature verify of artifacts) |
-| 39 | hostile set: each refused at its stage or admitted-and-contained, receipts checked by the host tool | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 40 | H29 READ\|WRITE requested -> READ granted | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 41 | production build refuses every candidate, zero admitted | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 33 | common: kernel alive + M3 threads/el0/ipc proofs unchanged | P2_ARTIFACT | IDENTICAL |
+| 34 | firmware read all candidates (`^artifact_candidates: N$`), report not truncated, final report | P2_ARTIFACT | DIFFERS (the kernel reads the fw_cfg bundle, not firmware files; same line and count; also fails on `artifact_bundle: malformed`) |
+| 35 | frames reclaimed (`artifact_frames_free_before` == `_after`) | P2_ARTIFACT | IDENTICAL (absolute counts differ) |
+| 36 | qualification build labelled TEST ONLY, receipt tier line | P2_ARTIFACT | IDENTICAL |
+| 37 | P26SEED read via grant, write/forged denied, granted subset of requested, exactly one capability, receipt | P2_ARTIFACT | IDENTICAL |
+| 38 | P25EXEC / P25WX (W^X fault) / P25SPIN (time budget) / P25TAMP (BadSignature) outcomes + receipts | P2_ARTIFACT | IDENTICAL |
+| 39 | hostile set: each refused at its stage or admitted-and-contained, receipts checked by the host tool | P2_ARTIFACT | DIFFERS (same expected.txt and checks, receipts checked by the C tool; also requires at least 29 cases) |
+| 40 | H29 READ\|WRITE requested -> READ granted | P2_ARTIFACT | IDENTICAL |
+| 41 | production build refuses every candidate, zero admitted | P2_ARTIFACT | IDENTICAL |
 
 ## M0 rollback: scripts/qemu_native_rollback_test.sh -> CK `M0_ROLLBACK`
+
+Every M0 rollback check is about the UEFI boot loader (BootNext consumed
+before ExitBootServices, A/B slot choice, fallback to Default), which lives in
+native/boot. Nothing in it is kernel scope, so the C kernel has no part of it
+to port; `M0_ROLLBACK` stays MISSING_IMPLEMENTATION until the C loader work
+(parked) is done.
 
 | # | Rust check (marker) | CK gate | Status |
 | --- | --- | --- | --- |
@@ -269,7 +312,7 @@ complete.
 
 ## Summary counts
 
-Rows 1-106: IDENTICAL 20, DIFFERS 30, NOT_RUN 56 (rows 92-95 have no CK gate at all; rows 96-106 are C-only). Rows 102-106 were checked against scripts/qemu_ck_net_test.sh. Rows 13, 24, 47-72, 76 and 96-101 were re-verified against scripts/qemu_ck_store_test.sh and scripts/lib_ck_m1_checks.sh at the commit that adds this line.
+Rows 1-106: IDENTICAL 28, DIFFERS 37, NOT_RUN 41, counted from the table (the previous summary, 20/30/56, was miscounted: the table on main had 21/35/50; rows 33-41 then moved from NOT_RUN to 7 IDENTICAL + 2 DIFFERS with the C artifact loader; rows 92-95 have no CK gate at all; rows 96-106 are C-only). Rows 33-41 were checked against scripts/qemu_ck_artifact_test.sh. Rows 102-106 were checked against scripts/qemu_ck_net_test.sh. Rows 13, 24, 47-72, 76 and 96-101 were re-verified against scripts/qemu_ck_store_test.sh and scripts/lib_ck_m1_checks.sh at the commit that adds this line.
 
 `scripts/trust1_m5_qualify.sh --with-qemu` also runs three of these gates as
 qemu rows: `ck_m1_boot_qemu` (M1), `ck_store_kernel_qemu` (M4_STORE) and
