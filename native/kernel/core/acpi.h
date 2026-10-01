@@ -26,6 +26,14 @@ const void *ck_acpi_lookup(uint64_t rsdp, const char sig[4]);
  * RSDP/root is invalid. */
 int ck_acpi_each(uint64_t rsdp, void (*fn)(uint64_t table, uint32_t len, void *ctx), void *ctx);
 
+/* Calls fn(lo, hi, ctx) with the byte span [lo, hi) of the RSDP (its checked
+ * length), the XSDT/RSDT and every table the root lists (at least the 36-byte
+ * header each, whatever their checksums). Used to keep all of them out of the
+ * frame allocator; the caller rounds to pages. Returns the number of spans,
+ * -1 if the RSDP is invalid (nothing reported). The root is reported even
+ * when its own checksum fails; its entries are then not trusted. */
+int ck_acpi_spans(uint64_t rsdp, void (*fn)(uint64_t lo, uint64_t hi, void *ctx), void *ctx);
+
 struct ck_madt_gic {
     uint64_t gicd;        /* GICD base (type 0x0C) */
     uint32_t gic_version; /* GICD entry field, 0 = "discover from hardware" */

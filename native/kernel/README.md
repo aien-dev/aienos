@@ -42,7 +42,12 @@ Output lands in `<repo>/target/native-kernel` (ignored by git).
 6. `report_kind: final`, then PSCI SYSTEM_RESET (WFI loop if refused).
 
 A panic prints `report_kind: panic`; an unexpected exception prints
-`report_kind: fault` with ESR, FAR and ELR. Both then reset.
+`report_kind: fault` with ESR, FAR and ELR. Both then reset. Before the drop
+to EL1, VBAR_EL2 points at a separate fatal-only table (`ck_vectors_el2`):
+any EL2 exception reports ESR_EL2/FAR_EL2/ELR_EL2 (`el=2`) from the emergency
+stack and resets; it never returns or touches EL1 state. After the stages,
+`mm_usage:` prints the stack high-water mark (painted stack) and the heap
+low-water free bytes.
 
 ## Memory map the kernel builds
 
@@ -50,16 +55,17 @@ A panic prints `report_kind: panic`; an unexpected exception prints
   never executable.
 - Kernel image: text read-only + executable, rodata and relocations
   read-only, data and BSS read-write. Nothing is writable and executable.
-- Kernel stack 64 KiB with an unmapped guard page below. An exception taken
+- Kernel stack 256 KiB (stages need >= 128 KiB) with an unmapped guard page below. An exception taken
   with SP below the stack floor switches to a 16 KiB emergency stack so the
   fault report still prints.
-- Heap 16 MiB (`ck_alloc`, zeroed, 16-byte aligned) with an unmapped guard
+- Heap 64 MiB (`ck_alloc`, zeroed, 16-byte aligned) with an unmapped guard
   page on both sides.
 - DMA pool 8 MiB, Normal Non-cacheable (`ck_dma_alloc`, never freed).
 - MMIO via `ck_mmio_map`: Device-nGnRE, never executable; panics if the
   range overlaps RAM.
 - The frame allocator only hands out EfiConventionalMemory, minus the image
-  and the handoff. Tables, stack, heap and pool come from it and are never
+  and the handoff, and minus the RSDP, the XSDT/RSDT and every table the root
+  lists (whole pages). Tables, stack, heap and pool come from it and are never
   handed out again.
 
 ## Notes for stage code

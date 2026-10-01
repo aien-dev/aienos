@@ -8,6 +8,7 @@ struct ck_probe ck_probe_state;
 
 void ck_exception(struct ck_frame *f, uint64_t vector);
 void ck_irq_dispatch(struct ck_frame *f);
+void ck_el2_fatal(uint64_t vector);
 
 static const char *const vec_names[16] = {
     "sync_el_sp0", "irq_el_sp0", "fiq_el_sp0", "serror_el_sp0",
@@ -18,17 +19,9 @@ static const char *const vec_names[16] = {
 
 void ck_exception(struct ck_frame *f, uint64_t vector)
 {
+    /* Only VBAR_EL1 points here (EL2 uses ck_vectors_el2). */
     unsigned el = ck_current_el();
-    uint64_t esr, far, elr;
-    if (el == 2) {
-        esr = ck_rd(esr_el2);
-        far = ck_rd(far_el2);
-        elr = ck_rd(elr_el2);
-    } else {
-        esr = ck_rd(esr_el1);
-        far = ck_rd(far_el1);
-        elr = f->elr;
-    }
+    uint64_t esr = ck_rd(esr_el1), far = ck_rd(far_el1), elr = f->elr;
     uint64_t ec = (esr >> 26) & 0x3f;
     /* Armed probe: a data abort at the probing load on the current EL. */
     if (el == 1 && vector == 4 && ec == 0x25 && ck_probe_state.fixup &&
@@ -40,6 +33,13 @@ void ck_exception(struct ck_frame *f, uint64_t vector)
         return;
     }
     ck_fault_report(vector < 16 ? vec_names[vector] : "unknown", esr, far, elr, el);
+}
+
+/* Any exception taken to EL2 before the drop to EL1 (ck_vectors_el2). */
+void ck_el2_fatal(uint64_t vector)
+{
+    ck_fault_report(vector < 16 ? vec_names[vector] : "unknown", ck_rd(esr_el2), ck_rd(far_el2),
+                    ck_rd(elr_el2), 2);
 }
 
 /* ---- IRQ registration (ck.h additions) ---- */

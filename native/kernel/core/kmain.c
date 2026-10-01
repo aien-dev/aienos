@@ -117,6 +117,12 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     run_stage("devices", ck_stage_devices);
     run_stage("security", ck_stage_security);
     run_stage("store", ck_stage_store);
+    struct ck_mm_usage mu;
+    ck_mm_usage(&mu);
+    ck_printf("mm_usage: stack_bytes=%llu stack_used=%llu heap_bytes=%llu heap_free=%llu heap_min_free=%llu\n",
+              (unsigned long long)mu.stack_bytes, (unsigned long long)mu.stack_used,
+              (unsigned long long)mu.heap_bytes, (unsigned long long)mu.heap_free,
+              (unsigned long long)mu.heap_min_free);
 
     ck_set_stage("final");
     ck_puts("\n");
@@ -131,10 +137,15 @@ void ck_kernel_entry(struct ck_handoff *h)
     hand = h;
     unsigned el = ck_current_el();
     if (el == 2)
-        ck_wr(vbar_el2, (uint64_t)(uintptr_t)ck_vectors);
+        ck_wr(vbar_el2, (uint64_t)(uintptr_t)ck_vectors_el2);
     else
         ck_wr(vbar_el1, (uint64_t)(uintptr_t)ck_vectors);
     ck_isb();
+#ifdef CK_SELFTEST_EL2_FAULT
+    /* One-off check of the EL2 fatal path (never in a normal build). */
+    if (el == 2)
+        __asm__ volatile("brk #0x2");
+#endif
     if (h->magic != CK_HANDOFF_MAGIC)
         ck_panic("handoff: bad magic");
     ck_psci_configure(ck_acpi_find("FACP"));

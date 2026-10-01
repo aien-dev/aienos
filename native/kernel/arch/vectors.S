@@ -1,5 +1,6 @@
 /* vectors.S -- exception vectors, EL2 -> EL1h entry, recoverable probe.
- * One table serves VBAR_EL2 (emergency, before the drop) and VBAR_EL1.
+ * ck_vectors serves VBAR_EL1 only; ck_vectors_el2 (fatal-only) serves VBAR_EL2
+ * before the drop to EL1.
  * TPIDR_EL1 and TPIDRRO_EL0 are scratch registers in the entry path (no EL0
  * runs in this core yet). Frame layout: struct ck_frame in arch.h. */
 #define FRAME 272
@@ -95,6 +96,47 @@ ck_vec_common:
     ldp x28, x29, [sp, #224]
     add sp, sp, #FRAME
     eret
+
+/* EL2 vectors, live only between the kernel entry at EL2 and the drop to EL1.
+ * Every EL2 exception is fatal: mask everything, move to the emergency stack
+ * (the firmware stack may be the cause) and report ESR_EL2/FAR_EL2/ELR_EL2,
+ * then reset. Nothing here touches the EL1 state or returns. */
+.macro VENTRY_EL2 idx
+    .balign 0x80
+    msr daifset, #0xf
+    mov x0, #\idx
+    b ck_vec_el2_common
+.endm
+
+    .balign 2048
+    .global ck_vectors_el2
+ck_vectors_el2:
+    VENTRY_EL2 0
+    VENTRY_EL2 1
+    VENTRY_EL2 2
+    VENTRY_EL2 3
+    VENTRY_EL2 4
+    VENTRY_EL2 5
+    VENTRY_EL2 6
+    VENTRY_EL2 7
+    VENTRY_EL2 8
+    VENTRY_EL2 9
+    VENTRY_EL2 10
+    VENTRY_EL2 11
+    VENTRY_EL2 12
+    VENTRY_EL2 13
+    VENTRY_EL2 14
+    VENTRY_EL2 15
+
+ck_vec_el2_common:
+    adrp x1, ck_emergency_stack_top
+    add x1, x1, :lo12:ck_emergency_stack_top
+    mov sp, x1
+    mov x29, xzr
+    mov x30, xzr
+    bl ck_el2_fatal
+1:  wfi
+    b 1b
 
 /* int ck_probe_read(const volatile void *addr) */
     .global ck_probe_read

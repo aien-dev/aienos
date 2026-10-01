@@ -11,10 +11,12 @@
 #  - takes the machine quiet flag itself (noclobber) and prints NOT_RUN if
 #    another run holds it; AIENOS_QUIET_FLAG overrides the flag path and
 #    AIENOS_QUIET_TAG the text written into it (the flag is removed only if
-#    it still holds that text);
+#    it still holds exactly that text, and at most once per run);
 #  - the M3 checks (threads, el0, preempt, placement, ipc) print NOT_RUN: the
 #    C kernel does not implement them yet, so they do not count;
 #  - one added check: guard_page (the C kernel's guard-page fault self test);
+#  - stricter: any QEMU exit status other than 0 fails (the Rust script fails
+#    only on the timeout status 124); PSCI reset with -no-reboot exits 0;
 #  - final line is AIENOS_CK_M1: PASS|FAIL|NOT_RUN.
 # Needs qemu-system-aarch64 and AAVMF (Ubuntu: qemu-system-arm qemu-efi-aarch64).
 set -euo pipefail
@@ -42,10 +44,19 @@ if ! ( set -C; echo "${quiet_tag}" > "${quiet_flag}" ) 2>/dev/null; then
     exit 3
 fi
 
+own_flag=1
+# Release the flag exactly once, and only while this run still owns it, so a
+# later run that wrote the same tag never loses its flag to this EXIT trap.
+release_flag() {
+    if [[ "${own_flag}" == 1 ]]; then
+        own_flag=0
+        if [[ -f "${quiet_flag}" ]] && grep -qxF -- "${quiet_tag}" "${quiet_flag}"; then rm -f "${quiet_flag}"; fi
+    fi
+}
 work="$(mktemp -d)"
 cleanup() {
     rm -rf "${work}"
-    if [[ -f "${quiet_flag}" ]] && grep -qF -- "${quiet_tag}" "${quiet_flag}"; then rm -f "${quiet_flag}"; fi
+    release_flag
 }
 trap cleanup EXIT
 mkdir -p "${work}/esp/EFI/BOOT" "${work}/esp/EFI/AIENOS"
@@ -71,7 +82,7 @@ qemu_status=$?
 set -e
 elapsed=$(( $(date +%s) - started ))
 # Release the machine as soon as QEMU is gone.
-if [[ -f "${quiet_flag}" ]] && grep -qF -- "${quiet_tag}" "${quiet_flag}"; then rm -f "${quiet_flag}"; fi
+release_flag
 
 tr -d '\r' <"${log}" >"${work}/serial.txt"
 [[ -z "${AIENOS_LOG_DIR:-}" ]] || cp "${work}/serial.txt" "${AIENOS_LOG_DIR}/qemu_ck_boot_serial.log"
@@ -152,6 +163,12 @@ if grep -qE "report_kind: (panic|fault)" "${work}/serial.txt"; then
 fi
 if [[ "${qemu_status}" == 124 ]]; then
     echo "FAIL  timed out (no reset)"
+    failed=1
+elif [[ "${qemu_status}" != 0 ]]; then
+    # Stricter than qemu_boot_test.sh (which fails only on 124): PSCI
+    # SYSTEM_RESET under -no-reboot makes QEMU exit 0, so any other status is a
+    # QEMU crash or abort even if the markers were already flushed.
+    echo "FAIL  qemu exited with status ${qemu_status} (expected 0 after PSCI reset)"
     failed=1
 fi
 

@@ -167,3 +167,39 @@ int ck_fadt_arm_boot_arch(const void *fadt, uint16_t *flags)
     *flags = (uint16_t)(f[129] | f[130] << 8);
     return 0;
 }
+
+static uint64_t span_end(uint64_t a, uint64_t len)
+{
+    /* Saturate below the last 4 KiB page so page rounding cannot wrap. */
+    const uint64_t top = ~(uint64_t)0xfff;
+    return (a >= top || len > top - a) ? top : a + len;
+}
+
+int ck_acpi_spans(uint64_t rsdp, void (*fn)(uint64_t lo, uint64_t hi, void *ctx), void *ctx)
+{
+    int x = 0;
+    uint64_t root = ck_acpi_root(rsdp, &x);
+    if (!root)
+        return -1;
+    const uint8_t *r = ptr(rsdp);
+    /* ck_acpi_root has checked the RSDP length (36..4096) for revision 2+. */
+    uint32_t rlen = r[15] >= 2 ? rd32(r + 20) : 20;
+    fn(rsdp, span_end(rsdp, rlen), ctx);
+    int n = 1;
+    uint32_t len = rd32(ptr(root) + 4);
+    fn(root, span_end(root, len < CK_ACPI_SDT_HEADER ? CK_ACPI_SDT_HEADER : len), ctx);
+    n++;
+    const uint8_t *ents;
+    uint32_t count, width;
+    if (root_entries(rsdp, &ents, &count, &width))
+        return n;
+    for (uint32_t i = 0; i < count; i++) {
+        uint64_t a = width == 8 ? rd64(ents + i * 8) : rd32(ents + i * 4);
+        if (!a)
+            continue;
+        uint32_t tl = rd32(ptr(a) + 4);
+        fn(a, span_end(a, tl < CK_ACPI_SDT_HEADER ? CK_ACPI_SDT_HEADER : tl), ctx);
+        n++;
+    }
+    return n;
+}

@@ -37,7 +37,7 @@ struct ck_frame {
 };
 _Static_assert(sizeof(struct ck_frame) == 272, "frame layout");
 
-extern char ck_vectors[];
+extern char ck_vectors[], ck_vectors_el2[];
 /* Lowest valid address of the active kernel stack; the vector entry switches
  * to an emergency stack when an exception arrives with SP below it. */
 extern uint64_t ck_stack_floor;

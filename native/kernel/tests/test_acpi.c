@@ -4,6 +4,7 @@
 #include <string.h>
 #include "ck_test.h"
 #include "acpi.h"
+#include "frames.h"
 
 static void w32(uint8_t *p, uint32_t v) { memcpy(p, &v, 4); }
 static void w64(uint8_t *p, uint64_t v) { memcpy(p, &v, 8); }
@@ -26,6 +27,60 @@ static void sdt(uint8_t *t, const char *sig, uint32_t len)
 }
 
 static uint8_t rsdp[36], xsdt[36 + 8 * 5], madt[256], spcr[80], fadt[276], badspcr[80], other[40];
+
+/* Frame reservation of every ACPI table: one page-aligned arena holding an
+ * RSDP that straddles a page boundary, the XSDT, a 5000-byte table spanning
+ * three pages and a header-only table. */
+static uint8_t arena[16 * 4096] __attribute__((aligned(4096)));
+static void reserve_cb(uint64_t lo, uint64_t hi, void *ctx)
+{
+    ck_frames_reserve(ctx, lo, hi);
+}
+
+static void test_spans(void)
+{
+    uint8_t *rs = arena + 1 * 4096 + 4080, *xs = arena + 4 * 4096 + 100;
+    uint8_t *big = arena + 7 * 4096 + 4000, *hdr = arena + 12 * 4096;
+    sdt(big, "OEM2", 5000);
+    sum_fix(big, 5000, 9);
+    sdt(hdr, "OEM3", 36);
+    sum_fix(hdr, 36, 9);
+    sdt(xs, "XSDT", 36 + 16);
+    w64(xs + 36, (uint64_t)(uintptr_t)big);
+    w64(xs + 44, (uint64_t)(uintptr_t)hdr);
+    sum_fix(xs, 36 + 16, 9);
+    memcpy(rs, "RSD PTR ", 8);
+    rs[15] = 2;
+    w32(rs + 20, 36);
+    w64(rs + 24, (uint64_t)(uintptr_t)xs);
+    sum_fix(rs, 20, 8);
+    sum_fix(rs, 36, 32);
+
+    uint64_t base = (uint64_t)(uintptr_t)arena;
+    struct ck_frames f;
+    ck_frames_init(&f);
+    CHECK(ck_frames_add(&f, base, base + sizeof arena) == 0);
+    CHECK(ck_acpi_spans((uint64_t)(uintptr_t)rs, reserve_cb, &f) == 4);
+    /* Exhaust the allocator: exactly the pages holding no ACPI byte remain. */
+    int got[16] = { 0 }, n = 0;
+    uint64_t a;
+    while (ck_frames_alloc(&f, 1, 4096, &a) == 0 && n < 32) {
+        CHECK(a >= base && a < base + sizeof arena);
+        if (a >= base && a < base + sizeof arena)
+            got[(a - base) / 4096]++;
+        n++;
+    }
+    static const int want[16] = { 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1 };
+    for (int i = 0; i < 16; i++)
+        CHECK(got[i] == want[i]);
+    CHECK(n == 9);
+    /* An invalid RSDP reports nothing. */
+    rs[8] ^= 1;
+    ck_frames_init(&f);
+    CHECK(ck_frames_add(&f, base, base + sizeof arena) == 0);
+    CHECK(ck_acpi_spans((uint64_t)(uintptr_t)rs, reserve_cb, &f) == -1);
+    CHECK(ck_frames_free_bytes(&f) == sizeof arena);
+}
 
 static int seen;
 static void each_cb(uint64_t t, uint32_t len, void *ctx)
@@ -125,5 +180,6 @@ int main(void)
     sum_fix(rsdp, 20, 8);
     CHECK(ck_acpi_root(r, &x) == 0x1234 && x == 0);
     CHECK(ck_acpi_root(0, &x) == 0);
+    test_spans();
     return ck_t_verdict("CK_ACPI");
 }

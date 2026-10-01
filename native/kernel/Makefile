@@ -11,6 +11,8 @@
 #                    $(STAGE_CFLAGS) and the native module include paths
 #   STAGE_OBJS=...   extra prebuilt freestanding objects linked as given
 #   STAGE_CFLAGS=... extra flags for STAGE_SRCS
+#   CK_EXTRA_CFLAGS=... extra kernel flags for one-off checks, e.g.
+#                    -DCK_SELFTEST_EL2_FAULT (brk at EL2: the EL2 fatal path)
 # The stages are weak in ck.h: with none linked the kernel prints
 # "stage <name>: not linked".
 #
@@ -42,6 +44,7 @@ AIENOS_COMMIT ?= $(shell git -C $(REPO) rev-parse HEAD 2>/dev/null || echo unkno
 STAGE_SRCS ?=
 STAGE_OBJS ?=
 STAGE_CFLAGS ?=
+CK_EXTRA_CFLAGS ?=
 
 KINC := -I$(KDIR)/include -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/arch -I$(BOOT)
 MODULE_INC := -I$(NATIVE)/disk -I$(NATIVE)/store -I$(NATIVE)/m5 -I$(NATIVE)/crypto \
@@ -49,7 +52,7 @@ MODULE_INC := -I$(NATIVE)/disk -I$(NATIVE)/store -I$(NATIVE)/m5 -I$(NATIVE)/cryp
 KCFLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -nostdlib -fno-builtin \
 	-fno-stack-protector -fno-tree-loop-distribute-patterns -mstrict-align \
 	-mgeneral-regs-only -fno-asynchronous-unwind-tables -fpie -fvisibility=hidden \
-	-fno-plt $(KINC)
+	-fno-plt $(KINC) $(CK_EXTRA_CFLAGS)
 KLDFLAGS := -nostdlib -pie --no-dynamic-linker -z norelro -z noexecstack -z max-page-size=4096 --no-warn-rwx-segments \
 	-T $(BOOT)/image.ld
 

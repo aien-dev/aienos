@@ -3,8 +3,8 @@
  *
  *   RAM (every WB-capable UEFI RAM type)  Normal WB, RW, XN
  *   kernel image                           text RX, rodata/relocs RO+XN, data/bss RW+XN
- *   kernel stack (64 KiB)                  RW, unmapped guard page below
- *   heap (16 MiB)                          RW, unmapped guard page on each side
+  *   kernel stack (256 KiB)                 RW, unmapped guard page below
+  *   heap (64 MiB)                           RW, unmapped guard page on each side
  *   DMA pool (8 MiB)                       Normal Non-cacheable (ck_dma_alloc)
  *   MMIO                                   Device-nGnRE, XN (ck_mmio_map)
  *   ACPI tables outside WB RAM             Normal RO, XN
@@ -17,8 +17,13 @@
 #include "heap.h"
 #include "pt.h"
 
-#define STACK_BYTES (64ull << 10)
-#define HEAP_BYTES (16ull << 20)
+/* Stack: stage code needs >= 128 KiB (m5_envelope_open alone has a ~64 KiB
+ * frame); 256 KiB gives 2x margin. Heap: the Store workspace and state are
+ * each over 1 MiB and the stage probe ran in a 64 MiB bump heap; 64 MiB with
+ * free() is the same budget. Both report their high-water marks. */
+#define STACK_BYTES (256ull << 10)
+#define HEAP_BYTES (64ull << 20)
+#define STACK_PAINT 0x5354414b5354414bull /* "KATSKATS": never-used stack words */
 #define DMA_BYTES (8ull << 20)
 #define RAM_MAX 256
 
@@ -31,6 +36,7 @@ static struct ck_frames frames;
 static struct ck_pt pt;
 static struct ck_heap heap;
 static int heap_ready;
+static size_t heap_min_free;
 static struct ck_mm_report rep;
 static uint64_t dma_cur;
 static struct {
@@ -90,6 +96,11 @@ static void map_acpi_page(uint64_t pa, uint64_t len)
     }
 }
 
+static void acpi_reserve_cb(uint64_t lo, uint64_t hi, void *ctx)
+{
+    ck_frames_reserve(ctx, lo, hi);
+}
+
 static void acpi_cb(uint64_t table, uint32_t len, void *ctx)
 {
     (void)ctx;
@@ -107,8 +118,11 @@ uint64_t ck_mm_build(const struct ck_handoff *h)
     ck_frames_reserve(&frames, h->image_base, h->image_end);
     ck_frames_reserve(&frames, (uint64_t)(uintptr_t)h, (uint64_t)(uintptr_t)h + sizeof *h);
     ck_frames_reserve(&frames, h->memory_map, h->memory_map + h->map_size);
+    /* ACPI: the RSDP, the XSDT/RSDT and every table the root lists, whole
+     * pages, before the first allocation. UEFI keeps them out of
+     * EfiConventionalMemory already; this holds even if a firmware does not. */
     if (h->rsdp)
-        ck_frames_reserve(&frames, h->rsdp, h->rsdp + 36);
+        ck_acpi_spans(h->rsdp, acpi_reserve_cb, &frames);
 
     must(ck_pt_init(&pt, pt_alloc, 0), "pt init");
 
@@ -144,6 +158,8 @@ uint64_t ck_mm_build(const struct ck_handoff *h)
     rep.stack_guard = s;
     rep.stack_lo = s + CK_PAGE;
     rep.stack_hi = rep.stack_lo + STACK_BYTES;
+    for (uint64_t *w = (uint64_t *)(uintptr_t)rep.stack_lo; w < (uint64_t *)(uintptr_t)rep.stack_hi; w++)
+        *w = STACK_PAINT;
 
     /* Heap with guard pages on both sides. */
     uint64_t hp = take(HEAP_BYTES + 2 * CK_PAGE, CK_PAGE, "heap");
@@ -201,6 +217,19 @@ void ck_mm_el1_ready(void)
     if (ck_heap_init(&heap, (void *)(uintptr_t)rep.heap_lo, HEAP_BYTES))
         ck_panic("mm: heap init failed");
     heap_ready = 1;
+    heap_min_free = ck_heap_free_bytes(&heap);
+}
+
+void ck_mm_usage(struct ck_mm_usage *u)
+{
+    u->stack_bytes = STACK_BYTES;
+    const uint64_t *w = (const uint64_t *)(uintptr_t)rep.stack_lo;
+    while ((uint64_t)(uintptr_t)w < rep.stack_hi && *w == STACK_PAINT)
+        w++;
+    u->stack_used = rep.stack_hi - (uint64_t)(uintptr_t)w;
+    u->heap_bytes = HEAP_BYTES;
+    u->heap_free = heap_ready ? ck_heap_free_bytes(&heap) : 0;
+    u->heap_min_free = heap_min_free;
 }
 
 const struct ck_mm_report *ck_mm_report(void) { return &rep; }
@@ -224,7 +253,13 @@ void *ck_alloc(size_t bytes)
 {
     if (!heap_ready)
         return 0;
-    return ck_heap_alloc(&heap, bytes);
+    void *p = ck_heap_alloc(&heap, bytes);
+    if (p) {
+        size_t fb = ck_heap_free_bytes(&heap);
+        if (fb < heap_min_free)
+            heap_min_free = fb;
+    }
+    return p;
 }
 
 void ck_free(void *p)

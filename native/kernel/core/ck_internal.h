@@ -47,6 +47,12 @@ uint64_t ck_mm_build(const struct ck_handoff *h);
 /* EL1 phase: heap ready after the MMU is on. */
 void ck_mm_el1_ready(void);
 const struct ck_mm_report *ck_mm_report(void);
+/* High-water marks: stack words ever written (painted at build), heap free
+ * bytes now and at the lowest point since the heap came up. */
+struct ck_mm_usage {
+    uint64_t stack_bytes, stack_used, heap_bytes, heap_free, heap_min_free;
+};
+void ck_mm_usage(struct ck_mm_usage *u);
 uint64_t ck_mm_mair(void);
 uint64_t ck_mm_tcr(void);
 uint64_t ck_mm_sctlr(void);
