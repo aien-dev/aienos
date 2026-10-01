@@ -29,6 +29,11 @@
 #                        (target/native-kernel-test-fwcfg); announces itself and
 #                        never counts toward a PASS. Default images are checked
 #                        to contain no fw_cfg artifact code.
+#   make CK_TEST_SMP_SKIP_CPU=1
+#                        TEST-ONLY SMP mutation: CPU_ON skipped for one secondary
+#                        core (core/smp.c); own OUT (target/native-kernel-test-smp-skip);
+#                        the SMP gate must FAIL on it (scripts/qemu_ck_smp_test.sh
+#                        --mutation); refused with CK_HARDWARE_STAGING
 #   make store-image     host tool $(OUT)/host/ck_store_image: signed artifacts
 #                        into the sealed Store on a raw NVMe disk image
 #   make test            host unit tests            -> CK_CORE_HOST: PASS
@@ -84,6 +89,29 @@ ifneq ($(strip $(CK_HARDWARE_STAGING)),)
 $(error CK_TEST_FWCFG_ARTIFACTS (QEMU fw_cfg test source) cannot be combined with CK_HARDWARE_STAGING)
 endif
 OUT ?= $(REPO)/target/native-kernel-test-fwcfg
+endif
+
+# TEST-ONLY SMP mutation: CK_TEST_SMP_SKIP_CPU=1 builds a kernel that never
+# calls PSCI CPU_ON for one secondary core (core/smp.c) but still waits for
+# it, so the SMP gate must FAIL on it (scripts/qemu_ck_smp_test.sh
+# --mutation). Own OUT; announces itself; refused with CK_HARDWARE_STAGING
+# and with the fw_cfg test source. Default images are checked to carry no
+# trace of it (smp_check).
+CK_TEST_SMP_SKIP_CPU ?=
+ifneq ($(strip $(CK_TEST_SMP_SKIP_CPU)),)
+ifneq ($(strip $(CK_TEST_SMP_SKIP_CPU)),1)
+$(error CK_TEST_SMP_SKIP_CPU must be empty or 1)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_TEST_SMP_SKIP_CPU (TEST-only SMP mutation) cannot be combined with CK_HARDWARE_STAGING)
+endif
+ifneq ($(strip $(CK_TEST_FWCFG_ARTIFACTS)),)
+$(error CK_TEST_SMP_SKIP_CPU cannot be combined with CK_TEST_FWCFG_ARTIFACTS)
+endif
+OUT ?= $(REPO)/target/native-kernel-test-smp-skip
+SMP_TEST_FLAGS := -DCK_TEST_SMP_SKIP_CPU=1
+else
+SMP_TEST_FLAGS :=
 endif
 OUT ?= $(REPO)/target/native-kernel
 AIENOS_COMMIT ?= $(shell git -C $(REPO) rev-parse HEAD 2>/dev/null || echo unknown)
@@ -177,7 +205,7 @@ MODULE_INC := -I$(NATIVE)/disk -I$(NATIVE)/store -I$(NATIVE)/m5 -I$(NATIVE)/cryp
 KCFLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -nostdlib -fno-builtin \
 	-fno-stack-protector -fno-tree-loop-distribute-patterns -mstrict-align \
 	-mgeneral-regs-only -mno-outline-atomics -fno-asynchronous-unwind-tables -fpie \
-	-fvisibility=hidden -fno-plt $(KINC) $(CK_EXTRA_CFLAGS)
+	-fvisibility=hidden -fno-plt $(KINC) $(SMP_TEST_FLAGS) $(CK_EXTRA_CFLAGS)
 KLDFLAGS := -nostdlib -pie --no-dynamic-linker -z norelro -z noexecstack -z max-page-size=4096 --no-warn-rwx-segments \
 	-T $(BOOT)/image.ld
 
@@ -186,7 +214,7 @@ CORE_C := $(BOOT)/efi_main.c \
 	$(KDIR)/core/acpi.c $(KDIR)/core/console.c $(KDIR)/core/fmt.c \
 	$(KDIR)/core/kmain.c $(KDIR)/core/handoff_check.c $(KDIR)/core/libc_min.c $(KDIR)/core/report.c \
 	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c \
-	$(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c \
+	$(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c $(KDIR)/core/smp.c \
 	$(KDIR)/mm/frames.c $(KDIR)/mm/heap.c $(KDIR)/mm/mmu.c $(KDIR)/mm/pt.c
 # P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
 # (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
@@ -196,7 +224,7 @@ ART_C := $(KDIR)/core/artifact_loader.c $(KDIR)/artifact/format.c $(KDIR)/artifa
 	$(NATIVE)/sig/ed25519.c $(NATIVE)/sig/ct.c
 ART_INC := -I$(KDIR)/svc/compat -I$(KDIR)/artifact -I$(NATIVE)/sig -I$(NATIVE)/argus
 CORE_C += $(ART_C)
-CORE_S := $(BOOT)/efi_entry.S $(KDIR)/arch/vectors.S $(KDIR)/arch/m3.S
+CORE_S := $(BOOT)/efi_entry.S $(KDIR)/arch/vectors.S $(KDIR)/arch/m3.S $(KDIR)/arch/smp_entry.S
 HDRS := $(wildcard $(KDIR)/include/*.h $(KDIR)/*/*.h $(BOOT)/*.h)
 
 KOBJ := $(OUT)/obj
@@ -320,6 +348,16 @@ define owner_check
 	fi
 endef
 
+# smp_check(elf): only a CK_TEST_SMP_SKIP_CPU image may carry the SMP mutation
+# announcement, and such an image must carry it.
+define smp_check
+	@if [ "$(strip $(CK_TEST_SMP_SKIP_CPU))" = 1 ]; then \
+	  grep -aqF "TEST-ONLY SMP mutation" $(1) || { echo "SMP mutation image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
+	else \
+	  if grep -aqF "TEST-ONLY SMP mutation" $(1); then echo "default image carries the TEST-ONLY SMP mutation"; rm -f $(1); exit 1; fi; \
+	fi
+endef
+
 # link_image(output elf, objects): refuses undefined symbols (weak stage
 # references excepted) and any relocation other than R_AARCH64_RELATIVE.
 define link_image
@@ -343,6 +381,7 @@ $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
 	@s=$$($(KNM) $@ | grep -E ' [TtDdBbWwVv] ck_stage_(devices|security|store|quiesce)$$' || true); \
 	if [ -n "$$s" ]; then echo "core image defines stage symbols: $$s"; rm -f $@; exit 1; fi
 	$(call fwcfg_check,$@)
+	$(call smp_check,$@)
 
 $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	$(call link_image,$@,$(CORE_OBJS) $(STAGE_LINK))
@@ -351,6 +390,7 @@ $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	$(call fwcfg_check,$@)
 	$(call owner_check,$@)
 	$(call xhci_mut_check,$@)
+	$(call smp_check,$@)
 
 $(EFI): $(ELF)
 	$(call pe_image,$<,$@)
