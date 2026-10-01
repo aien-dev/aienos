@@ -18,12 +18,9 @@ int disk_check(const disk_dev *d)
 
 static int range_ok(const disk_dev *d, uint64_t lba, uint32_t count)
 {
-    if (count == 0)
-        return DISK_EARG;
-    if (lba >= d->block_count) /* GUARD:disk-lba */
-        return DISK_ERANGE;
-    if ((uint64_t)count > d->block_count - lba) /* GUARD:disk-end */
-        return DISK_ERANGE;
+    if (count == 0) return DISK_EARG; /* GUARD:disk-zero */
+    if (lba >= d->block_count) return DISK_ERANGE; /* GUARD:disk-lba */
+    if ((uint64_t)count > d->block_count - lba) return DISK_ERANGE; /* GUARD:disk-end */
     return DISK_OK;
 }
 
@@ -95,8 +92,7 @@ int disk_queue_push(disk_queue *q, disk_op op, uint64_t lba, uint32_t count, uin
         return DISK_ESTATE;
     if (op != DISK_OP_READ && op != DISK_OP_WRITE && op != DISK_OP_FLUSH)
         return DISK_EARG;
-    if (q->len >= DISK_QUEUE_DEPTH) /* GUARD:queue-bound */
-        return DISK_EFULL;
+    if (q->len >= DISK_QUEUE_DEPTH) return DISK_EFULL; /* GUARD:queue-bound */
     if (op != DISK_OP_FLUSH) {
         int rc;
         if (!buf)
@@ -132,16 +128,18 @@ int disk_queue_drain(disk_queue *q)
         r->status = rc;
         q->head = (q->head + 1) % DISK_QUEUE_DEPTH;
         q->len--;
-        if (rc != DISK_OK) { /* GUARD:queue-failstop */
-            q->failed = 1;
+        if (rc != DISK_OK)
+            q->failed = 1; /* GUARD:queue-failstop */
+        if (rc != DISK_OK)
             return rc;
-        }
     }
     return DISK_OK;
 }
 
 void disk_queue_reset(disk_queue *q)
 {
+    if (!q)
+        return;
     q->head = 0;
     q->len = 0;
     q->failed = 0;
