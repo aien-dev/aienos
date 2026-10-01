@@ -256,6 +256,15 @@ static void test_scalars(void)
     CHECK(memcmp(out, lm1, 32) == 0, "L-1 mod L");
     aienos_sig_sc_muladd(out, lm1, lm1, zero);
     CHECK(memcmp(out, one, 32) == 0, "(L-1)^2 mod L");
+    /* 2^512 - 1 mod L: check direct reduction against muladd construction. */
+    uint8_t all_ones[64], max256[32], m1[32], m2[32];
+    memset(all_ones, 0xff, 64);
+    memset(max256, 0xff, 32);
+    aienos_sig_sc_reduce(out, all_ones);
+    /* 2^512 - 1 = (2^256 - 1)^2 + 2 * (2^256 - 1) = max256 * max256 + max256 + max256 */
+    aienos_sig_sc_muladd(m1, max256, max256, max256);
+    aienos_sig_sc_muladd(m2, one, max256, m1);
+    CHECK(memcmp(out, m2, 32) == 0, "2^512 - 1 consistent with muladd");
     uint8_t two[32] = {2}, three[32] = {3}, four[32] = {4}, ten[32] = {10};
     aienos_sig_sc_muladd(out, two, three, four);
     CHECK(memcmp(out, ten, 32) == 0, "2*3+4");
@@ -377,7 +386,10 @@ static void test_policy(void)
     uint8_t ident[32] = {1};
     forge_with_r(sig, ident, zero, a, pk, m, ml);
     CHECK(aienos_ed25519_verify(sig, m, ml, pk) == AIENOS_SIG_ERR_INVALID, "small-order R accepted");
-    /* Every small-order R the same way (S = k a, R small): refused. */
+    /* With an honest public key in the prime-order subgroup, [S]B - [k]A is always
+     * in the prime-order subgroup and can only equal small-order R if R is the
+     * identity point. For R != identity, [S]B - [k]A != R holds regardless of
+     * the small-order guard. We verify all 8 small-order R values are rejected. */
     for (size_t i = 0; i < sizeof SMALL_ORDER / sizeof SMALL_ORDER[0]; i++) {
         uint8_t Rs[32];
         unhex_fixed(SMALL_ORDER[i], Rs, 32);
@@ -386,7 +398,10 @@ static void test_policy(void)
     }
 
     /* A small order: R = [r]B, S = r satisfies [S]B = R + [k]A when [k]A is
-     * the identity (always for A = identity). Must be refused for all eight. */
+     * the identity. We find a message nonce for each small-order A such that
+     * k mod 8 == 0, guaranteeing [k]A is the identity. Then the signature is
+     * mathematically valid under [S]B - [k]A == R, so it is refused ONLY
+     * by the small-order public-key check. */
     uint8_t s8[64];
     memcpy(s8, Renc, 32);
     memcpy(s8 + 32, r, 32);
@@ -394,7 +409,29 @@ static void test_policy(void)
     for (size_t i = 0; i < sizeof SMALL_ORDER / sizeof SMALL_ORDER[0]; i++) {
         uint8_t As[32];
         unhex_fixed(SMALL_ORDER[i], As, 32);
-        CHECK(aienos_ed25519_verify(s8, m, ml, As) == AIENOS_SIG_ERR_INVALID, "small A %zu", i);
+        uint8_t mi[sizeof m + 4];
+        memcpy(mi, m, ml);
+        int found = 0;
+        for (uint32_t ctr = 0; ctr < 1000; ctr++) {
+            mi[ml] = (uint8_t)ctr;
+            mi[ml + 1] = (uint8_t)(ctr >> 8);
+            mi[ml + 2] = (uint8_t)(ctr >> 16);
+            mi[ml + 3] = (uint8_t)(ctr >> 24);
+            uint8_t kh[64], ks[32];
+            aienos_sha512_ctx c;
+            aienos_sha512_init(&c);
+            aienos_sha512_update(&c, Renc, 32);
+            aienos_sha512_update(&c, As, 32);
+            aienos_sha512_update(&c, mi, ml + 4);
+            aienos_sha512_final(&c, kh);
+            aienos_sig_sc_reduce(ks, kh);
+            if ((ks[0] & 7) == 0) {
+                CHECK(aienos_ed25519_verify(s8, mi, ml + 4, As) == AIENOS_SIG_ERR_INVALID, "small A %zu", i);
+                found = 1;
+                break;
+            }
+        }
+        CHECK(found, "found k mod 8 == 0 for small A %zu", i);
     }
 
     /* Non-canonical R and A encodings (y >= p) are refused. */
