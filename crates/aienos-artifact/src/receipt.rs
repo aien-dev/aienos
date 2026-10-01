@@ -353,6 +353,13 @@ pub fn validate(r: &Receipt) -> Result<(), ArtifactError> {
             }
         }
     }
+    // A CanaryFailed decision and a CanaryFailed execution status imply each
+    // other (FORMAL-4 discrepancy): neither may appear without the other.
+    if (r.decision == ReceiptDecision::CanaryFailed)
+        != (r.execution_status == ExecutionStatusCode::CanaryFailed)
+    {
+        return bad;
+    }
     if r.result_flags & RESULT_CANARY_PASSED != 0
         && (r.execution_status != ExecutionStatusCode::Exited || r.exit_status != 0)
     {
