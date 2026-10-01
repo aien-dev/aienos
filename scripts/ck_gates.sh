@@ -62,6 +62,9 @@ CHILDREN=(boot store net artifact)
 # ===========================================================================
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Receipts always boot QEMU -cpu max (FEAT_RNG present): the manual negative
+# override AIENOS_QEMU_CPU of the child scripts never reaches a receipt run.
+unset AIENOS_QEMU_CPU
 QUIET_FLAG="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
 AAVMF_CODE_FD="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}"
 AAVMF_VARS_FD="${AAVMF_VARS:-/usr/share/AAVMF/AAVMF_VARS.fd}"

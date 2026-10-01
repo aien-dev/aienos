@@ -7,6 +7,14 @@
 # failure and never resets it. ck_m3_checks (Lane 25) runs the five M3 checks
 # of qemu_boot_test.sh with the same patterns and sets m3_failed=1 on any
 # failure; it does not touch failed, so the M1 verdict is unchanged.
+#
+# Kernel entropy (Lane 31, C kernel addition): every boot must print
+# "entropy: rndr feat_rng=yes ..." (RNDR present, bounded retry, stuck test)
+# and no refusal. There is no fallback source, so a CPU without FEAT_RNG
+# fails M1. ck_m1_entropy=absent is set only by qemu_ck_store_test.sh for its
+# one negative boot on a CPU model without FEAT_RNG: that boot must print the
+# refusal instead (and cannot pass on a CPU that has RNDR).
+ck_m1_entropy=rndr
 
 check() { # description, pattern
     if grep -q -- "$2" "${work}/serial.txt"; then
@@ -77,6 +85,15 @@ ck_m1_checks() {
     # Added for the C kernel (the Rust kernel has no such test): every guard page
     # faulted and the fault was contained.
     check "guard pages fault and the fault is contained (C kernel addition)" "guard_page: ok fault=contained"
+    if [[ "${ck_m1_entropy}" == absent ]]; then
+        check "kernel entropy refused without FEAT_RNG (negative boot, C kernel addition)" \
+            "^entropy: unavailable reason=absent (ID_AA64ISAR0_EL1.RNDR=0, no FEAT_RNG); security consumers refuse, fail closed$"
+        check_absent "no RNDR entropy claimed without FEAT_RNG (negative boot)" "^entropy: rndr"
+    else
+        check "kernel entropy from RNDR: FEAT_RNG present, bounded retry, stuck test (C kernel addition)" \
+            "^entropy: rndr feat_rng=yes probe_words=2 retries=[0-9]* stuck_test=ok$"
+        check_absent "no kernel entropy refusal (C kernel addition)" "^entropy: \(unavailable\|refused\)"
+    fi
     check "final report on the SPCR console" "report_kind: final"
     check "no panic or fault" "report_kind: final"
     if grep -qE "report_kind: (panic|fault)" "${work}/serial.txt"; then

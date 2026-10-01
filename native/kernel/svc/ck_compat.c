@@ -8,7 +8,6 @@
 #include "compat/pthread.h"
 #include "compat/stdio.h"
 #include "compat/time.h"
-#include "sha256.h"
 
 /* ---- memory routines: weak, so a core copy wins at link time ---------- */
 __attribute__((weak)) void *memcpy(void *restrict d, const void *restrict s, size_t n)
@@ -71,65 +70,14 @@ void ck_compat_mutex_lock(pthread_mutex_t *m)
 }
 
 /* ---- entropy for "/dev/urandom" --------------------------------------- */
+/* The only kernel consumer is the capability office token
+ * (native/capability fill_token). Bytes come from ck_entropy_fill (RNDR,
+ * bounded retry, stuck test) or the read is refused: fread returns 0, the
+ * capability library fails closed (aienos_cap_start refuses) and the
+ * security stage (capability office + ARGUS) reports FAIL. There is no
+ * fallback source of any kind. */
 static int g_entropy = CK_ENTROPY_NONE;
 int ck_compat_entropy_source(void) { return g_entropy; }
-
-#if defined(__aarch64__)
-static int have_rndr(void)
-{
-    uint64_t isar0;
-    __asm__ volatile("mrs %0, id_aa64isar0_el1" : "=r"(isar0));
-    return ((isar0 >> 60) & 0xfu) >= 1u;
-}
-static int rndr(uint64_t *out)
-{
-    uint64_t v, nzcv;
-    __asm__ volatile("mrs %0, s3_3_c2_c4_0\n\tmrs %1, nzcv" : "=r"(v), "=r"(nzcv)::"cc");
-    *out = v;
-    return (nzcv & (1ull << 30)) == 0; /* Z set = failure */
-}
-static uint64_t cntvct(void)
-{
-    uint64_t v;
-    __asm__ volatile("isb\n\tmrs %0, cntvct_el0" : "=r"(v));
-    return v;
-}
-#else
-static int have_rndr(void) { return 0; }
-static int rndr(uint64_t *out) { *out = 0; return 0; }
-static uint64_t cntvct(void) { return ck_time_us(); }
-#endif
-
-static void fill_entropy(uint8_t *buf, size_t len)
-{
-    size_t i = 0;
-    if (have_rndr()) {
-        while (i < len) {
-            uint64_t v;
-            int tries = 0;
-            while (!rndr(&v)) {
-                if (++tries > 64) goto fallback;
-            }
-            for (int k = 0; k < 8 && i < len; k++) buf[i++] = (uint8_t)(v >> (8 * k));
-        }
-        g_entropy = CK_ENTROPY_RNDR;
-        return;
-    }
-fallback:
-    /* Timer jitter: hash 256 counter samples taken around short delays.
-     * WEAK: an observer of boot timing could narrow it down. */
-    {
-        uint64_t s[256];
-        for (int k = 0; k < 256; k++) {
-            s[k] = cntvct() ^ (ck_time_us() << 17);
-            ck_udelay((uint32_t)(s[k] & 3u) + 1u);
-        }
-        uint8_t d[32];
-        sha256_hash((const uint8_t *)s, sizeof s, d);
-        for (i = 0; i < len; i++) buf[i] = d[i % 32] ^ (uint8_t)(i * 151u);
-        g_entropy = CK_ENTROPY_TIMER_WEAK;
-    }
-}
 
 struct ck_compat_file { int open; };
 static struct ck_compat_file urandom_file;
@@ -148,7 +96,13 @@ FILE *ck_compat_fopen(const char *path, const char *mode)
 size_t ck_compat_fread(void *buf, size_t sz, size_t n, FILE *f)
 {
     if (!f || !f->open || sz == 0 || n == 0 || n > (size_t)-1 / sz) return 0;
-    fill_entropy(buf, sz * n);
+    if (ck_entropy_fill(buf, sz * n) != 0) {
+        g_entropy = CK_ENTROPY_NONE;
+        ck_printf("entropy: refused consumer=/dev/urandom (capability office token) reason=%s; "
+                  "service fails closed\n", ck_entropy_reason());
+        return 0;
+    }
+    g_entropy = CK_ENTROPY_RNDR;
     return n;
 }
 int ck_compat_fclose(FILE *f)

@@ -7,9 +7,11 @@ libc and pthreads. Every name is redirected to a ck_compat_* function in
 ../ck_compat.c, built on ck.h services:
   malloc/calloc/free  -> ck_alloc / ck_free
   clock_gettime       -> ck_time_us
-  fopen("/dev/urandom") + fread -> the CPU RNDR instruction when present,
-                         else a timer-jitter fallback that is announced on the
-                         console as WEAK (the capability office token)
+  fopen("/dev/urandom") + fread -> ck_entropy_fill (arch/rndr.c over
+                         core/entropy.c): the CPU RNDR instruction (FEAT_RNG
+                         checked, bounded retry, stuck test) or a refusal:
+                         fread returns 0 and the capability office token
+                         fails closed. There is no fallback source.
   pthread_mutex_*     -> single-core flag; contention means a bug (re-entry)
                          and panics instead of deadlocking.
 The native/* sources are compiled unmodified.

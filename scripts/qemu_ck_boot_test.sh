@@ -18,11 +18,15 @@
 #    panic, QEMU exit 0); the C kernel prints one extra line, ipc_detail,
 #    which no check reads (native/kernel/GATES.md rows 16-20 list the
 #    differences in how the C kernel does the work);
-#  - one added check: guard_page (the C kernel's guard-page fault self test);
+#  - two added checks: guard_page (the C kernel's guard-page fault self test)
+#    and kernel entropy ("entropy: rndr ..."; no fallback source exists);
 #  - stricter: any QEMU exit status other than 0 fails (the Rust script fails
 #    only on the timeout status 124); PSCI reset with -no-reboot exits 0;
 #  - the checks live in scripts/lib_ck_m1_checks.sh (shared with the Store gate);
-#  - last two lines are AIENOS_CK_M3: and AIENOS_CK_M1: PASS|FAIL|NOT_RUN.
+#  - last two lines are AIENOS_CK_M3: and AIENOS_CK_M1: PASS|FAIL|NOT_RUN;
+#  - AIENOS_QEMU_CPU overrides "-cpu max" for a manual negative run (e.g.
+#    neoverse-n1, which has no FEAT_RNG/RNDR: M1 must FAIL on the entropy
+#    row). scripts/ck_gates.sh unsets it, so receipts always use -cpu max.
 # Needs qemu-system-aarch64 and AAVMF (Ubuntu: qemu-system-arm qemu-efi-aarch64).
 set -euo pipefail
 
@@ -73,11 +77,12 @@ log="${work}/serial.log"
 
 # Issue #61: single-threaded TCG completed 120/120 soak boots; MTTCG hung in 1/40.
 qemu_accel=(-accel tcg,thread=single)
+qemu_cpu="${AIENOS_QEMU_CPU:-max}"
 
 started=$(date +%s)
 set +e
 timeout "${AIENOS_QEMU_TIMEOUT:-180}" qemu-system-aarch64 \
-    -M virt,virtualization=on,gic-version=3 "${qemu_accel[@]}" -cpu max -smp 4 -m 2048 \
+    -M virt,virtualization=on,gic-version=3 "${qemu_accel[@]}" -cpu "${qemu_cpu}" -smp 4 -m 2048 \
     -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
     -drive if=pflash,format=raw,file="${work}/vars.fd" \
     -drive if=none,id=esp,format=raw,file=fat:rw:"${work}/esp" \
@@ -95,7 +100,7 @@ tr -d '\r' <"${log}" >"${work}/serial.txt"
 failed=0
 # shellcheck source=scripts/lib_ck_m1_checks.sh
 source "${repo_root}/scripts/lib_ck_m1_checks.sh"
-echo "qemu exit ${qemu_status} after ${elapsed} s (commit ${commit:0:12})"
+echo "qemu exit ${qemu_status} after ${elapsed} s (commit ${commit:0:12}, -cpu ${qemu_cpu})"
 ck_m1_checks
 m3_failed=0
 ck_m3_checks
