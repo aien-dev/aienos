@@ -29,6 +29,11 @@ void ck_report_header(const char *kind);
 __attribute__((noreturn)) void ck_reset(void);
 /* PSCI conduit from the FADT; default SMC. */
 void ck_psci_configure(const void *fadt);
+/* One PSCI call (SMC32/SMC64 calling convention, x0-x3 in, x0 out) on the
+ * configured conduit: HVC only at EL1 when the FADT says HVC, else SMC. */
+int64_t ck_psci_call(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3);
+/* "hvc" or "smc": the conduit ck_psci_call uses at the current EL. */
+const char *ck_psci_conduit(void);
 __attribute__((noreturn)) void ck_fault_report(const char *what, uint64_t esr, uint64_t far,
                                                uint64_t elr, unsigned el);
 
@@ -94,5 +99,9 @@ void ck_m3_run(void);
  * Returns CK_RNG_OK or the refusal (see core/entropy.h). */
 int ck_entropy_init(void);
 uint64_t ck_entropy_retries(void);
+/* core/smp.c: secondary cores through PSCI CPU_ON, each on its own stack with
+ * the MMU on the boot core's tables, checked in and parked in WFE. Prints
+ * the smp: lines scripts/qemu_ck_smp_test.sh judges; never panics. */
+void ck_smp_run(void);
 
 #endif

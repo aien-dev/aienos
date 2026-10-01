@@ -4,7 +4,8 @@
  * vectors, PSCI conduit, own address space, then EL2 -> EL1h (ADR 0009) with
  * the MMU on our tables. ck_el1_main then reports the MMU switch from live
  * registers, proves the guard pages, brings up GICv3 and the EL1 physical
- * timer, runs the M3 isolation checks (core/m3.c) and the linked boot stages,
+ * timer, starts and parks the secondary cores (core/smp.c), runs the M3
+ * isolation checks (core/m3.c) and the linked boot stages,
  * and ends with the final report and a PSCI reset. QEMU runs of this path
  * qualify nothing physical. */
 #include "arch.h"
@@ -131,6 +132,11 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
                   : ent == CK_RNG_FAILED ? "RNDR returned no number within the retry bound"
                   : ent == CK_RNG_STUCK ? "RNDR repeated a 64-bit word"
                                         : "probe error");
+
+    /* Secondary cores (core/smp.c): PSCI CPU_ON, check in, park in WFE with
+     * interrupts masked; the boot core goes on alone. Lines judged by
+     * scripts/qemu_ck_smp_test.sh (CK gate SMP). */
+    ck_smp_run();
 
     /* M3 isolation checks (core/m3.c), before any stage registers an IRQ. */
     ck_m3_run();

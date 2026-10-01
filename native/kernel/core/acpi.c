@@ -147,6 +147,36 @@ int ck_madt_parse(const void *madt, struct ck_madt_gic *out)
 }
 
 
+int ck_madt_mpidrs(const void *madt, uint64_t *out, unsigned max, unsigned *n)
+{
+    const uint8_t *m = madt;
+    uint32_t len = rd32(m + 4);
+    unsigned count = 0;
+    *n = 0;
+    if (!sig_eq(m, "APIC", 4) || len < 44)
+        return -1;
+    for (uint32_t at = 44; at < len;) {
+        if (at + 2 > len)
+            return -1;
+        uint8_t type = m[at], elen = m[at + 1];
+        if (elen < 2 || at + elen > len)
+            return -1;
+        const uint8_t *e = m + at;
+        if (type == 0x0b) { /* GICC */
+            if (elen < 76)
+                return -1;
+            if (rd32(e + 12) & (1u | 8u)) {
+                if (count < max)
+                    out[count] = rd64(e + 68) & CK_MPIDR_AFF_MASK;
+                count++;
+            }
+        }
+        at += elen;
+    }
+    *n = count;
+    return count > max ? -2 : 0;
+}
+
 static void topo_add(struct ck_cpu_topology *t, uint8_t cls)
 {
     for (unsigned i = 0; i < t->distinct_classes; i++)

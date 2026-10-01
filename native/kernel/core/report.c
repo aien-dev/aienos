@@ -30,14 +30,32 @@ void ck_psci_configure(const void *fadt)
         psci_hvc = (flags & 2) != 0;
 }
 
-static void psci_call(uint64_t fn)
+/* SMCCC v1.0: x4-x17 may be corrupted by the callee. */
+#define PSCI_CLOBBERS "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", \
+                      "x15", "x16", "x17", "memory"
+
+int64_t ck_psci_call(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3)
 {
     register uint64_t x0 __asm__("x0") = fn;
+    register uint64_t x1 __asm__("x1") = a1;
+    register uint64_t x2 __asm__("x2") = a2;
+    register uint64_t x3 __asm__("x3") = a3;
     /* HVC would land in our own EL2 vectors while still at EL2. */
     if (psci_hvc && ck_current_el() == 1)
-        __asm__ volatile("hvc #0" : "+r"(x0)::"x1", "x2", "x3", "memory");
+        __asm__ volatile("hvc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3) : : PSCI_CLOBBERS);
     else
-        __asm__ volatile("smc #0" : "+r"(x0)::"x1", "x2", "x3", "memory");
+        __asm__ volatile("smc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3) : : PSCI_CLOBBERS);
+    return (int64_t)x0;
+}
+
+const char *ck_psci_conduit(void)
+{
+    return (psci_hvc && ck_current_el() == 1) ? "hvc" : "smc";
+}
+
+static void psci_call(uint64_t fn)
+{
+    (void)ck_psci_call(fn, 0, 0, 0);
 }
 
 void ck_reset(void)
