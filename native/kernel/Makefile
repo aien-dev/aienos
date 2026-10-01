@@ -159,12 +159,12 @@ endef
 
 $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
 	$(call link_image,$@,$(CORE_OBJS))
-	@s=$$($(KNM) $@ | grep -E ' [TtDdBbWwVv] ck_stage_(devices|security|store)$$' || true); \
+	@s=$$($(KNM) $@ | grep -E ' [TtDdBbWwVv] ck_stage_(devices|security|store|quiesce)$$' || true); \
 	if [ -n "$$s" ]; then echo "core image defines stage symbols: $$s"; rm -f $@; exit 1; fi
 
 $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	$(call link_image,$@,$(CORE_OBJS) $(STAGE_BUILT))
-	@for s in ck_stage_devices ck_stage_security ck_stage_store; do \
+	@for s in ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce; do \
 	  $(KNM) $@ | grep -qE " [TW] $$s$$" || { echo "full image lacks $$s"; rm -f $@; exit 1; }; done
 
 $(EFI): $(ELF)

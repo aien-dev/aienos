@@ -46,6 +46,16 @@ Output lands in `<repo>/target/native-kernel` (ignored by git).
    rc=<n>` or `stage <name>: not linked`.
 6. `report_kind: final`, then PSCI SYSTEM_RESET (WFI loop if refused).
 
+Every reset (final, panic or fault) first calls the stage hook
+`ck_stage_quiesce` once, if linked: the devices stage releases a still-live
+NVMe controller (NVMe normal shutdown, CC.SHN = 01b then wait for CSTS.SHST
+= 10b, bounded 5 s; then bus master off; then the SMMU stream back to abort)
+and prints `devices: quiesce before reset nvme=none|released-now|already-released`.
+The normal store path already released it, printing `nvme: shutdown normal
+cc=..->.. csts=.. shst=complete waited_us=N` before `dma_gate: nvme bus master
+revoked`. Code: `dev/nvme_shutdown.c` (register sequence, host-tested in
+`svc/tests/stage_test.c`), `dev/devices.c`.
+
 A panic prints `report_kind: panic`; an unexpected exception prints
 `report_kind: fault` with ESR, FAR and ELR. Both then reset. Before the drop
 to EL1, VBAR_EL2 points at a separate fatal-only table (`ck_vectors_el2`):

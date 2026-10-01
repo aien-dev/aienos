@@ -115,5 +115,8 @@ int ck_dma_faults(uint32_t stream_id, struct ck_dma_fault *first);
 __attribute__((weak)) int ck_stage_devices(void);  /* PCI, NVMe, virtio-net */
 __attribute__((weak)) int ck_stage_security(void); /* capability + ARGUS */
 __attribute__((weak)) int ck_stage_store(void);    /* sealed Store on NVMe */
+/* Optional devices-stage hook: ck_reset calls it once, before PSCI reset or
+ * off (final report, panic, fault), so no device keeps DMA across a reset. */
+__attribute__((weak)) void ck_stage_quiesce(void);
 
 #endif
