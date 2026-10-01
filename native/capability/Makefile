@@ -119,11 +119,16 @@ contain_protected_subject|aienos_contain.c|1|if (is_protected_subject(r->princip
 endef
 
 MUT_DIR = $(OUT)/mut
+# The mutant table lives outside MUT_DIR. GNU make expands every recipe line,
+# including $(file ...), before the first shell line runs, so the table must
+# target a directory that already exists ($(OUT), an order-only prerequisite)
+# and must not sit inside the directory the recipe's first line wipes.
+MUT_TABLE = $(OUT)/mutants.table
 MUT_TIMEOUT ?= 300
 
 mutants: $(TEST) $(CONTAIN_TEST) | $(OUT)
 	@rm -rf $(MUT_DIR); mkdir -p $(MUT_DIR)
-	$(file >$(MUT_DIR)/table,$(CAP_MUTANTS))
+	$(file >$(MUT_TABLE),$(CAP_MUTANTS))
 	@ulimit -c 0; \
 	if ./$(TEST) > $(MUT_DIR)/baseline.log 2>&1 && ./$(CONTAIN_TEST) >> $(MUT_DIR)/baseline.log 2>&1; then \
 	  echo "baseline (no mutation): tests pass"; \
@@ -146,7 +151,7 @@ mutants: $(TEST) $(CONTAIN_TEST) | $(OUT)
 	  timeout $(MUT_TIMEOUT) $$d/contain_test >> $$d/run.log 2>&1 || by="$${by:+$$by+}contain_test"; \
 	  if [ -n "$$by" ]; then echo "mutant $$name: killed by $$by"; killed=$$((killed+1)); \
 	  else echo "mutant $$name: SURVIVED (FAIL)"; fail=1; fi; \
-	done < $(MUT_DIR)/table; \
+	done < $(MUT_TABLE); \
 	if [ $$n -lt 8 ]; then echo "only $$n mutants defined, need at least 8"; fail=1; fi; \
 	if [ $$fail -eq 0 ] && [ $$killed -eq $$n ]; then echo "AIENOS_CAP_MUTANTS: PASS ($$killed/$$n killed)"; \
 	else echo "AIENOS_CAP_MUTANTS: FAIL ($$killed/$$n killed)"; exit 1; fi
