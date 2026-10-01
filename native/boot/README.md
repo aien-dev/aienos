@@ -22,3 +22,7 @@ and nothing else.
 
 Build and test from `native/kernel` (see its README). QEMU qualifies nothing
 physical.
+
+The handoff record (`handoff.h`, magic `CHANDOF1`) is specified, with what is
+frozen, what the kernel must refuse and how rollback works without A/B slots,
+in `docs/BOOT_HANDOFF_CONTRACT.md` (SPEC, NOT_RUN; ADR 0024 Q3).

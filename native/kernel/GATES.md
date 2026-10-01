@@ -207,17 +207,17 @@ How the C gate differs from the Rust gate (all apply to rows 33-41):
 
 Every M0 rollback check is about the UEFI boot loader (BootNext consumed
 before ExitBootServices, A/B slot choice, fallback to Default), which lives in
-native/boot. Nothing in it is kernel scope, so the C kernel has no part of it
-to port; `M0_ROLLBACK` stays MISSING_IMPLEMENTATION until the C loader work
-(parked) is done.
+native/boot. ADR 0024 Q3 (aien-architecture) freezes loader expansion: no A/B
+slots will be added. Rollback is the one-time BootNext rule; under
+`docs/BOOT_HANDOFF_CONTRACT.md` section 7.1 these rows rerun the same script with the C kernel image as the candidate. Until a forge receipt covers them they stay NOT_RUN.
 
 | # | Rust check (marker) | CK gate | Status |
 | --- | --- | --- | --- |
-| 42 | `AAVMF_BOOTNEXT_NVRAM` / `NATIVE_ROLLBACK_NORMAL` | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: C loader BootNext/A-B/rollback parked, native/boot/README.md) |
-| 43 | `NATIVE_ROLLBACK_FAULT` (faulted candidate returns to Default) | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: parked) |
-| 44 | `NATIVE_ROLLBACK_TIMEOUT` (hung candidate) | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: parked) |
-| 45 | `NATIVE_ROLLBACK_REJECTED` (malformed image) and absent-image fallback | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: parked) |
-| 46 | `NATIVE_ROLLBACK_BOOTNEXT_CONSUMED` / `_DEFAULT_UNCHANGED` | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: parked) |
+| 42 | `AAVMF_BOOTNEXT_NVRAM` / `NATIVE_ROLLBACK_NORMAL` | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: C image not yet wired as the BootNext candidate, docs/BOOT_HANDOFF_CONTRACT.md 7.1) |
+| 43 | `NATIVE_ROLLBACK_FAULT` (faulted candidate returns to Default) | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: needs TEST-only bad-magic C image, contract 7.1) |
+| 44 | `NATIVE_ROLLBACK_TIMEOUT` (hung candidate) | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: needs TEST-only hang C image, contract 7.1) |
+| 45 | `NATIVE_ROLLBACK_REJECTED` (malformed image) and absent-image fallback | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: C image as candidate path, contract 7.1) |
+| 46 | `NATIVE_ROLLBACK_BOOTNEXT_CONSUMED` / `_DEFAULT_UNCHANGED` | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: C image as candidate, contract 7.1) |
 
 ## M4 NVMe read: scripts/qemu_nvme_test.sh (SMMU=1 and SMMU=0) -> CK `M4_NVME`
 
