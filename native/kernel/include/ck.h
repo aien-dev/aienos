@@ -109,6 +109,16 @@ struct ck_dma_fault {
 };
 int ck_dma_faults(uint32_t stream_id, struct ck_dma_fault *first);
 
+/* Entropy (arch/rndr.c over core/entropy.c): the Arm RNDR instruction or a
+ * refusal; there is no fallback source. ck_entropy_fill returns 0 with len
+ * bytes of RNDR output, or a negative CK_RNG_* refusal (absent, failed,
+ * stuck) with buf zeroed; a refusal is latched for the rest of the boot.
+ * Every security consumer must fail closed on a refusal. ck_entropy_reason
+ * names the current state ("rndr" when usable). */
+int ck_entropy_fill(void *buf, size_t len);
+int ck_entropy_status(void);
+const char *ck_entropy_reason(void);
+
 /* ---- boot stages (implemented by the stage worker, all optional) -------- */
 /* Each returns 0 on success, negative on failure; core prints the result.
  * Declared weak so the core links and boots without them. */

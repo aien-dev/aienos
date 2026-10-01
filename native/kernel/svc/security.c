@@ -272,8 +272,10 @@ int ck_stage_security(void)
               pick(r.caps_ok, "ok", "failed"), pick(r.caps_granted, "yes", "no"), pick(r.caps_attenuated, "yes", "no"),
               pick(r.caps_amplify_denied, "denied", "ALLOWED"), pick(r.caps_forged_denied, "denied", "ALLOWED"),
               pick(r.caps_revoked_denied, "denied", "ALLOWED"),
-              ent == CK_ENTROPY_RNDR ? "rndr" : ent == CK_ENTROPY_TIMER_WEAK ? "timer-WEAK" :
-              ent == CK_ENTROPY_HOST ? "host-urandom" : "none");
+              ent == CK_ENTROPY_RNDR ? "rndr" : ent == CK_ENTROPY_HOST ? "host-urandom" : "none");
+    if (ck_entropy_status() != 0)
+        ck_printf("security: REFUSED kernel entropy %s (office token needs RNDR); capability office and ARGUS fail closed\n",
+                  ck_entropy_reason());
     if (r.argus_ok) {
         ck_printf("argus: ok narrow_revoke=1 revoked=denied unrelated=granted authority=unchanged\n");
     } else {

@@ -31,6 +31,16 @@
 #  boot 6     TEST-ONLY bypass image, no SMMU, same (corrupt) disk: the bypass
 #             warnings and grant are printed, the Store is still refused as
 #             structural and the image is unchanged.
+# Once, after both geometries:
+#  boot 7     default image, SMMU, fresh 512 B disk, on QEMU -cpu neoverse-n1
+#             (no FEAT_RNG, so no RNDR). The kernel has no fallback entropy:
+#             M1 must show "entropy: unavailable reason=absent" instead of
+#             "entropy: rndr", the capability office token read must be
+#             refused, caps/ARGUS must fail closed and "stage security: FAIL"
+#             must print (into ARGUS1_REVOKE: that gate cannot PASS unless the
+#             no-RNDR boot refuses); the Store still opens (its nonces are
+#             keyed, not random). AIENOS_QEMU_CPU overrides "-cpu max" on boots
+#             1-6 only for manual negative runs; scripts/ck_gates.sh unsets it.
 # SMMU observables (boots 1-4; patterns of qemu_nvme_test.sh where the Rust
 # kernel has them): "smmu: enabled", "smmu_dma_window: nvme only, translation
 # active", "dma_gate: nvme granted (Confined), bus master on", absent
@@ -133,6 +143,8 @@ fail_into() { # bucket variable name: move the current failed flag into it
 }
 sha() { sha256sum "$1" | cut -d' ' -f1; }
 
+qemu_cpu="${AIENOS_QEMU_CPU:-max}"
+boot_cpu="${qemu_cpu}"
 # boot <name> <efi> <disk image> <block bytes> <serial> [smmu]: one QEMU boot
 # (with "smmu" the machine gets an SMMUv3); leaves
 # the serial text in ${work}/serial.txt and the exit status in qemu_status.
@@ -149,7 +161,7 @@ boot() {
     set +e
     # Issue #61: single-threaded TCG (see qemu_boot_test.sh).
     timeout "${AIENOS_QEMU_TIMEOUT:-180}" qemu-system-aarch64 \
-        -M "${machine}" -accel tcg,thread=single -cpu max -smp 4 -m 2048 \
+        -M "${machine}" -accel tcg,thread=single -cpu "${boot_cpu}" -smp 4 -m 2048 \
         -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
         -drive if=pflash,format=raw,file="${work}/vars.fd" \
         -drive if=none,id=esp,format=raw,file=fat:rw:"${work}/esp" \
@@ -163,7 +175,7 @@ boot() {
     set -e
     tr -d '\r' <"${work}/serial.log" >"${work}/serial.txt"
     [[ -z "${AIENOS_LOG_DIR:-}" ]] || cp "${work}/serial.txt" "${AIENOS_LOG_DIR}/qemu_ck_store_$1.log"
-    echo "== boot $1: qemu exit ${qemu_status}"
+    echo "== boot $1: qemu exit ${qemu_status} (-cpu ${boot_cpu})"
     failed=0
     ck_m1_checks
     fail_into m1_fail
@@ -370,12 +382,35 @@ for bs in 512 4096; do
     [[ "${sha_bypass}" == "${sha_corrupt}" ]] && echo "PASS  image sha256 unchanged by the bypass boot" \
         || store_fail_msg "image changed by the bypass boot"
 done
+
+# Boot 7: no FEAT_RNG (QEMU -cpu neoverse-n1 has no RNDR). The kernel has no
+# fallback entropy source, so the office token must be refused and the
+# security stage must fail closed; the Store still opens (keyed nonces).
+image="${top}/nvme-nornd.img"
+truncate -s "${img_bytes}" "${image}"
+boot_cpu=neoverse-n1
+ck_m1_entropy=absent
+boot "boot7-no-rndr" "${safe_efi}" "${image}" 512 aienos-nvme-test smmu
+boot_cpu="${qemu_cpu}"
+ck_m1_entropy=rndr
+check "office token read refused without RNDR, service fails closed (C only)" \
+    "^entropy: refused consumer=/dev/urandom (capability office token) reason=absent; service fails closed$"
+check "security stage refuses without kernel entropy (C only)" \
+    "^security: REFUSED kernel entropy absent (office token needs RNDR); capability office and ARGUS fail closed$"
+check "capabilities not started, no office token (C only)" "^caps: failed .* office_token=none$"
+check "ARGUS not started: capability office refused (C only)" "^argus: FAIL step=cap_start "
+check "stage security failed (C only)" "^stage security: FAIL"
+check_absent "no capability grant without entropy (C only)" "^caps: ok"
+check_absent "no ARGUS narrow revoke without entropy (C only)" "^argus: ok"
+fail_into argus_fail
+check "Store still opens without RNDR: its nonces are keyed, not random (C only)" "^stage store: ok"
+fail_into store_fail
 release_flag
 
 if [[ "${m1_fail}${nvme_fail}${store_fail}${argus_fail}${smmu_fail}${shut_fail}" != 000000 || -n "${AIENOS_QEMU_VERBOSE:-}" ]]; then
     for s in "${top}"/*/serial.txt; do
         echo "---- serial console $(basename "$(dirname "${s}")") (stage lines) ----"
-        grep -E '^(stage |smmu|nvme:|dma_gate:|WARNING|devices:|store:|caps:|argus:|report_kind:|pci_nvme_mmio_shutdown)' "${s}" | head -60 || true
+        grep -E '^(stage |smmu|nvme:|dma_gate:|WARNING|devices:|store:|caps:|argus:|entropy:|security:|report_kind:|pci_nvme_mmio_shutdown)' "${s}" | head -60 || true
     done
 fi
 [[ "${m1_fail}" != 0 ]] && echo "M1 checks failed on at least one boot: no verdict can pass"

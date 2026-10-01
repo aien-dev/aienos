@@ -119,7 +119,7 @@ CORE_C := $(BOOT)/efi_main.c \
 	$(KDIR)/core/acpi.c $(KDIR)/core/console.c $(KDIR)/core/fmt.c \
 	$(KDIR)/core/kmain.c $(KDIR)/core/libc_min.c $(KDIR)/core/report.c \
 	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c \
-	$(KDIR)/core/m3.c \
+	$(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c \
 	$(KDIR)/mm/frames.c $(KDIR)/mm/heap.c $(KDIR)/mm/mmu.c $(KDIR)/mm/pt.c
 # P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
 # (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
@@ -259,8 +259,8 @@ $(FULL_EFI): $(FULL_ELF)
 
 # ---- host unit tests ----
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
-	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c
-TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact
+	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c
+TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 

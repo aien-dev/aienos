@@ -9,6 +9,7 @@
  * qualify nothing physical. */
 #include "arch.h"
 #include "ck_internal.h"
+#include "entropy.h"
 
 #define TTBR_BADDR_MASK 0x0000fffffffffffeull
 
@@ -114,6 +115,21 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     ck_printf("exception_level: EL%u\n", el);
     ck_puts("kernel: alive\n");
     ck_printf("kernel_el: EL%u%s\n", el, (spsel & 1) ? "h" : "t");
+
+    /* Kernel entropy (arch/rndr.c): RNDR or a latched refusal, no fallback.
+     * Probed once here, before the artifact loader and the stages. */
+    ck_set_stage("entropy");
+    int ent = ck_entropy_init();
+    if (ent == CK_RNG_OK)
+        ck_printf("entropy: rndr feat_rng=yes probe_words=2 retries=%llu stuck_test=ok\n",
+                  (unsigned long long)ck_entropy_retries());
+    else
+        ck_printf("entropy: unavailable reason=%s (%s); security consumers refuse, fail closed\n",
+                  ck_entropy_reason(),
+                  ent == CK_RNG_ABSENT ? "ID_AA64ISAR0_EL1.RNDR=0, no FEAT_RNG"
+                  : ent == CK_RNG_FAILED ? "RNDR returned no number within the retry bound"
+                  : ent == CK_RNG_STUCK ? "RNDR repeated a 64-bit word"
+                                        : "probe error");
 
     /* M3 isolation checks (core/m3.c), before any stage registers an IRQ. */
     ck_m3_run();

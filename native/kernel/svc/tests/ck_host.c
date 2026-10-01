@@ -75,6 +75,9 @@ uint32_t ck_boot_count_hint(void) { return 0; }
 
 /* Host: the capability library reads the real /dev/urandom. */
 int ck_compat_entropy_source(void) { return CK_ENTROPY_HOST; }
+/* Host: the kernel RNDR service is not in play (libc /dev/urandom above). */
+int ck_entropy_status(void) { return 0; }
+const char *ck_entropy_reason(void) { return "host-urandom"; }
 
 /* Host: no IORT, so no SMMU (the NVMe gate stays fail-closed). */
 int ck_dma_confine(uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
