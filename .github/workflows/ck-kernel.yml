@@ -29,7 +29,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'native/kernel/**'
+      - 'native/**'
       - 'scripts/ck_gates.sh'
       - 'scripts/qemu_ck_*.sh'
       - 'scripts/lib_ck_m1_checks.sh'
@@ -37,7 +37,7 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'native/kernel/**'
+      - 'native/**'
       - 'scripts/ck_gates.sh'
       - 'scripts/qemu_ck_*.sh'
       - 'scripts/lib_ck_m1_checks.sh'
@@ -88,6 +88,8 @@ jobs:
           rc=${PIPESTATUS[0]}
           set -e
           echo "ck_gates.sh exit ${rc}"
+          mkdir -p "${RUNNER_TEMP}/ck-receipt/logs"
+          cp -r /tmp/ck-gates-work.*/logs/* "${RUNNER_TEMP}/ck-receipt/logs/" 2>/dev/null || true
           [ "${rc}" = 0 ] || exit 1
           # Every gate with a C implementation (source != missing in the
           # ck_gates.sh table) must be PASS.
@@ -103,7 +105,7 @@ jobs:
           done
           exit ${fail}
 
-      - name: Upload the receipt
+      - name: Upload the receipt and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -111,4 +113,5 @@ jobs:
           path: |
             ${{ runner.temp }}/ck-receipt/
             ${{ runner.temp }}/ck-gates.txt
+            /tmp/ck-gates-work.*/logs/
           if-no-files-found: warn
