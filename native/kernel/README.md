@@ -49,7 +49,9 @@ Output lands in `<repo>/target/native-kernel` (ignored by git).
 Every reset (final, panic or fault) first calls the stage hook
 `ck_stage_quiesce` once, if linked: the devices stage releases a still-live
 NVMe controller (NVMe normal shutdown, CC.SHN = 01b then wait for CSTS.SHST
-= 10b, bounded 5 s; then bus master off; then the SMMU stream back to abort)
+= 10b, bounded 5 s; if it cannot (fatal status, not ready, timeout) it clears
+CC.EN and waits up to 1 s for CSTS.RDY = 0, printing `nvme: shutdown
+fallback disable ...`; then bus master off; then the SMMU stream back to abort)
 and prints `devices: quiesce before reset nvme=none|released-now|already-released`.
 The normal store path already released it, printing `nvme: shutdown normal
 cc=..->.. csts=.. shst=complete waited_us=N` before `dma_gate: nvme bus master

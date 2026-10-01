@@ -19,10 +19,10 @@ void ck_dev_nvme_release(void)
          * controller can still DMA, then bus master off, then the SMMU
          * stream back to abort. */
         ck_nvme_shutdown_bound(&g_nvme);
-        g_nvme.bm_on = 0;
-        if (pci_bus_master_off(g_nvme.pf) == 0)
+        if (pci_bus_master_off(g_nvme.pf) == 0) {
+            g_nvme.bm_on = 0;
             ck_printf("dma_gate: nvme bus master revoked\n");
-        else
+        } else /* bm_on stays set: the reset quiesce hook retries the revoke */
             ck_printf("dma_gate: nvme bus master revoke FAILED (command register still has BME)\n");
     }
     if (g_nvme.confined) {

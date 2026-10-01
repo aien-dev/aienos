@@ -243,5 +243,13 @@ int ck_nvme_shutdown_bound(ck_nvme *n)
     int rc = ck_nvme_shutdown(&o, CK_NVME_SHUT_TIMEOUT_US, &r);
     ck_printf("nvme: shutdown normal cc=0x%08x->0x%08x csts=0x%08x shst=%s waited_us=%u\n", r.cc_before,
               r.cc_after, r.csts, ck_nvme_shutdown_str(rc), r.waited_us);
+    if (ck_nvme_shutdown_needs_disable(rc)) {
+        /* The controller may still be live: stop it (CC.EN = 0, wait for
+         * CSTS.RDY = 0) before the caller cuts bus mastering. */
+        struct ck_nvme_shut_result d = {0, 0, 0, 0};
+        int drc = ck_nvme_disable(&o, CK_NVME_DISABLE_TIMEOUT_US, &d);
+        ck_printf("nvme: shutdown fallback disable cc=0x%08x->0x%08x csts=0x%08x rdy0=%s waited_us=%u\n",
+                  d.cc_before, d.cc_after, d.csts, ck_nvme_shutdown_str(drc), d.waited_us);
+    }
     return rc;
 }

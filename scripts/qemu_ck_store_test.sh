@@ -241,6 +241,7 @@ shutdown_checks() {
         echo "${out}"; })
     [[ "${order}" == ok ]] && echo "PASS  QEMU device trace: shutdown set while BME on, then BME cleared" \
         || { echo "FAIL  QEMU device trace order (${order})"; failed=1; }
+    check_absent "no fallback disable needed (normal shutdown completed)" "nvme: shutdown fallback disable"
     check "reset quiesce hook ran after the release (differs)" "devices: quiesce before reset nvme=already-released"
     fail_into shut_fail
 }
