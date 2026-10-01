@@ -70,7 +70,7 @@ AAVMF_CODE_FD="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}"
 AAVMF_VARS_FD="${AAVMF_VARS:-/usr/share/AAVMF/AAVMF_VARS.fd}"
 PHYSICAL_STATEMENT="QEMU emulator runs only. Nothing here was run on Machine 1 or any GB10; no physical qualification is claimed."
 M4_NVME_PASS_NOTE="SMMU-confined NVMe DMA in QEMU (iommu=smmuv3, default build); TEST-ONLY bypass build boot-checked separately"
-NET_PASS_NOTE="QEMU user networking (slirp), virtio-net DMA through the smmuv3 vIOMMU (ACCESS_PLATFORM negotiated, required): attach, UDP TX seen by the host helper, UDP reply RX parsed by M6-A, out-of-window device DMA refused (F_TRANSLATION, page intact) and recovered by reset; QEMU, not hardware"
+NET_PASS_NOTE="QEMU user networking (slirp), virtio-net with ACCESS_PLATFORM required behind the smmuv3 vIOMMU; this PASS covers: attach, UDP TX seen by the host helper, UDP reply RX parsed by M6-A, an out-of-window device DMA refused (F_TRANSLATION, page intact) and recovery by reset, as checked by this run only; QEMU, not hardware"
 
 die() { echo "ck_gates: $*" >&2; exit 2; }
 json_str() {
