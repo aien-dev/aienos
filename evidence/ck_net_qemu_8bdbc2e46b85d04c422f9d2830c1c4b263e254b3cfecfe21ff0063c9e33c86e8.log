@@ -1,0 +1,95 @@
+PASS  UDP echo helper listening on 127.0.0.1:47029 (token f99cbd71e03c03cc)
+Could not open option rom 'vgabios-ramfb.bin': No such file or directory
+== boot net-smmu: qemu exit 0
+PASS  pre-exit report printed
+PASS  image is this commit
+PASS  left firmware and entered the kernel
+PASS  kernel entered EL1h
+PASS  EL1 page tables and caches enabled
+PASS  GICv3 enabled
+PASS  timer IRQ delivered at least five ticks
+PASS  MMU switched from firmware tables (0x47fff000) to AIENOS tables (0x40000000)
+PASS  GIC bases from the ACPI MADT, GICv3 architecture and ICC system registers
+PASS  tick statistics consistent (period 10000 us, min 10161 avg 10305 max 10749)
+PASS  guard pages fault and the fault is contained (C kernel addition)
+PASS  kernel entropy from RNDR: FEAT_RNG present, bounded retry, stuck test (C kernel addition)
+PASS  no kernel entropy refusal (C kernel addition)
+PASS  final report on the SPCR console
+PASS  no panic or fault
+-- (a) attach
+PASS  virtio-net capabilities parsed
+PASS  SMMU window programmed for the virtio-net DMA region only
+PASS  virtio-net DMA granted only after confinement
+PASS  driver attached, QEMU NIC MAC read from the device, ACCESS_PLATFORM negotiated (features = VERSION_1|ACCESS_PLATFORM|MAC)
+PASS  ARP reply from the slirp gateway (52:55:0a:00:02:02)
+-- (b) TX
+PASS  guest sent one UDP frame and the device completed it (AIENOS-CK-NET ping nonce=5eb75ffd)
+PASS  host helper received the guest's datagram through slirp (same nonce)
+-- (c) RX
+PASS  host helper sent its reply
+PASS  guest received and parsed (M6-A, checksum verified) the helper's reply with this run's token
+PASS  round trip reported
+-- (d) fence: device DMA outside the window
+PASS  64 RX descriptors pointed outside the window, probe datagram sent
+PASS  host helper received the probe and replied (the device had a frame to write)
+PASS  SMMU event F_TRANSLATION (0x10) x16 for the NIC's stream 0x18 at 0x402bd000, in the target page 0x402bd000 outside the window; page intact; positive round trip fault-free (device model reaction, reported not judged: rx_completed=1 device_status=0x0f needs_reset=no event_overflow=0)
+-- (e) recovery inside the window
+PASS  device reset + re-init with ACCESS_PLATFORM after the fault
+PASS  second round trip after the fault, no new SMMU fault
+PASS  two helper replies with this run's token parsed (before and after the fault)
+PASS  net selftest PASS (round trip, fence and recovery)
+-- release
+PASS  device reset before the revoke
+PASS  virtio-net bus master revoked
+PASS  virtio-net SMMU stream returned to abort
+PASS  order: grant < round trip < fault refused < recovery round trip < device reset < bus master off < stream abort
+PASS  devices stage summary
+PASS  no virtio-net failure lines
+Could not open option rom 'vgabios-ramfb.bin': No such file or directory
+== boot net-nosmmu: qemu exit 0
+PASS  pre-exit report printed
+PASS  image is this commit
+PASS  left firmware and entered the kernel
+PASS  kernel entered EL1h
+PASS  EL1 page tables and caches enabled
+PASS  GICv3 enabled
+PASS  timer IRQ delivered at least five ticks
+PASS  MMU switched from firmware tables (0x47fff000) to AIENOS tables (0x40000000)
+PASS  GIC bases from the ACPI MADT, GICv3 architecture and ICC system registers
+PASS  tick statistics consistent (period 10000 us, min 10030 avg 10101 max 10197)
+PASS  guard pages fault and the fault is contained (C kernel addition)
+PASS  kernel entropy from RNDR: FEAT_RNG present, bounded retry, stuck test (C kernel addition)
+PASS  no kernel entropy refusal (C kernel addition)
+PASS  final report on the SPCR console
+PASS  no panic or fault
+PASS  virtio-net DMA denied without an SMMU
+PASS  virtio-net not bound without an SMMU
+PASS  no virtio-net grant without an SMMU
+PASS  no datagram sent without an SMMU
+PASS  devices stage summary (no SMMU)
+PASS  host helper saw nothing from the no-SMMU boot
+Could not open option rom 'vgabios-ramfb.bin': No such file or directory
+== boot net-noap: qemu exit 0
+PASS  pre-exit report printed
+PASS  image is this commit
+PASS  left firmware and entered the kernel
+PASS  kernel entered EL1h
+PASS  EL1 page tables and caches enabled
+PASS  GICv3 enabled
+PASS  timer IRQ delivered at least five ticks
+PASS  MMU switched from firmware tables (0x47fff000) to AIENOS tables (0x40000000)
+PASS  GIC bases from the ACPI MADT, GICv3 architecture and ICC system registers
+PASS  tick statistics consistent (period 10000 us, min 10081 avg 10310 max 10568)
+PASS  guard pages fault and the fault is contained (C kernel addition)
+PASS  kernel entropy from RNDR: FEAT_RNG present, bounded retry, stuck test (C kernel addition)
+PASS  no kernel entropy refusal (C kernel addition)
+PASS  final report on the SPCR console
+PASS  no panic or fault
+PASS  SMMU window programmed (the refusal is the driver's, not the SMMU's)
+PASS  driver refuses a NIC that does not offer ACCESS_PLATFORM
+PASS  no attach without ACCESS_PLATFORM
+PASS  no datagram sent without ACCESS_PLATFORM
+PASS  device released (reset, bus master revoked, stream back to abort)
+PASS  devices stage summary (no ACCESS_PLATFORM)
+PASS  host helper saw nothing from the no-ACCESS_PLATFORM boot
+AIENOS_CK_NET: PASS

@@ -43,7 +43,7 @@ control-transport stub. No Rust, no Python, no heap, no outside library.
 
 ## Not claimed (deferred, with the dependency)
 
-- Physical binding (real NIC, interrupts): the virtio-net driver is bound in the C kernel by `native/kernel/dev/net_bind.c` (#200 d75a266 attach and split virtqueue driver, #203 9807281 kernel hook, NET gate PASS in QEMU only). It is polled (no IRQs) and uses TEST keys. Lane 31 negotiates and requires VIRTIO_F_ACCESS_PLATFORM so the NIC DMA should go through the SMMU window, and the NET gate script now checks that an out-of-window DMA is refused; NOT_RUN on this branch (no forge receipt yet), QEMU only even once run. No physical NIC driver exists.
+- Physical binding (real NIC, interrupts): the virtio-net driver is bound in the C kernel by `native/kernel/dev/net_bind.c` (#200 d75a266 attach and split virtqueue driver, #203 9807281 kernel hook, NET gate PASS in QEMU only). It is polled (no IRQs) and uses TEST keys. Lane 31 negotiates and requires VIRTIO_F_ACCESS_PLATFORM so the NIC DMA should go through the SMMU window, and the NET gate script now checks that an out-of-window DMA is refused; QEMU PASS on this branch (receipt `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`, forge log of `scripts/qemu_ck_net_test.sh`), QEMU only; hardware NOT_RUN. No physical NIC driver exists.
 - Production identity and keys: needs M5 (key hierarchy, TRUST-1). The M6-B
   secure transport below exists as hosted code but runs on TEST keys only. The stub refuses every identity kind except TEST, whose key is
   derived from a public label and so protects nothing against an attacker.
@@ -193,7 +193,7 @@ verify}`, which carries a 32-byte tag. The two connect like this:
 
 ## Lane 26: virtio-net PCI fix and virtqueue data path (hosted)
 
-> Update 2026-10-01: the text of this section is the hosted-lane record. The driver is now bound in the C kernel (#200 d75a266, #203 9807281, `native/kernel/dev/net_bind.c`) and the NET gate passes in QEMU only (slirp UDP round trip; the last receipt predates Lane 31; Lane 31 negotiates VIRTIO_F_ACCESS_PLATFORM and adds an out-of-window DMA check to the gate, NOT_RUN on this branch; polled, no IRQs; no physical NIC; TEST keys). The "not proven" list below still holds for real hardware.
+> Update 2026-10-01: the text of this section is the hosted-lane record. The driver is now bound in the C kernel (#200 d75a266, #203 9807281, `native/kernel/dev/net_bind.c`) and the NET gate passes in QEMU only (slirp UDP round trip; the last receipt predates Lane 31; Lane 31 negotiates VIRTIO_F_ACCESS_PLATFORM and adds an out-of-window DMA check to the gate, QEMU PASS with receipt `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`; polled, no IRQs; no physical NIC; TEST keys). The "not proven" list below still holds for real hardware.
 
 **The attach bug.** The capability walk refused any vendor capability whose
 region had length 0, before looking at its type. Real QEMU virtio-net-pci
@@ -240,8 +240,8 @@ device broken (sticky) until re-init.
 - `VNET_ACCESS_PLATFORM_SIM`: bit 33 accepted when offered (with and without the
   flag); with the flag and no offer (three offer sets) refused as
   `NoAccessPlatform` with FAILED set, no feature bits written, no queue enabled
-  and no notify; unknown flags refused. NOT_RUN on this branch (written, no forge
-  receipt yet).
+  and no notify; unknown flags refused. PASS in the forge run `make -C native/net test` (log HIVE-L31NET-173414.log, not committed;
+  simulated device only).
 - Data path: TX full/reclaim, max-size frames, 70,000 frames each way so the
   16-bit ring indices wrap; the device model checks every descriptor it reads.
 - Hostile device: 9 directed cases plus a 2,000-round seeded fuzz of forged
@@ -259,7 +259,7 @@ guest kernel that drives the device; this module is hosted and the kernel
 binding belongs to the native kernel lane. (Lane 31: the C kernel binding,
 `native/kernel/dev/net_bind.c`, runs this driver in QEMU behind the smmuv3
 vIOMMU with ACCESS_PLATFORM required; see gate NET, GATES.md rows 102-112. The
-ACCESS_PLATFORM attach and the fence rows are NOT_RUN on this branch.)
+ACCESS_PLATFORM attach and the fence rows are QEMU PASS with receipt `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`; hardware NOT_RUN.)
 
 **Kernel hook (for the native kernel).** After `ck_virtio_net_probe` accepts
 the caps: add `aienos_virtio_net.c` to the stage sources, enable memory space
