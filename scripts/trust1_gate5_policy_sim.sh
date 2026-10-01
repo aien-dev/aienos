@@ -63,6 +63,7 @@ usage() {
 }
 [[ $# -eq 1 && "$1" == "selftest" ]] || usage
 
+# FLAG(sovereignty): whole script drives tpm2-tools (tpm2_* list below and every tpm2_ call to end of file, outside dep), host-only software-TPM sim; replace with in-house C TPM policy simulator.
 for t in swtpm swtpm_ioctl tpm2_startup tpm2_pcrextend tpm2_createprimary \
     tpm2_create tpm2_load tpm2_unseal tpm2_startauthsession tpm2_policypcr \
     tpm2_policynv tpm2_policyor tpm2_policyauthorize tpm2_policysigned \

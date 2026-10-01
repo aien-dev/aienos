@@ -62,6 +62,7 @@ echo "-- 2. The TPM can be read --"
 check "you are in the tss group (allowed to read the TPM)" \
     "$(id -nG | tr ' ' '\n' | grep -qx tss && echo 1 || echo 0)"
 check "the TPM device is readable by you" "$(yes_if test -r /dev/tpmrm0)"
+# FLAG(sovereignty): tpm2_pcrread (outside dep) on Linux host; replace with in-house C PCR reader.
 if command -v tpm2_pcrread >/dev/null 2>&1; then
     check "the TPM answers a read of startup measurement 7 (Secure Boot state)" \
         "$(yes_if tpm2_pcrread sha256:7)"
@@ -110,6 +111,7 @@ for s in tpm_measurement_campaign.sh build_recovery_media.sh build_standalone_re
          verify_recovery_tools.sh collect_recovery_boot_evidence.sh; do
     check "scripts/${s} is present" "$(yes_if test -f "${REPO_ROOT}/scripts/${s}")"
 done
+# FLAG(sovereignty): tpm2_pcrread/tpm2_eventlog required on Linux host; replace with in-house C tool.
 for t in tpm2_pcrread tpm2_eventlog mokutil efibootmgr sha256sum aien-proof; do
     check "${t} is installed on Ubuntu" "$(yes_if command -v "${t}")"
 done
