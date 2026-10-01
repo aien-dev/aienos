@@ -6,6 +6,8 @@ outside dependencies. Each in-script hit carries a `# FLAG(sovereignty):` commen
 Found with `git grep -n -iE 'systemd|systemctl|tpm2_|tpm2-tools|journalctl'` on origin/main.
 No earlier equivalent document existed. All results are NOT_RUN (documentation only).
 
+Line numbers are origin/main numbering (before the added FLAG comment lines), checked after merging a047289 and 7a16a9f.
+
 "Runs on" key: IMAGE = executes inside the AIENOS recovery image; HOST = Linux host only
 (TRUST-1 operator steps, CI, or the software-TPM test); DOC = text only.
 
@@ -29,7 +31,7 @@ No earlier equivalent document existed. All results are NOT_RUN (documentation o
 | Where | What it does | Runs on | Replacement owed |
 |---|---|---|---|
 | scripts/build_standalone_recovery_initrd.sh:39 (+:101 comment) | Copies `/usr/bin/tpm2_pcrread` and its TCTI library into the recovery initrd | IMAGE | In-house C PCR reader |
-| scripts/capture_gate1_receipt.sh:69 | Lists `/bin/tpm2_pcrread` in the Gate 1 receipt tool list | IMAGE (receipt) | Follows the C reader |
+| scripts/capture_gate1_receipt.sh:67 (origin/main numbering) | Names `tpm2_pcrread` in the Gate 1 receipt tool list | IMAGE (receipt) | Follows the C reader |
 | scripts/collect_recovery_boot_evidence.sh:119 | Reads SHA-256 PCRs in the rescue shell | IMAGE | In-house C PCR reader |
 | scripts/verify_recovery_tools.sh:87,123 | Checks tpm2_pcrread is present in the built image | HOST (checks IMAGE) | Check for the C reader instead |
 | scripts/tpm_measurement_campaign.sh:18,67-68,72,77,91,143 | pcrread, eventlog parse, version | HOST (Gate 0 operator) | In-house C PCR reader and event-log parser |
@@ -49,8 +51,8 @@ No earlier equivalent document existed. All results are NOT_RUN (documentation o
 
 | Where | What it does | Runs on | Replacement owed |
 |---|---|---|---|
-| scripts/trust1_m5_qualify.sh:309-312 | `tpm2_getcap properties-fixed` for TPM vendor and firmware | HOST (qualify) | In-house C TPM capability reader |
-| scripts/trust1_m5_qualify.sh:318 | `tpm2_pcrread sha256:0..15` | HOST (qualify) | In-house C PCR reader |
+| scripts/trust1_m5_qualify.sh:317-320 | `tpm2_getcap properties-fixed` for TPM vendor and firmware | HOST (qualify) | In-house C TPM capability reader |
+| scripts/trust1_m5_qualify.sh:326 | `tpm2_pcrread sha256:0..15` | HOST (qualify) | In-house C PCR reader |
 
 `native/capability/**` had no hits.
 

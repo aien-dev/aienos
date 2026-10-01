@@ -8,7 +8,7 @@ line printed by the tests has the form `GATE <NAME> PASS|FAIL <evidence>`; this 
 copies the evidence, it does not replace it.
 
 Code commit measured: **`b375dca`** on `feat/argus-0` (header `argus_abi.h` v1.1 =
-`398cfb9`, byte-identical since; round-3 code commits `df27200`, `62e5163`, `ee87069`).
+`398cfb9`, byte-identical until ARGUS-1 L0 (aienos #163) appended v1.2, ABI minor 2, additive: the v1.1 layout and the event version byte are unchanged; round-3 code commits `df27200`, `62e5163`, `ee87069`).
 Measured 2026-09-29 00:15-00:20 CDT.
 Re-run 2026-09-29 00:31 CDT on the Spark at `a77ce9d` plus the reconcile docs commit (code
 unchanged): `make test` exit 0, every gate line and the hostile summary identical.
