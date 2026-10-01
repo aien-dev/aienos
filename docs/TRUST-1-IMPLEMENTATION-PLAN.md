@@ -64,6 +64,8 @@ items 12-14 (mount recovered storage, repair `/boot/efi`, restore boot
 entries); `scripts/verify_recovery_tools.sh` is the pre-boot host proof;
 `scripts/collect_recovery_boot_evidence.sh` records the attended boot.
 
+Status (2026-09-30, software side): the image now also carries `sbverify`, `fusermount3` and the TPM device transport library (loaded at run time, so `ldd` never saw it), and the build fails loudly when `gocryptfs` is missing (FUSE is built into the Ubuntu kernel). `verify_recovery_tools.sh` checks that every library each recovery tool needs is inside the image. The collector now records items 6 (gocryptfs stores), 8 (PCRs, event log digest), 9-10 (ESP layout, hash and signer of every EFI image) and, only when the operator sets the unlock variables for that run, items 11-12 (open one store read-only with the offline spare and check a test file). `scripts/test_recovery_unlock_chroot.sh` (manual, needs sudo) rehearses that unlock with the image's own `age` and `gocryptfs` and throwaway keys. Still physical: rebuild the stick with this image (operator approval), the attended Secure-Boot-on boot, the test-file round trip, and return to Linux.
+
 Preconditions: Gate 0 PASS.
 
 Permitted mutations: Create recovery image on build host; write to separate physical USB (not ATLAS_RECOV); boot it once via operator-attended boot with Secure Boot enabled. No internal trust, TPM, or slot mutation.

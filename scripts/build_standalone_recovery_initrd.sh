@@ -32,6 +32,10 @@ BINARIES=(
     /bin/sed
     /bin/sha256sum
     /usr/bin/age
+    # Gate 1 item 10: check Authenticode signatures of the ESP loaders.
+    /usr/bin/sbverify
+    # FUSE mount helper; gocryptfs falls back to it if a direct mount fails.
+    /usr/bin/fusermount3
     /usr/bin/tpm2_pcrread
     /usr/bin/efibootmgr
     /usr/bin/findmnt
@@ -69,8 +73,19 @@ mkdir -p "$WORK_DIR/usr/local/sbin"
 install -m 0755 "$(dirname "$0")/collect_recovery_boot_evidence.sh" \
     "$WORK_DIR/usr/local/sbin/collect_recovery_boot_evidence"
 
-# Copy gocryptfs if available
-GOCRYPTFS_BIN=$(which gocryptfs 2>/dev/null || echo "/home/atlas/atlas-forgejo-setup-20260904/runtime/usr/bin/gocryptfs")
+# gocryptfs is the only way to open the private storage and the Forgejo
+# store from the rescue shell (Gate 1 items 11-12): a stick without it is not
+# a recovery stick, so fail loudly unless the caller explicitly accepts that.
+# FUSE itself is built into the Ubuntu kernel (modprobe reports "builtin").
+GOCRYPTFS_BIN="${AIENOS_GOCRYPTFS:-$(command -v gocryptfs 2>/dev/null || echo "/home/atlas/atlas-forgejo-setup-20260904/runtime/usr/bin/gocryptfs")}"
+if [[ ! -f "$GOCRYPTFS_BIN" ]]; then
+    if [[ "${AIENOS_RECOVERY_ALLOW_NO_GOCRYPTFS:-0}" == 1 ]]; then
+        echo "WARNING: gocryptfs not found; this image cannot unlock gocryptfs storage" >&2
+    else
+        echo "Error: gocryptfs not found at $GOCRYPTFS_BIN (set AIENOS_GOCRYPTFS, or AIENOS_RECOVERY_ALLOW_NO_GOCRYPTFS=1 for a test-only image)" >&2
+        exit 1
+    fi
+fi
 if [[ -f "$GOCRYPTFS_BIN" ]]; then
     cp -p "$GOCRYPTFS_BIN" "$WORK_DIR/bin/gocryptfs"
     if ldd "$GOCRYPTFS_BIN" >/dev/null 2>&1; then
@@ -82,6 +97,18 @@ if [[ -f "$GOCRYPTFS_BIN" ]]; then
         done
     fi
 fi
+
+# tpm2-tools load their transport library at run time (dlopen), so ldd never
+# lists it. Package the device transport so tpm2_pcrread can talk to
+# /dev/tpmrm0 in the rescue shell (Gate 1 item 8).
+tcti_found=0
+for lib in /lib/*-linux-gnu/libtss2-tcti-device.so.0*; do
+    [[ -e "$lib" ]] || continue
+    mkdir -p "$WORK_DIR/$(dirname "$lib")"
+    cp -a "$lib" "$WORK_DIR/$lib"
+    tcti_found=1
+done
+[[ "$tcti_found" == 1 ]] || { echo "Error: libtss2-tcti-device not found on the build host" >&2; exit 1; }
 
 # Kernel drivers the recovery shell needs on Machine 1 that the Ubuntu kernel
 # builds as modules: the ACPI xHCI controllers (NVDA8000), USB and Logitech

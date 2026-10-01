@@ -36,6 +36,14 @@ else
 fi
 
 INITRD_TMP="${WORK_DIR}/aienos-recovery-standalone-initrd.img"
+# Repo checks run on hosts without gocryptfs (CI, laptops). Only there, and
+# visibly, allow a test image without it. The real stick build
+# (build_recovery_media.sh) never sets this.
+if ! command -v gocryptfs >/dev/null 2>&1 && [[ ! -f /home/atlas/atlas-forgejo-setup-20260904/runtime/usr/bin/gocryptfs && -z "${AIENOS_GOCRYPTFS:-}" ]]; then
+    echo "SKIP  gocryptfs not on this host; building a TEST-ONLY image without it"
+    export AIENOS_RECOVERY_ALLOW_NO_GOCRYPTFS=1
+fi
+
 echo "Building standalone recovery initrd..."
 bash "${REPO_ROOT}/scripts/build_standalone_recovery_initrd.sh" "${INITRD_TMP}"
 
