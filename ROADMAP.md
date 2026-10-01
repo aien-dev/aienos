@@ -188,6 +188,8 @@ runs on Machine 1; maintainers execute it and publish the evidence. Read
 ## Ground rules
 
 - Language rule ([aien-architecture ADR 0024](https://github.com/aien-dev/aien-architecture/blob/main/docs/adr/0024-rust-scaffolding-omega-destination.md), which supersedes the earlier "Rust throughout" and "C is the target" wording): Rust is scaffolding, Omega is the destination, and C or assembly stay only where hardware, boot, ABI or measurement justifies them. No Python, no CUDA, and no CUDA-shaped APIs.
+- ~~Rust throughout, with small amounts of AArch64 assembly where the hardware
+  requires it. No Python, no CUDA, and no CUDA-shaped APIs.~~ SUPERSEDED 2026-10-01 by [ADR 0024](https://github.com/aien-dev/aien-architecture/blob/main/docs/adr/0024-rust-scaffolding-omega-destination.md) for the language part only. No Python, no CUDA, and no CUDA-shaped APIs still hold (kept in the rule above).
 - The trusted base builds from inspectable source, offline, with an
   independently obtainable toolchain.
 - Evidence earns claims: a boot, benchmark or fix counts when its output is
