@@ -1,0 +1,114 @@
+# AIENOS C kernel ("CK") CI: host tests and the QEMU TCG gates.
+#
+# Runs on a GitHub-hosted ARM64 runner (ubuntu-24.04-arm), so the kernel is
+# built natively with the distribution gcc/binutils (no cross toolchain).
+#   1. host unit tests: make test, make sanitize (ASan + UBSan)
+#   2. stage host tests: make stage-test, make stage-sanitize
+#   3. the gate runner's own self-test: scripts/ck_gates.sh --self-test
+#   4. the QEMU gates: scripts/ck_gates.sh (scripts/qemu_ck_boot_test.sh and
+#      scripts/qemu_ck_store_test.sh) with qemu-system-aarch64 and the AAVMF
+#      UEFI firmware from Ubuntu (packages qemu-system-arm, qemu-efi-aarch64).
+#      Every gate that has a C implementation must print PASS; a NOT_RUN for
+#      one of them fails the job (a missing tool or firmware cannot turn into
+#      a silent green). Gates with no C implementation stay NOT_RUN
+#      (MISSING_IMPLEMENTATION) exactly as the receipt says; the list of
+#      required gates below is the set of rows in the ck_gates.sh table whose
+#      source is not "missing".
+#
+# Firmware and image: the AAVMF code/vars files come from the Ubuntu package;
+# the UEFI boot disk is a host directory exposed by QEMU as a FAT drive
+# (fat:rw:), and the NVMe disk is a sparse file the Store script creates, so
+# no prebuilt image is needed. QEMU runs single-threaded TCG (-accel
+# tcg,thread=single), as on the Spark.
+#
+# QEMU is an emulator: a PASS here qualifies nothing physical. The receipt
+# (uploaded as a build artifact, not committed) says "physical": "NOT_RUN".
+name: C kernel (CK) gates
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/kernel/**'
+      - 'scripts/ck_gates.sh'
+      - 'scripts/qemu_ck_*.sh'
+      - 'scripts/lib_ck_m1_checks.sh'
+      - '.github/workflows/ck-kernel.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'native/kernel/**'
+      - 'scripts/ck_gates.sh'
+      - 'scripts/qemu_ck_*.sh'
+      - 'scripts/lib_ck_m1_checks.sh'
+      - '.github/workflows/ck-kernel.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ck:
+    name: C kernel host tests and QEMU gates (ARM64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install toolchain, QEMU and AAVMF firmware
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential qemu-system-arm qemu-efi-aarch64
+          uname -m
+          gcc --version | head -1
+          qemu-system-aarch64 --version | head -1
+          ls -l /usr/share/AAVMF/AAVMF_CODE.no-secboot.fd /usr/share/AAVMF/AAVMF_VARS.fd
+
+      - name: Host unit tests (plain and ASan + UBSan)
+        run: make -C native/kernel test sanitize
+
+      - name: Stage host tests (plain and ASan + UBSan)
+        run: make -C native/kernel stage-test stage-sanitize
+
+      - name: Gate runner self-test
+        run: bash scripts/ck_gates.sh --self-test
+
+      - name: Check the host tests left the tree clean (the gate runner refuses a dirty tree)
+        run: |
+          git status --porcelain --untracked-files=normal
+          test -z "$(git status --porcelain --untracked-files=normal)"
+
+      - name: QEMU TCG gates
+        env:
+          AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
+        run: |
+          mkdir -p "${RUNNER_TEMP}/ck-receipt"
+          set +e
+          bash scripts/ck_gates.sh --out "${RUNNER_TEMP}/ck-receipt" | tee "${RUNNER_TEMP}/ck-gates.txt"
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "ck_gates.sh exit ${rc}"
+          [ "${rc}" = 0 ] || exit 1
+          # Every gate with a C implementation (source != missing in the
+          # ck_gates.sh table) must be PASS.
+          required=$(sed -n "/^CK_GATE_TABLE='/,/^'/p" scripts/ck_gates.sh | awk -F'|' 'NF==3 && $2!="missing" {print $1}')
+          [ -n "${required}" ] || { echo "could not read the gate table"; exit 1; }
+          fail=0
+          for g in ${required}; do
+            if grep -q "^AIENOS_CK_${g}: PASS" "${RUNNER_TEMP}/ck-gates.txt"; then
+              echo "required gate ${g}: PASS"
+            else
+              echo "required gate ${g}: not PASS"; fail=1
+            fi
+          done
+          exit ${fail}
+
+      - name: Upload the receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ck-gates-receipt
+          path: |
+            ${{ runner.temp }}/ck-receipt/
+            ${{ runner.temp }}/ck-gates.txt
+          if-no-files-found: warn
