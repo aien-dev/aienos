@@ -7,7 +7,8 @@ control-transport stub. No Rust, no Python, no heap, no outside library.
 | File | What it is |
 |---|---|
 | `aienos_net.{h,c}` | Ethernet II, ARP + fixed ARP cache, IPv4 (no reassembly), ICMP echo, UDP. Bounded parsers; error order matches the reference. |
-| `aienos_virtio_pci.{h,c}` | virtio 1.x PCI vendor-capability walk over a config image (no device access). |
+| `aienos_virtio_pci.{h,c}` | virtio 1.x PCI vendor-capability walk over a config image (no device access). Accepts the real QEMU virtio-net-pci layout (see Lane 26 below). |
+| `aienos_virtio_net.{h,c}` | Lane 26: virtio-net driver core, split virtqueues, polled. New C written from the virtio 1.x spec (the Rust reference has no queue code). Device access only through a small ops struct. |
 | `aienos_ctl.{h,c}` | Control-transport stub: authenticated frames, ordered exactly-once delivery, retransmit, link-down. **TEST identity only.** The frame format is specified in the header. |
 | `x25519.{h,c}` | M6-B: X25519 (RFC 7748), constant-time ladder, small-order outputs refused. |
 | `aienos_sec.{h,c}` | M6-B: mutually authenticated secure control transport over the M6-A UDP framing. **TEST identities only.** The wire format is specified in the header. |
@@ -42,8 +43,8 @@ control-transport stub. No Rust, no Python, no heap, no outside library.
 
 ## Not claimed (deferred, with the dependency)
 
-- Native binding (virtio-net queues, real NIC, interrupts): needs a C kernel.
-  No C kernel exists yet; the aienos port order is an open operator decision.
+- Native binding (real NIC, interrupts, real DMA): the virtio-net queue code now
+  exists as hosted code (Lane 26, below) but nothing in the C kernel calls it yet.
 - Production identity and keys: needs M5 (key hierarchy, TRUST-1). The M6-B
   secure transport below exists as hosted code but runs on TEST keys only. The stub refuses every identity kind except TEST, whose key is
   derived from a public label and so protects nothing against an attacker.
@@ -194,3 +195,67 @@ verify}`, which carries a 32-byte tag. The two connect like this:
   signature means widening the Fabric tag to 64 bytes (an omega change).
 - **Nothing is built yet.** No adapter exists in either repository. This
   section is the interface plan only.
+
+## Lane 26: virtio-net PCI fix and virtqueue data path (hosted)
+
+**The attach bug.** The capability walk refused any vendor capability whose
+region had length 0, before looking at its type. Real QEMU virtio-net-pci
+always carries a `VIRTIO_PCI_CAP_PCI_CFG` (cfg_type 5) capability with bar 0,
+offset 0, length 0, which the virtio 1.x spec allows, so every real QEMU
+virtio-net device was refused with `InvalidRegion`. Confirmed on real config
+space dumped from QEMU 8.2.2 (no guest: the qtest protocol reads the ECAM
+window while the CPU is paused; `tests/fixtures/dump_qemu_virtio_net_cfg.sh`
+re-dumps it). Fix: the BAR / zero-length / overflow checks now apply to the
+four structures the driver maps (cfg_type 1..4) only; other cfg types are
+ignored, as the spec requires. The Rust reference has the same bug (left
+unedited: no Rust work).
+
+The pinned Rust differential still runs, against a reference-compat build
+(`-DAIENOS_VIRTIO_PCI_REFERENCE_COMPAT`, test-only). The default build has its
+own C-only pin, and `make diff-check` proves the two differ only on records
+the reference refused as `InvalidRegion` (1,622 of 200,000).
+
+**The data path** (`aienos_virtio_net`): reset, ACK, DRIVER; VERSION_1
+required, MAC accepted if offered, every other feature declined; FEATURES_OK
+read back; queue 0 RX and queue 1 TX, power-of-two size up to 256 (downsized to
+what the device offers); notify offset checked against the notify window; all
+RX buffers posted before DRIVER_OK; polled (no MSI-X vector, NO_INTERRUPT).
+Rings and buffers live in one caller region; descriptors are rebuilt from the
+id on every post and checked inside the region; nothing the device writes is
+trusted. A used entry with an id out of range or not outstanding, a length
+over the buffer, a short RX completion, or a used index running ahead marks the
+device broken (sticky) until re-init.
+
+**Tests** (`tests/vnet_test.c`, in `make test` and `make sanitize`):
+- `VIRTIO_PCI_QEMU822_CAPS`: both real QEMU dumps (transitional 0x1000, modern
+  0x1041) parse to the expected windows (BAR 4, common 0x0, ISR 0x1000, device
+  0x2000, notify 0x3000, multiplier 4); 15 malformed variants of the real image
+  stay refused (zero-length common/notify/ISR/device, bad BAR, offset overflow,
+  short cap, cap past config space, loops, duplicate, bad pointer).
+- Init against a simulated device in C: feature masking when the device offers
+  all 64 bits; refusals for no VERSION_1, FEATURES_OK refused, stuck reset, one
+  queue, queue size 0/1, pre-enabled queue, notify offset outside the window,
+  unstable config generation, missing/short caps, small/misaligned/wrapping
+  memory. No notify before DRIVER_OK.
+- Data path: TX full/reclaim, max-size frames, 70,000 frames each way so the
+  16-bit ring indices wrap; the device model checks every descriptor it reads.
+- Hostile device: 9 directed cases plus a 2,000-round seeded fuzz of forged
+  used entries and indices; each refusal is sticky; a device scribbling over
+  the descriptor table cannot steer the driver.
+- `VNET_M6A_UDP_ROUNDTRIP_SIM`: a UDP frame built by M6-A leaves through the TX
+  queue byte-exact; the simulated device answers with a frame placed in the RX
+  queue, and M6-A parses it (Ethernet, IPv4, UDP checksum, payload).
+
+**Not proven (do not read more into the PASS lines):** no real device, no real
+DMA or IOMMU/SMMU mapping, no interrupts, no QEMU slirp round trip, no
+cache-coherence or MMIO ordering on real hardware, no physical NIC. The only
+real-QEMU evidence is the static config space. A real QEMU end-to-end needs a
+guest kernel that drives the device; this module is hosted and the kernel
+binding belongs to the native kernel lane.
+
+**Kernel hook (for the native kernel).** After `ck_virtio_net_probe` accepts
+the caps: add `aienos_virtio_net.c` to the stage sources, enable memory space
+and bus mastering, map the BARs named by the caps, supply `vnet_ops` (volatile
+MMIO at BAR + cap offset + off; notify = 16-bit write at the notify window +
+off), give a DMA-visible region of `vnet_mem_size(qsize)` bytes with its bus
+address, and call `vnet_init`; then poll `vnet_rx` / `vnet_tx_reclaim`.

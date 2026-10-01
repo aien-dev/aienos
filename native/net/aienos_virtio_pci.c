@@ -60,7 +60,19 @@ virtio_pci_err virtio_pci_parse_caps(const uint8_t *config, size_t len, virtio_p
             if (cap_len < minimum || index + cap_len > len) return VIRTIO_PCI_SHORT_CAPABILITY;
             virtio_pci_region r = {1, config[index + 4], le32(config + index + 8),
                                    le32(config + index + 12)};
-            if (r.bar > 5 || r.length == 0 || r.offset > UINT32_MAX - r.length)
+            /* Region checks apply only to the structures this driver maps
+             * (cfg_type 1..4). VIRTIO_PCI_CAP_PCI_CFG (5) legally carries
+             * bar 0 / offset 0 / length 0 (real QEMU virtio-net-pci does), and
+             * the spec tells drivers to ignore cfg types they do not use. The
+             * Rust reference checked every vendor cap and so refused real
+             * QEMU; AIENOS_VIRTIO_PCI_REFERENCE_COMPAT restores that order for
+             * the pinned Rust differential only (tests/net_diff.c). */
+#ifdef AIENOS_VIRTIO_PCI_REFERENCE_COMPAT
+            int mapped = 1;
+#else
+            int mapped = kind >= 1 && kind <= 4;
+#endif
+            if (mapped && (r.bar > 5 || r.length == 0 || r.offset > UINT32_MAX - r.length))
                 return VIRTIO_PCI_INVALID_REGION;
             virtio_pci_err e = VIRTIO_PCI_OK;
             switch (kind) {

@@ -1,0 +1,92 @@
+AIENOS M6-A hosted C network stack + M6-B secure transport receipt
+commit: a12b05ceecedbeca4767e9b9bbdd527fa9ebbc55
+host: Linux 7.0.0-1019-nvidia aarch64
+cc: cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+scope: host tests only (no QEMU, no hardware, no native binding, TEST identity only)
+scope M6-B: hosted protocol code only; no real keys, no timing measurement, no formal protocol analysis
+sources:
+  9fe48c2a25f7872089d7495cc31860203647e109c097e708ec21f6d7f7a2a19a  native/net/aienos_net.c
+  61d3843a95a143ef546f00f2f6e460abc3e337bc8fb15d88d28df6bd644c9d4b  native/net/aienos_net.h
+  5badaedfcf9015b3a2a239a958e305464982c1ab1d92f18b5f614b5e881dd691  native/net/aienos_virtio_pci.c
+  93cad17472829580c121777e574f1993ee7acd9ce45138f50dde33f92e55136b  native/net/aienos_virtio_pci.h
+  1d5117f0cdf31d4686d4354f01a9100034ddab2b1feeb5c805db45d89992eca6  native/net/aienos_ctl.c
+  ccdba3e1611b646329d6ce67a4ff661f4ad85601ca13a505b362259170c8b92a  native/net/aienos_ctl.h
+  245c6965f5eece970432e28ad5d565c1bbd8f912cf9adef75581e2a9c743a153  native/net/aienos_virtio_net.c
+  14655c05cdf931b15fe1eb28d9e72c2afed3e5a6c15ba254cef1abd2e4b8aa24  native/net/aienos_virtio_net.h
+  5e0e002018b4a4fd696a5d2a23302a2019dd74b72ad47b7adfd1236c3c5c5282  native/net/x25519.c
+  213335960f2f1cc365a66d7981c0075b993b132139eea5396c113662951ff445  native/net/x25519.h
+  2ae2942144db438c39744c3b4c20bbe57706190ee354c7a1938daa9932f47467  native/net/aienos_sec.c
+  ff92be9bec46e03f58013c7877b3a11d915704dc9579992ad6e3a820c56f1898  native/net/aienos_sec.h
+  716b6d0e4e15a1c5696252d831f7e2cf2a287f2e64f7a2417f6f4908eefc56bd  native/net/../argus/sha256.c
+  4600b408ea501f3b5cb0a9f833c9300ffd970e359c2bee2e60f93e1ce244d973  native/net/../crypto/aes.c
+  f4b4f71c40687a4bfa5a00e61c5eb06d46edb5b526e041c920a4bfbd616d9c35  native/net/../crypto/polyval.c
+  394bc53984b516c3567ecaf2c108ed2a98b143ac658bc47a87b04787aa25c7be  native/net/../crypto/gcm_siv.c
+  3f774149c3e734dc85911431cb21e40e4e4ed65caea66536795ed5327fef563f  native/net/../crypto/hmac.c
+  3c72a3ac1e00550cba4c91339ea670520884e21fd3edaa34008535c768fbc75f  native/net/../crypto/ct.c
+  33714a7d8605cda4b13c13d7d2f75e6116bafebe95af4c30a11b8e04d82f3026  native/net/../sig/ed25519.c
+  110c6322c699ce77011906486aa5ff3cb8becdede12534d20efb92711b90ba22  native/net/../sig/sha512.c
+  59b7d18636e7acfc4f5f78d7c6abd7f7dd52cc45a342fb4888be6b4c83413035  native/net/../sig/ct.c
+  151bc87ef10b31cb69f8493c30258cccdc7a37011ce662f782c95bacadfe8dea  native/net/tests/net_test.c
+  9a104222986172cd99b84304fad598cfeeef07b641d2bb2239ca46bbf47093f6  native/net/tests/ctl_test.c
+  eecd1179afe1c907c6d1d53aa01dd750a705938dc88e8a3ad176568bf8e4b1e3  native/net/tests/net_diff.c
+  f8bd1c4cfdfcb96e03316dd0535f5d021ce013c3a3e864fb43cb627ba0dc9c5b  native/net/tests/x25519_test.c
+  ff80bbaba6c38139c78a2f0e6f92e184fc964946eb7df9ee915adfcdcb79ff7b  native/net/tests/sec_test.c
+  c18244c51a977e7a0497389baf19351d3796b03c44d7b4db19b1eb948f3f97fa  native/net/tests/vnet_test.c
+  e4b2b588c1e9feb1fc2d2a9c1b33556d92e2acfbba06c38b95f2cb675f72498c  native/net/tests/fixtures/qemu822_virtio_net_pci_transitional.cfg
+  0a794099f3bcdea39a851a0f484911c4ce91b790e39ef66546a8a3dee5f8a8d0  native/net/tests/fixtures/qemu822_virtio_net_pci_modern.cfg
+  7eb402f9d3fb2d920ec272954e4ef7507dc39093209f1e8d98bf659cb15632bd  native/net/tests/fixtures/dump_qemu_virtio_net_cfg.sh
+  89df8da60616d1d8e996189c1e4fd92e5af8bb2056512d58c75dac3f9da449cc  native/net/Makefile
+  2f7d6f32b16ef8b6e6f05a09065020518100eb6b36c8445e765be89d755a1235  native/net/receipt.sh
+rust reference (spec, unmodified):
+  4fa8265a900fb62d78d0a35bed9420dfc449e2aa20e74f5f5f3cd884c17cd449  crates/aienos-kernel/src/net.rs
+  b66117d6dd7b4fc534d9943559c96cd5297da337e07ac2699aad87ae76acd264  crates/aienos-kernel/src/virtio_net.rs
+differential corpus: 88e88c492ed54d87e3f458cd7e2f0dd0d063a853357dc5a49fcd0d942ddb8134
+results:
+  lib-checks PASS (no heap, clock, I/O or ambient randomness; TEST identity only)
+  NET_RUST_DIFFERENTIAL_PINNED: PASS (200000 records, reference-compat build)
+  NET_DIFFERENTIAL_FIXED_PINNED: PASS (C-only pin)
+  NET_DIFFERENTIAL_DIVERGENCE: PASS (1622 records differ, all reference InvalidRegion)
+  net_test seed=0x6a5e11 iters=200000 checks=398624 failures=0
+  NET_PROTOCOL_HOST: PASS
+    clean                  done=1 ticks=63 retx=0/0 dup=0/0 gap=0/0 badtag=0/0 malformed=0/0 transcript=0365b2fe4b2ccc0a
+    loss30                 done=1 ticks=326 retx=181/159 dup=7/4 gap=90/107 badtag=0/0 malformed=0/0 transcript=fcf753c7ec485c53
+    loss+dup+reorder       done=1 ticks=633 retx=171/190 dup=22/23 gap=142/151 badtag=0/0 malformed=0/0 transcript=617bdd0a7410d59b
+    corrupt20              done=1 ticks=231 retx=121/129 dup=18/14 gap=73/67 badtag=37/40 malformed=7/8 transcript=9b44fe14e4fbfc53
+    everything             done=1 ticks=851 retx=243/150 dup=13/8 gap=92/150 badtag=20/26 malformed=4/4 transcript=a92bca84a176256b
+    blackout-recover       done=1 ticks=483 retx=103/120 dup=0/0 gap=90/67 badtag=0/0 malformed=0/0 transcript=e47a0b838ca48036
+    blackout-dead          link_down at tick 31 after 3 retransmissions
+  ctl_test checks=21690 failures=0
+  CTL_TRANSPORT_LOSS_RECOVERY: PASS
+  X25519_RFC7748: PASS (149 checks, 0 failures, 1000 iterations)
+  AIENOS_NET_SECURE_TESTS: PASS (57248 checks, 0 failures)
+  VIRTIO_PCI_QEMU822_CAPS: PASS (real QEMU 8.2.2 virtio-net-pci config dumps, 0x1000 + 0x1041)
+  vnet_test: hostile fuzz delivered=1929 refused=1999
+  VNET_M6A_UDP_ROUNDTRIP_SIM: PASS
+  vnet_test: 789204 checks, 0 failures
+  VNET_SIM_DATAPATH: PASS (simulated device only; no real device, DMA, IRQ or QEMU round trip)
+  net_test seed=0x6a5e11 iters=50000 checks=99821 failures=0
+  NET_PROTOCOL_HOST: PASS
+    clean                  done=1 ticks=63 retx=0/0 dup=0/0 gap=0/0 badtag=0/0 malformed=0/0 transcript=0365b2fe4b2ccc0a
+    loss30                 done=1 ticks=326 retx=181/159 dup=7/4 gap=90/107 badtag=0/0 malformed=0/0 transcript=fcf753c7ec485c53
+    loss+dup+reorder       done=1 ticks=633 retx=171/190 dup=22/23 gap=142/151 badtag=0/0 malformed=0/0 transcript=617bdd0a7410d59b
+    corrupt20              done=1 ticks=231 retx=121/129 dup=18/14 gap=73/67 badtag=37/40 malformed=7/8 transcript=9b44fe14e4fbfc53
+    everything             done=1 ticks=851 retx=243/150 dup=13/8 gap=92/150 badtag=20/26 malformed=4/4 transcript=a92bca84a176256b
+    blackout-recover       done=1 ticks=483 retx=103/120 dup=0/0 gap=90/67 badtag=0/0 malformed=0/0 transcript=e47a0b838ca48036
+    blackout-dead          link_down at tick 31 after 3 retransmissions
+  ctl_test checks=21690 failures=0
+  CTL_TRANSPORT_LOSS_RECOVERY: PASS
+  X25519_RFC7748: PASS (149 checks, 0 failures, 1000 iterations)
+  AIENOS_NET_SECURE_TESTS: PASS (57248 checks, 0 failures)
+  VIRTIO_PCI_QEMU822_CAPS: PASS (real QEMU 8.2.2 virtio-net-pci config dumps, 0x1000 + 0x1041)
+  vnet_test: hostile fuzz delivered=1929 refused=1999
+  VNET_M6A_UDP_ROUNDTRIP_SIM: PASS
+  vnet_test: 789204 checks, 0 failures
+  VNET_SIM_DATAPATH: PASS (simulated device only; no real device, DMA, IRQ or QEMU round trip)
+  NET_SANITIZE: PASS
+  NET_SECURE_MUTANTS: 30/30 killed
+  NET_RUST_DIFFERENTIAL_LIVE: NOT_RUN (no RUSTDIFF driver given; pinned digest checked)
+deferred (not claimed): native binding -> needs a C kernel (no-Rust rule; port order open);
+  production identity and keys -> needs M5 key hierarchy (TRUST-1); M6-B runs on TEST keys only;
+  physical NIC qualification -> needs Machine 1 wave after TRUST-1 Gate 7.
+M6A_NET_HOST: PASS
+AIENOS_NET_SECURE: PASS
