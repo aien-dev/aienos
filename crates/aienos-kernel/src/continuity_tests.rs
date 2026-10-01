@@ -356,7 +356,7 @@ fn wrapping_fork_sum_is_refused_like_the_c_codec() {
     // {root forks = 2^64-1, child index 0 forks = 2}: the u64 sum wraps to 1,
     // which equals the one child. With a plain `.sum()` a --release build
     // (overflow checks off) accepts this table; the C codec refuses it
-    // (continuity_codec.c:482-491). The oracle must refuse as well.
+    // (cc_state_validate, native/kernel/svc/continuity_codec.c). The oracle must refuse as well.
     let mut state = AgentState::genesis(AGENT, 1);
     let root = root_branch_id(&AGENT);
     let child = state.fork(&root).unwrap();
@@ -420,8 +420,8 @@ fn branch_table_at_the_maximum_legal_fork_sum_is_accepted() {
 fn huge_fork_count_with_underivable_child_is_refused_without_spinning() {
     // Root forks = 2^64-1 and a child whose id is no derived index: an
     // uncapped `0..forks` scan would run ~2^64 hashes. Capped at MAX_BRANCHES
-    // like C (continuity_codec.c:468), it is refused after <= 256 hashes with
-    // C's class and text (continuity_codec.c:474-479).
+    // like C (cc_state_validate), it is refused after <= 256 hashes with
+    // C's class and text (cc_state_validate).
     let root = root_branch_id(&AGENT);
     let rogue = [0x77u8; 32];
     assert!((0..MAX_BRANCHES as u64).all(|i| child_branch_id(&root, i) != rogue));

@@ -1,7 +1,10 @@
 # C kernel contract: continuity objects and Recovery Core
 
-Status: **SPEC, NOT_RUN.** No C code exists for this contract yet. Every C gate
-named here is `NOT_RUN (MISSING_IMPLEMENTATION)` until a forge receipt covers it.
+Status: **SPEC, NOT_RUN.** Only the codec has C code (cuts 1-2: `svc/continuity_codec.c`,
+the golden vectors and the C/Rust decode agreement run by `make -C native/kernel test`
+and `continuity-mutants`: **host PASS**, QEMU n/a, nothing wired into the kernel).
+Resolution, Recovery Core and every C gate named here stay `NOT_RUN
+(MISSING_IMPLEMENTATION)` until a forge receipt covers them.
 QEMU qualifies nothing physical; nothing here says anything about Machine 1.
 
 Authority:
@@ -123,6 +126,13 @@ Each branch (80 bytes, `BRANCH_BYTES`, :340, encode :401-407):
 3. Every child: parent present; `id == child_branch_id(parent, i)` for some
    `i < parent.forks`; `depth == parent.depth + 1` (checked add).
 4. Sum of all `forks` equals the number of children ("fork indexes are not contiguous").
+   **DECIDED (CODE, Rust #232; C agrees): the sum is checked.** A sum that overflows
+   u64 is refused with the same class and text, because it can never equal the
+   child count (<= 255). Without the check a table with root forks = 2^64-1 and
+   one child with forks = 2 wraps to 1 and is accepted. C: `cc_state_validate`
+   (`continuity_codec.c`, the `over` flag); vector `state_forksum_overflow`; mutant MC-13.
+   The child-index scan is also capped at `MAX_BRANCHES` hashes in both (no outcome
+   changes for a table that passes the sum check).
 
 `fork` (:365-390): refuses at 256 branches (Limit), absent parent (Corrupt),
 depth overflow (Limit), id collision (Corrupt); child index = parent.forks,
@@ -385,7 +395,7 @@ main design point of this contract.
 
 ### 5.3 Known conflicts between the oracle and the sealed Store
 
-- **K-1 Size.** `SS_MAX_PLAINTEXT` is 16384 bytes per object
+- **K-1 Size.** **Cap IMPLEMENTED in the C codec, host PASS (cut 1, kept in cut 2); policy still PROPOSED** (the chunking alternative needs an operator decision). Evidence: `continuity_codec.c` decode cap at `rd_open` (`len > CC_MAX_OBJECT_BYTES`) and encode cap at `enc_begin`; `test_continuity_codec.c` K-1 checks (204 branches = 16384 bytes encodes, 205 is Limit with nothing written; 64 x 1024 WAL is Limit, never truncated; decode of 16385 bytes is Limit; mutant MC-11). Cap 16384 and 204 branches are unchanged by cut 2. `SS_MAX_PLAINTEXT` is 16384 bytes per object
   (store_sealed.h:46). Rust allows an AgentState up to 20544 bytes (256
   branches) and a WAL segment up to 67872 bytes (section 1). PROPOSED: the C
   port enforces the Rust bounds and an extra byte bound of 16384, returning
@@ -521,7 +531,7 @@ crates/aienos-kernel/src/recovery.rs:
 | 91o | `operator_auth_rejects_legacy_bare_sha256_response` | recovery.rs:299 |
 | 91p | `operator_auth_rejects_undomained_hmac_and_zero_response` | recovery.rs:311 |
 
-### 6.3 Differential agreement (PROPOSED)
+### 6.3 Differential agreement (D-1, D-2 DECIDED and IMPLEMENTED, host PASS; D-3 PROPOSED)
 
 ADR 0024 Q2 requires differential agreement, not just parallel tests.
 
@@ -534,8 +544,25 @@ ADR 0024 Q2 requires differential agreement, not just parallel tests.
   and HMAC responses with the TEST key. Committed as fixture files (no Python,
   no new dependency) under `native/kernel/tests/fixtures/`. The C host test
   must reproduce every byte and refuse the same tampered vectors.
+  **DECIDED and IMPLEMENTED (cut 2, host PASS).** Emitter: `crates/aienos-kernel/src/continuity_vectors.rs`
+  (test-only, `cfg(test)`; no kernel behaviour change). Fixtures:
+  `native/kernel/tests/fixtures/continuity_vectors.txt` (22 vectors, 5 branch ids, 4 deferred lines).
+  Regenerate: `AIENOS_CONTINUITY_VECTORS_REGEN=1 cargo test -p aienos-kernel --lib continuity_vectors`;
+  without the variable the Rust test fails if a committed fixture differs from freshly emitted bytes.
+  C: `test_continuity_codec.c` (`test_golden`, `test_tampered`; fixture dir = argv[1] or the Makefile
+  `CC_FIXTURE_DIR`) reproduces every byte and both ObjectIds (`cc_object_id` and `sv1_object_id`),
+  decode then encode is the identity, and tampered bytes, ObjectIds and verdicts are refused.
+  Added vector: `state_forksum_overflow` (hostile fork counts, refused by both).
+  **DEFERRED to the resolve cut:** the recovery challenges (both actions) and HMAC responses with the TEST key
+  (0x0f x32) are emitted as `deferred` lines but not checked, because the C codec has no challenge or
+  HMAC code yet.
 - **D-2 Decode agreement.** For every single-bit flip of every vector, C and
   Rust agree on accept / refuse and on the error class.
+  **DECIDED and IMPLEMENTED (cut 2, host PASS).** `continuity_verdicts.txt` holds the Rust verdict of each
+  vector and of each of its single-bit flips (class and reason text, one letter per distinct reason); C replays
+  and compares: 22 vectors, 86598 verdicts, **0 divergences** (C and Rust agree on accept/refuse, class and
+  reason text for every flip). The emitter panics on a Rust reason missing from its table, so a new reason
+  cannot be dropped silently. The K-1 cap (C-only Limit) cannot appear in a flip because flips keep the length.
 - **D-3 Cross-store agreement** is not possible byte-for-byte (sealed vs
   plaintext Store, section 5). Agreement is on resolved values: agent id,
   sequence, incarnation, branch table bytes, Cortex records, `memory=` digest.
@@ -564,6 +591,10 @@ M4_CONTINUITY:
 | MC-10 | agent id from a fixed value instead of RNDR | 83b |
 | MC-11 | WAL segment truncated silently at the size bound (K-1) instead of Limit | C size-bound test (PROPOSED) |
 | MC-12 | Conflict check skipped (first root used) | 87d |
+| MC-13 | fork-count sum unchecked (wraps): `CC_MUTANT_UNCHECKED_FORK_SUM`, IMPLEMENTED, killed | 87i, `state_forksum_overflow` (D-1, D-2) |
+| MC-14 | golden mismatch only the vectors see (manifest WAL id 63 replaced by id 0): `CC_MUTANT_MANIFEST_LAST_WAL_ZERO`, IMPLEMENTED, killed | D-1 |
+| MC-15 | golden comparison skipped: `CC_MUTANT_SKIP_D1` (the test counts comparisons), IMPLEMENTED, killed | D-1 |
+| MC-16 | decode-agreement comparison skipped: `CC_MUTANT_SKIP_D2`, IMPLEMENTED, killed | D-2 |
 
 M4_RECOVERY:
 
@@ -617,3 +648,10 @@ gate adds one.
 | Current manifest = the one no other names as previous (:57-61) | all catalog manifests must form exactly 1..n (continuity.rs:656-678) | port the stricter code rule |
 | Kinds 19 and 23 listed (:40, :42) | not written or read | out of scope |
 | Provisioning on a store with zero roots (:50-53) | also refused when orphan continuity objects exist (continuity.rs:642-649) | port the code rule |
+| Branch-table validation sums `forks` (not specified in the ADR text; section 1.5 item 4) | Rust #232: the sum is checked, an overflowing sum is refused as Corrupt("fork indexes are not contiguous"); before #232 a release build wrapped and accepted {root forks = 2^64-1, child forks = 2} | DECIDED: C refuses on overflow (`cc_state_validate`), Rust and C agree; vector `state_forksum_overflow`, mutant MC-13 |
+
+D-2 result (cut 2, host PASS): no C/Rust decode divergence was found over 86598
+verdicts (every single-bit flip of 22 vectors, plus the untouched vectors).
+The only known C/Rust difference in the codecs is the C-only K-1 size cap
+(section 5.3), which the flips cannot reach because they keep the length, and
+the C-only `CC_E_ARG` caller-bug class, which no decoder input reaches.

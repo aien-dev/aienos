@@ -33,7 +33,8 @@
  * part of a hardware staging image. */
 #if defined(CK_HARDWARE_STAGING) && \
     (defined(CC_MUTANT_SKIP_TAKE_BOUND) || defined(CC_MUTANT_ACCEPT_RESERVED) || \
-     defined(CC_MUTANT_CHILD_INDEX_LE) || defined(CC_MUTANT_TRUNCATE_AT_CAP))
+     defined(CC_MUTANT_CHILD_INDEX_LE) || defined(CC_MUTANT_TRUNCATE_AT_CAP) || \
+     defined(CC_MUTANT_UNCHECKED_FORK_SUM) || defined(CC_MUTANT_MANIFEST_LAST_WAL_ZERO))
 #error "continuity codec mutants are TEST-only and refused under CK_HARDWARE_STAGING"
 #endif
 
