@@ -130,6 +130,34 @@ static size_t build_frame(const ct_endpoint *ep, uint8_t type, uint32_t seq, con
     return CT_HEADER_LEN + (size_t)len + CT_TAG_LEN;
 }
 
+/* Resend wait for a slot that is already on the wire. The first retransmit
+ * waits exactly rto. Later ones wait rto plus a deterministic jitter in
+ * [0, rto], so the wait is bounded in [rto, 2*rto] and a strictly periodic
+ * loss pattern (drop every Nth datagram) cannot keep hitting the same frame.
+ * The jitter is a pure function of public connection state (session, role)
+ * and the slot (seq, tries): reproducible in tests, no clock, no randomness,
+ * no secret key bits, no new endpoint field, no wire change. */
+static uint64_t ct_mix(uint64_t x)
+{
+    x ^= x >> 30; x *= 0xbf58476d1ce4e5b9ull;
+    x ^= x >> 27; x *= 0x94d049bb133111ebull;
+    return x ^ (x >> 31);
+}
+
+static uint64_t ct_resend_wait(const ct_endpoint *ep, const ct_slot *s)
+{
+    uint64_t wait = ep->rto;
+    if (s->tries < 2) return wait; /* GUARD:ctl-jit-first */
+    uint64_t x = 0x9e3779b97f4a7c15ull;
+    x ^= (uint64_t)ep->session << 8; /* GUARD:ctl-jit-session */
+    x ^= (uint64_t)ep->role << 63; /* GUARD:ctl-jit-role */
+    x ^= (uint64_t)s->seq << 32; /* GUARD:ctl-jit-seq */
+    x ^= (uint64_t)s->tries * 0xd6e8feb86659fd93ull; /* GUARD:ctl-jit-tries */
+    x = ct_mix(x);
+    wait += x % ((uint64_t)ep->rto + 1u); /* GUARD:ctl-jit-add */
+    return wait;
+}
+
 ct_status ct_poll_tx(ct_endpoint *ep, uint64_t now, uint8_t *out, size_t cap, size_t *written)
 {
     if (!ep || !out || !written) return CT_ERR_ARG;
@@ -138,7 +166,7 @@ ct_status ct_poll_tx(ct_endpoint *ep, uint64_t now, uint8_t *out, size_t cap, si
     for (uint32_t q = ep->base; q != ep->next_seq; q++) {
         ct_slot *s = &ep->slots[q % CT_WINDOW];
         if (!s->used || s->seq != q) continue;
-        int due = !s->sent || (now >= s->last_tx && now - s->last_tx >= ep->rto);
+        int due = !s->sent || (now >= s->last_tx && now - s->last_tx >= ct_resend_wait(ep, s));
         if (!due) continue;
         if (s->sent && s->tries > ep->max_retries) { ep->link_down = 1; return CT_ERR_LINK_DOWN; }
         if (cap < CT_HEADER_LEN + (size_t)s->len + CT_TAG_LEN) return CT_ERR_CAPACITY;

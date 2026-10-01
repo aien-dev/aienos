@@ -12,7 +12,7 @@
 #                      external Rust-reference driver (see README.md)
 #   make secure     M6-B: X25519 RFC 7748 + secure transport tests, ASan/UBSan,
 #                   guard mutants; prints AIENOS_NET_SECURE: PASS/FAIL
-#   make mutants    delete each GUARD line in x25519.c / aienos_sec.c; tests must fail
+#   make mutants    delete each GUARD line in x25519.c / aienos_sec.c / aienos_ctl.c; tests must fail
 #   make clean
 
 CC ?= cc
@@ -36,7 +36,7 @@ DEP_SRCS = ../argus/sha256.c $(CRYPTO_SRCS) $(SIG_SRCS)
 DEP_OBJS = $(OUT)/sha256.o $(OUT)/crypto_aes.o $(OUT)/crypto_polyval.o $(OUT)/crypto_gcm_siv.o \
            $(OUT)/crypto_hmac.o $(OUT)/crypto_ct.o $(OUT)/sig_ed25519.o $(OUT)/sig_sha512.o $(OUT)/sig_ct.o
 OBJS = $(SRCS:%.c=$(OUT)/%.o) $(DEP_OBJS)
-SEC_GUARD_FILES = x25519.c aienos_sec.c
+SEC_GUARD_FILES = x25519.c aienos_sec.c aienos_ctl.c
 LIB = $(OUT)/libaienos_net.a
 SANFLAGS = -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all -g
 
@@ -116,8 +116,9 @@ else
 endif
 
 # Mutants (native/sig pattern): delete one "GUARD:name" line at a time from
-# the M6-B sources; the X25519 + secure transport tests must then fail. A
-# mutant that compiles and passes both tests SURVIVED, and fails this target.
+# the M6-B sources and the Lane 19 resend jitter in aienos_ctl.c; the X25519,
+# secure transport and control-transport tests must then fail. A
+# mutant that compiles and passes all three tests SURVIVED, and fails this target.
 mutants: | $(OUT)
 	@killed=0; total=0; survived=""; \
 	for f in $(SEC_GUARD_FILES); do \
@@ -127,9 +128,10 @@ mutants: | $(OUT)
 	    sed "/GUARD:$$g \*\//d" $$f > $$mdir/$$f; \
 	    if cmp -s $$f $$mdir/$$f; then echo "mutant $$g: guard line not found"; survived="$$survived $$g"; continue; fi; \
 	    if ! $(CC) $(CFLAGS) -Wno-error -I. -o $$mdir/x25519_t tests/x25519_test.c $$(for s in $(SRCS); do echo $$mdir/$$s; done) $(DEP_SRCS) 2>/dev/null || \
-	       ! $(CC) $(CFLAGS) -Wno-error -I. -o $$mdir/sec_t tests/sec_test.c $$(for s in $(SRCS); do echo $$mdir/$$s; done) $(DEP_SRCS) 2>/dev/null; then \
+	       ! $(CC) $(CFLAGS) -Wno-error -I. -o $$mdir/sec_t tests/sec_test.c $$(for s in $(SRCS); do echo $$mdir/$$s; done) $(DEP_SRCS) 2>/dev/null || \
+	       ! $(CC) $(CFLAGS) -Wno-error -I. -o $$mdir/ctl_t tests/ctl_test.c $$(for s in $(SRCS); do echo $$mdir/$$s; done) $(DEP_SRCS) 2>/dev/null; then \
 	      echo "mutant $$g: does not compile (counts as not killed)"; survived="$$survived $$g"; continue; fi; \
-	    if ./$$mdir/x25519_t >/dev/null 2>&1 && ./$$mdir/sec_t >/dev/null 2>&1; then \
+	    if ./$$mdir/x25519_t >/dev/null 2>&1 && ./$$mdir/sec_t >/dev/null 2>&1 && ./$$mdir/ctl_t >/dev/null 2>&1; then \
 	      echo "mutant $$g: SURVIVED"; survived="$$survived $$g"; \
 	    else echo "mutant $$g: killed"; killed=$$((killed+1)); fi; \
 	  done; \

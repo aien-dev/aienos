@@ -21,6 +21,7 @@ typedef struct {
     unsigned drop, dup, corrupt, max_delay; /* percent, percent, percent, ticks */
     uint64_t blackout_from, blackout_to;    /* everything dropped in [from, to) */
 } link_cfg;
+static uint64_t drop_every; /* Lane 19: drop every Nth frame per direction (0 = off) */
 
 #define QMAX 256
 typedef struct { uint64_t at; int to; size_t n; uint8_t f[CT_MAX_FRAME]; } wire_frame;
@@ -28,7 +29,7 @@ typedef struct {
     wire_frame q[QMAX];
     size_t nq;
     sha256_ctx transcript;
-    uint64_t sent, dropped;
+    uint64_t sent, dropped, count[2];
 } wire;
 
 typedef struct {
@@ -50,7 +51,9 @@ static void put_on_wire(wire *w, prng *p, const link_cfg *L, uint64_t now, int t
 {
     w->sent++;
     sha256_update(&w->transcript, f, n);
-    if ((now >= L->blackout_from && now < L->blackout_to) || chance(p, L->drop)) { w->dropped++; return; }
+    w->count[to]++;
+    if ((now >= L->blackout_from && now < L->blackout_to) || chance(p, L->drop) ||
+        (drop_every && w->count[to] % drop_every == 0)) { w->dropped++; return; }
     int copies = chance(p, L->dup) ? 2 : 1;
     for (int c = 0; c < copies && w->nq < QMAX; c++) {
         wire_frame *x = &w->q[w->nq++];
@@ -159,9 +162,15 @@ static void test_loss_recovery(void)
     link_cfg dead = {100, 0, 0, 0, 0, 0};
     result d = run(7, &dead, 1, 5, 3, 10000);
     EQ(d.done, 0);
-    CHECK(d.link_down_a && d.link_down_b);
-    EQ(d.ca.tx_retransmits, 3);
-    EQ(d.ticks, 20); /* sends at 0,5,10,15; declared down at 20 */
+    /* Lane 19: resend waits are jittered, so the two sides no longer give up on
+     * the same tick. The first side down has sent 1 + 3 frames: at 0, then 5
+     * (first retransmit waits exactly rto), then two waits in [5, 10], and is
+     * declared down after a third wait in [5, 10]: tick 20..35. */
+    CHECK(d.link_down_a || d.link_down_b);
+    EQ(d.link_down_a ? d.ca.tx_retransmits : d.cb.tx_retransmits, 3);
+    CHECK(d.ticks >= 20 && d.ticks <= 35);
+    result d2 = run(7, &dead, 1, 5, 3, 10000);
+    CHECK(memcmp(&d, &d2, sizeof d) == 0); /* deterministic */
     printf("  %-22s link_down at tick %llu after %llu retransmissions\n", "blackout-dead",
            (unsigned long long)d.ticks, (unsigned long long)d.ca.tx_retransmits);
 }
@@ -298,10 +307,114 @@ static void test_refusals(void)
     EQ(ct_receive(&a, ackf, an, m, sizeof m, &ml), CT_ERR_LINK_DOWN);
 }
 
+/* ---------------- resend jitter (Lane 19) ---------------- */
+/* Strictly periodic loss, both senders in lockstep, no sender-side timing
+ * tricks: with a fixed resend interval this starved one frame until the link
+ * went down. The jittered resend schedule must recover for every N. */
+static void test_periodic_loss(void)
+{
+    int recovered = 0, total = 0;
+    static const uint64_t N[] = {2, 3, 4, 5, 6, 7, 8, 11, 16};
+    for (size_t i = 0; i < sizeof N / sizeof N[0]; i++) {
+        link_cfg L = {0, 0, 0, 0, 0, 0};
+        drop_every = N[i];
+        result a = run(9, &L, MSGS, 3, 40, 200000);
+        result b = run(9, &L, MSGS, 3, 40, 200000);
+        CHECK(memcmp(&a, &b, sizeof a) == 0); /* bit-identical rerun */
+        EQ(a.done, 1);
+        total++; recovered += a.done;
+        EQ(a.delivered[0], MSGS);
+        EQ(a.delivered[1], MSGS);
+        CHECK(a.ca.tx_retransmits + a.cb.tx_retransmits > 0); /* loss really happened */
+        if (!a.done)
+            fprintf(stderr, "periodic loss N=%llu: delivered %u/%u down %d/%d\n",
+                    (unsigned long long)N[i], a.delivered[0], a.delivered[1], a.link_down_a, a.link_down_b);
+    }
+    drop_every = 0;
+    printf("  %-22s %d/%d drop-every-N patterns (N=2..16) recovered, bit-identical reruns\n", "periodic-loss",
+           recovered, total);
+}
+
+/* Transmit ticks of one message on a dead link, until link down. */
+static int tx_schedule(uint32_t session, uint8_t role, uint32_t seq, uint32_t rto, uint32_t retries,
+                       uint64_t *at, int max)
+{
+    ct_endpoint e;
+    ct_identity id;
+    uint8_t f[CT_MAX_FRAME];
+    size_t n;
+    ct_test_identity(&id, "lane19-jitter");
+    ct_init(&e, &id, role, session, rto, retries);
+    e.next_seq = e.base = seq;
+    EQ(ct_send(&e, (const uint8_t *)"j", 1), CT_OK);
+    int k = 0;
+    for (uint64_t t = 0; t < 100000; t++) {
+        ct_status s = ct_poll_tx(&e, t, f, sizeof f, &n);
+        if (s == CT_ERR_LINK_DOWN) break;
+        if (s == CT_OK && k < max) at[k++] = t;
+    }
+    return k;
+}
+
+static void test_resend_schedule(void)
+{
+    uint64_t at[64], at2[64];
+    int first_exact = 1, bounded = 1, by_seq = 0, by_session = 0, by_role = 0, by_tries = 0;
+    for (uint32_t q = 0; q < 64; q++) {
+        int k = tx_schedule(0xA1E5u, 0, q * 7919u, 5, 6, at, 64);
+        EQ(k, 1 + 6); /* first send + max_retries retransmissions */
+        EQ(tx_schedule(0xA1E5u, 0, q * 7919u, 5, 6, at2, 64), k);
+        CHECK(memcmp(at, at2, sizeof at[0] * (size_t)k) == 0); /* deterministic */
+        if (at[1] - at[0] != 5) first_exact = 0;
+        for (int i = 1; i < k; i++)
+            if (at[i] - at[i - 1] < 5 || at[i] - at[i - 1] > 10) bounded = 0;
+        for (int i = 3; i < k; i++)
+            if (at[i] - at[i - 1] != at[2] - at[1]) by_tries = 1;
+        uint64_t g_seq = at[2] - at[1];
+        tx_schedule(0xA1E5u, 0, q * 7919u + 1, 5, 6, at2, 64);
+        if (at2[2] - at2[1] != g_seq) by_seq = 1;
+        tx_schedule(0xA1E5u + 1 + q, 0, q * 7919u, 5, 6, at2, 64);
+        if (at2[2] - at2[1] != g_seq) by_session = 1;
+        tx_schedule(0xA1E5u, 1, q * 7919u, 5, 6, at2, 64);
+        if (at2[2] - at2[1] != g_seq) by_role = 1;
+    }
+    CHECK(first_exact); /* the first retransmit waits exactly rto */
+    CHECK(bounded);     /* every wait is in [rto, 2*rto] */
+    CHECK(by_tries && by_seq && by_session && by_role);
+    /* rto 1: waits are 1 or 2, and both occur */
+    int saw1 = 0, saw2 = 0;
+    for (uint32_t q = 0; q < 16; q++) {
+        int k = tx_schedule(3, 0, q, 1, 8, at, 64);
+        for (int i = 2; i < k; i++) {
+            uint64_t g = at[i] - at[i - 1];
+            CHECK(g == 1 || g == 2);
+            saw1 |= g == 1; saw2 |= g == 2;
+        }
+    }
+    CHECK(saw1 && saw2);
+    /* largest rto: the wait is computed without 32-bit overflow */
+    ct_endpoint e;
+    ct_identity id;
+    uint8_t f[CT_MAX_FRAME];
+    size_t n;
+    ct_test_identity(&id, "lane19-jitter");
+    ct_init(&e, &id, 0, 1, UINT32_MAX, 3);
+    ct_send(&e, (const uint8_t *)"j", 1);
+    EQ(ct_poll_tx(&e, 0, f, sizeof f, &n), CT_OK);
+    EQ(ct_poll_tx(&e, UINT32_MAX - 1ull, f, sizeof f, &n), CT_IDLE);
+    EQ(ct_poll_tx(&e, UINT32_MAX, f, sizeof f, &n), CT_OK);
+    EQ(ct_poll_tx(&e, 2ull * UINT32_MAX - 1, f, sizeof f, &n), CT_IDLE);
+    EQ(ct_poll_tx(&e, 3ull * UINT32_MAX, f, sizeof f, &n), CT_OK);
+    printf("  %-22s first wait = rto, later waits in [rto, 2*rto], vary by seq/session/role/try\n",
+           "resend-schedule");
+}
+
 int main(void)
 {
     test_refusals();
     test_loss_recovery();
+    test_periodic_loss();
+    test_resend_schedule();
     printf("ctl_test checks=%d failures=%d\n", checks, failures);
     printf("CTL_TRANSPORT_LOSS_RECOVERY: %s\n", failures ? "FAIL" : "PASS");
     return failures ? 1 : 0;

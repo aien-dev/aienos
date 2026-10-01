@@ -162,10 +162,15 @@ two in-process machines over real M6-A Ethernet/IPv4/UDP frames):
 - **Lockstep finding.** On a strictly periodic loss pattern, the M6-A
   channel's fixed resend schedule can lock into step with the losses, so
   the same frame is dropped every round and the link goes down. This was
-  seen with N = 2, 3 and 4 when both senders run in lockstep. The loss tests
-  add seeded, repeatable timing variation to the senders; the drop rule
-  stays exactly every Nth. Retransmit jitter inside `aienos_ctl` would fix
-  this at the source, and is left for an M6-A follow-up.
+  seen with N = 2, 3 and 4 when both senders run in lockstep. **Fixed at the
+  source (Lane 19):** `aienos_ctl` now waits exactly rto before the first
+  retransmit and rto plus a deterministic jitter in [0, rto] before each later
+  one (a pure function of session, role, seq and try count; no clock, no
+  randomness, no key bits, no wire or header change). The loss tests no longer
+  vary sender timing; `ctl_test` adds a drop-every-N run (N = 2 to 16) and a
+  schedule test (bounds, determinism, variation), and `make mutants` covers the
+  six jitter guard lines. The M6-B handshake resend (HS1/HS3) still uses a
+  fixed rto; its loss tests pass for N = 2 to 16.
 
 **Mapping onto omega's Fabric.** Omega's F5-0 Fabric (`src/fabric/fabric.h`)
 takes a `FabTransport {ctx, send(ctx, from, to, msg, len), recv(ctx, self,
