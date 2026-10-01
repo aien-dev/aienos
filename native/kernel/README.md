@@ -35,7 +35,7 @@ Output lands in `<repo>/target/native-kernel` (ignored by git).
 
 The default and QEMU images use the labelled TEST Store keys
 (`ck_store_test_keys`, public label, `M5_ID_TEST`), the TEST store uuid and
-the TEST ARGUS machine id (0xA1). The hardware staging image never embeds any
+the TEST ARGUS machine id (0xA1; the default image prints `argus: TEST machine id 0xA1 ...` on the serial console). The hardware staging image never embeds any
 of them:
 
     make -C native/kernel full CK_HARDWARE_STAGING=1 \
