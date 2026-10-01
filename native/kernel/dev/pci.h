@@ -101,6 +101,32 @@ void pci_enable(const pci_func *f, int bm);
 /* Clear Bus Master Enable and read it back: 0 when it reads clear. */
 int pci_bus_master_off(const pci_func *f);
 
+
+/* Post-exit bus-master sweep (port of crates/aienos-kernel/src/dma_gate.rs
+ * sweep_bus_master): walk every bus in the ECAM window, every device and
+ * (when marked multi-function) every function, and clear Bus Master Enable
+ * on every endpoint (header type 0) that has it set, reading it back.
+ * Bridges (header type 1) are counted, never changed: a bridge's BME only
+ * forwards DMA from the endpoints below it, which are cleared one by one.
+ * Runs before any device is given DMA, so every device starts with DMA off. */
+#define PCI_SWEEP_FINDINGS 8u
+typedef struct {
+    uint8_t bus, dev, fn;
+    uint16_t command_before, command_after; /* after: read back after the clear */
+} pci_bme_finding;
+typedef struct {
+    uint16_t functions;       /* functions that answered a config read */
+    uint16_t bridges;         /* header type 1 among them (left untouched) */
+    uint16_t bridges_bme;     /* bridges with BME set */
+    uint16_t endpoints_bme;   /* endpoints found with BME set (and cleared) */
+    uint16_t still_enabled;   /* endpoints whose BME still reads set after the clear */
+    pci_bme_finding f[PCI_SWEEP_FINDINGS]; /* first PCI_SWEEP_FINDINGS endpoints */
+} pci_sweep;
+void pci_sweep_bus_master(const pci_bus_access *a, pci_sweep *out);
+/* Print the sweep in the Rust kernel's format: one "dma_sweep: seg ..." line
+ * plus one "dma_sweep: bme cleared|STUCK ..." line per recorded finding. */
+void pci_sweep_report(const pci_ecam *e, const pci_sweep *s);
+
 /* First function with this class (class/subclass/progif masked by mask). */
 const pci_func *pci_find_class(const pci_system *s, uint32_t class_code, uint32_t mask);
 const pci_func *pci_find_id(const pci_system *s, uint16_t vendor, uint16_t device);

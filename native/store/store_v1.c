@@ -633,14 +633,25 @@ static uint32_t sb_crc(const uint8_t *b)
 /* 1 if the CRC field matches (engine helper crc_valid). */
 int sv1_superblock_crc_ok(const uint8_t b[SV1_UNIT])
 {
+#ifdef CK_TEST_STORE_MUTANT_ACCEPT_BAD_ROOT_CRC
+    /* TEST-ONLY mutant of the C kernel crash gate (native/kernel full image
+     * with CK_TEST_STORE_CRASH=1 CK_TEST_STORE_CRASH_MUTANT=accept_bad_root_crc):
+     * every superblock CRC is accepted. Never defined otherwise. */
+    (void)sb_crc;
+    (void)b;
+    return 1;
+#else
     return sb_crc(b) == sv1_get32(b + SV1_SB_CRC_OFFSET);
+#endif
 }
 
 int sv1_superblock_decode(const uint8_t *b, size_t len, uint32_t expected_slot,
                           sv1_superblock *s)
 {
     if (len != SV1_UNIT || !sv1_equal(b, SUPERBLOCK_MAGIC, 8)) return SV1_E_BAD_SUPERBLOCK_MAGIC; /* GUARD:sb-magic */
+#ifndef CK_TEST_STORE_MUTANT_ACCEPT_BAD_ROOT_CRC
     if (sb_crc(b) != sv1_get32(b + SV1_SB_CRC_OFFSET)) return SV1_E_BAD_SUPERBLOCK_CRC; /* GUARD:sb-crc */
+#endif
     if (!sv1_all_zero(b + SV1_SB_RESERVED_OFFSET, SV1_UNIT - SV1_SB_RESERVED_OFFSET)) return SV1_E_NONZERO_RESERVED; /* GUARD:sb-reserved */
     if (sv1_get16(b + 8) != 1 || sv1_get16(b + 10) != 0) return SV1_E_UNSUPPORTED_VERSION; /* GUARD:sb-version */
     if (sv1_get64(b + 12) != 0 || sv1_get64(b + 20) != 0)

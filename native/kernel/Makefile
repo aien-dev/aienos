@@ -17,6 +17,16 @@
 #                        both files; tools/ck_owner_gen.c checks them); its
 #                        Store stage refuses (production key source is
 #                        BLOCKED_OPERATOR). scripts/ck_owner_keys_check.sh
+#   make full CK_TEST_XHCI_MUTATION=bm-left-on|no-revoke|grant-no-smmu|no-sweep
+#                        TEST-ONLY image that breaks one xHCI DMA fence row on
+#                        purpose: $(OUT)/full-test-xhci-<name>/ (only
+#                        scripts/qemu_ck_keyboard_test.sh --mutation; refused
+#                        with CK_HARDWARE_STAGING=1 or CK_QEMU_UNSAFE_DMA=1)
+#   make full CK_TEST_STORE_CRASH=1 [CK_TEST_STORE_CRASH_MUTANT=<name>]
+#                        TEST-ONLY Store crash hook image
+#                        $(OUT)/full-test-store-crash[-mutant-<name>]/ for
+#                        scripts/qemu_ck_store_crash_test.sh (M4_STORE_CRASH);
+#                        refused with CK_HARDWARE_STAGING / CK_QEMU_UNSAFE_DMA
 #   make owner-gen       host tool $(OUT)/host/ck_owner_gen
 #   make [full] CK_TEST_FWCFG_ARTIFACTS=1
 #                        TEST-ONLY: loader takes candidates from the QEMU fw_cfg
@@ -24,6 +34,11 @@
 #                        (target/native-kernel-test-fwcfg); announces itself and
 #                        never counts toward a PASS. Default images are checked
 #                        to contain no fw_cfg artifact code.
+#   make CK_TEST_SMP_SKIP_CPU=1
+#                        TEST-ONLY SMP mutation: CPU_ON skipped for one secondary
+#                        core (core/smp.c); own OUT (target/native-kernel-test-smp-skip);
+#                        the SMP gate must FAIL on it (scripts/qemu_ck_smp_test.sh
+#                        --mutation); refused with CK_HARDWARE_STAGING
 #   make store-image     host tool $(OUT)/host/ck_store_image: signed artifacts
 #                        into the sealed Store inside the AIENOS GPT partition
 #                        of an NVMe disk image
@@ -39,6 +54,9 @@
 #                        (also builds the handoff_check reserved0 mutant
 #                        and requires test_handoff to FAIL against it)
 #   make sanitize        same under ASan + UBSan    -> CK_CORE_HOST: PASS
+#   make continuity-mutants
+#                        TEST-only -D mutants of svc/continuity_codec.c must
+#                        each fail test_continuity_codec -> CK_CONTINUITY_CODEC_MUTANTS: PASS
 #   make stage-test | stage-sanitize | stage-free   stage host tests (stage.mk)
 #   make print-kcflags   flags stage code must be built with
 #   make udp-echo        host UDP echo helper for scripts/qemu_ck_net_test.sh:
@@ -86,6 +104,29 @@ $(error CK_TEST_FWCFG_ARTIFACTS (QEMU fw_cfg test source) cannot be combined wit
 endif
 OUT ?= $(REPO)/target/native-kernel-test-fwcfg
 endif
+
+# TEST-ONLY SMP mutation: CK_TEST_SMP_SKIP_CPU=1 builds a kernel that never
+# calls PSCI CPU_ON for one secondary core (core/smp.c) but still waits for
+# it, so the SMP gate must FAIL on it (scripts/qemu_ck_smp_test.sh
+# --mutation). Own OUT; announces itself; refused with CK_HARDWARE_STAGING
+# and with the fw_cfg test source. Default images are checked to carry no
+# trace of it (smp_check).
+CK_TEST_SMP_SKIP_CPU ?=
+ifneq ($(strip $(CK_TEST_SMP_SKIP_CPU)),)
+ifneq ($(strip $(CK_TEST_SMP_SKIP_CPU)),1)
+$(error CK_TEST_SMP_SKIP_CPU must be empty or 1)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_TEST_SMP_SKIP_CPU (TEST-only SMP mutation) cannot be combined with CK_HARDWARE_STAGING)
+endif
+ifneq ($(strip $(CK_TEST_FWCFG_ARTIFACTS)),)
+$(error CK_TEST_SMP_SKIP_CPU cannot be combined with CK_TEST_FWCFG_ARTIFACTS)
+endif
+OUT ?= $(REPO)/target/native-kernel-test-smp-skip
+SMP_TEST_FLAGS := -DCK_TEST_SMP_SKIP_CPU=1
+else
+SMP_TEST_FLAGS :=
+endif
 OUT ?= $(REPO)/target/native-kernel
 AIENOS_COMMIT ?= $(shell git -C $(REPO) rev-parse HEAD 2>/dev/null || echo unknown)
 
@@ -101,6 +142,58 @@ $(error CK_QEMU_UNSAFE_DMA (unconfined DMA, QEMU debug only) cannot be combined 
 endif
 ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),1)
 $(error CK_QEMU_UNSAFE_DMA must be empty or 1)
+endif
+endif
+
+# TEST-ONLY xHCI DMA fence mutations (dev/xhci_fence.h), for the self-test of
+# scripts/qemu_ck_keyboard_test.sh --mutation only: each one breaks one
+# keyboard DMA-safety row on purpose. Own FULL_NAME, never a hardware image.
+CK_TEST_XHCI_MUTATION ?=
+ifneq ($(strip $(CK_TEST_XHCI_MUTATION)),)
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_TEST_XHCI_MUTATION (TEST-ONLY xHCI DMA fence mutation) cannot be combined with CK_HARDWARE_STAGING)
+endif
+ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),)
+$(error CK_TEST_XHCI_MUTATION cannot be combined with CK_QEMU_UNSAFE_DMA)
+endif
+XHCI_MUT_NUM := $(if $(filter bm-left-on,$(CK_TEST_XHCI_MUTATION)),1,$(if $(filter no-revoke,$(CK_TEST_XHCI_MUTATION)),2,$(if $(filter grant-no-smmu,$(CK_TEST_XHCI_MUTATION)),3,$(if $(filter no-sweep,$(CK_TEST_XHCI_MUTATION)),4,))))
+ifeq ($(XHCI_MUT_NUM),)
+$(error CK_TEST_XHCI_MUTATION must be one of bm-left-on no-revoke grant-no-smmu no-sweep)
+endif
+endif
+
+# TEST-ONLY Store crash hook (svc/store_crash.h; only
+# scripts/qemu_ck_store_crash_test.sh sets it): the Store stage reads a crash
+# plan from the scratch unit, runs on a volatile write cache and halts at the
+# planned checkpoint. Own OUT subdirectory; announces itself; never counts
+# toward a PASS of M4_STORE; refused with CK_HARDWARE_STAGING and
+# CK_QEMU_UNSAFE_DMA. CK_TEST_STORE_CRASH_MUTANT (only with it) builds a
+# deliberately broken Store the crash gate must catch:
+#   skip_root_flush      no flush between the commit record and the root write
+#   accept_bad_root_crc  superblock CRC never checked
+CK_TEST_STORE_CRASH ?=
+CK_TEST_STORE_CRASH_MUTANT ?=
+ifneq ($(strip $(CK_TEST_STORE_CRASH)),)
+ifneq ($(strip $(CK_TEST_STORE_CRASH)),1)
+$(error CK_TEST_STORE_CRASH must be empty or 1)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_TEST_STORE_CRASH (TEST-ONLY Store crash hook) cannot be combined with CK_HARDWARE_STAGING)
+endif
+ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),)
+$(error CK_TEST_STORE_CRASH (TEST-ONLY Store crash hook) cannot be combined with CK_QEMU_UNSAFE_DMA)
+endif
+endif
+ifneq ($(strip $(CK_TEST_STORE_CRASH_MUTANT)),)
+ifneq ($(strip $(CK_TEST_STORE_CRASH)),1)
+$(error CK_TEST_STORE_CRASH_MUTANT needs CK_TEST_STORE_CRASH=1 (TEST-ONLY))
+endif
+ifeq ($(strip $(CK_TEST_STORE_CRASH_MUTANT)),skip_root_flush)
+STORE_MUTANT_FLAGS := -DCK_TEST_STORE_MUTANT_SKIP_ROOT_FLUSH=1
+else ifeq ($(strip $(CK_TEST_STORE_CRASH_MUTANT)),accept_bad_root_crc)
+STORE_MUTANT_FLAGS := -DCK_TEST_STORE_MUTANT_ACCEPT_BAD_ROOT_CRC=1
+else
+$(error CK_TEST_STORE_CRASH_MUTANT must be skip_root_flush or accept_bad_root_crc)
 endif
 endif
 
@@ -173,7 +266,7 @@ MODULE_INC := -I$(NATIVE)/disk -I$(NATIVE)/store -I$(NATIVE)/m5 -I$(NATIVE)/cryp
 KCFLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -nostdlib -fno-builtin \
 	-fno-stack-protector -fno-tree-loop-distribute-patterns -mstrict-align \
 	-mgeneral-regs-only -mno-outline-atomics -fno-asynchronous-unwind-tables -fpie \
-	-fvisibility=hidden -fno-plt $(KINC) $(CK_EXTRA_CFLAGS)
+	-fvisibility=hidden -fno-plt $(KINC) $(SMP_TEST_FLAGS) $(CK_EXTRA_CFLAGS)
 KLDFLAGS := -nostdlib -pie --no-dynamic-linker -z norelro -z noexecstack -z max-page-size=4096 --no-warn-rwx-segments \
 	-T $(BOOT)/image.ld
 
@@ -182,7 +275,7 @@ CORE_C := $(BOOT)/efi_main.c \
 	$(KDIR)/core/acpi.c $(KDIR)/core/console.c $(KDIR)/core/fmt.c \
 	$(KDIR)/core/kmain.c $(KDIR)/core/handoff_check.c $(KDIR)/core/libc_min.c $(KDIR)/core/report.c \
 	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c \
-	$(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c \
+	$(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c $(KDIR)/core/smp.c \
 	$(KDIR)/mm/frames.c $(KDIR)/mm/heap.c $(KDIR)/mm/mmu.c $(KDIR)/mm/pt.c
 # P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
 # (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
@@ -192,7 +285,7 @@ ART_C := $(KDIR)/core/artifact_loader.c $(KDIR)/artifact/format.c $(KDIR)/artifa
 	$(NATIVE)/sig/ed25519.c $(NATIVE)/sig/ct.c
 ART_INC := -I$(KDIR)/svc/compat -I$(KDIR)/artifact -I$(NATIVE)/sig -I$(NATIVE)/argus
 CORE_C += $(ART_C)
-CORE_S := $(BOOT)/efi_entry.S $(KDIR)/arch/vectors.S $(KDIR)/arch/m3.S
+CORE_S := $(BOOT)/efi_entry.S $(KDIR)/arch/vectors.S $(KDIR)/arch/m3.S $(KDIR)/arch/smp_entry.S
 HDRS := $(wildcard $(KDIR)/include/*.h $(KDIR)/*/*.h $(BOOT)/*.h)
 
 KOBJ := $(OUT)/obj
@@ -210,6 +303,10 @@ else
 FULL_NAME := full
 STAGE_DMA_FLAGS :=
 endif
+ifneq ($(strip $(CK_TEST_XHCI_MUTATION)),)
+FULL_NAME := full-test-xhci-$(strip $(CK_TEST_XHCI_MUTATION))
+STAGE_DMA_FLAGS += -DCK_TEST_XHCI_MUTATION=$(XHCI_MUT_NUM)
+endif
 ifneq ($(strip $(CK_HARDWARE_STAGING)),)
 # Own OUT subdirectory: stage objects built with these flags never mix with
 # the default full image's objects.
@@ -218,6 +315,15 @@ OWNER_HDR := $(OUT)/gen-$(FULL_NAME)/ck_owner_prov.h
 STAGE_DMA_FLAGS += -DCK_HARDWARE_STAGING=1 -I$(dir $(OWNER_HDR))
 else
 OWNER_HDR :=
+endif
+ifeq ($(strip $(CK_TEST_STORE_CRASH)),1)
+# Own OUT subdirectory: TEST hook objects never mix with a default image.
+ifneq ($(strip $(CK_TEST_STORE_CRASH_MUTANT)),)
+FULL_NAME := full-test-store-crash-mutant-$(strip $(CK_TEST_STORE_CRASH_MUTANT))
+else
+FULL_NAME := full-test-store-crash
+endif
+STAGE_DMA_FLAGS += -DCK_TEST_STORE_CRASH=1 $(STORE_MUTANT_FLAGS)
 endif
 ifeq ($(strip $(CK_TEST_DISK_XLATE_BYPASS)),1)
 FULL_NAME := $(FULL_NAME)-test-xlate-bypass
@@ -294,6 +400,17 @@ define fwcfg_check
 	fi
 endef
 
+# xhci_mut_check(elf): only a CK_TEST_XHCI_MUTATION image may carry the
+# TEST-ONLY xHCI mutation banner (and it must carry it).
+define xhci_mut_check
+	@if [ -n "$(strip $(CK_TEST_XHCI_MUTATION))" ]; then \
+	  grep -aqF "TEST-ONLY xHCI MUTATION BUILD" $(1) || { echo "xHCI mutation image lacks its TEST-ONLY banner"; rm -f $(1); exit 1; }; \
+	else \
+	  if grep -aqF "TEST-ONLY xHCI MUTATION" $(1); then echo "default image carries the TEST-ONLY xHCI mutation"; rm -f $(1); exit 1; fi; \
+	  echo "no xHCI mutation code in $(1)"; \
+	fi
+endef
+
 # owner_check(elf): a hardware staging image must carry no TEST Store label,
 # TEST store uuid, TEST Store print lines or TEST key symbols.
 define owner_check
@@ -302,6 +419,29 @@ define owner_check
 	  y=$$($(KNM) $(1) | grep -E " (ck_store_test_keys|ck_store_test_uuid)$$" | tr "\n" " "); \
 	  if [ -n "$$s$$y" ]; then echo "hardware staging image carries the TEST Store identity: $$s$$y"; rm -f $(1); exit 1; fi; \
 	  echo "no TEST Store label, uuid or key code in $(1)"; \
+	fi
+endef
+
+# smp_check(elf): only a CK_TEST_SMP_SKIP_CPU image may carry the SMP mutation
+# announcement, and such an image must carry it.
+define smp_check
+	@if [ "$(strip $(CK_TEST_SMP_SKIP_CPU))" = 1 ]; then \
+	  grep -aqF "TEST-ONLY SMP mutation" $(1) || { echo "SMP mutation image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
+	else \
+	  if grep -aqF "TEST-ONLY SMP mutation" $(1); then echo "default image carries the TEST-ONLY SMP mutation"; rm -f $(1); exit 1; fi; \
+	fi
+endef
+
+# crash_check(elf): a full image built without CK_TEST_STORE_CRASH must carry
+# no Store crash hook code or strings; a TEST crash image must announce itself.
+define crash_check
+	@if [ "$(strip $(CK_TEST_STORE_CRASH))" = 1 ]; then \
+	  grep -aqF "TEST-ONLY Store crash hook image" $(1) || { echo "TEST crash image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
+	else \
+	  s=$$(grep -aoE "store_crash:|AIENCRSH|TEST-ONLY MUTANT" $(1) | sort -u | tr "\n" " "); \
+	  y=$$($(KNM) $(1) | grep -E " ck_store_crash_[a-z_]+$$" | tr "\n" " "); \
+	  if [ -n "$$s$$y" ]; then echo "default image carries the TEST Store crash hook: $$s$$y"; rm -f $(1); exit 1; fi; \
+	  echo "no Store crash hook code in $(1)"; \
 	fi
 endef
 
@@ -328,6 +468,7 @@ $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
 	@s=$$($(KNM) $@ | grep -E ' [TtDdBbWwVv] ck_stage_(devices|security|store|quiesce)$$' || true); \
 	if [ -n "$$s" ]; then echo "core image defines stage symbols: $$s"; rm -f $@; exit 1; fi
 	$(call fwcfg_check,$@)
+	$(call smp_check,$@)
 
 $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	$(call link_image,$@,$(CORE_OBJS) $(STAGE_LINK))
@@ -335,6 +476,9 @@ $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	  $(KNM) $@ | grep -qE " [TW] $$s$$" || { echo "full image lacks $$s"; rm -f $@; exit 1; }; done
 	$(call fwcfg_check,$@)
 	$(call owner_check,$@)
+	$(call xhci_mut_check,$@)
+	$(call smp_check,$@)
+	$(call crash_check,$@)
 
 $(EFI): $(ELF)
 	$(call pe_image,$<,$@)
@@ -346,7 +490,8 @@ $(FULL_EFI): $(FULL_ELF)
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
 	$(KDIR)/core/handoff_check.c
-TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy test_handoff
+TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy test_handoff \
+	test_continuity_codec
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -399,6 +544,43 @@ $(OUT)/host-san/test_artifact: $(KDIR)/tests/test_artifact.c $(ART_HOST_DEPS) $(
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(ART_HOST_INC) -o $@ $< $(ART_HOST_SRCS)
 
+# Continuity codec (C port cut 1, contract CONTINUITY_RECOVERY_CONTRACT.md,
+# aienos#222): host test plus TEST-only -D mutants, each of which must make
+# the test print its FAIL verdict. Mutant flags are refused under
+# CK_HARDWARE_STAGING (svc/continuity_codec.h).
+CC_HOST_SRCS := $(KDIR)/svc/continuity_codec.c $(NATIVE)/argus/sha256.c $(NATIVE)/store/store_v1.c
+CC_HOST_INC := -I$(KDIR)/svc -I$(NATIVE)/argus -I$(NATIVE)/store
+CC_HOST_DEPS := $(CC_HOST_SRCS) $(KDIR)/svc/continuity_codec.h $(NATIVE)/argus/sha256.h \
+	$(NATIVE)/store/store_v1.h $(KDIR)/tests/ck_test.h
+CC_MUTANTS := CC_MUTANT_SKIP_TAKE_BOUND CC_MUTANT_ACCEPT_RESERVED CC_MUTANT_CHILD_INDEX_LE \
+	CC_MUTANT_TRUNCATE_AT_CAP
+
+$(OUT)/host/test_continuity_codec: $(KDIR)/tests/test_continuity_codec.c $(CC_HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(CC_HOST_INC) -o $@ $< $(CC_HOST_SRCS)
+
+$(OUT)/host-san/test_continuity_codec: $(KDIR)/tests/test_continuity_codec.c $(CC_HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CC_HOST_INC) -o $@ $< $(CC_HOST_SRCS)
+
+continuity-mutants: $(OUT)/host/test_continuity_codec
+	@mkdir -p $(OUT)/host-mut; fail=0; \
+	$(OUT)/host/test_continuity_codec > $(OUT)/host-mut/base.log 2>&1 || { echo "unmutated test_continuity_codec fails"; fail=1; }; \
+	for m in $(CC_MUTANTS); do \
+	  b=$(OUT)/host-mut/test_continuity_codec_$$m; \
+	  if ! $(HOSTCC) $(HCFLAGS) $(CC_HOST_INC) -D$$m -o $$b $(KDIR)/tests/test_continuity_codec.c $(CC_HOST_SRCS); then \
+	    echo "mutant $$m: does not build (FAIL)"; fail=1; continue; fi; \
+	  if $$b > $$b.log 2>&1; then echo "mutant $$m: SURVIVED (FAIL)"; fail=1; \
+	  elif grep -q "^test_continuity_codec: FAIL" $$b.log; then \
+	    echo "mutant $$m: killed ($$(grep -c '^  FAIL ' $$b.log) checks failed)"; \
+	  else echo "mutant $$m: no FAIL verdict (crashed?) (FAIL)"; fail=1; fi; \
+	done; \
+	if $(HOSTCC) $(HCFLAGS) $(CC_HOST_INC) -DCK_HARDWARE_STAGING=1 -DCC_MUTANT_SKIP_TAKE_BOUND \
+	    -fsyntax-only $(KDIR)/svc/continuity_codec.c 2>/dev/null; then \
+	  echo "mutant flag accepted under CK_HARDWARE_STAGING (FAIL)"; fail=1; \
+	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
+	if [ $$fail = 0 ]; then echo "CK_CONTINUITY_CODEC_MUTANTS: PASS"; else echo "CK_CONTINUITY_CODEC_MUTANTS: FAIL"; exit 1; fi
+
 ART_TOOL := $(OUT)/host/ck_artifact_tool
 $(ART_TOOL): $(KDIR)/tools/ck_artifact_tool.c $(ART_HOST_DEPS)
 	@mkdir -p $(dir $@)
@@ -442,4 +624,4 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize handoff-mutant clean print-kcflags udp-echo tool store-image gpt-image owner-gen FORCE
+.PHONY: all full test sanitize handoff-mutant clean print-kcflags udp-echo tool store-image gpt-image owner-gen continuity-mutants FORCE

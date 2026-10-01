@@ -1,10 +1,12 @@
-/* devices.c -- ck_stage_devices: PCI, NVMe, virtio-net. Freestanding. */
+/* devices.c -- ck_stage_devices: PCI (with the post-exit bus-master sweep),
+ * NVMe, virtio-net, xHCI DMA fence. Freestanding. */
 #include "devices.h"
 #include "ck.h"
 #include "nvme_bind.h"
 #include "pci.h"
 #include "virtio_net.h"
 #include "net_bind.h"
+#include "xhci_fence.h"
 
 static pci_system g_pci;
 static ck_nvme g_nvme;
@@ -42,6 +44,15 @@ int ck_stage_devices(void)
 {
     int rc = pci_stage_probe(&g_pci);
     if (rc) return rc;
+    /* Post-exit bus-master sweep (Rust dma_gate::sweep_bus_master): before any
+     * device is given DMA, clear BME on every endpoint firmware left with it
+     * set, so each device starts with DMA off. */
+    if (ck_xhci_sweep_enabled()) {
+        pci_sweep sw;
+        pci_sweep_bus_master(&g_pci.acc, &sw);
+        pci_sweep_report(&g_pci.ecam, &sw);
+    }
+    ck_xhci_after_sweep(&g_pci); /* TEST-ONLY bm-left-on mutation hook; no-op otherwise */
     int nrc = ck_nvme_bind(&g_nvme, &g_pci);
     if (nrc) ck_dev_nvme_release(); /* a failed bind never keeps DMA */
     virtio_pci_caps caps;
@@ -53,6 +64,11 @@ int ck_stage_devices(void)
     int netrc = (vrc == 0 && vf) ? ck_net_bind_selftest(vf, &caps) : 1;
     ck_printf("devices: pci=ok nvme=%s virtio_net=%s\n", g_nvme.bound ? "bound" : "unbound",
               vrc != 0 ? "caps-refused" : !vf ? "absent" : netrc == 0 ? "selftest-ok" : "selftest-failed");
+    /* xHCI: DMA fence only (bus master off before the gate, SMMU-confined grant
+     * or fail-closed deny, halt, revoke, stream back to abort); no USB HID
+     * driver yet. Reported, never a devices-stage failure. */
+    int xrc = ck_xhci_fence(&g_pci);
+    ck_printf("devices: xhci=%s (rc=%d)\n", ck_xhci_state(), xrc);
     if (nrc == -1) return 0;  /* no NVMe present: not a devices failure; Store reports it */
     return nrc;
 }
@@ -65,10 +81,13 @@ void ck_stage_quiesce(void)
 {
     int net_live = ck_net_live();
     if (net_live) ck_net_release();
+    int xhci_live = ck_xhci_live();
+    if (xhci_live) ck_xhci_release();
     int was_live = g_nvme.pf && (g_nvme.bm_on || g_nvme.confined);
     if (was_live)
         ck_dev_nvme_release();
     ck_printf("devices: quiesce before reset nvme=%s\n",
               !g_nvme.pf ? "none" : was_live ? "released-now" : "already-released");
     if (net_live) ck_printf("devices: quiesce before reset virtio_net=released-now\n");
+    if (xhci_live) ck_printf("devices: quiesce before reset xhci=released-now\n");
 }

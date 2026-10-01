@@ -5,11 +5,12 @@
 # It refuses a dirty tree, runs the C kernel QEMU scripts that exist
 # (scripts/qemu_ck_boot_test.sh, scripts/qemu_ck_store_test.sh,
 # scripts/qemu_ck_net_test.sh, scripts/qemu_ck_artifact_test.sh,
+# scripts/qemu_ck_smp_test.sh, scripts/qemu_ck_store_crash_test.sh,
 # scripts/qemu_ck_disk_layout_test.sh), and prints
 # one line per gate:
 #     AIENOS_CK_<gate>: PASS|FAIL|NOT_RUN [(reason)]
 # for M1 M3 SMMU NVME_SHUTDOWN P2_ARTIFACT M0_ROLLBACK M4_NVME M4_STORE M4_STORE_CRASH
-# M4_CONTINUITY M4_RECOVERY ARGUS1_REVOKE KEYBOARD NET DISK_LAYOUT. Gates with no C
+# M4_CONTINUITY M4_RECOVERY ARGUS1_REVOKE KEYBOARD NET SMP DISK_LAYOUT. Gates with no C
 # implementation print NOT_RUN (MISSING_IMPLEMENTATION: <reason>) and never
 # run anything. A missing child script, a child that reports NOT_RUN, a child
 # that prints no verdict line, or a PASS line contradicted by the child's exit
@@ -41,6 +42,8 @@ set -uo pipefail
 #         store -> verdict line from scripts/qemu_ck_store_test.sh
 #         net   -> verdict line from scripts/qemu_ck_net_test.sh
 #         artifact -> verdict line from scripts/qemu_ck_artifact_test.sh
+#         smp   -> verdict line from scripts/qemu_ck_smp_test.sh
+#         crash -> verdict line from scripts/qemu_ck_store_crash_test.sh
 #         disk  -> verdict line from scripts/qemu_ck_disk_layout_test.sh
 #         missing -> NOT_RUN (MISSING_IMPLEMENTATION), never run, never PASS
 # ===========================================================================
@@ -53,15 +56,16 @@ P2_ARTIFACT|artifact|-
 M0_ROLLBACK|missing|C loader signatures, A/B, BootNext and rollback are parked (native/boot/README.md)
 M4_NVME|store|-
 M4_STORE|store|-
-M4_STORE_CRASH|missing|no C Store crash/kill campaign (4 KiB or 512 B) and no slot reuse (C Store is append-only)
+M4_STORE_CRASH|crash|-
 M4_CONTINUITY|missing|no continuity core (ADR 0016 agent identity and memory) in the C kernel
 M4_RECOVERY|missing|no Recovery Core (ADR 0006) in the C kernel
 ARGUS1_REVOKE|store|-
 KEYBOARD|missing|no xHCI/USB HID keyboard driver in the C kernel
 NET|net|-
+SMP|smp|-
 DISK_LAYOUT|disk|-
 '
-CHILDREN=(boot store net artifact disk)
+CHILDREN=(boot store net artifact smp crash disk)
 # ===========================================================================
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -103,6 +107,8 @@ set_default_children() {
         [store]="${repo_root}/scripts/qemu_ck_store_test.sh"
         [net]="${repo_root}/scripts/qemu_ck_net_test.sh"
         [artifact]="${repo_root}/scripts/qemu_ck_artifact_test.sh"
+        [smp]="${repo_root}/scripts/qemu_ck_smp_test.sh"
+        [crash]="${repo_root}/scripts/qemu_ck_store_crash_test.sh"
         [disk]="${repo_root}/scripts/qemu_ck_disk_layout_test.sh"
     )
 }
@@ -333,11 +339,11 @@ self_test() {
     }
     expect_missing_all() {
         local g
-        for g in P2_ARTIFACT M0_ROLLBACK M4_STORE_CRASH M4_CONTINUITY M4_RECOVERY KEYBOARD DISK_LAYOUT; do expect "${g}" NOT_RUN; done  # P2_ARTIFACT, DISK_LAYOUT: no artifact or disk child in A..G
+        for g in P2_ARTIFACT M0_ROLLBACK M4_STORE_CRASH M4_CONTINUITY M4_RECOVERY KEYBOARD DISK_LAYOUT; do expect "${g}" NOT_RUN; done  # P2_ARTIFACT: no artifact child in A..G; M4_STORE_CRASH: no crash child in A..J and R; DISK_LAYOUT: no disk child in A..S
     }
-    scenario() { # NAME BOOT_SCRIPT STORE_SCRIPT [NET_SCRIPT] [ARTIFACT_SCRIPT] [DISK_SCRIPT] (absent: missing)
+    scenario() { # NAME BOOT_SCRIPT STORE_SCRIPT [NET_SCRIPT] [ARTIFACT_SCRIPT] [SMP_SCRIPT] [CRASH_SCRIPT] [DISK_SCRIPT] (absent: missing)
         scen="$1"
-        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}" [disk]="${6:-${tmp}/kids/no_disk_child.sh}")
+        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}" [smp]="${6:-${tmp}/kids/no_smp_child.sh}" [crash]="${7:-${tmp}/kids/no_crash_child.sh}" [disk]="${8:-${tmp}/kids/no_disk_child.sh}")
         run_children 2>/dev/null
         evaluate_table >"${tmp}/${scen}.out"
     }
@@ -345,15 +351,16 @@ self_test() {
     # A: all present gates PASS; the store child also claims PASS for gates
     # with no C implementation, which must stay NOT_RUN.
     scenario A "$(fake bootA 0 'PASS  x' 'AIENOS_CK_M3: PASS' 'AIENOS_CK_M1: PASS')" \
-        "$(fake storeA 0 'AIENOS_CK_M4_NVME: PASS' 'AIENOS_CK_M4_STORE: PASS' 'AIENOS_CK_ARGUS1_REVOKE: PASS (narrow)' \
+        "$(fake storeA 0 'AIENOS_CK_M4_NVME: PASS' 'AIENOS_CK_M4_STORE: PASS' 'AIENOS_CK_M4_STORE_CRASH: PASS' 'AIENOS_CK_ARGUS1_REVOKE: PASS (narrow)' \
             'AIENOS_CK_SMMU: PASS' 'AIENOS_CK_NVME_SHUTDOWN: PASS' 'AIENOS_CK_KEYBOARD: PASS' 'PASS  NVMe DMA granted confined' \
             'PASS  DMA outside the window faulted, page intact, controller still usable (differs)' 'PASS  NVMe DMA denied without an SMMU' \
             'PASS  NVMe DMA granted through the TEST-ONLY bypass')" \
-        "$(fake netA 0 'PASS  UDP reply received' 'AIENOS_CK_NET: PASS')"
-    expect M1 PASS; expect M3 PASS; expect M4_NVME PASS; expect M4_STORE PASS; expect ARGUS1_REVOKE PASS; expect SMMU PASS; expect NVME_SHUTDOWN PASS; expect NET PASS; expect_missing_all
+        "$(fake netA 0 'PASS  UDP reply received' 'AIENOS_CK_NET: PASS')" "" \
+        "$(fake smpA 0 'PASS  3 secondary cores checked in' 'AIENOS_CK_SMP_MUTATION: FAIL' 'AIENOS_CK_SMP: PASS')"
+    expect M1 PASS; expect M3 PASS; expect M4_NVME PASS; expect M4_STORE PASS; expect ARGUS1_REVOKE PASS; expect SMMU PASS; expect NVME_SHUTDOWN PASS; expect NET PASS; expect SMP PASS; expect_missing_all
     count_rows
-    [[ "${n_pass}/${n_fail}/${n_notrun}/${n_total}" == "8/0/7/15" && ${overall} == NOT_ALL_GATES_PASS ]] \
-        && ok "A: counts 8/0/7 of 15, verdict NOT_ALL_GATES_PASS" || bad "A: counts ${n_pass}/${n_fail}/${n_notrun}/${n_total} ${overall}"
+    [[ "${n_pass}/${n_fail}/${n_notrun}/${n_total}" == "9/0/7/16" && ${overall} == NOT_ALL_GATES_PASS ]] \
+        && ok "A: counts 9/0/7 of 16, verdict NOT_ALL_GATES_PASS" || bad "A: counts ${n_pass}/${n_fail}/${n_notrun}/${n_total} ${overall}"
     [[ "$(nvme_dma_mode)" == "Confined (QEMU SMMUv3 stage 1, out-of-window DMA faulted); no-SMMU boot denied (NoSmmu); TEST-ONLY bypass image checked separately" ]] && ok "A: confined DMA mode recorded from the store PASS lines" || bad "A: dma mode '$(nvme_dma_mode)'"
     grep -qxF "AIENOS_CK_M4_NVME: PASS (${M4_NVME_PASS_NOTE})" "${tmp}/A.out" \
         && ok "A: M4_NVME PASS line carries the confined-mode note" || bad "A: M4_NVME PASS line lacks the note"
@@ -361,11 +368,11 @@ self_test() {
         && ok "A: NET PASS line carries the QEMU slirp / SMMU fence note" || bad "A: NET PASS line lacks the note"
     grep -qx 'AIENOS_CK_KEYBOARD: NOT_RUN (MISSING_IMPLEMENTATION: no xHCI/USB HID keyboard driver in the C kernel)' "${tmp}/A.out" \
         && ok "A: missing gate prints NOT_RUN (MISSING_IMPLEMENTATION: reason)" || bad "A: KEYBOARD line wrong"
-    [[ "$(grep -c '^AIENOS_CK_[A-Z0-9_]*: ' "${tmp}/A.out")" == 15 ]] && ok "A: exactly 15 verdict lines" || bad "A: verdict line count"
+    [[ "$(grep -c '^AIENOS_CK_[A-Z0-9_]*: ' "${tmp}/A.out")" == 16 ]] && ok "A: exactly 16 verdict lines" || bad "A: verdict line count"
 
     # B: boot FAIL; store script missing -> its three gates NOT_RUN, never PASS.
     scenario B "$(fake bootB 1 'FAIL  kernel: alive' 'AIENOS_CK_M3: FAIL' 'AIENOS_CK_M1: FAIL')" "${tmp}/kids/does_not_exist.sh"
-    expect M1 FAIL; expect M3 FAIL; expect M4_NVME NOT_RUN; expect M4_STORE NOT_RUN; expect ARGUS1_REVOKE NOT_RUN; expect SMMU NOT_RUN; expect NVME_SHUTDOWN NOT_RUN; expect NET NOT_RUN; expect_missing_all
+    expect M1 FAIL; expect M3 FAIL; expect M4_NVME NOT_RUN; expect M4_STORE NOT_RUN; expect ARGUS1_REVOKE NOT_RUN; expect SMMU NOT_RUN; expect NVME_SHUTDOWN NOT_RUN; expect NET NOT_RUN; expect SMP NOT_RUN; expect_missing_all
     [[ "$(nvme_dma_mode)" == "not run" ]] && ok "B: dma mode 'not run' when the store script is missing" || bad "B: dma mode"
 
     # C: boot NOT_RUN (quiet flag held, exit 3); store mixed with exit 1.
@@ -406,16 +413,51 @@ self_test() {
     scenario J "$(fake bootJ 0 'AIENOS_CK_M1: PASS')" "$(fake storeJ 0 'AIENOS_CK_M4_NVME: PASS')" "" \
         "$(fake artJ 1 'FAIL  P25WX' 'AIENOS_CK_P2_ARTIFACT: FAIL')"
     expect P2_ARTIFACT FAIL
-    # K: disk child PASS -> DISK_LAYOUT PASS; a store gate it claims is ignored.
-    # L: disk child FAIL (mutant survived) -> FAIL; M: PASS line, exit 1 -> FAIL.
-    scenario K "$(fake bootK 0 'AIENOS_CK_M1: PASS')" "$(fake storeK 3 'AIENOS_CK_M4_STORE: NOT_RUN')" "" "" \
-        "$(fake diskK 0 'PASS  translation bypass makes DISK_LAYOUT fail (mutant killed)' 'AIENOS_CK_M4_STORE: PASS' 'AIENOS_CK_DISK_LAYOUT: PASS')"
-    expect DISK_LAYOUT PASS; expect M4_STORE NOT_RUN
+    # O: the crash child (scripts/qemu_ck_store_crash_test.sh) PASS -> M4_STORE_CRASH PASS,
+    # and only that child's line counts (the store child's claim in A was ignored).
+    # P: crash child FAIL -> FAIL. Q: crash child prints PASS but exits 1 with no
+    # FAIL line -> FAIL. S: crash child quiet flag held (exit 3) -> NOT_RUN.
+    scenario O "$(fake bootO 0 'AIENOS_CK_M1: PASS')" "$(fake storeO 0 'AIENOS_CK_M4_NVME: PASS')" "" "" "" \
+        "$(fake crashO 0 'CK_STORE_CRASH_512B_QEMU: PASS' 'AIENOS_CK_M4_STORE_CRASH: PASS')"
+    expect M4_STORE_CRASH PASS; expect M4_CONTINUITY NOT_RUN; expect M4_RECOVERY NOT_RUN
+    scenario P "$(fake bootP 0 'AIENOS_CK_M1: PASS')" "$(fake storeP 0 'AIENOS_CK_M4_STORE_CRASH: PASS')" "" "" "" \
+        "$(fake crashP 1 'bs=4096 settle=3 cp=after_final_flush -> BAD' 'AIENOS_CK_M4_STORE_CRASH: FAIL')"
+    expect M4_STORE_CRASH FAIL
+    scenario Q "$(fake bootQ 0 'AIENOS_CK_M1: PASS')" "$(fake storeQ 0 'AIENOS_CK_M4_NVME: PASS')" "" "" "" \
+        "$(fake crashQ 1 'AIENOS_CK_M4_STORE_CRASH: PASS')"
+    expect M4_STORE_CRASH FAIL
+    scenario S "$(fake bootS 0 'AIENOS_CK_M1: PASS')" "$(fake storeS 0 'AIENOS_CK_M4_NVME: PASS')" "" "" "" \
+        "$(fake crashS 3 'NOT_RUN  quiet flag held' 'AIENOS_CK_M4_STORE_CRASH: NOT_RUN')"
+    expect M4_STORE_CRASH NOT_RUN
+
+    # K: SMP child FAIL (a core never checked in) -> FAIL; L: quiet flag held
+    # (exit 3) -> NOT_RUN; M: PASS line with an unexplained exit 2 -> FAIL;
+    # N: only the mutation verdict line (AIENOS_CK_SMP_MUTATION) -> no SMP
+    # verdict -> FAIL, never PASS.
+    scenario K "$(fake bootK 0 'AIENOS_CK_M1: PASS')" "$(fake storeK 0 'AIENOS_CK_M4_NVME: PASS')" "" "" \
+        "$(fake smpK 1 'FAIL  core never checked in: smp_cpu: target=0x3 checked_in=no' 'AIENOS_CK_SMP: FAIL')"
+    expect SMP FAIL; expect M1 PASS
     scenario L "$(fake bootL 0 'AIENOS_CK_M1: PASS')" "$(fake storeL 0 'AIENOS_CK_M4_NVME: PASS')" "" "" \
-        "$(fake diskL 1 'FAIL  translation bypass mutant survived' 'AIENOS_CK_DISK_LAYOUT: FAIL')"
-    expect DISK_LAYOUT FAIL
+        "$(fake smpL 3 'NOT_RUN  quiet flag held' 'AIENOS_CK_SMP: NOT_RUN')"
+    expect SMP NOT_RUN
     scenario M "$(fake bootM 0 'AIENOS_CK_M1: PASS')" "$(fake storeM 0 'AIENOS_CK_M4_NVME: PASS')" "" "" \
-        "$(fake diskM 1 'AIENOS_CK_DISK_LAYOUT: PASS')"
+        "$(fake smpM 2 'AIENOS_CK_SMP: PASS')"
+    expect SMP FAIL
+    scenario N "$(fake bootN 0 'AIENOS_CK_M1: PASS')" "$(fake storeN 0 'AIENOS_CK_M4_NVME: PASS')" "" "" \
+        "$(fake smpN 0 'AIENOS_CK_SMP_MUTATION: PASS (gate checks FAIL on the CPU_ON-skip image; mutation killed)')"
+    expect SMP FAIL
+
+    # T: disk child (scripts/qemu_ck_disk_layout_test.sh) PASS -> DISK_LAYOUT PASS;
+    # a store gate it claims is ignored. U: disk child FAIL (mutant survived)
+    # -> FAIL; V: PASS line, exit 1 -> FAIL.
+    scenario T "$(fake bootT 0 'AIENOS_CK_M1: PASS')" "$(fake storeT 3 'AIENOS_CK_M4_STORE: NOT_RUN')" "" "" "" "" \
+        "$(fake diskT 0 'PASS  translation bypass makes DISK_LAYOUT fail (mutant killed)' 'AIENOS_CK_M4_STORE: PASS' 'AIENOS_CK_DISK_LAYOUT: PASS')"
+    expect DISK_LAYOUT PASS; expect M4_STORE NOT_RUN
+    scenario U "$(fake bootU 0 'AIENOS_CK_M1: PASS')" "$(fake storeU 0 'AIENOS_CK_M4_NVME: PASS')" "" "" "" "" \
+        "$(fake diskU 1 'FAIL  translation bypass mutant survived' 'AIENOS_CK_DISK_LAYOUT: FAIL')"
+    expect DISK_LAYOUT FAIL
+    scenario V "$(fake bootV 0 'AIENOS_CK_M1: PASS')" "$(fake storeV 0 'AIENOS_CK_M4_NVME: PASS')" "" "" "" "" \
+        "$(fake diskV 1 'AIENOS_CK_DISK_LAYOUT: PASS')"
     expect DISK_LAYOUT FAIL
 
     # Receipt: named by its content hash, valid JSON, physical NOT_RUN, never overwritten.
@@ -431,10 +473,10 @@ self_test() {
         bad "receipt name does not match its content hash"
     fi
     if command -v jq >/dev/null; then
-        jq -e '.physical == "NOT_RUN" and (.gates | length) == 15 and .verdict == "NOT_ALL_GATES_PASS"
+        jq -e '.physical == "NOT_RUN" and (.gates | length) == 16 and .verdict == "NOT_ALL_GATES_PASS"
                and ([.gates[] | select(.id == "M1")][0].verdict == "PASS")
                and ([.gates[] | select(.id == "ARGUS1_REVOKE")][0].verdict == "FAIL")
-               and (.children | length) == 5 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
+               and (.children | length) == 7 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
             && ok "receipt is valid JSON (jq) with expected fields" || bad "receipt JSON invalid or fields wrong"
     else
         echo "SKIP  jq not installed; JSON validity not machine-checked"
@@ -447,18 +489,18 @@ self_test() {
         bad "an existing receipt was overwritten or the clash was not refused"
     fi
 
-    # The gate table parses: 15 rows, known sources, reasons only on missing rows.
+    # The gate table parses: 16 rows, known sources, reasons only on missing rows.
     local g s w rows=0 tbad=0
     while IFS='|' read -r g s w; do
         [[ -n "${g}" ]] || continue
         rows=$((rows + 1))
         case "${s}" in
-            boot|store|net|artifact|disk) [[ "${w}" == - ]] || tbad=1 ;;
+            boot|store|net|artifact|smp|crash|disk) [[ "${w}" == - ]] || tbad=1 ;;
             missing) [[ -n "${w}" && "${w}" != - ]] || tbad=1 ;;
             *) tbad=1 ;;
         esac
     done <<<"${CK_GATE_TABLE}"
-    [[ ${tbad} == 0 && ${rows} == 15 ]] && ok "gate table: 15 rows well-formed" || bad "gate table malformed (${rows} rows)"
+    [[ ${tbad} == 0 && ${rows} == 16 ]] && ok "gate table: 16 rows well-formed" || bad "gate table malformed (${rows} rows)"
 
     # Dirty-tree refusal, end to end, on a private clone (never this tree).
     # Both runs stop before any child script (no QEMU).
@@ -492,7 +534,7 @@ main() {
         case "$1" in
             --out) [[ $# -ge 2 ]] || die "--out needs a directory"; out_arg="$2"; shift ;;
             --self-test) mode=self ;;
-            -h|--help) sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+            -h|--help) sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
             *) die "unknown argument: $1" ;;
         esac
         shift

@@ -206,6 +206,18 @@ int main(void)
     static const uint32_t wn[8] = { 0, 1, 0, 1, 0, 1, 0, 1 };
     for (uint32_t i = 0; i < 8; i++)
         CHECK(ck_place_task(&tp, i, &pc, &pn) == 0 && pc == wc[i] && pn == wn[i]);
+    /* MPIDR list for the SMP bring-up (core/smp.c). */
+    uint64_t mp[4];
+    unsigned mn = 99;
+    CHECK(ck_madt_mpidrs(madt, mp, 4, &mn) == 0 && mn == 1 && mp[0] == 0); /* disabled GICC skipped */
+    memcpy(m2, madt, sizeof m2);
+    w32(m2 + 44 + 80 + 12, 8); /* second GICC online-capable */
+    w64(m2 + 44 + 80 + 68, 0xffffffffff000102ull); /* RES0 bits masked off */
+    CHECK(ck_madt_mpidrs(m2, mp, 4, &mn) == 0 && mn == 2 && mp[0] == 0 && mp[1] == 0xff00000102ull);
+    CHECK(ck_madt_mpidrs(m2, mp, 1, &mn) == -2 && mn == 2); /* more cores than slots */
+    m2[44 + 80 + 1] = 72; /* GICC too short to carry the MPIDR */
+    CHECK(ck_madt_mpidrs(m2, mp, 4, &mn) == -1);
+    CHECK(ck_madt_mpidrs(fadt, mp, 4, &mn) == -1); /* not a MADT */
     test_spans();
     return ck_t_verdict("CK_ACPI");
 }

@@ -465,7 +465,15 @@ impl AgentState {
                 }
                 Some(p) => {
                     let parent = self.branch(&p).ok_or(bad("parent branch is absent"))?;
-                    let index_ok = (0..parent.forks).any(|i| child_branch_id(&p, i) == b.id);
+                    // Scan capped at MAX_BRANCHES, as in the C codec
+                    // (continuity_codec.c:463-475): `forks` is input-controlled,
+                    // so an uncapped scan lets a hostile table spin for up to
+                    // 2^64 hashes. A table that passes the fork-sum check below
+                    // has every forks <= 255, so the cap changes no outcome for
+                    // a valid table; an id past the cap is refused here as
+                    // Corrupt("branch lineage is inconsistent"), same as C.
+                    let lim = parent.forks.min(MAX_BRANCHES as u64);
+                    let index_ok = (0..lim).any(|i| child_branch_id(&p, i) == b.id);
                     if !index_ok || Some(b.depth) != parent.depth.checked_add(1) {
                         return Err(bad("branch lineage is inconsistent"));
                     }
@@ -473,8 +481,16 @@ impl AgentState {
                 }
             }
         }
-        let forks: u64 = self.branches.iter().map(|b| b.forks).sum();
-        if roots != 1 || forks != children {
+        // Checked sum: kernel images build with --release and no profile turns
+        // overflow checks on, so a plain `.sum()` would wrap and accept e.g.
+        // {root forks = 2^64-1, child forks = 2}. An overflowing sum can never
+        // equal `children` (<= 255), so it is refused with the same class and
+        // text as the C codec (native/kernel/svc/continuity_codec.c:482-491).
+        let forks = self
+            .branches
+            .iter()
+            .try_fold(0u64, |acc, b| acc.checked_add(b.forks));
+        if roots != 1 || forks != Some(children) {
             return Err(bad("fork indexes are not contiguous"));
         }
         Ok(())

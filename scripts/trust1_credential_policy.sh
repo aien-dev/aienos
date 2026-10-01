@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# FLAG(sovereignty): decodes systemd-creds credentials (systemd dependency), Linux host Gate 0 only; retire once credentials move off systemd-creds.
 # trust1_credential_policy.sh: show which TPM policy seals a systemd credential.
 #
 # TRUST-1 Gate 0 (G7) and Gate 6. Reads only the public header of an
@@ -75,6 +76,7 @@ live_policy_digest() {
     bankname="$(bank_name "${bank}")"
     for ((i = 0; i < 24; i++)); do
         if (((mask >> i) & 1)); then
+            # FLAG(sovereignty): tpm2_pcrread (outside dep) on Linux host; replace with in-house C PCR reader.
             values+="$(tpm2_pcrread "${bankname}:${i}" | awk -v i="${i}" '$1 == i && $2 == ":" { sub(/^0x/, "", $3); print tolower($3) }')"
         fi
     done

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# FLAG(sovereignty): the tool list below names /bin/tpm2_pcrread (outside dep) in the recovery-image receipt; follows the in-house C replacement.
 # capture_gate1_receipt.sh: write the TRUST-1 Gate 1 (standalone RAM recovery
 # media) receipt from checks that actually ran. Nothing in the receipt is
 # assumed: every field is either measured here or marked NOT_RUN.

@@ -15,6 +15,7 @@
 #                                 Gate 2 per-experiment receipt (JSON)
 #   OUT_DIR                       legacy form, same as `capture OUT_DIR`
 #
+# FLAG(sovereignty): requires tpm2-tools (outside dep), Linux host only; replace with in-house C tool.
 # Requirements: tpm2-tools (tpm2_pcrread, tpm2_eventlog), read access to
 # /dev/tpmrm0 and the event log (member of group tss), sha256sum.
 # TPM2TOOLS_TCTI may point at a software TPM for host testing.
@@ -64,6 +65,7 @@ cmd_capture() {
     local out="${1:?capture needs OUT_DIR}" label="${2:-unlabelled}"
     [[ "${label}" =~ ^[A-Za-z0-9._-]+$ ]] || die "label must match [A-Za-z0-9._-]+"
     [[ ! -e "${out}" ]] || die "${out} already exists; captures are never overwritten"
+    # FLAG(sovereignty): tpm2_pcrread/tpm2_eventlog (outside dep), Linux host only; replace with in-house C PCR reader and event-log parser.
     command -v tpm2_pcrread >/dev/null || die "tpm2_pcrread not installed"
     command -v tpm2_eventlog >/dev/null || die "tpm2_eventlog not installed"
     mkdir -p "${out}/efivars"
@@ -138,8 +140,10 @@ cmd_capture() {
         echo "boot_current=$(awk '/^BootCurrent:/ {print $2}' "${out}/boot_entries.txt")"
         echo "boot_order=$(awk '/^BootOrder:/ {print $2}' "${out}/boot_entries.txt")"
         echo "boot_next=$(awk '/^BootNext:/ {print $2}' "${out}/boot_entries.txt")"
+        # FLAG(sovereignty): systemctl (systemd) queried on Linux host; remove, read fwupd state another way or drop the line.
         echo "fwupd_refresh_timer=$(systemctl is-enabled fwupd-refresh.timer 2>/dev/null || echo unknown)"
         echo "pcr_banks_with_values=$(cd "${out}" && ls pcr_*.norm | sed "s/pcr_//; s/.norm//" | paste -sd, -)"
+        # FLAG(sovereignty): tpm2_pcrread --version used only to record tool version; drop with tpm2-tools.
         echo "tpm2_tools=$(tpm2_pcrread --version 2>/dev/null | sed -n 's/.*version="\([^"]*\)".*/\1/p')"
     } >"${out}/capture.env"
 

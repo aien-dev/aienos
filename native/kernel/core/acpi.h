@@ -60,6 +60,13 @@ struct ck_cpu_topology {
     uint64_t first_mpidr;
 };
 int ck_madt_cpu_topology(const void *madt, struct ck_cpu_topology *out);
+/* MPIDR affinity fields of every enabled or online-capable GICC entry (offset
+ * 68, masked to Aff3 [39:32] and Aff2..Aff0 [23:0]), in table order, for the
+ * SMP bring-up (core/smp.c). *n gets the number of such entries even when it
+ * exceeds max (only the first max are stored). 0 ok, -1 malformed (bad entry
+ * length, truncation, a GICC entry shorter than 76 bytes), -2 more than max. */
+#define CK_MPIDR_AFF_MASK 0xff00ffffffull
+int ck_madt_mpidrs(const void *madt, uint64_t *out, unsigned max, unsigned *n);
 /* thread.rs place_task: task_index modulo the classified cores, walked class
  * by class. 0 and (class, index within class), or -1 if no core is classified. */
 int ck_place_task(const struct ck_cpu_topology *t, uint32_t task_index, uint8_t *class_id,
