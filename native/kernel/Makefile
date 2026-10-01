@@ -36,6 +36,8 @@
 #                        offset; $(OUT)/full-test-xlate-bypass/ (refused with
 #                        CK_HARDWARE_STAGING; never counted toward a PASS)
 #   make test            host unit tests            -> CK_CORE_HOST: PASS
+#                        (also builds the handoff_check reserved0 mutant
+#                        and requires test_handoff to FAIL against it)
 #   make sanitize        same under ASan + UBSan    -> CK_CORE_HOST: PASS
 #   make stage-test | stage-sanitize | stage-free   stage host tests (stage.mk)
 #   make print-kcflags   flags stage code must be built with
@@ -178,7 +180,7 @@ KLDFLAGS := -nostdlib -pie --no-dynamic-linker -z norelro -z noexecstack -z max-
 CORE_C := $(BOOT)/efi_main.c \
 	$(KDIR)/arch/exception.c $(KDIR)/arch/gic.c $(KDIR)/arch/timer.c \
 	$(KDIR)/core/acpi.c $(KDIR)/core/console.c $(KDIR)/core/fmt.c \
-	$(KDIR)/core/kmain.c $(KDIR)/core/libc_min.c $(KDIR)/core/report.c \
+	$(KDIR)/core/kmain.c $(KDIR)/core/handoff_check.c $(KDIR)/core/libc_min.c $(KDIR)/core/report.c \
 	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c \
 	$(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c \
 	$(KDIR)/mm/frames.c $(KDIR)/mm/heap.c $(KDIR)/mm/mmu.c $(KDIR)/mm/pt.c
@@ -342,9 +344,10 @@ $(FULL_EFI): $(FULL_ELF)
 
 # ---- host unit tests ----
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
-	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c
-TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy
-HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests
+	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
+	$(KDIR)/core/handoff_check.c
+TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy test_handoff
+HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
 $(OUT)/host/%: $(KDIR)/tests/%.c $(HOST_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
@@ -355,8 +358,20 @@ $(OUT)/host-san/%: $(KDIR)/tests/%.c $(HOST_SRCS) $(KDIR)/tests/ck_test.h $(HDRS
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -o $@ $< $(HOST_SRCS)
 
-test: $(addprefix $(OUT)/host/,$(TESTS))
-	@fail=0; for t in $^; do $$t || fail=1; done; \
+# TEST-ONLY mutant of core/handoff_check.c (reserved0 check removed): the
+# handoff test must FAIL against it, so "make test" fails if the test stops
+# catching the mutation. Host only (handoff_check.c refuses it freestanding
+# and with CK_HARDWARE_STAGING); never part of an image.
+$(OUT)/host/test_handoff_mutant: $(KDIR)/tests/test_handoff.c $(HOST_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -DCK_HANDOFF_MUTANT_SKIP_RESERVED -o $@ $< $(HOST_SRCS)
+
+handoff-mutant: $(OUT)/host/test_handoff_mutant
+	@if $< > $<.log 2>&1; then cat $<.log; echo "test_handoff mutant (reserved0 check removed): PASSED, test does not catch it"; exit 1; \
+	else grep -F "test_handoff: FAIL" $<.log && echo "test_handoff mutant (reserved0 check removed): FAILS as required"; fi
+
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant
+	@fail=0; for t in $(filter-out handoff-mutant,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -427,4 +442,4 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize clean print-kcflags udp-echo tool store-image gpt-image owner-gen FORCE
+.PHONY: all full test sanitize handoff-mutant clean print-kcflags udp-echo tool store-image gpt-image owner-gen FORCE

@@ -82,6 +82,19 @@ of them:
   host tools) are still present as data in every image, including hardware
   staging; the ordinary loader trusts no anchor.
 
+## Known hardware risk: disk footprint (CK gate DISK_LAYOUT: NOT_RUN)
+
+**Do not boot the C kernel on a disk holding data until CK gate `DISK_LAYOUT`
+is PASS on a forge receipt.** That gate is NOT_RUN (MISSING_IMPLEMENTATION, fix
+in progress).
+
+The kernel is partition-unaware. At every boot it writes and restores the last
+4 KiB unit of the whole NVMe namespace (`dev/nvme_bind.c:93-127`, called at
+`:224`) and uses the first 16 KiB as the anti-rollback anchor
+(`dev/disk_layout.h:3,12`; `svc/store_boot.c:164-170`). On a GPT disk those
+areas hold the protective MBR, the primary GPT and the backup GPT. Details and
+the operator-facing warning: `docs/TRUST-1-OPERATOR-STEPS.md`.
+
 ## Boot sequence
 
 1. UEFI stub: pre-exit report on ConOut, memory map, `ExitBootServices`.
