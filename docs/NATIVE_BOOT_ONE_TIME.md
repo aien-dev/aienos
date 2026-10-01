@@ -1,4 +1,4 @@
-# Machine 1 Native Boot Qualification Procedure: Attended, One-Time, Secure Boot ON
+# Machine 1 Native Boot Qualification Procedure: Attended, One-Time, Secure Boot OFF for development (as of 2026-10-01), ON for release
 
 This document defines the safe, operator-attended qualification procedure for one-time native candidate boots of AIENOS on NVIDIA DGX Spark ("Machine 1", `spark-b87b`).
 
@@ -10,9 +10,12 @@ This document defines the safe, operator-attended qualification procedure for on
 HARDWARE_QUALIFICATION_BLOCKED_BY_TRUST_CHAIN
 ```
 
+> [!NOTE]
+> **Update 2026-10-01 (owner decision):** Secure Boot is OFF on Machine 1 for development, by Drake's decision. The TPM stores were relocked with PCR 7 measured under Secure Boot off (recovery procedure: `~/handoffs/secure-boot-off/after-restart.sh`). Gates now report Secure Boot state as an observed fact and do not fail on it. Any production or release gate must still require Secure Boot ON. The historical warning below describes the 2026-09-24 state and the PCR 7 sealing risk when the setting is flipped.
+
 > [!CAUTION]
-> **DO NOT DISABLE SECURE BOOT.**
-> On Machine 1, turning Secure Boot off alters TPM PCR 7. On the historical 2026-09-24 first-boot test, changing PCR 7 prevented the TPM from unsealing the volume encryption keys for `atlas-private-storage` and `atlas-forgejo-storage`, locking the filesystem and causing severe service restart loops (`evidence/machine1_core_baseline_2026-09-24.md`). Secure Boot was restored and must remain **ENABLED** at all times.
+> **HISTORICAL (2026-09-24): do not flip Secure Boot without re-sealing the TPM stores.**
+> On Machine 1, turning Secure Boot off alters TPM PCR 7. On the historical 2026-09-24 first-boot test, changing PCR 7 prevented the TPM from unsealing the volume encryption keys for `atlas-private-storage` and `atlas-forgejo-storage`, locking the filesystem and causing severe service restart loops (`evidence/machine1_core_baseline_2026-09-24.md`). Secure Boot was restored then; as of 2026-10-01 it is OFF for development by owner decision (see note above).
 >
 > The native AIENOS boot images (`aienos-handoff.efi`, `aienos-boot.efi`) are not currently signed by a key enrolled in Machine 1's UEFI database (`db`). Direct execution under Secure Boot will fail with `Secure Boot Violation` (`evidence/gate1_machine1_selftest_2026-09-24.md`).
 >
@@ -22,7 +25,7 @@ HARDWARE_QUALIFICATION_BLOCKED_BY_TRUST_CHAIN
 
 ## 2. Hard Invariants & Safety Constraints
 
-1. **Secure Boot Enforced:** Machine 1 must report `SecureBoot enabled` (`/sys/firmware/efi/efivars/SecureBoot-*` byte 4 == 1). Any tool or procedure attempting to disable Secure Boot fails closed.
+1. **Secure Boot (release only):** a release gate requires `SecureBoot enabled`; during development (OFF since 2026-10-01, owner decision) the state is only recorded. For a release, Machine 1 must report `SecureBoot enabled` (`/sys/firmware/efi/efivars/SecureBoot-*` byte 4 == 1). Any tool or procedure attempting to disable Secure Boot fails closed.
 2. **Permanent BootOrder Immutable:** `BootOrder` must not be modified. Linux (Ubuntu GRUB/shim, `Boot0001`) remains the permanent, unchallengeable default.
 3. **One-Time Staging Only:** Candidates are invoked strictly via UEFI `BootNext`. Firmware deletes `BootNext` upon boot.
 4. **Zero Persistent Storage Mutation:** Candidate execution must not write to Linux root (`/dev/nvme0n1p2`) or alter the EFI System Partition (`/dev/nvme0n1p1`) outside of the staging scratch directory `\EFI\AIENOS`.

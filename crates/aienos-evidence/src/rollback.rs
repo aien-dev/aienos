@@ -161,17 +161,15 @@ fn boot_order(v: &Value) -> Vec<String> {
 /// Returns the full report text and the verdict.
 pub fn verify(pre: &Value, post: &Value) -> (String, Verdict) {
     let mut errors: Vec<String> = Vec::new();
-    let mut blocked: Vec<String> = Vec::new();
+    // Nothing blocks today: Secure Boot is OFF for development (owner decision,
+    // 2026-10-01), so its state is reported as an observed fact. A release gate
+    // that requires "enabled" must be added separately.
+    let blocked: Vec<String> = Vec::new();
 
-    // 1. Secure Boot must be on before and after, and unchanged.
+    // 1. Secure Boot is observed (reported below), not required to be on during
+    //    development. It must still be unchanged across the candidate boot.
     let sb_pre = text(pre, "secure_boot").to_lowercase();
     let sb_post = text(post, "secure_boot").to_lowercase();
-    if sb_pre != "enabled" {
-        blocked.push(format!("Pre-boot Secure Boot is not enabled: {sb_pre}"));
-    }
-    if sb_post != "enabled" {
-        blocked.push(format!("Post-boot Secure Boot is not enabled: {sb_post}"));
-    }
     if sb_pre != sb_post {
         errors.push(format!(
             "Secure Boot state changed from '{sb_pre}' to '{sb_post}'"
@@ -438,16 +436,23 @@ ESP UUID:     e-1 (matched=True)\n";
     }
 
     #[test]
-    fn secure_boot_off_blocks_even_with_other_failures() {
+    fn secure_boot_off_is_observed_not_blocking() {
         let mut pre = capture();
         pre["secure_boot"] = json!("disabled");
         let mut post = capture();
-        post["boot_next"] = json!("0000");
+        post["secure_boot"] = json!("disabled");
         let (report, v) = verify(&pre, &post);
-        assert_eq!(v, Verdict::Blocked);
-        assert_eq!(v.exit_code(), 3);
-        assert!(report.contains("* Pre-boot Secure Boot is not enabled: disabled\n"));
-        assert!(!report.contains("VIOLATIONS"));
+        assert_eq!(v, Verdict::Pass);
+        assert!(report.contains("Secure Boot:  before=disabled, after=disabled\n"));
+    }
+
+    #[test]
+    fn secure_boot_change_is_still_a_violation() {
+        let mut pre = capture();
+        pre["secure_boot"] = json!("disabled");
+        let (report, v) = verify(&pre, &capture());
+        assert_ne!(v, Verdict::Pass);
+        assert!(report.contains("Secure Boot state changed"));
     }
 
     #[test]

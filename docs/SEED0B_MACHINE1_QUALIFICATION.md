@@ -25,7 +25,7 @@ enrolls no key, and it changes no trust state.
 1. **TRUST-1 owner-signed boot chain** ([#40](https://github.com/aien-dev/aienos/issues/40)).
    Native Machine 1 boots are paused by operator decision (2026-09-24):
    turning Secure Boot off changes TPM PCR 7 and breaks the secrets sealed
-   to it. **Secure Boot stays on.** The qualification image must therefore
+   to it. **Secure Boot was kept on at the time of this decision. Update 2026-10-01: Secure Boot is OFF for development by owner decision; the TPM stores were relocked under PCR 7 with it off (`~/handoffs/secure-boot-off/after-restart.sh`). A release image must still be signed by the TRUST-1 chain.** The qualification image must therefore
    be signed by the owner-controlled chain TRUST-1 defines. Do not disable
    Secure Boot, enroll the test keys, or relax any other mechanism to run
    this step.

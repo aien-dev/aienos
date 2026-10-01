@@ -20,7 +20,7 @@ Under no circumstances—whether normal completion, kernel panic, CPU exception,
    - The primary operating system (e.g. Ubuntu Linux under GRUB/shim on Machine 1, or default reference OS in QEMU) is represented by persistent boot variable `Boot0001` (or existing default `BootCurrent`).
    - The UEFI `BootOrder` variable lists default entries in priority order (e.g. `0001,0003`).
    - The default boot configuration is immutable with respect to candidate execution.
-   - Secure Boot state remains enabled (`SecureBoot=1`).
+   - Secure Boot state is unchanged across the run. It is OFF for development as of 2026-10-01 (owner decision) and is recorded as an observed fact; a release gate requires `SecureBoot=1`.
    - TPM PCR policies and sealed volume secrets remain intact.
 
 2. **One-Time Candidate Selection:**
