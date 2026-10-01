@@ -1,0 +1,40 @@
+{
+  "schema": "aienos.ck_gates.v1",
+  "started_utc": "2026-10-01T11:21:11Z",
+  "finished_utc": "2026-10-01T11:23:03Z",
+  "commit": "197b8360bfd2ee00c7b31e82b712f17f52cc599b",
+  "commit_subject": "ck: P2_ARTIFACT sealed artifact loader in the C kernel (QEMU gate)",
+  "tree_clean_before": true,
+  "tree_clean_after": true,
+  "quiet_flag": "/home/drakestapleton/workspace/.spark-quiet",
+  "quiet_flag_present_at_start": false,
+  "host": {"hostname": "spark-b87b", "arch": "aarch64", "kernel": "7.0.0-1019-nvidia", "cpu_model": "Cortex-A725;Cortex-X925"},
+  "qemu": {"binary": "/usr/bin/qemu-system-aarch64", "version": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)"},
+  "firmware": {"aavmf_code": "/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd", "aavmf_code_sha256": "4a4cb7f6d8106bb2a7dd8c763fab14b1810152136fc4304e5b728f0043e84f12", "aavmf_vars": "/usr/share/AAVMF/AAVMF_VARS.fd", "aavmf_vars_sha256": "b3b855c5a80310168051164986855692d1bdb06e67619856177965cd87c6774f"},
+  "nvme_dma_mode": "Confined (QEMU SMMUv3 stage 1, out-of-window DMA faulted); no-SMMU boot denied (NoSmmu); TEST-ONLY bypass image checked separately",
+  "children": [
+    {"name": "boot", "script": "scripts/qemu_ck_boot_test.sh", "present": true, "script_sha256": "64bcb2d1285485b989dc8309ce0b024ea799d3bce13cff22f62924d3ae4b7cce", "exit": "0", "seconds": 6, "log_sha256": "bb655365a8aeae638a6f7214f8d7e5770e597b6fd0e64c58e6bd0ffe79d2ca2f", "log_lines": 22},
+    {"name": "store", "script": "scripts/qemu_ck_store_test.sh", "present": true, "script_sha256": "b005ed29619d1113536a0686cedafe84fcea95fa30321307ec1d1335ea231925", "exit": "0", "seconds": 89, "log_sha256": "ec6d169e4c22262c48769778c4939c21f2c00e14bc7328a02a464c644c7a475e", "log_lines": 533},
+    {"name": "artifact", "script": "scripts/qemu_ck_artifact_test.sh", "present": true, "script_sha256": "8aa38b624d29b3b62189c6bd9dec12a7551d16c45b1ba21686a3fc30fb14618f", "exit": "0", "seconds": 16, "log_sha256": "d5b54877710c4b59f66376cd9f181afe77168093c606abe079eeea253a45413d", "log_lines": 167}
+  ],
+  "gates": [
+    {"id": "M1", "marker": "AIENOS_CK_M1", "source": "boot", "verdict": "PASS", "reason": "child reported PASS, exit 0"},
+    {"id": "M3", "marker": "AIENOS_CK_M3", "source": "boot", "verdict": "PASS", "reason": "child reported PASS, exit 0"},
+    {"id": "SMMU", "marker": "AIENOS_CK_SMMU", "source": "store", "verdict": "PASS", "reason": "child reported PASS, exit 0"},
+    {"id": "NVME_SHUTDOWN", "marker": "AIENOS_CK_NVME_SHUTDOWN", "source": "store", "verdict": "PASS", "reason": "child reported PASS, exit 0"},
+    {"id": "P2_ARTIFACT", "marker": "AIENOS_CK_P2_ARTIFACT", "source": "artifact", "verdict": "PASS", "reason": "child reported PASS, exit 0"},
+    {"id": "M0_ROLLBACK", "marker": "AIENOS_CK_M0_ROLLBACK", "source": "missing", "verdict": "NOT_RUN", "reason": "MISSING_IMPLEMENTATION: C loader signatures, A/B, BootNext and rollback are parked (native/boot/README.md)"},
+    {"id": "M4_NVME", "marker": "AIENOS_CK_M4_NVME", "source": "store", "verdict": "PASS", "reason": "SMMU-confined NVMe DMA in QEMU (iommu=smmuv3, default build); TEST-ONLY bypass build boot-checked separately"},
+    {"id": "M4_STORE", "marker": "AIENOS_CK_M4_STORE", "source": "store", "verdict": "PASS", "reason": "child reported PASS, exit 0"},
+    {"id": "M4_STORE_CRASH", "marker": "AIENOS_CK_M4_STORE_CRASH", "source": "missing", "verdict": "NOT_RUN", "reason": "MISSING_IMPLEMENTATION: no C Store crash/kill campaign (4 KiB or 512 B) and no slot reuse (C Store is append-only)"},
+    {"id": "M4_CONTINUITY", "marker": "AIENOS_CK_M4_CONTINUITY", "source": "missing", "verdict": "NOT_RUN", "reason": "MISSING_IMPLEMENTATION: no continuity core (ADR 0016 agent identity and memory) in the C kernel"},
+    {"id": "M4_RECOVERY", "marker": "AIENOS_CK_M4_RECOVERY", "source": "missing", "verdict": "NOT_RUN", "reason": "MISSING_IMPLEMENTATION: no Recovery Core (ADR 0006) in the C kernel"},
+    {"id": "ARGUS1_REVOKE", "marker": "AIENOS_CK_ARGUS1_REVOKE", "source": "store", "verdict": "PASS", "reason": "child reported PASS, exit 0"},
+    {"id": "KEYBOARD", "marker": "AIENOS_CK_KEYBOARD", "source": "missing", "verdict": "NOT_RUN", "reason": "MISSING_IMPLEMENTATION: no xHCI/USB HID keyboard driver in the C kernel"}
+  ],
+  "counts": {"total": 13, "pass": 8, "fail": 0, "not_run": 5},
+  "verdict": "NOT_ALL_GATES_PASS",
+  "parity": "native/kernel/GATES.md",
+  "physical": "NOT_RUN",
+  "physical_statement": "QEMU emulator runs only. Nothing here was run on Machine 1 or any GB10; no physical qualification is claimed."
+}
