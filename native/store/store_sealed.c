@@ -9,7 +9,7 @@
 #include "store_v1.h"
 
 /* ---- sealed transaction record, kind SS_KIND_TXREC ----
- * 0 "AIENSTX1" | 8 version u16 = 1 | 10 identity_class | 11 reserved = 0
+ * 0 "AIENSTX1" | 8 version u16 = 2 (1 refused: SS_E_FORMAT_VERSION) | 10 identity_class | 11 reserved = 0
  * | 12 count u16 (1..SS_MAX_OBJECTS) | 14 reserved u16 = 0 | 16 store_uuid[16]
  * | 32 store_generation u64 | 40 counter u64 (= store_generation)
  * | 48 key_generation u64 | 56 previous_record_digest[32] (zero at generation 2)
@@ -20,7 +20,9 @@
  * 0 "AIENSAN1" | 8 version u16 = 1 | 10 identity_class | 11..16 zero
  * | 16 store_uuid[16] | 32 m5 anchor[120] | 152..4096 zero */
 #define TX_DOMAIN "AIENOS-STORE-SEALED-TX-V1"
-#define ENVID_DOMAIN "AIENOS-SEALED-ENVID-V1"
+#define ENVID_DOMAIN "AIENOS-SEALED-ENVID-V2"
+#define ENVID_KEY_INFO "AIENOS-SEALED-ENVID-KEY-V2"
+#define TX_VERSION 2u /* 1 = predictable envelope ids (refused, SS_E_FORMAT_VERSION) */
 #define AN_OFF 32u
 
 static void put16(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
@@ -63,6 +65,7 @@ const char *ss_strerror(int e)
     case SS_E_FOREIGN_KIND: return "SealedForeignKind";
     case SS_E_CRYPTO: return "SealedCryptoFailure";
     case SS_E_NEEDS_REOPEN: return "SealedNeedsReopen";
+    case SS_E_FORMAT_VERSION: return "SealedFormatVersion";
     default: return st_strerror(e);
     }
 }
@@ -160,7 +163,9 @@ static int tx_open(ss_store *s, const uint8_t *b, size_t len, ss_txinfo *info,
                    ss_claim *claims, uint32_t room, uint32_t *cnt)
 {
     if (len < SS_TX_HDR + SS_TX_ENTRY + 32 || len > SS_TX_MAX) return SS_E_TXREC;
-    if (memcmp(b, "AIENSTX1", 8) != 0 || get16(b + 8) != 1 || b[11] != 0 || get16(b + 14) != 0)
+    if (memcmp(b, "AIENSTX1", 8) != 0) return SS_E_TXREC;
+    if (get16(b + 8) == 1) return SS_E_FORMAT_VERSION; /* GUARD:tx-version-1 */
+    if (get16(b + 8) != TX_VERSION || b[11] != 0 || get16(b + 14) != 0)
         return SS_E_TXREC;
     uint32_t n = get16(b + 12);
     if (n == 0 || n > SS_MAX_OBJECTS) return SS_E_TXREC;
@@ -325,6 +330,44 @@ void ss_tx_remac(ss_store *s)
     tx_mac(s->keys.k_root_auth, b, len - 32, b + len - 32);
 }
 
+/* Envelope id (16 bytes) and nonce prefix (8 bytes) of the object at
+ * (generation, index), V2 rule: the first 24 bytes of
+ * HMAC(k_envid, "AIENOS-SEALED-ENVID-V2\0" || uuid || generation u64 ||
+ * index u32 || kind u16 || version u16 || key_generation u64 ||
+ * identity_class u8 || plaintext_len u64 || SHA-256(plaintext)),
+ * k_envid = HKDF-Expand(k_domain, "AIENOS-SEALED-ENVID-KEY-V2\0", 32).
+ * The envelope id also feeds the per-object key, so the AES-GCM-SIV
+ * (key, nonce) pair of a chunk changes whenever the plaintext changes.
+ * After a whole-disk rollback a rewrite of the same generation and index
+ * with different bytes therefore never repeats a (key, nonce) pair; only a
+ * rewrite of the identical object reproduces the identical envelope, which
+ * shows an attacker nothing the old image did not already show. */
+static int envid_derive(const ss_store *s, uint64_t gen, uint32_t index, uint16_t kind,
+                        uint16_t version, const uint8_t *pt, size_t len, uint8_t out[32])
+{
+    uint8_t k[32], ph[32], m[16 + 8 + 4 + 2 + 2 + 8 + 1 + 8 + 32];
+    if (m5_hkdf_expand(s->keys.k_domain, (const uint8_t *)ENVID_KEY_INFO, sizeof(ENVID_KEY_INFO), k,
+                       sizeof k) != M5_OK)
+        return SS_E_CRYPTO;
+    sha256_hash(pt, len, ph);
+    memcpy(m, s->uuid, 16);
+    put64(m + 16, gen);
+    put32(m + 24, index);
+    put16(m + 28, kind);
+    put16(m + 30, version);
+    put64(m + 32, s->keys.key_generation);
+    m[40] = s->keys.identity_class;
+    put64(m + 41, (uint64_t)len);
+    memcpy(m + 49, ph, 32);
+    aienos_hmac_sha256_ctx c;
+    aienos_hmac_sha256_init(&c, k);
+    aienos_hmac_sha256_update(&c, (const uint8_t *)ENVID_DOMAIN, sizeof(ENVID_DOMAIN));
+    aienos_hmac_sha256_update(&c, m, sizeof m);
+    aienos_hmac_sha256_final(&c, out);
+    memset(k, 0, sizeof k);
+    return 0;
+}
+
 int ss_prepare(ss_store *s, const ss_object *o, size_t n)
 {
     if (!s || !s->ws || (!o && n)) return SS_E_ARG;
@@ -341,15 +384,9 @@ int ss_prepare(ss_store *s, const ss_object *o, size_t n)
     for (size_t i = 0; i < n; i++) {
         if (o[i].len > SS_MAX_PLAINTEXT || (!o[i].bytes && o[i].len)) return SS_E_ARG; /* GUARD:sealed-size */
         if (o[i].kind == 0 || o[i].version == 0) return SS_E_ARG;
-        uint8_t h[32], m[16 + 8 + 4];
-        sha256_ctx c;
-        sha256_init(&c);
-        sha256_update(&c, (const uint8_t *)ENVID_DOMAIN, sizeof(ENVID_DOMAIN));
-        memcpy(m, s->uuid, 16);
-        put64(m + 16, ng);
-        put32(m + 24, (uint32_t)i);
-        sha256_update(&c, m, sizeof m);
-        sha256_final(&c, h);
+        uint8_t h[32];
+        if (envid_derive(s, ng, (uint32_t)i, o[i].kind, o[i].version, o[i].bytes, o[i].len, h) != 0)
+            return SS_E_CRYPTO;
         m5_object_binding b;
         memset(&b, 0, sizeof b);
         memcpy(b.store_uuid, s->uuid, 16);
@@ -377,7 +414,7 @@ int ss_prepare(ss_store *s, const ss_object *o, size_t n)
         ws->objs[i].len = ws->env_len[i];
     }
     memcpy(tx, "AIENSTX1", 8);
-    put16(tx + 8, 1);
+    put16(tx + 8, TX_VERSION);
     tx[10] = s->keys.identity_class;
     put16(tx + 12, (uint16_t)n);
     memcpy(tx + 16, s->uuid, 16);
@@ -456,6 +493,15 @@ int ss_read(ss_store *s, const uint8_t sid[32], uint8_t *out, size_t cap, size_t
                           out, cap, len);
     if (rc == M5_ERR_SPACE) return SS_E_ARG;
     if (rc != M5_OK) return SS_E_ENVELOPE;
+    /* the envelope id and nonce prefix must follow the V2 rule for these bytes */
+    m5_env_header eh;
+    uint8_t h[32];
+    int bad = m5_envelope_parse_header(s->ws->rd, elen, &eh) != M5_OK ||
+              c->c.object_sequence > UINT32_MAX ||
+              envid_derive(s, c->c.store_generation, (uint32_t)c->c.object_sequence,
+                           c->c.obj.object_kind, c->c.obj.object_version, out, *len, h) != 0;
+    if (!bad) bad = memcmp(h, c->c.obj.envelope_id, 16) != 0 || memcmp(h + 16, eh.nonce_prefix, 8) != 0;
+    if (bad) { memset(out, 0, *len); *len = 0; return SS_E_ENVELOPE; } /* GUARD:read-envid-rule */
     if (kind) *kind = c->c.obj.object_kind;
     return 0;
 }

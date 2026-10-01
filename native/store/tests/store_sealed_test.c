@@ -400,16 +400,32 @@ static void ed_seq(ss_store *s, void *a)
 static uint8_t dup_tx[SS_TX_MAX];
 static void ed_dup_gen(ss_store *s, void *a)
 {
-    (void)a; /* a second, different, validly MACed record for the same generation */
+    (void)a; /* two validly MACed, chain-valid records for the same generation,
+              * each claiming one of the two envelopes once, so only the
+              * one-record-per-generation check can refuse the pair */
     ss_workspace *w = s->ws;
-    memcpy(dup_tx, w->tx, w->tx_len);
-    w->tx[56] ^= 1;
-    ss_tx_remac(s);
+    uint8_t *e1 = w->tx + SS_TX_HDR + SS_TX_ENTRY;
+    m5_commit c;
+    m5_commit_open(e1 + 32, M5_COMMIT_LEN, K.k_root_auth, K.identity_class, &c);
+    c.object_sequence = 0;
+    size_t len1 = SS_TX_HDR + SS_TX_ENTRY + 32;
+    memcpy(dup_tx, w->tx, SS_TX_HDR);
+    memcpy(dup_tx + SS_TX_HDR, e1, 32);
+    m5_commit_seal(&c, K.k_root_auth, dup_tx + SS_TX_HDR + 32);
+    dup_tx[12] = 1;
+    dup_tx[13] = 0;
+    w->tx[12] = 1;
+    w->tx[13] = 0;
+    w->tx_len = len1;
+    ss_tx_remac(s); /* the real record now claims envelope 0 only */
     uint8_t t[SS_TX_MAX];
-    memcpy(t, w->tx, w->tx_len);
-    memcpy(w->tx, dup_tx, w->tx_len);
-    memcpy(dup_tx, t, w->tx_len);
-    w->objs[w->nobjs++] = (st_object){SS_KIND_TXREC, 1, dup_tx, w->tx_len};
+    memcpy(t, w->tx, len1);
+    memcpy(w->tx, dup_tx, len1);
+    ss_tx_remac(s);
+    memcpy(dup_tx, w->tx, len1);
+    memcpy(w->tx, t, len1);
+    w->objs[w->nobjs - 1].len = len1;
+    w->objs[w->nobjs++] = (st_object){SS_KIND_TXREC, 1, dup_tx, len1};
 }
 static uint8_t old_sid[32];
 static m5_commit old_commit;
@@ -619,6 +635,136 @@ static void test_kinds(void)
     CHECK(SS_KIND_ENVELOPE != SS_KIND_TXREC, "distinct kinds");
 }
 
+/* ---- nonce safety (Lane 26): envelope id + nonce prefix = V2 rule ---- */
+#define NONCE_ROUNDS 24
+/* (envelope_id || nonce_prefix) of the last envelope sealed into g_ws.env[0] */
+static void last_pair(uint8_t out[24])
+{
+    memcpy(out, g_ws.env[0] + 28, 16);
+    memcpy(out + 16, g_ws.env[0] + 44, 8);
+}
+
+static void test_nonce(void)
+{
+    uint8_t ids[2][32];
+    make_gen2(ids);
+    static uint8_t snap[RIG_BYTES], q[SS_MAX_PLAINTEXT];
+    CHECK(file_load(g_path, snap, RIG_BYTES) == 0, "snapshot gen 2");
+    /* gen 3 written, then whole-disk rollback to gen 2 and a different gen 3,
+     * NONCE_ROUNDS times: every (key input, nonce) pair must be new */
+    static uint8_t pairs[NONCE_ROUNDS + 1][24];
+    for (int r = 0; r <= NONCE_ROUNDS; r++) {
+        CHECK(file_save(g_path, snap, RIG_BYTES) == 0, "whole-disk rollback");
+        fill(q, 600, 100u + (uint32_t)r);
+        uint8_t id[32];
+        advance(&K, 42, q, 600, id, 0);
+        last_pair(pairs[r]);
+        rig rr;
+        ss_store s;
+        SCHECK_EQ(sopen(&rr, &s, &K), 0, "rewritten gen 3 mounts");
+        SCHECK_EQ(ss_generation(&s), 3, "same generation after rollback");
+        SCHECK_EQ(check_read(&s, id, q, 600, 42), 0, "rewritten object reads back");
+        rig_close(&rr);
+        for (int j = 0; j < r; j++) {
+            CHECK(memcmp(pairs[j], pairs[r], 16) != 0, "envelope id (object key input) repeated");
+            CHECK(memcmp(pairs[j] + 16, pairs[r] + 16, 8) != 0, "nonce prefix repeated");
+        }
+        /* the old predictable V1 value is not used */
+        uint8_t m[16 + 8 + 4], v1[32];
+        sha256_ctx c;
+        sha256_init(&c);
+        sha256_update(&c, (const uint8_t *)"AIENOS-SEALED-ENVID-V1", sizeof("AIENOS-SEALED-ENVID-V1"));
+        memcpy(m, RIG_UUID, 16);
+        for (int b = 0; b < 8; b++) m[16 + b] = (uint8_t)((uint64_t)3 >> (8 * b));
+        memset(m + 24, 0, 4);
+        sha256_update(&c, m, sizeof m);
+        sha256_final(&c, v1);
+        CHECK(memcmp(v1, pairs[r], 24) != 0, "V1 predictable id still used");
+    }
+    /* the identical object rewritten at the same place gives the identical
+     * envelope (deterministic; reveals nothing the old image did not) */
+    CHECK(file_save(g_path, snap, RIG_BYTES) == 0, "rollback");
+    fill(q, 600, 100u);
+    advance(&K, 42, q, 600, NULL, 0);
+    uint8_t again[24];
+    last_pair(again);
+    CHECK(memcmp(again, pairs[0], 24) == 0, "identical rewrite is deterministic");
+    /* one byte, kind or version changed gives a new pair */
+    CHECK(file_save(g_path, snap, RIG_BYTES) == 0, "rollback");
+    q[599] ^= 1;
+    advance(&K, 42, q, 600, NULL, 0);
+    last_pair(again);
+    CHECK(memcmp(again, pairs[0], 16) != 0 && memcmp(again + 16, pairs[0] + 16, 8) != 0, "one-bit change, new pair");
+    CHECK(file_save(g_path, snap, RIG_BYTES) == 0, "rollback");
+    q[599] ^= 1;
+    advance(&K, 43, q, 600, NULL, 0);
+    last_pair(again);
+    CHECK(memcmp(again, pairs[0], 16) != 0 && memcmp(again + 16, pairs[0] + 16, 8) != 0, "kind change, new pair");
+
+    /* counter going backwards is refused: Store rolled back under the anchor */
+    CHECK(file_save(g_path, snap, RIG_BYTES) == 0, "rollback");
+    advance(&K, 42, q, 600, NULL, 0); /* gen 3 */
+    static uint8_t g3[RIG_BYTES], t[RIG_BYTES];
+    CHECK(file_load(g_path, g3, RIG_BYTES) == 0, "snapshot gen 3");
+    memcpy(t, g3, RIG_BYTES);
+    copy_store(t, snap);
+    CHECK(file_save(g_path, t, RIG_BYTES) == 0, "write");
+    SCHECK_EQ(open_rc(&K), SS_E_ROLLBACK, "counter went backwards (store 2 under anchor 3)");
+
+    /* a version-1 record (old predictable-id format) is refused, typed */
+    CHECK(file_save(g_path, g3, RIG_BYTES) == 0, "restore gen 3");
+    {
+        rig rr;
+        ss_store s;
+        SCHECK_EQ(sopen(&rr, &s, &K), 0, "open gen 3");
+        ss_object o = {44, 1, P1, sizeof P1};
+        SCHECK_EQ(ss_prepare(&s, &o, 1), 0, "prepare");
+        g_ws.tx[8] = 1;
+        ss_tx_remac(&s);
+        SCHECK_EQ(ss_commit_prepared(&s, NULL, NULL), 0, "commit forged v1 record");
+        rig_close(&rr);
+        SCHECK_EQ(open_rc(&K), SS_E_FORMAT_VERSION, "version-1 record refused");
+    }
+
+    /* a writer that sealed with the old predictable id (valid MACs and
+     * digests) mounts, but the envelope is refused on read */
+    CHECK(file_save(g_path, g3, RIG_BYTES) == 0, "restore gen 3");
+    {
+        rig rr;
+        ss_store s;
+        SCHECK_EQ(sopen(&rr, &s, &K), 0, "open gen 3");
+        ss_object o = {44, 1, P1, sizeof P1};
+        SCHECK_EQ(ss_prepare(&s, &o, 1), 0, "prepare");
+        uint8_t m[16 + 8 + 4], v1[32];
+        sha256_ctx c;
+        sha256_init(&c);
+        sha256_update(&c, (const uint8_t *)"AIENOS-SEALED-ENVID-V1", sizeof("AIENOS-SEALED-ENVID-V1"));
+        memcpy(m, RIG_UUID, 16);
+        for (int b = 0; b < 8; b++) m[16 + b] = (uint8_t)((uint64_t)4 >> (8 * b));
+        memset(m + 24, 0, 4);
+        sha256_update(&c, m, sizeof m);
+        sha256_final(&c, v1);
+        m5_commit mc;
+        uint8_t *e = g_ws.tx + SS_TX_HDR;
+        CHECK(m5_commit_open(e + 32, M5_COMMIT_LEN, K.k_root_auth, K.identity_class, &mc) == M5_OK, "commit open");
+        memcpy(mc.obj.envelope_id, v1, 16);
+        CHECK(m5_envelope_seal(K.k_domain, &mc.obj, v1 + 16, SS_CHUNK, P1, sizeof P1, g_ws.env[0],
+                               SS_ENV_CAP, &g_ws.env_len[0]) == M5_OK, "legacy seal");
+        g_ws.objs[0].len = g_ws.env_len[0];
+        CHECK(sv1_object_id(SS_KIND_ENVELOPE, 1, g_ws.env[0], g_ws.env_len[0], e) == 0, "object id");
+        sha256_hash(g_ws.env[0], g_ws.env_len[0], mc.object_id);
+        CHECK(m5_commit_seal(&mc, K.k_root_auth, e + 32) == M5_OK, "commit seal");
+        ss_tx_remac(&s);
+        uint8_t sid[32];
+        memcpy(sid, e, 32);
+        SCHECK_EQ(ss_commit_prepared(&s, NULL, NULL), 0, "commit legacy-id envelope");
+        rig_close(&rr);
+        SCHECK_EQ(sopen(&rr, &s, &K), 0, "legacy-id envelope mounts (digests valid)");
+        SCHECK_EQ(check_read(&s, sid, P1, sizeof P1, 44), SS_E_ENVELOPE, "legacy-id envelope refused on read");
+        rig_close(&rr);
+    }
+}
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : ".";
@@ -641,6 +787,7 @@ int main(int argc, char **argv)
         test_identity();
         test_forgery();
         test_anchor_crash();
+        test_nonce();
         printf("sealed store, %u-byte blocks: %s\n", g_bs, g_failed == before ? "ok" : "FAILED");
         unlink(g_path);
     }
