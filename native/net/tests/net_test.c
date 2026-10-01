@@ -107,6 +107,10 @@ static void test_arp_cache(void)
     EQ(net_arp_cache_learn(&c, &p, 1, 0, 10, 5), NET_OK);
     net_arp_packet q = p; q.sender_ip.b[3] = 9;
     EQ(net_arp_cache_learn(&c, &q, 1, 0, 11, 5), NET_ERR_CAPACITY);
+    EQ(net_arp_cache_learn(&c, &q, 1, 0, 15, 5), NET_OK);      /* expired slot is reclaimed by learn */
+    EQ(net_arp_cache_lookup(&c, q.sender_ip, 16, &m), 1);
+    EQ(net_arp_cache_lookup(&c, p.sender_ip, 16, &m), 0);
+    EQ(net_arp_cache_learn(&c, &p, 1, 0, 20, 5), NET_OK);      /* q expired at 20 */
     /* same IP re-learn replaces in place (spoofed reply would overwrite: caller must gate) */
     p.sender_mac.b[0] = 7;
     EQ(net_arp_cache_learn(&c, &p, 1, 0, 12, 5), NET_OK);

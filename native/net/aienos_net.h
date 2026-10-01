@@ -7,7 +7,8 @@
  * byte for byte (see tests/net_diff.c).
  *
  * Deliberate difference: checksums accumulate in 64 bits, so inputs larger
- * than 128 KiB cannot overflow the sum (the Rust u32 sum would overflow there).
+ * than 128 KiB cannot overflow the sum (the Rust u32 sum would overflow there),
+ * and the ARP cache reuses expired entries when learning (see README.md).
  *
  * Hosted only: no native binding (needs a C kernel) and no production keys
  * (needs M5). See README.md.

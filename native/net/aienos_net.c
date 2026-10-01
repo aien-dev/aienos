@@ -133,7 +133,9 @@ net_err net_arp_cache_learn(net_arp_cache *c, const net_arp_packet *p, int solic
     for (size_t i = 0; i < c->capacity; i++) {
         const net_arp_entry *e = &c->entries[i];
         if (e->used && memcmp(e->ip.b, p->sender_ip.b, 4) == 0) { slot = i; break; }
-        if (!e->used && slot == SIZE_MAX) slot = i;
+        /* An expired entry is free (deliberate difference: the reference only
+         * reclaims it during a lookup, so learning depended on lookup order). */
+        if ((!e->used || e->expires <= now) && slot == SIZE_MAX) slot = i;
     }
     if (slot == SIZE_MAX) return NET_ERR_CAPACITY;
     c->entries[slot].used = 1;

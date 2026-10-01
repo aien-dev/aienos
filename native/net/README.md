@@ -34,6 +34,9 @@ control-transport stub. No Rust, no Python, no heap, no outside library.
   about 128 KiB of input).
 - NULL pointer or argument misuse returns an error instead of being
   impossible by type.
+- The ARP cache reuses an expired entry when learning (the reference only
+  frees expired entries during a lookup, so a full cache refused new senders
+  until some lookup ran). Found by the Codex review.
 
 ## Not claimed (deferred, with the dependency)
 
