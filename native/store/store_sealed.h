@@ -19,6 +19,10 @@
  * anchor one behind: mount reports SS_RB_PREPARED_ADVANCE and the next
  * transaction first catches the anchor up. Deterministic either way.
  *
+ * Envelope ids and nonce prefixes are a keyed function of the plaintext
+ * (record version 2, see README), so a rewrite after a whole-disk rollback
+ * never reuses an AES-GCM-SIV (key, nonce) pair for different bytes.
+ *
  * Limitation: the anchor sits on the same disk as the Store. It refuses a
  * Store-only rollback, a stale anchor more than one step behind and any
  * forged or replayed record, but an attacker who rolls back BOTH regions
@@ -61,6 +65,7 @@ enum {
     SS_E_FOREIGN_KIND = -311, /* plaintext (non-sealed) object inside a sealed store */
     SS_E_CRYPTO = -312,       /* sealing failed */
     SS_E_NEEDS_REOPEN = -313, /* an anchor write failed; reopen */
+    SS_E_FORMAT_VERSION = -314, /* version-1 record (predictable envelope ids): reformat */
 };
 const char *ss_strerror(int e);
 
