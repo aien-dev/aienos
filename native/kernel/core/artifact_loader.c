@@ -793,12 +793,15 @@ static void run_task(struct task *t, struct outcome *o)
         regs[i] = t->args[i];
     uint64_t hz = ck_rd(cntfrq_el0);
     uint64_t interval = hz >= 100 ? hz / 100 : 625000;
-    uint64_t kttbr = ck_rd(ttbr0_el1), cpacr = ck_rd(cpacr_el1);
+    uint64_t kttbr = ck_rd(ttbr0_el1), cpacr = ck_rd(cpacr_el1), cntkctl = ck_rd(cntkctl_el1);
     ck_lower_sync = loader_sync;
     ck_tick_switch = loader_tick;
     rt.start = ck_rd(cntpct_el0);
     rt.active = 1;
     ck_wr(cpacr_el1, (cpacr & ~(3ull << 20)) | (1ull << 20)); /* FP/SIMD traps at EL0 */
+    /* EL0 must not touch the physical/virtual timers (EL0PTEN, EL0VTEN): the
+     * budget timer is the kernel's, whatever firmware left in CNTKCTL_EL1. */
+    ck_wr(cntkctl_el1, cntkctl & ~((1ull << 9) | (1ull << 8)));
     swap_ttbr0(t->root);
     ck_wr(cntp_cval_el0, rt.start + interval);
     ck_wr(cntp_ctl_el0, 1);
@@ -809,6 +812,7 @@ static void run_task(struct task *t, struct outcome *o)
     ck_isb();
     swap_ttbr0(kttbr);
     ck_wr(cpacr_el1, cpacr);
+    ck_wr(cntkctl_el1, cntkctl);
     ck_isb();
     rt.active = 0;
     ck_lower_sync = 0;

@@ -102,6 +102,12 @@ static void test_receipt(void)
     r.stage = CKS_VERIFIED;
     r.reason = CKA_BAD_SIGNATURE;
     CHECK(cka_receipt_validate(&r) != 0);
+    {
+        uint8_t bad[CKA_RECEIPT_SIZE];
+        struct cka_receipt out;
+        cka_receipt_encode(&r, bad);
+        CHECK(cka_receipt_decode(bad, &out) != 0); /* decode validates */
+    }
 }
 
 static void test_names(void)

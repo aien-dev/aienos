@@ -134,7 +134,7 @@ int cka_receipt_decode(const uint8_t b[CKA_RECEIPT_SIZE], struct cka_receipt *r)
     r->context = cka_rd64(b + 392);
     put(r->fp, b + 404, 32);
     put(r->sig, b + 436, 64);
-    return CKA_OK;
+    return cka_receipt_validate(r); /* as receipt::decode in Rust */
 }
 
 int cka_receipt_validate(const struct cka_receipt *r)

@@ -151,13 +151,13 @@ receipt_check() { # serial name pattern
     record=${line##*record=}
     kdigest=$(sed -E 's/.* digest=([0-9a-f]{64}) .*/\1/' <<<"${line}")
     local file="${work}/${rtag}-${name}.receipt"
-    "${tool}" receipt from-hex "${record}" "${file}" >/dev/null
+    if ! "${tool}" receipt from-hex "${record}" "${file}" >/dev/null 2>&1; then fail "${name} receipt record decodes on the host"; return; fi
     if ! out=$("${tool}" receipt check "${file}" "${art}/${name}" 2>&1); then
         fail "${name} receipt binds the supplied artifact (${out})"; return
     fi
     if [[ "${out}" != *"digest=${kdigest} "* ]]; then fail "${name} receipt digest recomputed by the host"; return; fi
     if ! grep -qE -- "${want}" <<<"${out}"; then fail "${name} receipt records the observed outcome (${out})"; return; fi
-    "${tool}" receipt sign-test "${file}" "${file}.signed" >/dev/null
+    if ! "${tool}" receipt sign-test "${file}" "${file}.signed" >/dev/null 2>&1; then fail "${name} receipt TEST ONLY signing"; return; fi
     if "${tool}" receipt verify "${file}.signed" | grep -q "RECEIPT_VERIFY: PASS digest=${kdigest} "; then
         pass "${name} receipt: bound, host digest match, observed outcome, TEST ONLY signature verifies"
     else
