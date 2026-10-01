@@ -1,63 +1,60 @@
 # AIENOS
 
-> **Status: experimental / pre-alpha.** The first native boot on the NVIDIA DGX Spark passed on 2026-09-24 ([evidence](evidence/m2_first_boot_2026-09-24.md)); the operating system itself is far from usable. No support, stability, or compatibility promises. Expect breaking changes.
+> **Status: experimental / pre-alpha. Nothing here is physically qualified.** The first native boot on the NVIDIA DGX Spark passed on 2026-09-24 ([evidence](evidence/m2_first_boot_2026-09-24.md)). Since then the work has run in an emulator (QEMU). No support, stability or compatibility promises. Expect breaking changes.
 
-## Help build AIENOS
-
-We are building a sovereign, agent-native operating system in Rust, from the
-first instruction after firmware upward, and we want help. Kernel isolation,
-memory management, interrupts, scheduling, storage, networking and native
-inference are all open, and most of it can be developed and tested in QEMU on
-any machine: no special hardware needed.
-
-- **[ROADMAP.md](ROADMAP.md)**: the current AIENOS component execution order and live gate status.
-- **[docs/PLAN_AUTHORITY.md](docs/PLAN_AUTHORITY.md)**: how AIENOS plans relate to the one whole-system plan in `aien-dev/aien-architecture`.
-- **[Open issues](https://github.com/aien-dev/aienos/issues)**: start with
-  [`good first issue`](https://github.com/aien-dev/aienos/labels/good%20first%20issue)
-  or anything labelled
-  [`emulator-ok`](https://github.com/aien-dev/aienos/labels/emulator-ok).
-- **[CONTRIBUTING.md](CONTRIBUTING.md)**: build, verify, and the rules for the
-  trusted base.
-- **[Discussions](https://github.com/aien-dev/aienos/discussions)**: questions,
-  design ideas, and introductions.
-
-AIENOS is an agent-native operating system designed around continuous logical agent existence: the agent persists while models, kernels, inference state, power states, and physical machines change beneath it. You turn the machine on, the agent wakes up, knows the machine and your history, operates nearly everything inside it, and asks you only before crossing a boundary you have told it not to cross alone.
-
-AIEN is provisioned once. After that, boot, reboot, sleep, model reload, kernel restart, hardware failure, and migration are execution-state transitions—not agent creation events.
-
-The kernel stays small, deterministic, and non-intelligent. The model is never the kernel, and the agent is never the root of trust.
+AIENOS is our own operating system kernel, built to replace Linux on the DGX Spark. It is agent-native: the agent is the control plane, and the model is never the kernel. The kernel stays small, deterministic and non-intelligent, and the agent is never the root of trust.
 
 ```text
-Firmware
-  -> AIEN Boot
-  -> AIEN Kernel
-  -> AIEN Runtime
-  -> AIEN Agent
-  -> You
+Firmware -> AIEN Boot -> AIEN Kernel -> AIEN Runtime -> AIEN Agent -> You
 ```
 
-An optional compatibility island (for example, Linux with vendor drivers) may sit beside AIENOS while native support is built. It shrinks over time and AIENOS is never designed around it.
+## Current state
 
-## First milestone
+The kernel is being rewritten in C (the `native/` directory) and is IMPLEMENTED / NOT QUALIFIED: it passes a set of emulator gates (9 of 14 at the last receipt; the rest report NOT_RUN, never PASS) and has never been booted on real hardware. The earlier Rust kernel in `crates/` is legacy and is being replaced; it is not extended. Trust-chain and encrypted-storage work (TRUST-1 and M5) is NOT_QUALIFIED, with hardware and operator steps outstanding. Do not trust any number in this file over the live documents:
 
-Power on, AIENOS boots directly on the NVIDIA DGX Spark (no Linux host), the AIEN agent starts on a local console, a local model loads, you talk to it, and its state persists across reboot. CPU inference is acceptable for this milestone.
+- [ROADMAP.md](ROADMAP.md): component status, updated at each gate
+- [native/kernel/GATES.md](native/kernel/GATES.md): what each emulator gate checks
+- [docs/TRUST-1-M5-GATE-MATRIX.md](docs/TRUST-1-M5-GATE-MATRIX.md) and [docs/TRUST-1-OPERATOR-STEPS.md](docs/TRUST-1-OPERATOR-STEPS.md)
+- [docs/PLAN_AUTHORITY.md](docs/PLAN_AUTHORITY.md): how this repository's plans relate to the whole-system plan in [aien-architecture](https://github.com/aien-dev/aien-architecture)
 
-Two UEFI images are available. The default diagnostic prints a banner and returns to firmware. The handoff image discovers the CPU topology, memory map, display and GB10 identity, exits UEFI boot services, enters the AIENOS kernel, reports what it found on screen, in a bounded firmware variable and on the serial port, then resets. It booted natively on the DGX Spark on 2026-09-24 (`kernel: alive` at EL2, 20 cores in two efficiency classes, 184 memory-map descriptors with none rejected) and returned to Linux without damage. Kernel isolation, storage, agent-state recovery and model loading are still missing, so this milestone remains open; see [ROADMAP.md](ROADMAP.md).
+## How this fits with the other repositories
 
-The AIENOS boot path is a native Rust UEFI entry followed by the AIENOS kernel. It does not use systemd or a Linux init system. The handoff image emits counter-based timings for UEFI entry to kernel handoff and handoff to kernel entry once it runs on hardware. These timings do not include platform firmware time before UEFI starts the image.
-
-AEGIS currently checks capability scope and uses HMAC-SHA256 for capability tokens and operator grants. The broker can own an in-memory J-Space World delta and route `fs.write` and `fs.delete` into it without invoking host handlers; these effects can run without an operator grant only while that World is active. A claimed World ID alone grants nothing. World storage and recovery are still prototypes. Filesystem scope checks enforce lexical path boundaries; native handlers must also resolve symlinks safely before filesystem effects can be considered contained.
+AIENOS owns the trusted operating substrate. [omega](https://github.com/aien-dev/omega) (the C reaction runtime and compiler) runs on top of it, [physics](https://github.com/aien-dev/physics) holds machine realization (FORGE), and [aien-architecture](https://github.com/aien-dev/aien-architecture) is the authority for status and sequencing. An optional compatibility island (for example Linux with vendor drivers) may sit beside AIENOS while native support is built; it shrinks over time.
 
 ## Principles
 
-- **Sovereignty:** no outside organization is required to boot the machine, access your data, authenticate you, authorize the agent, build the trusted core, recover, change models, move hardware, or keep operating.
-- **Continuous existence:** the agent is provisioned once; power and substrate changes reconstruct execution, they do not recreate identity.
-- **Open trusted base:** boot, kernel, memory management, scheduling, storage, cryptography, identity, AEGIS, capability enforcement, update verification, recovery, and provenance build from inspectable source with a reproducible toolchain. Opaque software may accelerate AIENOS; it may never be required to trust, build, boot, recover, or control it.
+- **Sovereignty:** no outside organization is required to boot the machine, access your data, authenticate you, authorize the agent, build the trusted core, recover, change models, move hardware or keep operating.
+- **Open trusted base:** boot, kernel, memory, scheduling, storage, cryptography, identity, AEGIS, capability enforcement, update verification and recovery build from inspectable source, offline, with a reproducible toolchain.
 - **Fastest thing possible:** close to the metal, measured, with evidence.
 - **Free inside reversible state; explicit authorization at irreversible boundaries.**
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for current AIENOS design, [ROADMAP.md](ROADMAP.md) for current AIENOS execution order, [docs/adr/README.md](docs/adr/README.md) for accepted decisions, and [docs/PLAN_AUTHORITY.md](docs/PLAN_AUTHORITY.md) for document precedence. Older blueprint, milestone-matrix, and systems-integration documents are retained as design/reference history and do not override the current roadmap.
+## Standing rules
+
+C is the target language, with assembly only where measured. No new Rust. No Python, no CUDA toolkit, no CUDA-shaped APIs, no systemd or Linux init in boot, services or tooling. Dependencies in the trusted base are rare and built offline.
+
+## Build and verify
+
+The C kernel needs only gcc, binutils, make and a shell. Host tests need nothing else.
+
+```bash
+make -C native/kernel test        # C kernel host tests
+make -C native/kernel sanitize    # same under ASan and UBSan
+make -C native/capability test    # capability authority
+make -C native/store test mutants # torn-write-safe Store record
+```
+
+The emulator gates need `qemu-system-aarch64` and the AAVMF firmware (Ubuntu packages: `qemu-system-arm`, `qemu-efi-aarch64`):
+
+```bash
+bash scripts/ck_gates.sh          # runs the C gates, writes a content-addressed receipt; its child scripts take the machine quiet flag and report NOT_RUN while another run holds it
+```
+
+The legacy Rust workspace is still checked by `bash scripts/verify_all.sh` (needs a Rust toolchain with the `aarch64-unknown-uefi` and `aarch64-unknown-none` targets) until it is retired. Anything that needs the real DGX Spark is labelled `needs-hardware` and is run by maintainers.
+
+## Contributing
+
+Start with [issues labelled `good first issue`](https://github.com/aien-dev/aienos/labels/good%20first%20issue) or [`emulator-ok`](https://github.com/aien-dev/aienos/labels/emulator-ok): they need no special hardware. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Open pull requests against `main` (protected; the CodeQL checks `Analyze (c-cpp)` and `Analyze (actions)` must pass) and lead with the commands you ran and their output. Questions go in [Discussions](https://github.com/aien-dev/aienos/discussions). Report vulnerabilities privately through GitHub security advisories.
 
 ## License
 
-Apache-2.0 WITH LLVM-exception. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache-2.0 WITH LLVM-exception. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Contact: aien@aienos.com.
