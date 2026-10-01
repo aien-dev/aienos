@@ -71,6 +71,8 @@ m5_sealed_volume_keys_real_tpm|missing|-|-|-|M5: sealed volume keys bound to a r
 m5_store_encrypted_objects|missing|-|-|-|M5: Store integration of encrypted objects
 m5_owner_signed_chain_machine1|missing|-|-|-|M5: owner-signed trust chain on Machine 1
 m5_production_store_512b|missing|-|-|-|M5: production Store on 512-byte geometry (needs 4K atomic-root predicate, aienos-boot nvme_read.rs; no C disk layer)
+t1_gate4_manifest_ab|missing|-|-|-|Gate 4: signed boot manifest + A/B slot selection in the loader (awaits the C/asm loader)
+m5_migration_owner_signature|missing|-|-|-|M5: migration authorization bound to an owner signature (no in-house signature primitive)
 '
 # ===========================================================================
 
