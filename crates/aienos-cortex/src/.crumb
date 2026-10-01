@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-cortex/src",
+  "layer": "crates/aienos-cortex/src",
+  "purpose": "Directory crates/aienos-cortex/src. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-cortex",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-cortex/src. Purpose not yet described by a human.",
+      "files": [
+        "lib.rs",
+        "record.rs",
+        "status.rs",
+        "store.rs",
+        "verification.rs"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 1,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "bc25e73",
+          "timestamp": "2026-09-23T18:21:24-05:00",
+          "author": "aien-dev",
+          "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
+          "pr": 2
+        }
+      ]
+    }
+  }
+}

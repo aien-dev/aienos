@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-artifact/src",
+  "layer": "crates/aienos-artifact/src",
+  "purpose": "Directory crates/aienos-artifact/src. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-artifact",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-artifact/src. Purpose not yet described by a human.",
+      "files": [
+        "canonical.rs",
+        "capability.rs",
+        "error.rs",
+        "format.rs",
+        "id.rs",
+        "lib.rs",
+        "receipt.rs",
+        "receipt_tests.rs",
+        "resource.rs",
+        "signature.rs",
+        "tests.rs",
+        "verify.rs"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 4,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "4dd5726",
+          "timestamp": "2026-09-25T07:02:01-05:00",
+          "author": "aien-dev",
+          "subject": "P2-6A: Admission Receipt v0 (canonical encoding, strict decode, TEST-ONLY signing, CLI) (#124)",
+          "pr": 124
+        },
+        {
+          "source": "backfill-git",
+          "sha": "1a62ca3",
+          "timestamp": "2026-09-24T21:20:14-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #121 from aien-dev/phase2/binary-artifact-v0",
+          "pr": 121
+        },
+        {
+          "source": "backfill-git",
+          "sha": "952e53e",
+          "timestamp": "2026-09-24T21:05:20-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #120 from aien-dev/phase2/binary-artifact-v0",
+          "pr": 120
+        },
+        {
+          "source": "backfill-git",
+          "sha": "7604b6e",
+          "timestamp": "2026-09-24T20:41:08-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #119 from aien-dev/phase2/binary-artifact-v0",
+          "pr": 119
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "name": "docs/crumbs",
+  "layer": "docs/crumbs",
+  "purpose": "Directory docs/crumbs. Purpose not yet described by a human.",
+  "above": {
+    "name": "docs",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory docs/crumbs. Purpose not yet described by a human.",
+      "files": [
+        "BACKFILL.md"
+      ]
+    },
+    "owner_lane": ""
+  }
+}

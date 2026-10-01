@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-kernel/tests",
+  "layer": "crates/aienos-kernel/tests",
+  "purpose": "Directory crates/aienos-kernel/tests. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-kernel",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-kernel/tests. Purpose not yet described by a human.",
+      "files": [
+        "nvme_completion.rs",
+        "nvme_flush.rs",
+        "nvme_identify.rs",
+        "nvme_prp.rs",
+        "nvme_write.rs",
+        "nvme_write_completion.rs",
+        "nvme_write_prp.rs",
+        "store_v1_golden_vectors.rs",
+        "store_v1_negative.rs"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 4,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "5ac7cfc",
+          "timestamp": "2026-09-25T17:37:17-05:00",
+          "author": "aien-dev",
+          "subject": "test(store): prove ADR 0015 golden vectors with the kernel encoders in Rust (#139)",
+          "pr": 139
+        },
+        {
+          "source": "backfill-git",
+          "sha": "3f8ebf3",
+          "timestamp": "2026-09-25T09:33:00-05:00",
+          "author": "aien-dev",
+          "subject": "P3: native NVMe write and flush qualification on QEMU (#132)",
+          "pr": 132
+        },
+        {
+          "source": "backfill-git",
+          "sha": "ef359ec",
+          "timestamp": "2026-09-25T08:55:24-05:00",
+          "author": "aien-dev",
+          "subject": "P3 Native NVMe Read Substrate (QEMU-qualified) (#129)",
+          "pr": 129
+        },
+        {
+          "source": "backfill-git",
+          "sha": "9919813",
+          "timestamp": "2026-09-25T08:50:17-05:00",
+          "author": "aien-dev",
+          "subject": "P3-1: freeze System Store v1 format and canonical vectors (#130)",
+          "pr": 130
+        }
+      ]
+    }
+  }
+}

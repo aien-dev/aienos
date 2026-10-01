@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0.0",
+  "name": "native/argus/bridge",
+  "layer": "native/argus/bridge",
+  "purpose": "Directory native/argus/bridge. Purpose not yet described by a human.",
+  "above": {
+    "name": "native/argus",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory native/argus/bridge. Purpose not yet described by a human.",
+      "files": [
+        "argus_aegis_bridge.c",
+        "argus_aegis_bridge.h"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 1,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "138acb0",
+          "timestamp": "2026-09-29T09:04:35-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #168 from aien-dev/feat/argus-1-x",
+          "pr": 168
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-artifact-tool/fixtures/p2_5",
+  "layer": "crates/aienos-artifact-tool/fixtures/p2_5",
+  "purpose": "Directory crates/aienos-artifact-tool/fixtures/p2_5. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-artifact-tool",
+    "path": "../.."
+  },
+  "below": [
+    {
+      "name": "p25exec",
+      "role": ""
+    },
+    {
+      "name": "p25spin",
+      "role": ""
+    },
+    {
+      "name": "p25wx",
+      "role": ""
+    }
+  ],
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-artifact-tool/fixtures/p2_5. Purpose not yet described by a human.",
+      "files": [
+        "assemble.sh",
+        "pack.sh"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 1,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "3a6174a",
+          "timestamp": "2026-09-25T06:23:20-05:00",
+          "author": "aien-dev",
+          "subject": "P2-5: Binary Artifact loader — exact-byte W^X EL0 execution with full rollback (#122)",
+          "pr": 122
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "schema_version": "1.0.0",
+  "name": "native/capability",
+  "layer": "native/capability",
+  "purpose": "Directory native/capability. Purpose not yet described by a human.",
+  "above": {
+    "name": "native",
+    "path": ".."
+  },
+  "below": [
+    {
+      "name": "tests",
+      "role": ""
+    }
+  ],
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory native/capability. Purpose not yet described by a human.",
+      "files": [
+        "Makefile",
+        "aienos_capability.c",
+        "aienos_capability.h",
+        "aienos_contain.c",
+        "aienos_contain.h"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 5,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "9ac377f",
+          "timestamp": "2026-09-29T08:23:21-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #166 from aien-dev/feat/argus-1-g",
+          "pr": 166
+        },
+        {
+          "source": "backfill-git",
+          "sha": "d39dd5b",
+          "timestamp": "2026-09-29T06:33:10-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #161: capability observer callback (AEGIS -> ARGUS)",
+          "pr": 161
+        },
+        {
+          "source": "backfill-git",
+          "sha": "4c21386",
+          "timestamp": "2026-09-28T21:00:02-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #158 from aien-dev/fix/cap-generation-restart",
+          "pr": 158
+        },
+        {
+          "source": "backfill-git",
+          "sha": "c8ab65e",
+          "timestamp": "2026-09-27T19:11:35-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #157 from aien-dev/fix/capability-c-no-build-output",
+          "pr": 157
+        },
+        {
+          "source": "backfill-git",
+          "sha": "c97249a",
+          "timestamp": "2026-09-27T19:05:24-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #156 from aien-dev/feat/capability-c",
+          "pr": 156
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane1",
+          "sha": "c97249a",
+          "pr": 156,
+          "note": "WP-B production Store on 512-byte SSD: MISSING_IMPLEMENTATION. Production Store/NVMe path is Rust; protocol proven (#136, #175 native/store/torn_slot.c); dependency = C NVMe driver + C ADR 0015 engin",
+          "ref": "2026-10-01-push-lane1-report.md"
+        }
+      ]
+    }
+  }
+}

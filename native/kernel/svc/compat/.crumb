@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0.0",
+  "name": "native/kernel/svc/compat",
+  "layer": "native/kernel/svc/compat",
+  "purpose": "Directory native/kernel/svc/compat. Purpose not yet described by a human.",
+  "above": {
+    "name": "native/kernel/svc",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory native/kernel/svc/compat. Purpose not yet described by a human.",
+      "files": [
+        "README",
+        "pthread.h",
+        "stdio.h",
+        "stdlib.h",
+        "string.h",
+        "time.h"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 1,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "ba7b75d",
+          "timestamp": "2026-10-01T02:33:01-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #195 from aien-dev/lane18/native-kernel-devstore",
+          "pr": 195
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane18",
+          "sha": "ba7b75d",
+          "pr": 195,
+          "note": "#195 devices (PCI/NVMe), capability+ARGUS, sealed C Store in the boot path: merge ba7b75deba7fdcbdf1e28a26c1ad8b6331aaf799",
+          "ref": "2026-10-01-push-lane18-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane18",
+          "sha": "ba7b75d",
+          "pr": 195,
+          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        }
+      ]
+    }
+  }
+}

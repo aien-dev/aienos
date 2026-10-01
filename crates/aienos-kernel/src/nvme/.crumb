@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-kernel/src/nvme",
+  "layer": "crates/aienos-kernel/src/nvme",
+  "purpose": "Directory crates/aienos-kernel/src/nvme. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-kernel/src",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-kernel/src/nvme. Purpose not yet described by a human.",
+      "files": [
+        "atomicity.rs",
+        "driver.rs"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 6,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "c851d01",
+          "timestamp": "2026-09-25T13:16:01-05:00",
+          "author": "aien-dev",
+          "subject": "P3: qualify NVMe power-fail atomicity for Store root writes (#133)",
+          "pr": 133
+        },
+        {
+          "source": "backfill-git",
+          "sha": "3f8ebf3",
+          "timestamp": "2026-09-25T09:33:00-05:00",
+          "author": "aien-dev",
+          "subject": "P3: native NVMe write and flush qualification on QEMU (#132)",
+          "pr": 132
+        },
+        {
+          "source": "backfill-git",
+          "sha": "ef359ec",
+          "timestamp": "2026-09-25T08:55:24-05:00",
+          "author": "aien-dev",
+          "subject": "P3 Native NVMe Read Substrate (QEMU-qualified) (#129)",
+          "pr": 129
+        },
+        {
+          "source": "backfill-git",
+          "sha": "1261bfc",
+          "timestamp": "2026-09-24T11:27:30-05:00",
+          "author": "aien-dev",
+          "subject": "feat(nvme): implement polled block I/O (#100)",
+          "pr": 100
+        },
+        {
+          "source": "backfill-git",
+          "sha": "9ebb187",
+          "timestamp": "2026-09-24T10:44:38-05:00",
+          "author": "aien-dev",
+          "subject": "feat(nvme): create polled I/O queues (#86)",
+          "pr": 86
+        },
+        {
+          "source": "backfill-git",
+          "sha": "b295a87",
+          "timestamp": "2026-09-24T10:29:52-05:00",
+          "author": "aien-dev",
+          "subject": "kernel: polled NVMe controller init and Identify, host-tested (part of #31) (#82)",
+          "pr": 82
+        }
+      ]
+    }
+  }
+}

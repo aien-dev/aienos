@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-agent-state",
+  "layer": "crates/aienos-agent-state",
+  "purpose": "Directory crates/aienos-agent-state. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates",
+    "path": ".."
+  },
+  "below": [
+    {
+      "name": "src",
+      "role": ""
+    }
+  ],
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-agent-state. Purpose not yet described by a human.",
+      "files": [
+        "Cargo.toml"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 2,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "39e246a",
+          "timestamp": "2026-09-25T17:56:23-05:00",
+          "author": "aien-dev",
+          "subject": "fix(agent-state): preserve branch identity across restore (#143)",
+          "pr": 143
+        },
+        {
+          "source": "backfill-git",
+          "sha": "bc25e73",
+          "timestamp": "2026-09-23T18:21:24-05:00",
+          "author": "aien-dev",
+          "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
+          "pr": 2
+        }
+      ]
+    }
+  }
+}

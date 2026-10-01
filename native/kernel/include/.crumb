@@ -1,0 +1,98 @@
+{
+  "schema_version": "1.0.0",
+  "name": "native/kernel/include",
+  "layer": "native/kernel/include",
+  "purpose": "Directory native/kernel/include. Purpose not yet described by a human.",
+  "above": {
+    "name": "native/kernel",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory native/kernel/include. Purpose not yet described by a human.",
+      "files": [
+        "ck.h"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 3,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "ff57d33",
+          "timestamp": "2026-10-01T04:18:33-05:00",
+          "author": "aien-dev",
+          "subject": "ck: NVMe normal shutdown before bus-master disable + NVME_SHUTDOWN gate (QEMU) (#198)",
+          "pr": 198
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane25",
+          "sha": "ff57d33",
+          "pr": 198,
+          "note": "PR #198, squash-merged as ff57d33.",
+          "ref": "2026-10-01-push-lane25-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane25",
+          "sha": "ff57d33",
+          "pr": 198,
+          "note": "09:21Z Lane 25 interim: aienos #197 e9f5b3a (SMMUv3 stage-1 confined NVMe, bypass test-only), #198 ff57d33 (NVMe CC.SHN shutdown gate); ck_gates 6 PASS/7 NOT_RUN of 13; item 3 M3 isolation port conti",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "e9f5b3a",
+          "timestamp": "2026-10-01T03:54:52-05:00",
+          "author": "aien-dev",
+          "subject": "native/kernel: SMMUv3 service; NVMe Store path SMMU-confined in QEMU (#197)",
+          "pr": 197
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane25",
+          "sha": "e9f5b3a",
+          "pr": 197,
+          "note": "PR #197, squash-merged as e9f5b3a.",
+          "ref": "2026-10-01-push-lane25-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane25",
+          "sha": "e9f5b3a",
+          "pr": 197,
+          "note": "09:21Z Lane 25 interim: aienos #197 e9f5b3a (SMMUv3 stage-1 confined NVMe, bypass test-only), #198 ff57d33 (NVMe CC.SHN shutdown gate); ck_gates 6 PASS/7 NOT_RUN of 13; item 3 M3 isolation port conti",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "34c6053",
+          "timestamp": "2026-10-01T02:17:36-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #194 from aien-dev/lane18/native-kernel-core",
+          "pr": 194
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane18",
+          "sha": "34c6053",
+          "pr": 194,
+          "note": "#194 C kernel core + UEFI entry stub + memory/exceptions + host tests: merge 34c60536da7a95d8b782b13e52495730578c83ba",
+          "ref": "2026-10-01-push-lane18-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane18",
+          "sha": "34c6053",
+          "pr": 194,
+          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        }
+      ]
+    }
+  }
+}

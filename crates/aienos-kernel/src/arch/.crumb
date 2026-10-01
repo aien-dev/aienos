@@ -1,0 +1,107 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-kernel/src/arch",
+  "layer": "crates/aienos-kernel/src/arch",
+  "purpose": "Directory crates/aienos-kernel/src/arch. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-kernel/src",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-kernel/src/arch. Purpose not yet described by a human.",
+      "files": [
+        "aarch64.rs",
+        "mod.rs"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 10,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "a2a0382",
+          "timestamp": "2026-09-25T17:56:21-05:00",
+          "author": "aien-dev",
+          "subject": "M4: continuity objects over Store v1; same identity and memory across cold restarts (CONTINUITY_QEMU) (#142)",
+          "pr": 142
+        },
+        {
+          "source": "backfill-git",
+          "sha": "6b4290f",
+          "timestamp": "2026-09-24T10:25:36-05:00",
+          "author": "aien-dev",
+          "subject": "boot: enter EL1h with AIENOS page tables and caches on (#66, ADR 0009) (#80)",
+          "pr": 80
+        },
+        {
+          "source": "backfill-git",
+          "sha": "acba849",
+          "timestamp": "2026-09-24T09:54:35-05:00",
+          "author": "aien-dev",
+          "subject": "kernel(usb): add xHCI discovery and keyboard descriptors (SEED-0A 2c) (#75)",
+          "pr": 75
+        },
+        {
+          "source": "backfill-git",
+          "sha": "52109bc",
+          "timestamp": "2026-09-23T20:19:04-05:00",
+          "author": "aien-dev",
+          "subject": "First-boot evidence image for Machine 1 and ADR 0008 bring-up exception (#15)",
+          "pr": 15
+        },
+        {
+          "source": "backfill-git",
+          "sha": "44fcba7",
+          "timestamp": "2026-09-23T19:58:07-05:00",
+          "author": "aien-dev",
+          "subject": "Discover CPU topology from the ACPI MADT and record the revised critical path (#14)",
+          "pr": 14
+        },
+        {
+          "source": "backfill-git",
+          "sha": "a22b1d8",
+          "timestamp": "2026-09-23T19:38:27-05:00",
+          "author": "aien-dev",
+          "subject": "Make the native boot report visible without serial and self-returning (#13)",
+          "pr": 13
+        },
+        {
+          "source": "backfill-git",
+          "sha": "e37bd2b",
+          "timestamp": "2026-09-23T18:42:34-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #9 from aien-dev/feat/aienos-boot-timing",
+          "pr": 9
+        },
+        {
+          "source": "backfill-git",
+          "sha": "d1ae435",
+          "timestamp": "2026-09-23T18:31:01-05:00",
+          "author": "aien-dev",
+          "subject": "feat(boot): compile explicit UEFI to early-kernel handoff image (#5)",
+          "pr": 5
+        },
+        {
+          "source": "backfill-git",
+          "sha": "28c939c",
+          "timestamp": "2026-09-23T18:24:28-05:00",
+          "author": "aien-dev",
+          "subject": "fix(kernel): use Spark 8250 MMIO UART register layout (#3)",
+          "pr": 3
+        },
+        {
+          "source": "backfill-git",
+          "sha": "bc25e73",
+          "timestamp": "2026-09-23T18:21:24-05:00",
+          "author": "aien-dev",
+          "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
+          "pr": 2
+        }
+      ]
+    }
+  }
+}
