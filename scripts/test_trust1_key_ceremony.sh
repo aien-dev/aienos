@@ -64,6 +64,7 @@ bash "${tool}" verify "${work}/swapped" >/dev/null 2>&1 && fail "swapped release
 pass "a swapped public key is refused"
 
 # Rotation: add -> verify (old and new both trusted) -> revoke (only new).
+cp -r "${out}/public" "${work}/gen1snap"
 printf 'release payload\n' >"${work}/payload"
 "${OPENSSL}" pkeyutl -sign -rawin -inkey "${out}/private/release_signer.key.pem" -passin file:"${work}/pass" \
     -in "${work}/payload" -out "${work}/payload.oldsig"
@@ -82,10 +83,8 @@ ls "${out}"/private/release_signer.gen2.revoked.key.pem >/dev/null || fail "old 
 pass "rotation revoke: generation 3 trusts only the new key; old key quarantined, not deleted"
 bash "${tool}" rotate "${out}" owner_root add >/dev/null 2>&1 && fail "rotate allowed owner_root"
 pass "owner_root cannot be rotated by the routine tool (special recovery ceremony only)"
-cp -r "${out}/public" "${work}/rolled"
-cp "${work}/rolled/authority_manifest.gen1.txt" "${work}/rolled/authority_manifest.txt"
-cp "${work}/rolled/authority_manifest.gen1.sig" "${work}/rolled/authority_manifest.sig"
-bash "${tool}" verify "${work}/rolled" 3 >/dev/null 2>&1 && fail "rollback to generation 1 accepted"
+bash "${tool}" verify "${work}/gen1snap" 1 >/dev/null || fail "intact generation 1 snapshot refused at minimum 1"
+bash "${tool}" verify "${work}/gen1snap" 3 >/dev/null 2>&1 && fail "rollback to generation 1 accepted"
 bash "${tool}" verify "${out}/public" 3 >/dev/null || fail "current generation 3 refused"
 pass "a validly signed older generation is refused when generation 3 is the minimum"
 

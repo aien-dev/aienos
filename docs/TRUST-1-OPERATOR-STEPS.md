@@ -86,11 +86,13 @@ storage *without* Ubuntu, using the offline spare. We prove it with a
 throwaway file whose fingerprint we know, never with real data.
 
 ```bash
-date -u | sudo tee /home/atlas/atlas-runtime-setup-20260905/private-data/trust1-roundtrip-test.txt
-sudo sha256sum /home/atlas/atlas-runtime-setup-20260905/private-data/trust1-roundtrip-test.txt
+sudo -u atlas sh -c 'date -u > /home/atlas/atlas-runtime-setup-20260905/private-data/trust1-roundtrip-test.txt'
+sudo -u atlas sha256sum /home/atlas/atlas-runtime-setup-20260905/private-data/trust1-roundtrip-test.txt
 ```
 
-*Changes:* adds one small text file to the private storage. *You should see:*
+The commands run as the `atlas` account because that account opened the
+private storage, and only it may write there (even the administrator is
+refused). *Changes:* adds one small text file to the private storage. *You should see:*
 the date, then a long fingerprint (64 letters and digits). Write the
 fingerprint down or paste it to the orchestrator; Step 6 checks it.
 
@@ -127,8 +129,12 @@ touch the Spark's internal drive.
 do that it needs two things: the *spare* (a locked copy of the storage
 password, already kept on the Spark at
 `~/.config/atlas/offline-spares/atlas-private-storage.passfile.age`) and the
-*identity* (the private key that unlocks the spare). The spare is useless
-without the identity, so where the identity sits during the test matters.
+*identity* (the private key that unlocks the spare). The identity is **not**
+on the Spark, on purpose; it is kept on the MacBook. The orchestrator will
+confirm which MacBook file opens this spare before you copy it. If that file
+is itself passphrase-protected, the recovery prompt will ask for that
+passphrase during Step 6. The spare is useless without the identity, so where
+the identity sits during the test matters.
 
 **The decision.** Where should the identity be when the stick boots?
 
