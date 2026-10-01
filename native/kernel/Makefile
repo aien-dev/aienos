@@ -75,9 +75,10 @@ CORE_C := $(BOOT)/efi_main.c \
 	$(KDIR)/arch/exception.c $(KDIR)/arch/gic.c $(KDIR)/arch/timer.c \
 	$(KDIR)/core/acpi.c $(KDIR)/core/console.c $(KDIR)/core/fmt.c \
 	$(KDIR)/core/kmain.c $(KDIR)/core/libc_min.c $(KDIR)/core/report.c \
-	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c \
+	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c \
+	$(KDIR)/core/m3.c \
 	$(KDIR)/mm/frames.c $(KDIR)/mm/heap.c $(KDIR)/mm/mmu.c $(KDIR)/mm/pt.c
-CORE_S := $(BOOT)/efi_entry.S $(KDIR)/arch/vectors.S
+CORE_S := $(BOOT)/efi_entry.S $(KDIR)/arch/vectors.S $(KDIR)/arch/m3.S
 HDRS := $(wildcard $(KDIR)/include/*.h $(KDIR)/*/*.h $(BOOT)/*.h)
 
 KOBJ := $(OUT)/obj
@@ -175,8 +176,8 @@ $(FULL_EFI): $(FULL_ELF)
 
 # ---- host unit tests ----
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
-	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c
-TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu
+	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c
+TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 

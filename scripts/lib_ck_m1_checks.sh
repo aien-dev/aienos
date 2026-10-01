@@ -4,7 +4,9 @@
 # where qemu_ck_boot_test.sh's header lists a deliberate difference.
 # Not executable on its own. Callers set: work (serial text in
 # ${work}/serial.txt), commit, qemu_status; ck_m1_checks sets failed=1 on any
-# failure and never resets it.
+# failure and never resets it. ck_m3_checks (Lane 25) runs the five M3 checks
+# of qemu_boot_test.sh with the same patterns and sets m3_failed=1 on any
+# failure; it does not touch failed, so the M1 verdict is unchanged.
 
 check() { # description, pattern
     if grep -q -- "$2" "${work}/serial.txt"; then
@@ -22,20 +24,12 @@ check_absent() { # description, pattern
         echo "PASS  $1"
     fi
 }
-not_run() { # description: M3 feature the C kernel does not have yet
-    echo "NOT_RUN  $1 (not implemented in the C kernel yet)"
-}
 
 ck_m1_checks() {
     check "pre-exit report printed" "report_kind: pre_exit"
     check "image is this commit" "aienos_commit: ${commit}"
     check "left firmware and entered the kernel" "kernel: alive"
     check "kernel entered EL1h" "kernel_el: EL1h"
-    not_run "cooperative threads interleaved"
-    not_run "EL0 capability and fault isolation"
-    not_run "timer-driven preemption across runnable tasks"
-    not_run "deterministic MADT placement of preempt workers"
-    not_run "typed IPC with attenuated revocable delegation"
     check "EL1 page tables and caches enabled" "mmu: enabled"
     check "GICv3 enabled" "gic: v3"
     if grep -qE 'timer_irq: ([0-9]+) ticks' "${work}/serial.txt"; then
@@ -99,4 +93,21 @@ ck_m1_checks() {
         echo "FAIL  qemu exited with status ${qemu_status} (expected 0 after PSCI reset)"
         failed=1
     fi
+}
+
+ck_m3_checks() {
+    # Same five patterns as qemu_boot_test.sh lines 63-67 (the Rust M3 rows).
+    m3_check() { # description, pattern
+        if grep -q -- "$2" "${work}/serial.txt"; then
+            echo "PASS  $1"
+        else
+            echo "FAIL  $1"
+            m3_failed=1
+        fi
+    }
+    m3_check "cooperative threads interleaved" "threads: ok"
+    m3_check "EL0 capability and fault isolation" "el0: ok write=granted forged=denied fault=contained exit=0"
+    m3_check "timer-driven preemption across runnable tasks" "preempt: ok"
+    m3_check "deterministic MADT placement of preempt workers" "placement: worker0=class0/core0 worker1=class0/core1"
+    m3_check "typed IPC with attenuated revocable delegation" "ipc: ok message=delivered cap=delegated rights=attenuated forged=denied revoked=denied"
 }

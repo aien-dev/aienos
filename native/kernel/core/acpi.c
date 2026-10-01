@@ -146,6 +146,84 @@ int ck_madt_parse(const void *madt, struct ck_madt_gic *out)
     return 0;
 }
 
+
+static void topo_add(struct ck_cpu_topology *t, uint8_t cls)
+{
+    for (unsigned i = 0; i < t->distinct_classes; i++)
+        if (t->class_id[i] == cls) {
+            t->class_count[i]++;
+            return;
+        }
+    if (t->distinct_classes >= CK_MAX_CLASSES) {
+        t->unknown_class++;
+        return;
+    }
+    /* Insert keeping the classes sorted. */
+    unsigned at = t->distinct_classes;
+    while (at > 0 && t->class_id[at - 1] > cls) {
+        t->class_id[at] = t->class_id[at - 1];
+        t->class_count[at] = t->class_count[at - 1];
+        at--;
+    }
+    t->class_id[at] = cls;
+    t->class_count[at] = 1;
+    t->distinct_classes++;
+}
+
+int ck_madt_cpu_topology(const void *madt, struct ck_cpu_topology *out)
+{
+    const uint8_t *m = madt;
+    struct ck_cpu_topology t = { 0 };
+    uint32_t len = rd32(m + 4);
+    if (!sig_eq(m, "APIC", 4) || len < 44)
+        return -1;
+    for (uint32_t at = 44; at < len;) {
+        if (at + 2 > len)
+            return -1;
+        uint8_t type = m[at], elen = m[at + 1];
+        if (elen < 2 || at + elen > len)
+            return -1;
+        const uint8_t *e = m + at;
+        if (type == 0x0b) { /* GICC */
+            if (elen < 16)
+                return -1;
+            if (rd32(e + 12) & (1u | 8u)) {
+                t.cores++;
+                if (!t.has_first_mpidr && elen >= 76) {
+                    t.has_first_mpidr = 1;
+                    t.first_mpidr = rd64(e + 68);
+                }
+                if (elen >= 77)
+                    topo_add(&t, e[76]);
+                else
+                    t.unknown_class++;
+            }
+        }
+        at += elen;
+    }
+    *out = t;
+    return 0;
+}
+
+int ck_place_task(const struct ck_cpu_topology *t, uint32_t task_index, uint8_t *class_id,
+                  uint32_t *core)
+{
+    uint32_t capacity = 0;
+    for (unsigned i = 0; i < t->distinct_classes; i++)
+        capacity += t->class_count[i];
+    if (capacity == 0)
+        return -1;
+    uint32_t idx = task_index % capacity;
+    for (unsigned i = 0; i < t->distinct_classes; i++) {
+        if (idx < t->class_count[i]) {
+            *class_id = t->class_id[i];
+            *core = idx;
+            return 0;
+        }
+        idx -= t->class_count[i];
+    }
+    return -1;
+}
 int ck_spcr_parse(const void *spcr, struct ck_spcr *out)
 {
     const uint8_t *s = spcr;

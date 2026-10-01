@@ -12,13 +12,17 @@
 #    another run holds it; AIENOS_QUIET_FLAG overrides the flag path and
 #    AIENOS_QUIET_TAG the text written into it (the flag is removed only if
 #    it still holds exactly that text, and at most once per run);
-#  - the M3 checks (threads, el0, preempt, placement, ipc) print NOT_RUN: the
-#    C kernel does not implement them yet, so they do not count;
+#  - the five M3 checks (threads, el0, preempt, placement, ipc) use the same
+#    patterns and give their own verdict AIENOS_CK_M3, which is PASS only if
+#    all five pass AND every M1 check of the same boot passes (no fault, no
+#    panic, QEMU exit 0); the C kernel prints one extra line, ipc_detail,
+#    which no check reads (native/kernel/GATES.md rows 16-20 list the
+#    differences in how the C kernel does the work);
 #  - one added check: guard_page (the C kernel's guard-page fault self test);
 #  - stricter: any QEMU exit status other than 0 fails (the Rust script fails
 #    only on the timeout status 124); PSCI reset with -no-reboot exits 0;
 #  - the checks live in scripts/lib_ck_m1_checks.sh (shared with the Store gate);
-#  - final line is AIENOS_CK_M1: PASS|FAIL|NOT_RUN.
+#  - last two lines are AIENOS_CK_M3: and AIENOS_CK_M1: PASS|FAIL|NOT_RUN.
 # Needs qemu-system-aarch64 and AAVMF (Ubuntu: qemu-system-arm qemu-efi-aarch64).
 set -euo pipefail
 
@@ -27,8 +31,8 @@ cd "${repo_root}"
 
 code_fd="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}"
 vars_fd="${AAVMF_VARS:-/usr/share/AAVMF/AAVMF_VARS.fd}"
-command -v qemu-system-aarch64 >/dev/null || { echo "qemu-system-aarch64 not installed"; echo "AIENOS_CK_M1: NOT_RUN"; exit 2; }
-[[ -r "${code_fd}" && -r "${vars_fd}" ]] || { echo "AAVMF firmware not found"; echo "AIENOS_CK_M1: NOT_RUN"; exit 2; }
+command -v qemu-system-aarch64 >/dev/null || { echo "qemu-system-aarch64 not installed"; echo "AIENOS_CK_M3: NOT_RUN"; echo "AIENOS_CK_M1: NOT_RUN"; exit 2; }
+[[ -r "${code_fd}" && -r "${vars_fd}" ]] || { echo "AAVMF firmware not found"; echo "AIENOS_CK_M3: NOT_RUN"; echo "AIENOS_CK_M1: NOT_RUN"; exit 2; }
 
 cross=""
 if [ "$(uname -m)" != "aarch64" ]; then cross="aarch64-linux-gnu-"; fi
@@ -41,6 +45,7 @@ quiet_flag="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
 quiet_tag="${AIENOS_QUIET_TAG:-qemu_ck_boot_test $$}"
 if ! ( set -C; echo "${quiet_tag}" > "${quiet_flag}" ) 2>/dev/null; then
     echo "NOT_RUN  quiet flag ${quiet_flag} is held: $(head -c 200 "${quiet_flag}" 2>/dev/null || true)"
+    echo "AIENOS_CK_M3: NOT_RUN"
     echo "AIENOS_CK_M1: NOT_RUN"
     exit 3
 fi
@@ -92,9 +97,15 @@ failed=0
 source "${repo_root}/scripts/lib_ck_m1_checks.sh"
 echo "qemu exit ${qemu_status} after ${elapsed} s (commit ${commit:0:12})"
 ck_m1_checks
+m3_failed=0
+ck_m3_checks
 
-if [[ "${failed}" != 0 || -n "${AIENOS_QEMU_VERBOSE:-}" ]]; then
+if [[ "${failed}" != 0 || "${m3_failed}" != 0 || -n "${AIENOS_QEMU_VERBOSE:-}" ]]; then
     echo "---- serial console ----"
     cat "${work}/serial.txt"
 fi
-[[ "${failed}" == 0 ]] && echo "AIENOS_CK_M1: PASS" || { echo "AIENOS_CK_M1: FAIL"; exit 1; }
+m3_verdict=PASS
+[[ "${m3_failed}" == 0 && "${failed}" == 0 ]] || m3_verdict=FAIL
+echo "AIENOS_CK_M3: ${m3_verdict}"
+[[ "${failed}" == 0 ]] && echo "AIENOS_CK_M1: PASS" || echo "AIENOS_CK_M1: FAIL"
+[[ "${failed}" == 0 && "${m3_verdict}" == PASS ]] || exit 1

@@ -1,8 +1,9 @@
 /* vectors.S -- exception vectors, EL2 -> EL1h entry, recoverable probe.
  * ck_vectors serves VBAR_EL1 only; ck_vectors_el2 (fatal-only) serves VBAR_EL2
  * before the drop to EL1.
- * TPIDR_EL1 and TPIDRRO_EL0 are scratch registers in the entry path (no EL0
- * runs in this core yet). Frame layout: struct ck_frame in arch.h. */
+ * TPIDR_EL1 and TPIDRRO_EL0 are scratch registers in the entry path; every
+ * exit clears TPIDRRO_EL0 so no kernel value is readable from EL0 (the M3
+ * EL0 tasks, core/m3.c). Frame layout: struct ck_frame in arch.h. */
 #define FRAME 272
 
     .text
@@ -71,11 +72,18 @@ ck_vec_common:
     stp x2, x1, [sp, #256]
     mov x0, sp
     cmp x1, #5
-    b.ne 2f
-    bl ck_irq_dispatch
+    b.eq 4f
+    cmp x1, #9
+    b.eq 4f
+    bl ck_exception
     b 3f
-2:  bl ck_exception
-3:  ldp x30, x2, [sp, #240]
+    /* IRQ: the dispatcher returns the frame to resume. It is the same frame
+     * unless the M3 preemption check switches to another task's frame, which
+     * sits at the top of that task's stack, so SP moves with it. */
+4:  bl ck_irq_dispatch
+    mov sp, x0
+3:  msr tpidrro_el0, xzr           /* scratch never leaks to EL0 */
+    ldp x30, x2, [sp, #240]
     msr elr_el1, x2
     ldr x2, [sp, #256]
     msr spsr_el1, x2

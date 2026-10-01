@@ -11,7 +11,7 @@ QEMU qualifies nothing physical: a PASS here says nothing about real hardware.
 | `include/ck.h` | Frozen contract for stage code (devices, security, store). Lane 18 core added only `ck_irq_register`, `ck_irq_enable`, `ck_irq_cpu_enable`. |
 | `arch/` | Vectors, EL2 -> EL1h entry (ADR 0009), recoverable probe, exception and IRQ dispatch, GICv3, EL1 physical timer. |
 | `mm/` | Frame allocator (UEFI map), 4 KiB-granule page-table builder, heap, the kernel address space (`mmu.c`). |
-| `core/` | Console, printf, ACPI, reports/panic/PSCI reset, `kmain.c`. |
+| `core/` | Console, printf, ACPI, reports/panic/PSCI reset, M3 (threads, scheduler, EL0, capabilities, IPC), `kmain.c`. |
 | `tests/` | Host unit tests. |
 | `../boot/` | Minimal UEFI entry stub (one image with the kernel). |
 
@@ -108,6 +108,13 @@ low-water free bytes.
 - `guard_page: ok fault=contained` is an addition: the C kernel proves its
   guard pages fault and that the fault is handled. The Rust kernel has no
   such test.
-- M3 features (threads, EL0, preemption, placement, IPC) are not implemented
-  yet; the QEMU script reports them as NOT_RUN.
+- M3 (threads, EL0, preemption, placement, IPC) runs in the core before the
+  stages (`core/m3.c`, `core/sched.c`, `core/ipc.c`, `arch/m3.S`; host tests
+  `tests/test_sched.c`, `tests/test_ipc.c`) and prints the same five lines as
+  the Rust kernel, plus an extra `ipc_detail:` line. Differences in how:
+  the EL0 return uses SPSR 0x3c5 (Rust 0x5); EL0 entry zeroes all general
+  registers and TPIDR_EL0/TPIDRRO_EL0; the EL0 window uses ASID 0 with a
+  full TLB flush (Rust ASID 1); context switches save x19-x30 and sp only
+  (no FP/SIMD; EL0 FP/SIMD traps). Placement is computed from the MADT; no
+  secondary core is started (same as Rust). See GATES.md rows 16-20.
 - MAIR adds a Normal Non-cacheable attribute (index 2) for the DMA pool.

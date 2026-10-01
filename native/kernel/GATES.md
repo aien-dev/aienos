@@ -17,11 +17,11 @@ Status vocabulary:
 - **NOT_RUN**: no C implementation exists (MISSING_IMPLEMENTATION, reason
   given). `ck_gates.sh` prints NOT_RUN for these; never PASS.
 
-C gates (one line each from `ck_gates.sh`): `M1` (from
+C gates (one line each from `ck_gates.sh`): `M1` and `M3` (from
 `scripts/qemu_ck_boot_test.sh`), `M4_NVME`, `M4_STORE`, `ARGUS1_REVOKE`
 `SMMU`, `NVME_SHUTDOWN` (from `scripts/qemu_ck_store_test.sh`; rows 21-24b, 47-72, 76 and
 96-101 were checked against its exact grep patterns), and the NOT_RUN gates
-`M3`, `P2_ARTIFACT`, `M0_ROLLBACK`, `M4_STORE_CRASH`,
+`P2_ARTIFACT`, `M0_ROLLBACK`, `M4_STORE_CRASH`,
 `M4_CONTINUITY`, `M4_RECOVERY`, `KEYBOARD`.
 
 `M4_NVME` and `SMMU` PASS in the SMMU-confined mode (default `make full`
@@ -53,18 +53,37 @@ builds with make instead of cargo and takes the machine quiet flag itself.
 | 14 | (none in Rust) guard pages fault and are contained (`guard_page: ok fault=contained`) | M1 | DIFFERS (added check, C only; stricter) |
 | 15 | final verdict line `QEMU_BOOT: PASS` | M1 | DIFFERS (`AIENOS_CK_M1: PASS`; quiet flag held -> `AIENOS_CK_M1: NOT_RUN`, exit 3) |
 
-## M3: scripts/qemu_boot_test.sh M3 lines -> CK `M3`
+## M3: scripts/qemu_boot_test.sh M3 lines -> CK `M3` (scripts/qemu_ck_boot_test.sh)
 
 | # | Rust check (pattern) | CK gate | Status |
 | --- | --- | --- | --- |
-| 16 | cooperative threads (`threads: ok`) | M3 | NOT_RUN (MISSING_IMPLEMENTATION: no threads/scheduler in the C kernel) |
-| 17 | EL0 isolation (`el0: ok write=granted forged=denied fault=contained exit=0`) | M3 | NOT_RUN (MISSING_IMPLEMENTATION: no EL0 tasks) |
-| 18 | timer preemption (`preempt: ok`) | M3 | NOT_RUN (MISSING_IMPLEMENTATION: no preemptive scheduler) |
-| 19 | MADT placement (`placement: worker0=class0/core0 worker1=class0/core1`) | M3 | NOT_RUN (MISSING_IMPLEMENTATION: only the boot CPU is brought up) |
-| 20 | typed IPC (`ipc: ok message=delivered cap=delegated rights=attenuated forged=denied revoked=denied`) | M3 | NOT_RUN (MISSING_IMPLEMENTATION: no IPC; the stage `caps:` line mirrors the capability semantics in-kernel but is not IPC) |
+| 16 | cooperative threads (`threads: ok`) | M3 | IDENTICAL |
+| 17 | EL0 isolation (`el0: ok write=granted forged=denied fault=contained exit=0`) | M3 | IDENTICAL |
+| 18 | timer preemption (`preempt: ok`) | M3 | IDENTICAL |
+| 19 | MADT placement (`placement: worker0=class0/core0 worker1=class0/core1`) | M3 | IDENTICAL (same pattern; like the Rust kernel this is computed from the MADT GICC entries and no secondary core is started) |
+| 20 | typed IPC (`ipc: ok message=delivered cap=delegated rights=attenuated forged=denied revoked=denied`) | M3 | IDENTICAL |
 
-`qemu_ck_boot_test.sh` prints these five as `NOT_RUN` and they do not count
-toward `AIENOS_CK_M1`.
+`scripts/lib_ck_m1_checks.sh` (`ck_m3_checks`) greps the same five patterns
+as `qemu_boot_test.sh` lines 63-67 on the same boot. `AIENOS_CK_M3` is PASS
+only if all five pass and every M1 check of that boot passes (no fault or
+panic, QEMU exit 0); the quiet flag held prints `AIENOS_CK_M3: NOT_RUN`.
+The C code is `native/kernel/core/m3.c`, `core/sched.c`, `core/ipc.c`,
+`arch/m3.S` (ports of the Rust thread.rs, scheduler.rs, ipc.rs, caps.rs,
+user.rs and acpi.rs placement). How the C kernel does the work differs, not
+the observable:
+
+- one extra line `ipc_detail: exit_a=.. exit_b0=.. exit_b1=.. child=.. revoke=..`
+  that no check reads;
+- the return from EL0 to the kernel uses SPSR 0x3c5 (EL1h, DAIF masked; Rust 0x5)
+  and every EL0 entry zeroes x0-x30, TPIDR_EL0 and TPIDRRO_EL0 (the Rust
+  kernel enters EL0 with kernel register values); every exception return
+  zeroes TPIDRRO_EL0;
+- the EL0 window uses ASID 0 and a full `tlbi vmalle1` on each TTBR0 swap
+  (Rust: ASID 1); the code page is EL0 read-only and PXN, the stack page EL0
+  read-write, PXN and UXN;
+- threads and preempt workers save x19-x30 and sp only (the kernel is built
+  without FP/SIMD); EL0 runs with CPACR FPEN=01 so EL0 FP/SIMD traps to the
+  kernel and is contained, never saved.
 
 ## SMMU: scripts/qemu_smmu_test.sh (= keyboard test, SMMU on, bypass forced off) -> CK `SMMU`
 
@@ -105,7 +124,7 @@ per-stream page tables, `ck_dma_confine` / `ck_dma_unconfine` /
 
 | # | Rust check (pattern) | CK gate | Status |
 | --- | --- | --- | --- |
-| 33 | common: kernel alive + M3 threads/el0/ipc proofs unchanged | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION: no artifact loader; M3 also missing) |
+| 33 | common: kernel alive + M3 threads/el0/ipc proofs unchanged | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION: no artifact loader) |
 | 34 | firmware read all candidates (`^artifact_candidates: N$`), report not truncated, final report | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
 | 35 | frames reclaimed (`artifact_frames_free_before` == `_after`) | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
 | 36 | qualification build labelled TEST ONLY, receipt tier line | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
@@ -244,7 +263,7 @@ complete.
 
 ## Summary counts
 
-Rows 1-101: IDENTICAL 15, DIFFERS 25, NOT_RUN 61 (rows 92-95 have no CK gate at all; rows 96-101 are C-only). Rows 13, 24, 47-72, 76 and 96-101 were re-verified against scripts/qemu_ck_store_test.sh and scripts/lib_ck_m1_checks.sh at the commit that adds this line.
+Rows 1-101: IDENTICAL 20, DIFFERS 25, NOT_RUN 56 (rows 92-95 have no CK gate at all; rows 96-101 are C-only). Rows 13, 24, 47-72, 76 and 96-101 were re-verified against scripts/qemu_ck_store_test.sh and scripts/lib_ck_m1_checks.sh at the commit that adds this line.
 
 `scripts/trust1_m5_qualify.sh --with-qemu` also runs three of these gates as
 qemu rows: `ck_m1_boot_qemu` (M1), `ck_store_kernel_qemu` (M4_STORE) and
