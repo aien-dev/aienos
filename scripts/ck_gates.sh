@@ -159,7 +159,14 @@ classify_gate() {
 nvme_dma_mode() {
     local log="${child_log[store]:-}"
     if [[ "${child_present[store]:-0}" != 1 || ! -f "${log}" ]]; then echo "not run"; return; fi
-    if grep -q 'dma_gate: nvme granted (UnsafeBypass)' "${log}"; then echo "UnsafeBypass (QEMU-only build, no SMMU confinement)"
+    # The store script prints check descriptions, not serial lines; accept
+    # its PASS line for the bypass grant as well as the raw serial line.
+    if grep -qE '^PASS  NVMe DMA granted through the unsafe bypass$|dma_gate: nvme granted \(UnsafeBypass\)' "${log}"; then
+        if grep -qE '^PASS  NVMe DMA denied without an SMMU$' "${log}"; then
+            echo "UnsafeBypass (QEMU-only build, no SMMU confinement); default image denied (NoSmmu)"
+        else
+            echo "UnsafeBypass (QEMU-only build, no SMMU confinement)"
+        fi
     elif grep -q 'dma_gate: nvme granted (Confined)' "${log}"; then echo "Confined"
     elif grep -q 'dma_gate: nvme denied (NoSmmu)' "${log}"; then echo "denied (NoSmmu)"
     else echo "not reported"; fi
@@ -316,12 +323,12 @@ self_test() {
     # with no C implementation, which must stay NOT_RUN.
     scenario A "$(fake bootA 0 'PASS  x' 'AIENOS_CK_M1: PASS')" \
         "$(fake storeA 0 'AIENOS_CK_M4_NVME: PASS' 'AIENOS_CK_M4_STORE: PASS' 'AIENOS_CK_ARGUS1_REVOKE: PASS (narrow)' \
-            'AIENOS_CK_M3: PASS' 'AIENOS_CK_KEYBOARD: PASS' 'dma_gate: nvme granted (UnsafeBypass), bus master on')"
+            'AIENOS_CK_M3: PASS' 'AIENOS_CK_KEYBOARD: PASS' 'PASS  NVMe DMA granted through the unsafe bypass' 'PASS  NVMe DMA denied without an SMMU')"
     expect M1 PASS; expect M4_NVME PASS; expect M4_STORE PASS; expect ARGUS1_REVOKE PASS; expect_missing_all
     count_rows
     [[ "${n_pass}/${n_fail}/${n_notrun}/${n_total}" == "4/0/8/12" && ${overall} == NOT_ALL_GATES_PASS ]] \
         && ok "A: counts 4/0/8 of 12, verdict NOT_ALL_GATES_PASS" || bad "A: counts ${n_pass}/${n_fail}/${n_notrun}/${n_total} ${overall}"
-    [[ "$(nvme_dma_mode)" == UnsafeBypass* ]] && ok "A: unsafe-bypass DMA mode recorded" || bad "A: dma mode '$(nvme_dma_mode)'"
+    [[ "$(nvme_dma_mode)" == "UnsafeBypass (QEMU-only build, no SMMU confinement); default image denied (NoSmmu)" ]] && ok "A: unsafe-bypass DMA mode recorded from the store PASS lines" || bad "A: dma mode '$(nvme_dma_mode)'"
     grep -qxF "AIENOS_CK_M4_NVME: PASS (${M4_NVME_PASS_NOTE})" "${tmp}/A.out" \
         && ok "A: M4_NVME PASS line carries the unsafe-bypass / SMMU NOT_RUN note" || bad "A: M4_NVME PASS line lacks the note"
     grep -qx 'AIENOS_CK_M3: NOT_RUN (MISSING_IMPLEMENTATION: no threads, EL0 tasks, preemption, MADT placement or typed IPC in the C kernel)' "${tmp}/A.out" \
