@@ -13,8 +13,9 @@
 #   --with-qemu  also run the QEMU suites (default off). Vetoed (NOT_RUN) while
 #                ~/workspace/.spark-quiet exists.
 #   --out DIR    where logs and the receipt go (default: a new temp folder
-#                outside the tree). DIR may be evidence/: the receipt is
-#                written last, after the dirty-tree re-check.
+#                outside the tree). DIR may be evidence/: the receipt is the
+#                only file the run adds there, written after the dirty-tree
+#                re-check, ready to commit.
 #   --self-test  fast negative controls of the verdict logic and the
 #                dirty-tree refusal; runs no gate and touches no hardware.
 #
@@ -501,6 +502,15 @@ self_test() {
         # A run that dirties the tree must exit 1.
         AIENOS_QUALIFY_TEST_DIRTY=1 bash "${clone}/scripts/trust1_m5_qualify.sh" --machine-only --out "${tmp}/o3" >/dev/null 2>&1; rc=$?
         [[ ${rc} == 1 ]] && ok "a run that dirties the tree exits 1" || bad "dirtying run gave exit ${rc}, expected 1"
+        # --out inside the tree: exit 0 and the receipt is the only new file.
+        git -C "${clone}" clean -qfd
+        bash "${clone}/scripts/trust1_m5_qualify.sh" --machine-only --out "${clone}/evidence/qualify_st" >/dev/null 2>&1; rc=$?
+        local added; added="$(git -C "${clone}" status --porcelain --untracked-files=all)"
+        if [[ ${rc} == 0 && "${added}" =~ ^\?\?\ evidence/qualify_st/trust1_m5_qualification_[0-9a-f]{64}\.json$ ]]; then
+            ok "--out inside the tree: exit 0, receipt is the only new file"
+        else
+            bad "--out inside the tree: exit ${rc}, tree change: ${added}"
+        fi
     else
         bad "could not make a private clone for the dirty-tree test"
     fi
@@ -535,8 +545,9 @@ main() {
     started_utc="$(date -u +%FT%TZ)"
 
     if [[ -n "${out_arg}" ]]; then
+        # Resolved now, created only after the dirty-tree re-check, so an
+        # in-tree DIR (evidence/) gets the receipt and nothing else.
         out_dir="$(realpath -m -- "${out_arg}")"
-        mkdir -p "${out_dir}" || die "cannot create ${out_dir}"
     else
         out_dir="$(mktemp -d "${TMPDIR:-/tmp}/trust1-m5-qualify.XXXXXX")" || die "mktemp failed"
     fi
@@ -564,6 +575,7 @@ main() {
     fi
 
     summarize
+    mkdir -p "${out_dir}" || die "cannot create ${out_dir}"
     write_receipt
     echo "Logs: ${work_dir}/logs"
     echo "Receipt: ${receipt_path}"
