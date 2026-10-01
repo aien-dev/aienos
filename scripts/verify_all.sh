@@ -221,3 +221,16 @@ if command -v swtpm >/dev/null && command -v tpm2_pcrread >/dev/null && command 
 else
     skipped "swtpm, tpm2-tools, or xxd not present on host."
 fi
+
+# Step 11: TRUST-1 Gate 4 Secure Boot enforcement in QEMU. Firmware with
+# Secure Boot ON and the published Debian "snakeoil" TEST key in PK/KEK/db:
+# signed loader boots, unsigned / one-byte-tampered / wrong-key are refused
+# with Access Denied. No owner key, no hardware.
+echo ""
+echo "--- [TRUST-1 Gate 4 Secure Boot Signing in QEMU] ---"
+if command -v qemu-system-aarch64 >/dev/null && command -v sbsign >/dev/null && command -v sbverify >/dev/null \
+    && [[ -r /usr/share/AAVMF/AAVMF_CODE.snakeoil.fd && -r /usr/share/qemu-efi-aarch64/PkKek-1-snakeoil.key ]]; then
+    ./scripts/qemu_secureboot_signing_test.sh
+else
+    skipped "qemu-system-aarch64, sbsigntool, or snakeoil AAVMF firmware not present on host."
+fi

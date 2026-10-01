@@ -133,6 +133,8 @@ Clean UEFI boot; ExitBootServices handoff; memory-map validation; MMU init; vect
 
 Evidence required: Build receipts (commit, lockfile digest, toolchain, command, binary digest, reproducibility) + emulator receipts (image digest, suite version, counts, fault results, swTPM state).
 
+Status (2026-09-30): "signed loader accepted; unsigned rejected; tampered rejected" is covered by `scripts/qemu_secureboot_signing_test.sh` (verify_all step 11). It boots with Secure Boot ON under AAVMF snakeoil firmware (a published TEST key, never an owner key): the snakeoil-signed loader reaches `kernel: alive`; the unsigned image, a one-byte-flipped signed image and an image signed by a throwaway key not in db are each refused with the firmware verdict `Access Denied`. The older `qemu_security_suite.sh` "corrupt rejected" case runs with Secure Boot OFF and only shows a PE load failure. Still open for Gate 4: signing with the Gate 3 Boot Signer instead of snakeoil (needs Gate 3), manifest accepted/altered, A/B selection and fallback, swTPM policy current/next/rollback (Gate 5), the 100-boot soak (suite default is 5, verify_all runs 3), and the build/emulator receipts.
+
 Rollback: N/A (no hardware state). Failure returns to implementation, never to hardware.
 
 ---

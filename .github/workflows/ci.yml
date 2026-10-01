@@ -23,7 +23,7 @@ jobs:
       - name: Install QEMU and AAVMF firmware
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-arm qemu-efi-aarch64 swtpm swtpm-tools tpm2-tools libtss2-tcti-swtpm0t64 xxd
+          sudo apt-get install -y qemu-system-arm qemu-efi-aarch64 swtpm swtpm-tools tpm2-tools libtss2-tcti-swtpm0t64 xxd sbsigntool
 
       - name: Build and test native C capability authority
         run: make -C native/capability test
