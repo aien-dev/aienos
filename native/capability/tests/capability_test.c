@@ -6,6 +6,8 @@
  */
 #include "../aienos_capability.h"
 
+#include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +25,21 @@ static int checks;
     } while (0)
 
 #define EQ(a, b) CHECK((a) == (b))
+
+/* Entries are compared field by field, never with memcmp. AienosCapEntry
+ * has padding (after cap_id, parent_id and minted_by_id), and a struct copy
+ * such as `*out = *e` need not copy padding bytes, so memcmp can see stack
+ * garbage in the padding of two equal entries. How a compiler copies differs
+ * by target (the suspected cause of the x86-64 CI baseline failure). */
+static int same_entry(const AienosCapEntry *x, const AienosCapEntry *y) {
+    return x->cap_id == y->cap_id && x->generation == y->generation && x->state == y->state &&
+           x->issuer == y->issuer && x->subject == y->subject && x->rights == y->rights &&
+           x->resource == y->resource && x->epoch == y->epoch &&
+           x->lease_expiry == y->lease_expiry && x->parent_id == y->parent_id &&
+           x->parent_generation == y->parent_generation &&
+           x->minted_by_id == y->minted_by_id &&
+           x->minted_by_generation == y->minted_by_generation;
+}
 
 static const AienosCapRef NONE = {AIENOS_CAP_PARENT_NONE, 0};
 
@@ -340,7 +357,7 @@ static int matches_view(Auth *a, const Rec *r) {
     AienosCapEntry now;
     AienosCapRef ref = {r->entry.cap_id, r->entry.generation};
     if (aienos_cap_inspect(a->view, ref, &now) != AIENOS_CAP_OK) return 0;
-    return memcmp(&now, &r->entry, sizeof now) == 0;
+    return same_entry(&now, &r->entry);
 }
 
 static void observer_sees_each_admin_operation_once(void) {
@@ -621,7 +638,7 @@ static int shadow_matches(Auth *a, const Shadow *sh) {
         }
         /* The epoch and clock move without touching entries; the entry
          * itself must be exactly what the shadow holds. */
-        if (rc != AIENOS_CAP_OK || memcmp(&now, &sh->e[i], sizeof now) != 0) return 0;
+        if (rc != AIENOS_CAP_OK || !same_entry(&now, &sh->e[i])) return 0;
     }
     return 1;
 }
@@ -664,6 +681,101 @@ static void observer_shadow_matches_table_under_random_operations(uint64_t base_
     }
 }
 
+
+/* Rights are a superset check: a reference holding READ must not pass a
+ * request for READ|WRITE. Kills mutant validate_partial_rights (any-overlap
+ * instead of all-of). */
+static void validate_needs_every_requested_right(void) {
+    Auth a = boot();
+    AienosCapRef cap;
+    EQ(root_mint(&a, 1, 0x60, AIENOS_CAP_RIGHT_READ | AIENOS_CAP_RIGHT_EFFECT, &cap),
+       AIENOS_CAP_OK);
+    EQ(validate(&a, cap, 1, 0x60, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_OK);
+    EQ(validate(&a, cap, 1, 0x60, AIENOS_CAP_RIGHT_READ | AIENOS_CAP_RIGHT_EFFECT), AIENOS_CAP_OK);
+    EQ(validate(&a, cap, 1, 0x60, AIENOS_CAP_RIGHT_READ | AIENOS_CAP_RIGHT_WRITE),
+       AIENOS_CAP_ERR_RIGHTS);
+    EQ(validate(&a, cap, 1, 0x60,
+                AIENOS_CAP_RIGHT_READ | AIENOS_CAP_RIGHT_EFFECT | AIENOS_CAP_RIGHT_DELEGATE),
+       AIENOS_CAP_ERR_RIGHTS);
+    aienos_cap_stop(a.admin, a.view);
+}
+
+/* A lease of n ticks is good for clock values below start+n and dead at
+ * exactly start+n. Kills mutant lease_expiry_off_by_one (> instead of >=). */
+static void lease_ends_exactly_at_expiry_tick(void) {
+    Auth a = boot();
+    AienosCapRef leased;
+    AienosCapMint m = {3, 1, 0x70, AIENOS_CAP_RIGHT_READ, 5, NONE, office(&a)};
+    EQ(aienos_cap_mint(a.admin, &m, &leased), AIENOS_CAP_OK);
+    EQ(aienos_cap_advance_clock(a.admin, office(&a), 4), AIENOS_CAP_OK);
+    EQ(validate(&a, leased, 1, 0x70, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_OK);
+    EQ(aienos_cap_advance_clock(a.admin, office(&a), 1), AIENOS_CAP_OK);
+    EQ(aienos_cap_clock(a.view), 5u);
+    EQ(validate(&a, leased, 1, 0x70, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_ERR_EXPIRED);
+    aienos_cap_stop(a.admin, a.view);
+}
+
+/* Fault injection for the chain walk in validate.
+ *
+ * Through the public calls a live child of a non-live parent cannot exist:
+ * revoke cascades to every descendant, and reclaim and force_generation
+ * only touch non-live slots. So the "parent must be LIVE" step in validate
+ * is defense in depth, and only a corrupted table can reach it. This test
+ * corrupts the table on purpose: it flips the parent's state with no
+ * cascade and checks validate still refuses the child with CHAIN.
+ *
+ * It reaches the table through a mirror of the private layout in
+ * aienos_capability.c (CapShared/CapState). The mirror is checked against
+ * the public view before anything is written; any layout drift fails this
+ * test loudly instead of poking the wrong bytes. Kills mutant
+ * validate_parent_live. */
+typedef struct {
+    uint64_t boot_gen;
+    uint64_t epoch;
+    uint64_t clock;
+    AienosCapEntry entries[AIENOS_CAP_MAX];
+    bool delivered[AIENOS_CAP_MAX];
+    bool writer_alive;
+} MirrorCapState;
+
+typedef struct {
+    pthread_mutex_t state_lock;
+    MirrorCapState state;
+} MirrorCapShared;
+
+static void validate_refuses_child_of_non_live_parent_in_corrupt_table(void) {
+    Auth a = boot();
+    AienosCapRef parent, child;
+    AienosCapEntry pe, ce, oe;
+    EQ(root_mint(&a, 1, 0x80, AIENOS_CAP_RIGHT_READ | AIENOS_CAP_RIGHT_DELEGATE, &parent),
+       AIENOS_CAP_OK);
+    EQ(child_mint(&a, parent, 1, 2, 0x80, AIENOS_CAP_RIGHT_READ, &child), AIENOS_CAP_OK);
+    EQ(validate(&a, child, 2, 0x80, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_OK);
+    EQ(aienos_cap_inspect(a.view, parent, &pe), AIENOS_CAP_OK);
+    EQ(aienos_cap_inspect(a.view, child, &ce), AIENOS_CAP_OK);
+    EQ(aienos_cap_inspect(a.view, office(&a), &oe), AIENOS_CAP_OK);
+
+    MirrorCapShared *sh = *(MirrorCapShared *const *)a.admin;
+    int layout_ok = sh != NULL && sh->state.epoch == 1 && sh->state.clock == 0 &&
+                    sh->state.writer_alive && sh->state.delivered[child.cap_id] &&
+                    same_entry(&sh->state.entries[0], &oe) &&
+                    same_entry(&sh->state.entries[parent.cap_id], &pe) &&
+                    same_entry(&sh->state.entries[child.cap_id], &ce);
+    CHECK(layout_ok);
+    if (layout_ok) {
+        AienosCapEntry *p = &sh->state.entries[parent.cap_id];
+        p->state = AIENOS_CAP_STATE_REVOKED; /* no cascade: child stays LIVE */
+        EQ(aienos_cap_inspect(a.view, child, &ce), AIENOS_CAP_OK);
+        EQ(ce.state, AIENOS_CAP_STATE_LIVE);
+        EQ(validate(&a, child, 2, 0x80, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_ERR_CHAIN);
+        p->state = AIENOS_CAP_STATE_FREE;
+        EQ(validate(&a, child, 2, 0x80, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_ERR_CHAIN);
+        p->state = AIENOS_CAP_STATE_LIVE;
+        EQ(validate(&a, child, 2, 0x80, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_OK);
+    }
+    aienos_cap_stop(a.admin, a.view);
+}
+
 int main(int argc, char **argv) {
     uint64_t base_seed = argc > 1 ? strtoull(argv[1], NULL, 0) : 0x5eedull;
     high_half_resource_is_kept();
@@ -679,6 +791,9 @@ int main(int argc, char **argv) {
     generation_above_32_bits_is_kept();
     ordinary_capability_cannot_administer_and_depth_stops();
     table_fills_then_refuses();
+    validate_needs_every_requested_right();
+    lease_ends_exactly_at_expiry_tick();
+    validate_refuses_child_of_non_live_parent_in_corrupt_table();
     observer_sees_each_admin_operation_once();
     observer_sees_cascade_ancestor_first();
     observer_sees_refusals_with_their_code();

@@ -29,6 +29,43 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
+# rows_all_ok FILE WANT: true only when FILE holds exactly WANT result rows
+# (lines with " -> ") and every one ends in "-> OK". A missing file, a short
+# campaign, an extra row or any BAD row is false, so a loop that never ran
+# (or stopped early) cannot read as PASS.
+rows_all_ok() {
+    local f="$1" want="$2" total=0 ok=0
+    [[ -f "${f}" ]] || { echo "      rows: ${f##*/} missing (want ${want})"; return 1; }
+    total=$(grep -c ' -> ' "${f}" || true)
+    ok=$(grep -c ' -> OK$' "${f}" || true)
+    if [[ "${want}" -gt 0 && "${total}" == "${want}" && "${ok}" == "${want}" ]]; then return 0; fi
+    echo "      rows: ${f##*/} has ${total} rows, ${ok} OK; want exactly ${want} OK"
+    return 1
+}
+
+# --verdict-self-test: feed the verdict check broken result files (no QEMU,
+# no build) and require FAIL for each, PASS only for the complete table.
+if [[ "${1:-}" == --verdict-self-test ]]; then
+    t="$(mktemp -d)"; st=0
+    want_rows() { # NAME WANT EXPECT(0 pass|1 fail) LINES...
+        local name="$1" want="$2" expect="$3"; shift 3
+        printf '%s' "" > "${t}/r"; for l in "$@"; do printf '%s\n' "${l}" >> "${t}/r"; done
+        local got=0; rows_all_ok "${t}/r" "${want}" >/dev/null || got=1
+        if [[ "${got}" == "${expect}" ]]; then echo "PASS  ${name} -> $([ "${got}" = 0 ] && echo PASS || echo FAIL)"
+        else echo "FAIL  ${name} gave the wrong verdict"; st=1; fi
+    }
+    want_rows "empty results (campaign never ran)" 3 1
+    want_rows "one row short (campaign stopped early)" 3 1 "a -> OK" "b -> OK"
+    want_rows "one BAD row" 3 1 "a -> OK" "b -> BAD" "c -> OK"
+    want_rows "one extra row" 3 1 "a -> OK" "b -> OK" "c -> OK" "d -> OK"
+    want_rows "zero rows wanted is never a pass" 0 1
+    want_rows "complete, all OK" 3 0 "a -> OK" "b -> OK" "c -> OK"
+    rm -f "${t}/r"; rows_all_ok "${t}/r" 3 >/dev/null && { echo "FAIL  missing file read as PASS"; st=1; } || echo "PASS  missing results file -> FAIL"
+    rm -rf "${t}"
+    [[ "${st}" == 0 ]] && { echo "STORE_CRASH_VERDICT_SELF_TEST: PASS"; exit 0; }
+    echo "STORE_CRASH_VERDICT_SELF_TEST: FAIL"; exit 1
+fi
+
 code_fd="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}"
 vars_fd="${AAVMF_VARS:-/usr/share/AAVMF/AAVMF_VARS.fd}"
 command -v qemu-system-aarch64 >/dev/null || { echo "qemu-system-aarch64 not installed"; exit 2; }
@@ -45,7 +82,10 @@ target_dir="target/qemu-store-512b-crash"
 
 echo "=== Building aienos-handoff (store-qual) and aienos-store-tool ==="
 commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
-git diff --quiet HEAD 2>/dev/null || commit="${commit}-dirty"
+tree_dirty=unknown
+if [[ "${commit}" != unknown ]]; then
+    if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then tree_dirty=true; commit="${commit}-dirty"; else tree_dirty=false; fi
+fi
 AIENOS_COMMIT="${commit}" AIENOS_RESTART_SECS=1 cargo build --quiet --release \
     -p aienos-boot --target aarch64-unknown-uefi --features store-qual --bin aienos-handoff \
     --target-dir "${target_dir}" || { echo "build failed"; exit 2; }
@@ -186,8 +226,10 @@ for settle in 0 3; do
     done
 done
 cat "${work}/results_tier1.txt"
-tier1_pass=1
-grep -q ' -> BAD' "${work}/results_tier1.txt" && tier1_pass=0
+# Exactly one OK row per (settle, checkpoint); a short or empty table is FAIL.
+tier1_pass=0
+rows_all_ok "${work}/results_tier1.txt" $(( 2 * ${#checkpoints[@]} )) && tier1_pass=1
+[[ "${tier1_pass}" == 1 ]] || fail=1
 [[ "${tier1_pass}" == 1 ]] && echo "STORE_512B_CRASH_OBSERVED_QEMU: PASS" || echo "STORE_512B_CRASH_OBSERVED_QEMU: FAIL"
 
 # --- Tier 2a: root tear closure on the real Tier 1 images -------------------
@@ -195,11 +237,16 @@ echo
 echo "=== Tier 2a: Root Tear Closure (host proof over Tier 1 images) ==="
 tier2a_pass=1
 for settle in 0 3; do
+    # PASS needs exit 0 AND the tool's own PASS line (an empty run is FAIL).
     if ! "${tool}" tear-closure "${work}/saved/s${settle}_after_first_flush.img" \
             "${work}/saved/s${settle}_after_final_flush.img" "${store_offset}" "${lba_bytes}" \
-            | sed "s/^/settle=${settle} /"; then
+            > "${work}/tear_s${settle}.txt" 2>&1 \
+       || ! grep -q "^STORE_ROOT_TEAR_CLOSURE: PASS" "${work}/tear_s${settle}.txt"; then
+        sed "s/^/settle=${settle} /" "${work}/tear_s${settle}.txt"
         tier2a_pass=0; fail=1
         echo "settle=${settle} STORE_ROOT_TEAR_CLOSURE: FAIL"
+    else
+        sed "s/^/settle=${settle} /" "${work}/tear_s${settle}.txt"
     fi
 done
 [[ "${tier2a_pass}" == 1 ]] && echo "STORE_512B_ROOT_TEAR_CLOSURE: PASS" || echo "STORE_512B_ROOT_TEAR_CLOSURE: FAIL"
@@ -259,11 +306,12 @@ for row in "${inject_cases[@]}"; do
         "${expect}" "$([ "${ok}" = 1 ] && echo OK || echo BAD)" >> "${work}/results_tier2b.txt"
     if [[ "${ok}" != 1 ]]; then tier2b_pass=0; fail=1; fi
 done
+rows_all_ok "${work}/results_tier2b.txt" ${#inject_cases[@]} || { tier2b_pass=0; fail=1; }
 cat "${work}/results_tier2b.txt"
 [[ "${tier2b_pass}" == 1 ]] && echo "STORE_512B_INJECTED_ROOT_RECOVERY_QEMU: PASS" || echo "STORE_512B_INJECTED_ROOT_RECOVERY_QEMU: FAIL"
 
 echo
-echo "=== Final Summary (commit ${commit}) ==="
+echo "=== Final Summary (commit ${commit}, tree_dirty=${tree_dirty}, evidence level: QEMU only) ==="
 [[ "${integration_pass}" == 1 && "${reopen_pass}" == 1 ]] && echo "STORE_NVME_INTEGRATION_512B_QEMU: PASS" || echo "STORE_NVME_INTEGRATION_512B_QEMU: FAIL"
 [[ "${tier1_pass}" == 1 ]] && echo "STORE_512B_CRASH_OBSERVED_QEMU: PASS" || echo "STORE_512B_CRASH_OBSERVED_QEMU: FAIL"
 [[ "${tier2a_pass}" == 1 ]] && echo "STORE_512B_ROOT_TEAR_CLOSURE: PASS" || echo "STORE_512B_ROOT_TEAR_CLOSURE: FAIL"

@@ -2,7 +2,8 @@
 # only compiled these into the kernel image; nothing ran their own tests.
 #
 # Coverage map (what runs where):
-#   native/capability  test, mutants          ci.yml (test), not repeated here
+#   native/capability  test                   ci.yml
+#   native/capability  mutants                this file
 #   native/store       test mutants           ci.yml
 #   native/kernel      test sanitize + gates  ck-kernel.yml (owned by another lane)
 #   native/net         test sanitize mutants  this file
@@ -51,6 +52,7 @@ jobs:
           - { suite: m5, targets: "test sanitize mutants" }
           - { suite: disk, targets: "test sanitize mutants" }
           - { suite: argus, targets: "test sanitize" }
+          - { suite: capability, targets: "mutants" }
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -77,6 +79,7 @@ jobs:
             m5)     req='M5_NATIVE: PASS|M5_NATIVE_MUTANTS: PASS' ;;
             disk)   req='AIENOS_DISK_NATIVE: PASS|AIENOS_DISK_SANITIZE: PASS|AIENOS_DISK_MUTANTS: PASS' ;;
             argus)  req='GATE CONTAIN_TEST PASS|GATE CONTAIN_DETERMINISM PASS' ;;
+            capability) req='AIENOS_CAP_MUTANTS: PASS' ;;
           esac
           for m in $(echo "$req" | tr '|' '\n' | sed 's/ /@/g'); do
             m="${m//@/ }"
