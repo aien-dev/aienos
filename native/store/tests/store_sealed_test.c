@@ -760,6 +760,15 @@ static void test_nonce(void)
         SCHECK_EQ(ss_commit_prepared(&s, NULL, NULL), 0, "commit legacy-id envelope");
         rig_close(&rr);
         SCHECK_EQ(sopen(&rr, &s, &K), 0, "legacy-id envelope mounts (digests valid)");
+        {
+            static uint8_t canary[SS_MAX_PLAINTEXT];
+            memset(canary, 0xaa, sizeof canary);
+            size_t clen = 999;
+            SCHECK_EQ(ss_read(&s, sid, canary, sizeof canary, &clen, NULL), SS_E_ENVELOPE, "legacy-id refused");
+            int z = 1;
+            for (size_t b = 0; b < sizeof canary; b++) z &= canary[b] == 0;
+            CHECK(clen == 0 && z, "whole output buffer wiped on envelope refusal");
+        }
         SCHECK_EQ(check_read(&s, sid, P1, sizeof P1, 44), SS_E_ENVELOPE, "legacy-id envelope refused on read");
         rig_close(&rr);
     }

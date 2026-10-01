@@ -364,7 +364,9 @@ static int envid_derive(const ss_store *s, uint64_t gen, uint32_t index, uint16_
     aienos_hmac_sha256_update(&c, (const uint8_t *)ENVID_DOMAIN, sizeof(ENVID_DOMAIN));
     aienos_hmac_sha256_update(&c, m, sizeof m);
     aienos_hmac_sha256_final(&c, out);
-    memset(k, 0, sizeof k);
+    aienos_wipe(k, sizeof k);
+    aienos_wipe(ph, sizeof ph);
+    aienos_wipe(m, sizeof m);
     return 0;
 }
 
@@ -500,8 +502,8 @@ int ss_read(ss_store *s, const uint8_t sid[32], uint8_t *out, size_t cap, size_t
               c->c.object_sequence > UINT32_MAX ||
               envid_derive(s, c->c.store_generation, (uint32_t)c->c.object_sequence,
                            c->c.obj.object_kind, c->c.obj.object_version, out, *len, h) != 0;
-    if (!bad) bad = memcmp(h, c->c.obj.envelope_id, 16) != 0 || memcmp(h + 16, eh.nonce_prefix, 8) != 0;
-    if (bad) { memset(out, 0, *len); *len = 0; return SS_E_ENVELOPE; } /* GUARD:read-envid-rule */
+    if (!bad) bad = !aienos_ct_equal(h, c->c.obj.envelope_id, 16) || !aienos_ct_equal(h + 16, eh.nonce_prefix, 8);
+    if (bad) { aienos_wipe(out, cap); *len = 0; return SS_E_ENVELOPE; } /* GUARD:read-envid-rule */
     if (kind) *kind = c->c.obj.object_kind;
     return 0;
 }
