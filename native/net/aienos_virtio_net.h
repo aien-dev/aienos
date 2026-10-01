@@ -16,10 +16,15 @@
  * that runs ahead of what was posted, or a short RX completion marks the
  * device broken (sticky); the caller must reset and re-init.
  *
- * Features: VIRTIO_F_VERSION_1 is required; VIRTIO_NET_F_MAC is accepted when
- * offered; every other feature is declined (no packed ring, no indirect
- * descriptors, no event index, no offloads, no mergeable RX buffers, no
- * control queue, no ACCESS_PLATFORM). One descriptor per packet; the 12-byte
+ * Features: VIRTIO_F_VERSION_1 is required; VIRTIO_NET_F_MAC and
+ * VIRTIO_F_ACCESS_PLATFORM are accepted when offered (virtio 1.x 6.1: a driver
+ * SHOULD accept ACCESS_PLATFORM; with it the device DMAs through the
+ * platform IOMMU, so `dma` below is an IOMMU bus address). With
+ * VNET_INIT_REQUIRE_ACCESS_PLATFORM the driver refuses (fail closed, before
+ * FEATURES_OK) a device that does not offer it: an IOMMU-confined caller
+ * must never run a device that would bypass the IOMMU. Every other feature
+ * is declined (no packed ring, no indirect descriptors, no event index, no
+ * offloads, no mergeable RX buffers, no control queue). One descriptor per packet; the 12-byte
  * virtio 1.x net header precedes each frame. Interrupts are not used. */
 #ifndef AIENOS_VIRTIO_NET_H
 #define AIENOS_VIRTIO_NET_H
@@ -38,6 +43,10 @@
 
 #define VNET_F_MAC 5u
 #define VNET_F_VERSION_1 32u
+#define VNET_F_ACCESS_PLATFORM 33u  /* VIRTIO_F_ACCESS_PLATFORM (was IOMMU_PLATFORM) */
+
+/* vnet_init_flags flags */
+#define VNET_INIT_REQUIRE_ACCESS_PLATFORM 1u
 
 /* virtio common configuration (virtio 1.x 4.1.4.3), byte offsets */
 #define VNET_CC_DFSELECT 0x00u
@@ -97,6 +106,7 @@ typedef enum {
     VNET_E_FULL = 10,          /* no free TX descriptor (reclaim first) */
     VNET_E_DEVICE = 11,        /* hostile or broken device completion; device is now broken */
     VNET_E_BROKEN = 12,        /* sticky: an earlier VNET_E_DEVICE; reset and re-init */
+    VNET_E_NO_ACCESS_PLATFORM = 13, /* required (flag) but not offered by the device */
 } vnet_err;
 
 typedef struct {
@@ -133,6 +143,9 @@ size_t vnet_mem_size(uint16_t qsize);
  * driver writes FAILED to the device status when it got that far. */
 vnet_err vnet_init(vnet_dev *d, const vnet_ops *ops, const virtio_pci_caps *caps,
                    void *mem, uint64_t dma, size_t mem_len, uint16_t qsize);
+/* vnet_init with flags (VNET_INIT_REQUIRE_ACCESS_PLATFORM); vnet_init is flags 0. */
+vnet_err vnet_init_flags(vnet_dev *d, const vnet_ops *ops, const virtio_pci_caps *caps, void *mem, uint64_t dma,
+                         size_t mem_len, uint16_t qsize, uint32_t flags);
 
 /* Copy one Ethernet frame (14..VNET_FRAME_MAX bytes, no FCS) into a free TX
  * buffer behind a zero virtio-net header, post it and notify. */
