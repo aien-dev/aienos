@@ -193,7 +193,7 @@ verify}`, which carries a 32-byte tag. The two connect like this:
 
 ## Lane 26: virtio-net PCI fix and virtqueue data path (hosted)
 
-> Update 2026-10-01: the text of this section is the hosted-lane record. The driver is now bound in the C kernel (#200 d75a266, #203 9807281, `native/kernel/dev/net_bind.c`) and the NET gate passes in QEMU only (slirp UDP round trip; SMMU window programmed but not enforced because VIRTIO_F_ACCESS_PLATFORM is not negotiated; polled, no IRQs; no physical NIC; TEST keys). The "not proven" list below still holds for real hardware.
+> Update 2026-10-01: the text of this section is the hosted-lane record. The driver is now bound in the C kernel (#200 d75a266, #203 9807281, `native/kernel/dev/net_bind.c`) and the NET gate passes in QEMU only (slirp UDP round trip; SMMU window enforced since Lane 31 negotiates VIRTIO_F_ACCESS_PLATFORM and the gate shows an out-of-window DMA refused; polled, no IRQs; no physical NIC; TEST keys). The "not proven" list below still holds for real hardware.
 
 **The attach bug.** The capability walk refused any vendor capability whose
 region had length 0, before looking at its type. Real QEMU virtio-net-pci

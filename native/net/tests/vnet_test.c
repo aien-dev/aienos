@@ -422,7 +422,7 @@ static void test_access_platform(void)
     CHECK(strcmp(vnet_err_name(VNET_E_NO_ACCESS_PLATFORM), "NoAccessPlatform") == 0);
 }
 
-static void test_datapath)(void)
+static void test_datapath(void)
 {
     sim s; vnet_dev d;
     sim_reset(&s, region, DMA, sizeof region);
