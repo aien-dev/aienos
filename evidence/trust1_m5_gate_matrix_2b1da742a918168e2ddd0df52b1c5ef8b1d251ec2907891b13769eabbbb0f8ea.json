@@ -1,0 +1,11 @@
+{
+  "receipt_type": "trust1_m5_gate_matrix",
+  "schema_version": "1.0.0",
+  "base_commit": "a3be1b017e174745d8bb336e6e8f155425480437",
+  "document": "docs/TRUST-1-M5-GATE-MATRIX.md",
+  "document_sha256": "a4c1cd2b3947880c9b1ef599d8ed83f5c04f5cb9f1309bbc36b6c632445926ee",
+  "method": "manual audit of main against docs/TRUST-1-IMPLEMENTATION-PLAN.md and CURRENT_EXECUTION_PLAN D1; no hardware, no mutation",
+  "counts": {"PASS": 0, "FAIL": 0, "NOT_RUN": 0, "BLOCKED_HARDWARE": 0, "BLOCKED_OPERATOR": 9, "MISSING_IMPLEMENTATION": 10},
+  "trust1_verdict": "NOT_QUALIFIED",
+  "m5_verdict": "NOT_QUALIFIED"
+}
