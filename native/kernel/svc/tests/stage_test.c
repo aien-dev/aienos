@@ -8,6 +8,7 @@
 #include "ck.h"
 #include "ck_host.h"
 #include "devices.h"
+#include "nvme_shutdown.h"
 #include "disk_file.h"
 #include "disk_layout.h"
 #include "m5.h"
@@ -330,6 +331,107 @@ static void test_security(void)
     ck_security_shutdown();
 }
 
+
+/* ---- NVMe normal shutdown (dev/nvme_shutdown.c) against a model controller */
+struct shut_model {
+    uint32_t cc, csts;
+    int done_after;     /* polls until SHST = 10b; -1 never */
+    int polls, cc_writes, gone;
+    int cfs_after;      /* polls until CFS = 1; 0 never */
+    int rdy_drop_after; /* polls after EN = 0 until RDY = 0; -1 never */
+    int dpolls;
+    uint32_t log_off[8];
+    int nlog;
+};
+static uint32_t sm_r32(void *ctx, uint32_t off)
+{
+    struct shut_model *m = ctx;
+    if (m->gone) return 0xffffffffu;
+    if (off == CK_NVME_REG_CC) return m->cc;
+    if (off == CK_NVME_REG_CSTS) {
+        if (!(m->cc & CK_NVME_CC_EN) && m->rdy_drop_after >= 0 && m->dpolls++ >= m->rdy_drop_after)
+            m->csts &= ~CK_NVME_CSTS_RDY;
+        if (m->cc & CK_NVME_CC_SHN_MASK) {
+            int p = m->polls++;
+            if (m->done_after >= 0 && p >= m->done_after)
+                m->csts = (m->csts & ~CK_NVME_CSTS_SHST_MASK) | CK_NVME_CSTS_SHST_DONE;
+            if (m->cfs_after > 0 && p >= m->cfs_after)
+                m->csts |= CK_NVME_CSTS_CFS;
+        }
+        return m->csts;
+    }
+    return 0;
+}
+static void sm_w32(void *ctx, uint32_t off, uint32_t v)
+{
+    struct shut_model *m = ctx;
+    if (m->nlog < 8) m->log_off[m->nlog++] = off;
+    if (off == CK_NVME_REG_CC) { m->cc = v; m->cc_writes++; }
+}
+static void sm_delay(void *ctx, uint32_t us) { (void)ctx; (void)us; }
+
+static void test_nvme_shutdown(void)
+{
+    struct shut_model m;
+    struct ck_nvme_shut_ops o = {&m, sm_r32, sm_w32, 0, sm_delay};
+    struct ck_nvme_shut_result r;
+    /* Normal: EN=1, IOSQES/IOCQES kept, SHN=01 written once, SHST reached. */
+    memset(&m, 0, sizeof m);
+    m.cc = 0x00460001u; m.csts = 1; m.done_after = 3;
+    CHECK(ck_nvme_shutdown(&o, 1000, &r) == CK_NVME_SHUT_OK);
+    CHECK(m.cc == (0x00460001u | CK_NVME_CC_SHN_NORMAL) && m.cc_writes == 1 && m.log_off[0] == CK_NVME_REG_CC);
+    CHECK(r.cc_before == 0x00460001u && (r.cc_after & CK_NVME_CC_SHN_MASK) == CK_NVME_CC_SHN_NORMAL);
+    CHECK((r.csts & CK_NVME_CSTS_SHST_MASK) == CK_NVME_CSTS_SHST_DONE && r.waited_us == 3 * CK_NVME_SHUT_POLL_US);
+    /* An abrupt-shutdown request already in CC is replaced by normal. */
+    memset(&m, 0, sizeof m);
+    m.cc = 0x00468001u; m.csts = 1; m.done_after = 1; /* not yet complete at entry */
+    CHECK(ck_nvme_shutdown(&o, 1000, &r) == CK_NVME_SHUT_OK && (m.cc & CK_NVME_CC_SHN_MASK) == CK_NVME_CC_SHN_NORMAL);
+    /* Never completes: bounded, reports TIMEOUT. */
+    memset(&m, 0, sizeof m);
+    m.cc = 1; m.csts = 1; m.done_after = -1;
+    CHECK(ck_nvme_shutdown(&o, 1000, &r) == CK_NVME_SHUT_TIMEOUT && r.waited_us == 1000 && m.cc_writes == 1);
+    /* Disabled controller: nothing written. */
+    memset(&m, 0, sizeof m);
+    CHECK(ck_nvme_shutdown(&o, 1000, &r) == CK_NVME_SHUT_NOT_ENABLED && m.cc_writes == 0);
+    /* Device not answering. */
+    memset(&m, 0, sizeof m);
+    m.gone = 1;
+    CHECK(ck_nvme_shutdown(&o, 1000, &r) == CK_NVME_SHUT_GONE && m.cc_writes == 0);
+    CHECK(ck_nvme_shutdown(0, 1000, &r) == CK_NVME_SHUT_EARG);
+    CHECK(ck_nvme_shutdown(&o, 1000, 0) == CK_NVME_SHUT_EARG);
+    CHECK(ck_nvme_shutdown_str(CK_NVME_SHUT_OK)[0] == 'c');
+    /* Fatal controller (CFS at entry): nothing written, needs disable. */
+    memset(&m, 0, sizeof m);
+    m.cc = 1; m.csts = 1 | CK_NVME_CSTS_CFS;
+    CHECK(ck_nvme_shutdown(&o, 1000, &r) == CK_NVME_SHUT_FATAL && m.cc_writes == 0
+          && ck_nvme_shutdown_needs_disable(CK_NVME_SHUT_FATAL));
+    /* CFS raised while polling: stop at once, not after the full bound. */
+    memset(&m, 0, sizeof m);
+    m.cc = 1; m.csts = 1; m.done_after = -1; m.cfs_after = 2;
+    CHECK(ck_nvme_shutdown(&o, 1000000, &r) == CK_NVME_SHUT_FATAL && r.waited_us == 2 * CK_NVME_SHUT_POLL_US);
+    /* Enabled but not ready: SHN must not be written. */
+    memset(&m, 0, sizeof m);
+    m.cc = 1; m.csts = 0;
+    CHECK(ck_nvme_shutdown(&o, 1000, &r) == CK_NVME_SHUT_NOT_READY && m.cc_writes == 0);
+    /* Already shut down: nothing written, no disable needed. */
+    memset(&m, 0, sizeof m);
+    m.cc = 1 | CK_NVME_CC_SHN_NORMAL; m.csts = 1 | CK_NVME_CSTS_SHST_DONE;
+    CHECK(ck_nvme_shutdown(&o, 1000, &r) == CK_NVME_SHUT_ALREADY && m.cc_writes == 0
+          && !ck_nvme_shutdown_needs_disable(CK_NVME_SHUT_ALREADY) && !ck_nvme_shutdown_needs_disable(CK_NVME_SHUT_OK));
+    /* Disable fallback: EN and SHN cleared, other CC fields kept, RDY drops. */
+    memset(&m, 0, sizeof m);
+    m.cc = 0x00464001u; m.csts = 1; m.rdy_drop_after = 2;
+    CHECK(ck_nvme_disable(&o, 1000, &r) == CK_NVME_SHUT_OK && m.cc == 0x00460000u && m.cc_writes == 1
+          && !(r.csts & CK_NVME_CSTS_RDY) && r.waited_us == 2 * CK_NVME_SHUT_POLL_US);
+    /* Disable that never drops RDY is bounded; gone device is reported. */
+    memset(&m, 0, sizeof m);
+    m.cc = 1; m.csts = 1; m.rdy_drop_after = -1;
+    CHECK(ck_nvme_disable(&o, 1000, &r) == CK_NVME_SHUT_TIMEOUT && r.waited_us == 1000);
+    memset(&m, 0, sizeof m);
+    m.gone = 1;
+    CHECK(ck_nvme_disable(&o, 1000, &r) == CK_NVME_SHUT_GONE && m.cc_writes == 0);
+    CHECK(ck_nvme_disable(0, 1000, &r) == CK_NVME_SHUT_EARG);
+}
 int main(void)
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -339,6 +441,7 @@ int main(void)
     test_pci_enum();
     test_store();
     test_security();
+    test_nvme_shutdown();
     printf("CK_STAGE_HOST: %s checks=%d failures=%d\n", failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;
 }

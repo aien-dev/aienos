@@ -19,8 +19,8 @@ Status vocabulary:
 
 C gates (one line each from `ck_gates.sh`): `M1` (from
 `scripts/qemu_ck_boot_test.sh`), `M4_NVME`, `M4_STORE`, `ARGUS1_REVOKE`
-`SMMU` (from `scripts/qemu_ck_store_test.sh`; rows 21-24b, 47-72, 76 and
-96-98 were checked against its exact grep patterns), and the NOT_RUN gates
+`SMMU`, `NVME_SHUTDOWN` (from `scripts/qemu_ck_store_test.sh`; rows 21-24b, 47-72, 76 and
+96-101 were checked against its exact grep patterns), and the NOT_RUN gates
 `M3`, `P2_ARTIFACT`, `M0_ROLLBACK`, `M4_STORE_CRASH`,
 `M4_CONTINUITY`, `M4_RECOVERY`, `KEYBOARD`.
 
@@ -231,17 +231,20 @@ complete.
 | 94 | corrupted binary rejected before `kernel: alive` | (none) | NOT_RUN (MISSING_IMPLEMENTATION: no CK corruption test) |
 | 95 | Secure Boot: signed boots, unsigned / tampered / wrong-key refused (Access Denied) | (none) | NOT_RUN (MISSING_IMPLEMENTATION: CK BOOTAA64.EFI never signed or booted under Secure Boot) |
 
-## C-only gate
+## C-only gates
 
 | # | C check | CK gate | Status |
 | --- | --- | --- | --- |
 | 96 | ARGUS-1 narrow revoke in-kernel (`argus: ok narrow_revoke=1 revoked=denied unrelated=granted authority=unchanged$`) | ARGUS1_REVOKE | DIFFERS (no Rust QEMU gate exists for it; checked on all 5 boots of both geometries, with `caps: ok granted=yes attenuated=yes amplify=denied forged=denied revoked=denied office_token=rndr$`) |
 | 97 | corrupt Store superblock (XOR 0xa5 over 2 x 4096 bytes) refused, disk untouched | M4_STORE | DIFFERS (C-only, boot 4: `store: REFUSED proof=structural `, `disk left as found, not reformatted`, `stage store: FAIL`, absent `store: committed`, image sha256 unchanged; nearest Rust check is row 79) |
 | 98 | no disk without DMA: Store refuses | M4_STORE | DIFFERS (C-only, boot 5 safe image: `store: REFUSED proof=io step="no boot disk"`, image sha256 unchanged) |
+| 99 | NVMe normal shutdown before bus-master disable (CC.SHN = 01b, then wait CSTS.SHST = 10b) | NVME_SHUTDOWN | DIFFERS (C-only; the Rust kernel has no NVMe shutdown. Boots 1-4 and 6, both geometries: exactly one `nvme: shutdown normal cc=0x..->0x.. csts=0x.. shst=complete waited_us=N` line with CC.SHN read back as 01b and CSTS.SHST as 10b, printed before `dma_gate: nvme bus master revoked`, and no `nvme: shutdown fallback disable` line. Host tests cover CFS, not-ready, already-shut, timeout and the CC.EN = 0 fallback) |
+| 100 | QEMU device trace shows the shutdown while bus master is on | NVME_SHUTDOWN | DIFFERS (C-only: QEMU `-trace` of `pci_nvme_mmio_shutdown_set` and `pci_cfg_write` on the NVMe command register; the shutdown must land between the guest's BME-set and BME-clear writes) |
+| 101 | reset path quiesces DMA first; no shutdown without a bound controller | NVME_SHUTDOWN | DIFFERS (C-only: `devices: quiesce before reset nvme=already-released` on every boot (`ck_reset` hook, also covers panic/fault resets); boot 5 safe image: absent `nvme: shutdown normal`) |
 
 ## Summary counts
 
-Rows 1-98: IDENTICAL 15, DIFFERS 22, NOT_RUN 61 (rows 92-95 have no CK gate at all; rows 97-98 are C-only). Rows 13, 24, 47-72, 76 and 96-98 were re-verified against scripts/qemu_ck_store_test.sh and scripts/lib_ck_m1_checks.sh at the commit that adds this line.
+Rows 1-101: IDENTICAL 15, DIFFERS 25, NOT_RUN 61 (rows 92-95 have no CK gate at all; rows 96-101 are C-only). Rows 13, 24, 47-72, 76 and 96-101 were re-verified against scripts/qemu_ck_store_test.sh and scripts/lib_ck_m1_checks.sh at the commit that adds this line.
 
 `scripts/trust1_m5_qualify.sh --with-qemu` also runs three of these gates as
 qemu rows: `ck_m1_boot_qemu` (M1), `ck_store_kernel_qemu` (M4_STORE) and

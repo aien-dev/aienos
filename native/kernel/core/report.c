@@ -42,7 +42,12 @@ static void psci_call(uint64_t fn)
 
 void ck_reset(void)
 {
+    static int quiescing;
     __asm__ volatile("msr daifset, #0xf" ::: "memory");
+    if (ck_stage_quiesce && !quiescing) {
+        quiescing = 1; /* a panic inside the hook resets without it */
+        ck_stage_quiesce();
+    }
     ck_mb();
     psci_call(0x84000009u); /* PSCI SYSTEM_RESET */
     psci_call(0x84000008u); /* SYSTEM_OFF if reset was refused */

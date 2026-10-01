@@ -17,6 +17,7 @@ typedef struct {
     int bound;
     int bm_on; /* bus mastering was enabled for this function */
     int confined;      /* DMA confined by the SMMU (ck_dma_confine) */
+    int shut;          /* normal shutdown already attempted (ck_nvme_shutdown_bound) */
     uint32_t stream_id; /* SMMU stream when confined */
 } ck_nvme;
 
@@ -26,6 +27,12 @@ typedef struct {
  * last 4 KiB unit). Returns 0, or a negative NVME_E* / DISK_E* / -1 when
  * no NVMe function exists. */
 int ck_nvme_bind(ck_nvme *n, const pci_system *pci);
+
+/* Normal NVMe shutdown (dev/nvme_shutdown.c) on the bound controller, run
+ * while bus mastering is still on, before the bus-master revoke. Prints
+ * "nvme: shutdown normal cc=0x..->0x.. csts=0x.. shst=<result> waited_us=N".
+ * Runs at most once per bind; returns the CK_NVME_SHUT_* code. */
+int ck_nvme_shutdown_bound(ck_nvme *n);
 
 /* Run the write/flush/read-back probe on the last whole unit of `d`
  * (shared with the host tests). `seed` varies the pattern per boot.

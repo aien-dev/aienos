@@ -15,10 +15,14 @@ void ck_dev_nvme_release(void)
     if (!g_nvme.pf) return;
     g_nvme.bound = 0;
     if (g_nvme.bm_on) {
-        g_nvme.bm_on = 0;
-        if (pci_bus_master_off(g_nvme.pf) == 0)
+        /* Halt order: NVMe normal shutdown (CC.SHN, wait CSTS.SHST) while the
+         * controller can still DMA, then bus master off, then the SMMU
+         * stream back to abort. */
+        ck_nvme_shutdown_bound(&g_nvme);
+        if (pci_bus_master_off(g_nvme.pf) == 0) {
+            g_nvme.bm_on = 0;
             ck_printf("dma_gate: nvme bus master revoked\n");
-        else
+        } else /* bm_on stays set: the reset quiesce hook retries the revoke */
             ck_printf("dma_gate: nvme bus master revoke FAILED (command register still has BME)\n");
     }
     if (g_nvme.confined) {
@@ -43,4 +47,17 @@ int ck_stage_devices(void)
               vrc == 0 ? "probed" : "caps-refused");
     if (nrc == -1) return 0;  /* no NVMe present: not a devices failure; Store reports it */
     return nrc;
+}
+
+/* Called by the core's ck_reset (PSCI reset/off after the final report, a
+ * panic or a fault report): no device may keep DMA across a reset. A normal
+ * boot has already released the NVMe controller in the Store stage, so this
+ * only reports that; after a panic mid-stage it does the full halt order. */
+void ck_stage_quiesce(void)
+{
+    int was_live = g_nvme.pf && (g_nvme.bm_on || g_nvme.confined);
+    if (was_live)
+        ck_dev_nvme_release();
+    ck_printf("devices: quiesce before reset nvme=%s\n",
+              !g_nvme.pf ? "none" : was_live ? "released-now" : "already-released");
 }

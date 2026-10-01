@@ -1,5 +1,6 @@
 /* nvme_bind.c -- NVMe binding through ck.h (see nvme_bind.h). Freestanding. */
 #include "nvme_bind.h"
+#include "nvme_shutdown.h"
 #include "ck.h"
 #include "disk_layout.h"
 
@@ -132,6 +133,7 @@ int ck_nvme_bind(ck_nvme *n, const pci_system *pci)
     n->bound = 0;
     n->bm_on = 0;
     n->confined = 0;
+    n->shut = 0;
     n->stream_id = 0;
 #if CK_NVME_UNSAFE_BYPASS
     ck_printf("WARNING: UNSAFE NVME DMA BYPASS BUILD (CK_QEMU_UNSAFE_DMA=1, QEMU debug only, TEST-ONLY)\n");
@@ -229,4 +231,25 @@ int ck_nvme_bind(ck_nvme *n, const pci_system *pci)
     }
     n->bound = 1;
     return 0;
+}
+
+int ck_nvme_shutdown_bound(ck_nvme *n)
+{
+    if (!n || !n->bar0 || !n->bm_on || n->shut)
+        return CK_NVME_SHUT_EARG;
+    n->shut = 1;
+    struct ck_nvme_shut_ops o = {n, m_r32, m_w32, m_barrier, m_delay};
+    struct ck_nvme_shut_result r = {0, 0, 0, 0};
+    int rc = ck_nvme_shutdown(&o, CK_NVME_SHUT_TIMEOUT_US, &r);
+    ck_printf("nvme: shutdown normal cc=0x%08x->0x%08x csts=0x%08x shst=%s waited_us=%u\n", r.cc_before,
+              r.cc_after, r.csts, ck_nvme_shutdown_str(rc), r.waited_us);
+    if (ck_nvme_shutdown_needs_disable(rc)) {
+        /* The controller may still be live: stop it (CC.EN = 0, wait for
+         * CSTS.RDY = 0) before the caller cuts bus mastering. */
+        struct ck_nvme_shut_result d = {0, 0, 0, 0};
+        int drc = ck_nvme_disable(&o, CK_NVME_DISABLE_TIMEOUT_US, &d);
+        ck_printf("nvme: shutdown fallback disable cc=0x%08x->0x%08x csts=0x%08x rdy0=%s waited_us=%u\n",
+                  d.cc_before, d.cc_after, d.csts, ck_nvme_shutdown_str(drc), d.waited_us);
+    }
+    return rc;
 }

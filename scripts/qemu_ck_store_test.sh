@@ -59,13 +59,20 @@
 #   and "argus: ok narrow_revoke=1 ...". The Rust NVME_ERROR_QEMU check (a
 #   device-reported command error) has no C counterpart and is not run.
 # Boots 1-4 add iommu=smmuv3 to the machine like the Rust Store scripts.
+# NVMe shutdown (C-only gate, no Rust counterpart): on every boot where the
+# NVMe bus master was on (boots 1-4 and 6) the kernel must print exactly one
+# "nvme: shutdown normal cc=..->.. csts=.. shst=complete" line with CC.SHN read
+# back as 01b and CSTS.SHST as 10b, before "dma_gate: nvme bus master
+# revoked"; QEMU's own trace (pci_nvme_mmio_shutdown_set, pci_cfg_write) must
+# show the shutdown landing between the BME set and BME clear writes. Boot 5
+# must show no shutdown. Every boot must show the ck_reset quiesce hook.
 #
 # Takes the machine quiet flag itself like qemu_ck_boot_test.sh
 # (AIENOS_QUIET_FLAG / AIENOS_QUIET_TAG; released at most once, only if it
 # still holds exactly this run's text). Any QEMU exit status other than 0 fails.
 # Final lines: AIENOS_CK_M4_NVME, AIENOS_CK_M4_STORE, AIENOS_CK_ARGUS1_REVOKE,
-# AIENOS_CK_SMMU, each PASS|FAIL|NOT_RUN. A boot that fails an M1 check fails
-# all four.
+# AIENOS_CK_SMMU, AIENOS_CK_NVME_SHUTDOWN, each PASS|FAIL|NOT_RUN. A boot that
+# fails an M1 check fails all five.
 # Needs qemu-system-aarch64 and AAVMF (Ubuntu: qemu-system-arm qemu-efi-aarch64).
 set -euo pipefail
 
@@ -77,6 +84,7 @@ verdicts() { # one value for all three
     echo "AIENOS_CK_M4_STORE: $1"
     echo "AIENOS_CK_ARGUS1_REVOKE: $1"
     echo "AIENOS_CK_SMMU: $1"
+    echo "AIENOS_CK_NVME_SHUTDOWN: $1"
 }
 code_fd="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}"
 vars_fd="${AAVMF_VARS:-/usr/share/AAVMF/AAVMF_VARS.fd}"
@@ -108,6 +116,7 @@ release_flag() {
     fi
 }
 top="$(mktemp -d)"
+printf '%s\n' pci_nvme_mmio_shutdown_set pci_nvme_mmio_shutdown_cleared pci_cfg_write >"${top}/trace.events"
 cleanup() {
     rm -rf "${top}"
     release_flag
@@ -117,7 +126,7 @@ trap cleanup EXIT
 # shellcheck source=scripts/lib_ck_m1_checks.sh
 source "${repo_root}/scripts/lib_ck_m1_checks.sh"
 img_bytes=67108864
-m1_fail=0; nvme_fail=0; store_fail=0; argus_fail=0; smmu_fail=0
+m1_fail=0; nvme_fail=0; store_fail=0; argus_fail=0; smmu_fail=0; shut_fail=0
 fail_into() { # bucket variable name: move the current failed flag into it
     if [[ "${failed}" != 0 ]]; then printf -v "$1" 1; fi
     failed=0
@@ -148,7 +157,8 @@ boot() {
         -drive if=none,id=nvme0,format=raw,file="$3" \
         -device "${nvme_dev}" \
         -device ramfb -display none -nic none \
-        -serial file:"${work}/serial.log" -no-reboot
+        -serial file:"${work}/serial.log" -no-reboot \
+        -D "${work}/trace.log" -trace events="${top}/trace.events"
     qemu_status=$?
     set -e
     tr -d '\r' <"${work}/serial.log" >"${work}/serial.txt"
@@ -196,6 +206,45 @@ nvme_checks() { # block bytes, confined|bypass: the bound NVMe path
     check_absent "no bus master revoke failure (differs)" "bus master revoke FAILED"
     fail_into nvme_fail
 }
+# shutdown_checks: the bound NVMe path must do an NVMe normal shutdown
+# (CC.SHN = 01b, then CSTS.SHST = 10b) before the bus-master revoke. Three
+# independent views: the kernel's register readback on serial, the serial
+# order, and QEMU's own device trace (pci_nvme_mmio_shutdown_set must fall
+# between the guest setting BME in the NVMe command register and clearing it).
+shutdown_checks() {
+    local sre='^nvme: shutdown normal cc=0x([0-9a-f]{8})->0x([0-9a-f]{8}) csts=0x([0-9a-f]{8}) shst=([A-Za-z-]+) waited_us=([0-9]+)$'
+    local n line ls lr order
+    n=$(grep -cE "${sre}" "${work}/serial.txt" || true)
+    line=$(grep -E "${sre}" "${work}/serial.txt" | tail -1 || true)
+    if [[ "${n}" == 1 && "${line}" =~ ${sre} ]]; then
+        local cc_a=$(( 16#${BASH_REMATCH[2]} )) csts=$(( 16#${BASH_REMATCH[3]} )) res="${BASH_REMATCH[4]}"
+        if (( ((cc_a >> 14) & 3) == 1 )); then echo "PASS  CC.SHN read back as 01b (normal shutdown requested)"
+        else echo "FAIL  CC.SHN read back as $(( (cc_a >> 14) & 3 )), expected 1"; failed=1; fi
+        if (( ((csts >> 2) & 3) == 2 )) && [[ "${res}" == complete ]]; then
+            echo "PASS  CSTS.SHST read back as 10b (shutdown complete, waited ${BASH_REMATCH[5]} us)"
+        else echo "FAIL  shutdown not complete: ${line}"; failed=1; fi
+    else
+        echo "FAIL  exactly one NVMe shutdown line reported (found ${n})"; failed=1
+    fi
+    ls=$(grep -nE '^nvme: shutdown normal ' "${work}/serial.txt" | head -1 | cut -d: -f1)
+    lr=$(grep -n 'dma_gate: nvme bus master revoked' "${work}/serial.txt" | head -1 | cut -d: -f1)
+    if [[ -n "${ls}" && -n "${lr}" && "${ls}" -lt "${lr}" ]]; then echo "PASS  shutdown reported before the bus-master revoke (serial order)"
+    else echo "FAIL  shutdown not before the bus-master revoke (serial lines ${ls:-none} / ${lr:-none})"; failed=1; fi
+    order=$(grep -E '^pci_nvme_mmio_shutdown_set|^pci_cfg_write nvme [0-9a-f:.]+ @0x4 <- 0x[0-9a-f]+$' "${work}/trace.log" 2>/dev/null | {
+        on=0; s=0; out=none
+        while read -r a _ _ _ _ v; do
+            if [[ "${a}" == pci_nvme_mmio_shutdown_set ]]; then (( on )) && s=1
+            elif (( v & 4 )); then on=1; s=0
+            elif (( on )); then if (( s )); then out=ok; else out=bad; fi; on=0
+            fi
+        done
+        echo "${out}"; })
+    [[ "${order}" == ok ]] && echo "PASS  QEMU device trace: shutdown set while BME on, then BME cleared" \
+        || { echo "FAIL  QEMU device trace order (${order})"; failed=1; }
+    check_absent "no fallback disable needed (normal shutdown completed)" "nvme: shutdown fallback disable"
+    check "reset quiesce hook ran after the release (differs)" "devices: quiesce before reset nvme=already-released"
+    fail_into shut_fail
+}
 argus_checks() {
     check "capabilities: grant, attenuate, deny amplify/forged/revoked, RNDR token (differs)" \
         "caps: ok granted=yes attenuated=yes amplify=denied forged=denied revoked=denied office_token=rndr$"
@@ -214,6 +263,7 @@ for bs in 512 4096; do
     for k in 1 2 3; do
         boot "${bs}-boot${k}" "${safe_efi}" "${image}" "${bs}" "${serial}" smmu
         nvme_checks "${bs}" confined
+        shutdown_checks
         argus_checks
         check "stage store ok (differs)" "stage store: ok"
         check_absent "Store not refused (differs)" "store: REFUSED"
@@ -276,6 +326,7 @@ for bs in 512 4096; do
         || store_fail_msg "host corruption did not change the image"
     boot "${bs}-boot4-corrupt" "${safe_efi}" "${image}" "${bs}" "${serial}" smmu
     nvme_checks "${bs}" confined
+    shutdown_checks
     argus_checks
     check "corrupt Store refused as structural (differs)" "store: REFUSED proof=structural "
     check "corrupt Store left as found, not reformatted (differs)" "disk left as found, not reformatted"
@@ -295,6 +346,8 @@ for bs in 512 4096; do
     check_absent "NVMe controller never granted DMA" "dma_gate: nvme granted"
     check_absent "no unsafe DMA bypass in this image" "UNSAFE NVME DMA BYPASS"
     check_absent "NVMe controller never identified (differs)" "nvme: identify"
+    check_absent "no NVMe shutdown without a bound controller (differs)" "nvme: shutdown normal"
+    check "reset quiesce hook found nothing live (differs)" "devices: quiesce before reset nvme=already-released"
     check "NVMe left unbound (differs)" "devices: pci=ok nvme=unbound"
     fail_into nvme_fail
     check "Store refused without a disk (differs)" 'store: REFUSED proof=io step="no boot disk"'
@@ -308,6 +361,7 @@ for bs in 512 4096; do
     # honest: it must announce itself, and the corrupt Store is still refused.
     boot "${bs}-boot6-bypass" "${unsafe_efi}" "${image}" "${bs}" "${serial}"
     nvme_checks "${bs}" bypass
+    shutdown_checks
     argus_checks
     check "corrupt Store refused under the bypass image too (differs)" "store: REFUSED proof=structural "
     check_absent "nothing committed under the bypass image (differs)" "store: committed"
@@ -318,10 +372,10 @@ for bs in 512 4096; do
 done
 release_flag
 
-if [[ "${m1_fail}${nvme_fail}${store_fail}${argus_fail}${smmu_fail}" != 00000 || -n "${AIENOS_QEMU_VERBOSE:-}" ]]; then
+if [[ "${m1_fail}${nvme_fail}${store_fail}${argus_fail}${smmu_fail}${shut_fail}" != 000000 || -n "${AIENOS_QEMU_VERBOSE:-}" ]]; then
     for s in "${top}"/*/serial.txt; do
         echo "---- serial console $(basename "$(dirname "${s}")") (stage lines) ----"
-        grep -E '^(stage |smmu|nvme:|dma_gate:|WARNING|devices:|store:|caps:|argus:|report_kind:)' "${s}" | head -60 || true
+        grep -E '^(stage |smmu|nvme:|dma_gate:|WARNING|devices:|store:|caps:|argus:|report_kind:|pci_nvme_mmio_shutdown)' "${s}" | head -60 || true
     done
 fi
 [[ "${m1_fail}" != 0 ]] && echo "M1 checks failed on at least one boot: no verdict can pass"
@@ -331,4 +385,5 @@ echo "AIENOS_CK_M4_NVME: $(v "$(( nvme_fail | smmu_fail ))")"
 echo "AIENOS_CK_M4_STORE: $(v "${store_fail}")"
 echo "AIENOS_CK_ARGUS1_REVOKE: $(v "${argus_fail}")"
 echo "AIENOS_CK_SMMU: $(v "${smmu_fail}")"
-[[ "${m1_fail}${nvme_fail}${store_fail}${argus_fail}${smmu_fail}" == 00000 ]] || exit 1
+echo "AIENOS_CK_NVME_SHUTDOWN: $(v "${shut_fail}")"
+[[ "${m1_fail}${nvme_fail}${store_fail}${argus_fail}${smmu_fail}${shut_fail}" == 000000 ]] || exit 1
