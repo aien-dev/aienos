@@ -20,7 +20,12 @@ QEMU qualifies nothing physical: a PASS here says nothing about real hardware.
     make -C native/kernel            # target/native-kernel/BOOTAA64.EFI
     make -C native/kernel test       # host tests, ends CK_CORE_HOST: PASS
     make -C native/kernel sanitize   # same under ASan + UBSan
-    scripts/qemu_ck_boot_test.sh     # QEMU boot, ends AIENOS_CK_M1: PASS
+    make -C native/kernel full       # + stages: target/native-kernel/full/BOOTAA64.EFI
+    make -C native/kernel stage-test # stage host tests (also stage-sanitize, stage-free)
+    scripts/qemu_ck_boot_test.sh     # QEMU boot of the core-only image, ends AIENOS_CK_M1: PASS
+    scripts/qemu_ck_store_test.sh    # QEMU NVMe + Store gate (full image, QEMU-only
+                                     # CK_QEMU_UNSAFE_DMA=1 build), ends AIENOS_CK_M4_NVME,
+                                     # AIENOS_CK_M4_STORE, AIENOS_CK_ARGUS1_REVOKE
 
 Toolchain: gcc, binutils (ld, objcopy, nm, readelf), make, shell. On a
 non-aarch64 host the Makefile uses the `aarch64-linux-gnu-` prefix.
@@ -74,10 +79,13 @@ low-water free bytes.
 - `\n` is sent as CR LF on the UART.
 - IRQs are masked when a stage starts and are masked again after it returns.
   Use `ck_irq_register` + `ck_irq_enable` + `ck_irq_cpu_enable(1)`.
-- Link stage code with `STAGE_SRCS=...` (compiled here with the kernel flags,
-  `STAGE_CFLAGS` and include paths for native/disk, store, m5, crypto,
-  capability, argus and net) or `STAGE_OBJS=...` (prebuilt objects; build
-  them with `make print-kcflags`).
+- Stage code is listed in `stage.mk` and linked by `make full`, compiled with
+  `STAGE_CFLAGS` first, then the kernel flags and `-U_FORTIFY_SOURCE`. The
+  core defines no `ck_stage_*` defaults; the core-only image is checked to
+  contain none and the full image to contain all three.
+- NVMe DMA is refused by default (no SMMU service). `CK_QEMU_UNSAFE_DMA=1`
+  (QEMU only, refused with `CK_HARDWARE_STAGING`) builds the unconfined bypass
+  and prints the `WARNING: UNSAFE NVME DMA BYPASS` lines.
 
 ## Differences from the Rust kernel
 
