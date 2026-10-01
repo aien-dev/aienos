@@ -16,6 +16,8 @@
 #include "pci.h"
 #include "security.h"
 #include "store_boot.h"
+#include "artifact_store.h"
+#include "sha256.h"
 #include "net_bind.h"
 #include "net_udp.h"
 
@@ -592,6 +594,155 @@ static void test_net_udp(void)
     CHECK(ck_net_bind_selftest(NULL, &caps) == CK_NET_E_ARG);
 }
 
+
+/* ---------------- signed-artifact objects in the boot disk Store ---------------- */
+
+#define A_UNITS 2048u
+static char aimg[256];
+
+static int a_boot(disk_file *f, disk_dev *d, ck_store_report *r)
+{
+    ss_keys k;
+    ck_store_test_keys(&k);
+    if (disk_file_open(f, d, aimg, T_BS, (uint64_t)A_UNITS * T_BPU, 0)) return -999;
+    return store_boot_run(d, &k, ck_store_test_uuid, "art-test", r);
+}
+
+static void test_artifact_store(void)
+{
+    snprintf(aimg, sizeof aimg, "/tmp/ck_stage_art_%d.img", (int)getpid());
+    unlink(aimg);
+    disk_file f;
+    disk_dev d;
+    ck_store_report r;
+    CHECK(disk_file_open(&f, &d, aimg, T_BS, (uint64_t)A_UNITS * T_BPU, 1) == 0);
+    disk_file_close(&f);
+
+    static uint8_t big[40000], big2[40000];
+    for (size_t i = 0; i < sizeof big; i++) {
+        big[i] = (uint8_t)(i * 7 + 3);
+        big2[i] = (uint8_t)(i * 13 + 1);
+    }
+    const uint8_t small[10] = "0123456789";
+    ck_art_input in[3] = {{"A.AIEN", big, sizeof big, 0}, {"B.AIEN", small, sizeof small, 0},
+                          {"C-MISSING.AIEN", 0, 100, 1}};
+    ck_art_set *set = calloc(1, sizeof *set);
+    CHECK(set != NULL);
+    if (!set) return;
+    const char *why = 0;
+
+    printf("  [artifact store: write at image build, read back at boot]\n");
+    CHECK(a_boot(&f, &d, &r) == 0 && r.formatted == 1);
+    CHECK(ck_art_collect(store_boot_store(), set, &why) == 0 && set->found == 0); /* no index yet */
+    ck_art_input longname = {"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456", small, sizeof small, 0};
+    ck_art_input empty = {"E.AIEN", small, 0, 0};
+    ck_art_input dup[2] = {{"B.AIEN", small, sizeof small, 0}, {"B.AIEN", small, sizeof small, 0}};
+    CHECK(ck_art_write(store_boot_store(), &longname, 1) != 0);
+    CHECK(ck_art_write(store_boot_store(), &empty, 1) != 0);
+    CHECK(ck_art_write(store_boot_store(), dup, 2) != 0);
+    CHECK(ck_art_write(store_boot_store(), in, 3) == 0);
+    disk_flush(&d);
+    disk_file_close(&f);
+
+    CHECK(a_boot(&f, &d, &r) == 0 && r.formatted == 0 && r.boot_count_prev == 1);
+    CHECK(ck_art_collect(store_boot_store(), set, &why) == 0 && set->found == 1 && set->count == 3);
+    uint8_t h[32];
+    sha256_hash(big, sizeof big, h);
+    CHECK(set->e[0].state == CK_ART_OK && set->e[0].len == sizeof big && set->e[0].chunks == 3);
+    CHECK(set->e[0].bytes && memcmp(set->e[0].bytes, big, sizeof big) == 0 && memcmp(set->e[0].sha256, h, 32) == 0);
+    CHECK(set->e[1].state == CK_ART_OK && set->e[1].len == 10 && memcmp(set->e[1].bytes, small, 10) == 0);
+    CHECK(set->e[2].state == CK_ART_MISSING && set->e[2].present == 0 && set->e[2].bytes == NULL);
+    CHECK(strcmp(set->e[0].name, "A.AIEN") == 0 && strcmp(set->e[2].name, "C-MISSING.AIEN") == 0);
+    ck_art_set_free(set);
+
+    /* the stage hook hands the same bytes to the loader */
+    struct ck_disk_artifacts da;
+    ck_art_stage_load(store_boot_store(), 0);
+    CHECK(ck_stage_disk_artifacts(&da) == 0 && da.available == 1 && da.count == 3);
+    CHECK(da.a[0].state == CK_DISK_ART_OK && da.a[0].len == sizeof big && memcmp(da.a[0].bytes, big, sizeof big) == 0);
+    CHECK(da.a[2].state == CK_DISK_ART_MISSING && da.a[2].bytes == NULL);
+
+    printf("  [artifact store: a newer index and chunks win]\n");
+    in[0].bytes = big2;
+    CHECK(ck_art_write(store_boot_store(), in, 2) == 0);
+    CHECK(ck_art_collect(store_boot_store(), set, &why) == 0 && set->count == 2);
+    CHECK(set->e[0].state == CK_ART_OK && memcmp(set->e[0].bytes, big2, sizeof big2) == 0);
+    ck_art_set_free(set);
+
+
+    printf("  [artifact store: chunks of another write are never spliced in]\n");
+    ck_art_input again = {"A.AIEN", 0, sizeof big2, 1}; /* same name and length, no bytes */
+    CHECK(ck_art_write(store_boot_store(), &again, 1) == 0);
+    CHECK(ck_art_collect(store_boot_store(), set, &why) == 0 && set->count == 1);
+    CHECK(set->e[0].state == CK_ART_MISSING && set->e[0].present == 0 && set->e[0].bytes == NULL);
+    ck_art_set_free(set);
+    /* a chunk that names B and B's digest but carries other bytes */
+    static uint8_t fake[CK_ART_CHUNK_HDR + 10], fix[CK_ART_INDEX_HDR + CK_ART_INDEX_ENTRY];
+    uint8_t dg[32];
+    sha256_hash(small, sizeof small, dg);
+    memcpy(fake, "AIENACH1\x01\x00\x00\x00\x0a\x00\x00\x00\x00\x00\x01\x00\x06\x00\x00\x00", 24);
+    memcpy(fake + 24, "B.AIEN", 6);
+    memcpy(fake + 56, dg, 32);
+    memcpy(fake + CK_ART_CHUNK_HDR, "9876543210", 10);
+    memcpy(fix, "AIENAIX1\x01\x00\x00\x00\x01\x00\x00\x00", 16);
+    fix[16] = 6;
+    memcpy(fix + 20, "B.AIEN", 6);
+    fix[16 + 36] = 10;
+    fix[16 + 40] = 1;
+    memcpy(fix + 16 + 48, dg, 32);
+    ss_object fo[2] = {{CK_ART_CHUNK_KIND, 1, fake, sizeof fake}, {CK_ART_INDEX_KIND, 1, fix, sizeof fix}};
+    CHECK(ss_transact(store_boot_store(), fo, 2, 0, 0, 0) == 0);
+    CHECK(ck_art_collect(store_boot_store(), set, &why) == 0 && set->count == 1);
+    CHECK(set->e[0].state == CK_ART_MISMATCH && set->e[0].present == 1 && set->e[0].bytes == NULL);
+    ck_art_set_free(set);
+    ck_art_stage_load(store_boot_store(), 0);
+    CHECK(ck_stage_disk_artifacts(&da) == 0 && da.available == 1 && da.a[0].state == CK_DISK_ART_MISSING);
+    ck_stage_disk_artifacts_free();
+    CHECK(ck_stage_disk_artifacts(&da) == 0 && da.available == 0 && da.count == 0);
+    printf("  [artifact store: malformed index refused]\n");
+    uint8_t badix[16] = {'A', 'I', 'E', 'N', 'A', 'I', 'X', '1', 2, 0, 0, 0, 0, 0, 0, 0};
+    ss_object ob = {CK_ART_INDEX_KIND, 1, badix, sizeof badix};
+    CHECK(ss_transact(store_boot_store(), &ob, 1, 0, 0, 0) == 0);
+    CHECK(ck_art_collect(store_boot_store(), set, &why) < 0 && set->found == 0);
+    ck_art_stage_load(store_boot_store(), 0);
+    CHECK(ck_stage_disk_artifacts(&da) == 0 && da.available == 0);
+    /* a valid index again, then the disk is corrupted under one chunk */
+    CHECK(ck_art_write(store_boot_store(), in, 2) == 0);
+    ss_store *s = store_boot_store();
+    uint64_t off = 0, elen = 0;
+    for (uint32_t k = 0; k < s->nclaims && !off; k++) {
+        if (s->ws->claims[k].c.obj.object_kind != CK_ART_CHUNK_KIND) continue;
+        for (uint32_t i = 0; i < s->st.root.n; i++) {
+            const sv1_entry *e = &s->st.ws->cat[s->st.root.cat_index][i];
+            if (memcmp(e->object_id, s->ws->claims[k].sid, 32)) continue;
+            off = r.store_base_lba * T_BS + e->first_unit * 4096u;
+            elen = e->byte_length;
+        }
+    }
+    disk_flush(&d);
+    disk_file_close(&f);
+    CHECK(off != 0 && elen > 0);
+
+    printf("  [artifact store: corrupted chunk on disk refuses the Store, no artifact used]\n");
+    FILE *fp = fopen(aimg, "r+b");
+    CHECK(fp != NULL);
+    if (fp) {
+        uint8_t b = 0;
+        fseek(fp, (long)(off + elen / 2), SEEK_SET);
+        CHECK(fread(&b, 1, 1, fp) == 1);
+        b ^= 0xa5;
+        fseek(fp, (long)(off + elen / 2), SEEK_SET);
+        CHECK(fwrite(&b, 1, 1, fp) == 1);
+        fclose(fp);
+    }
+    CHECK(a_boot(&f, &d, &r) != 0 && r.verdict == CK_SB_REFUSED);
+    disk_file_close(&f);
+    ck_art_stage_load(r.verdict == CK_SB_COMMITTED ? store_boot_store() : 0, r.step);
+    CHECK(ck_stage_disk_artifacts(&da) == 0 && da.available == 0 && da.count == 0);
+    free(set);
+    unlink(aimg);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -600,6 +751,7 @@ int main(void)
     test_pci_bars();
     test_pci_enum();
     test_store();
+    test_artifact_store();
     test_security();
     test_nvme_shutdown();
     test_net_udp();

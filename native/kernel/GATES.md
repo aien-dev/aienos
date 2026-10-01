@@ -129,19 +129,41 @@ signature, admission and receipt code in `native/kernel/artifact/` and the
 host tool `native/kernel/tools/ck_artifact_tool.c` (C ports of
 aienos-artifact, admission.rs, receipt.rs and aienos-artifact-tool; the tool's
 pack, sign, negative corpus and expected.txt are byte-identical to the Rust
-tool's). Two boots as in the Rust gate: `make CK_SEED0B_TEST_ANCHOR=1`
-(trusts the RFC 8032 TEST 1 public key only, labelled TEST ONLY) and the
-ordinary build (no anchors). Same QEMU command line plus one `-fw_cfg` file.
+tool's). Three boots of the full image (`make full`, with the device,
+security and Store stages): `make full CK_SEED0B_TEST_ANCHOR=1` (trusts the
+RFC 8032 TEST 1 public key only, labelled TEST ONLY), the ordinary build (no
+anchors), and the TEST ONLY build again on a copy of the boot disk with one
+byte of a sealed artifact flipped. Same QEMU command line plus
+`iommu=smmuv3` and the NVMe boot disk; no `-fw_cfg`.
 
 How the C gate differs from the Rust gate (all apply to rows 33-41):
 
-- **Candidate source**: one QEMU fw_cfg file `opt/aienos/artifacts` (a
-  bundle: `AIENBND\0`, count, then name/length/bytes per candidate) instead of
-  `\EFI\AIENOS\ARTIFACTS\*.AIEN` read by the UEFI loader. The C boot stub
-  (native/boot) reads no files. The kernel finds the fw_cfg window from the
-  ACPI DSDT (`QEMU0002` device, Memory32Fixed), nothing hard-coded. The
-  640 KiB per-file limit and the input-frame shortage path (FirmwareRead)
-  are applied by the kernel at the same stage (`received`).
+- **Candidate source**: the sealed C Store on the NVMe boot disk instead of
+  `\EFI\AIENOS\ARTIFACTS\*.AIEN` read by the UEFI loader (the C boot stub,
+  native/boot, reads no files). At image build time the host tool
+  `native/kernel/tools/ck_store_image.c` (`make store-image`) writes each
+  signed artifact into the Store as ordinary sealed objects (chunks of kind
+  0x0A02 plus one index of kind 0x0A01, format in
+  `native/kernel/svc/artifact_store.h`); no second disk format. At boot the
+  store stage reads them over the SMMU-confined NVMe driver before the NVMe
+  DMA revoke and prints `artifact_disk: NAME bytes=N sha256=H` per artifact;
+  the gate requires each H to equal the host's SHA-256 of the file, the line
+  `artifact_source: nvme_store generation=G candidates=N`, and the order disk
+  read < `dma_gate: nvme bus master revoked` < loader. The Store's keys are
+  TEST keys, so the bytes stay untrusted: format, signature, digest and
+  admission checks run unchanged on them. The 640 KiB per-file limit and a
+  missing artifact (FirmwareRead) are applied at the same stage
+  (`received`). Hostile disk cases: `D01-DISK-MISSING.AIEN` is named in the
+  disk index with no bytes (refused at `received`, FirmwareRead, receipt
+  checked); index entries and chunks carry the artifact's SHA-256, so chunks
+  of different writes are never spliced (host test); boot 3 flips one byte of P26SEED's sealed envelope, and the
+  Store is refused at open (`store: REFUSED`, `artifact_disk: none (Store
+  refused: ..)`, `artifact_source: none (..)`, zero candidates, nothing
+  admitted). The old QEMU fw_cfg side channel survives only as a TEST build
+  (`make CK_TEST_FWCFG_ARTIFACTS=1`, own output directory, prints
+  `artifact_source_mode: TEST-ONLY ...` and never counts toward a PASS); the
+  Makefile and the gate check that no default image contains its strings or
+  symbols.
 - **Build and tools**: make + gcc and the in-tree C tool, not cargo and the
   Rust tool; the probe programs are the same committed fixtures packed by
   the same `pack.sh`. No Machine 1 captured-log mode (stays with the Rust gate).
@@ -163,12 +185,12 @@ How the C gate differs from the Rust gate (all apply to rows 33-41):
 | # | Rust check (pattern) | CK gate | Status |
 | --- | --- | --- | --- |
 | 33 | common: kernel alive + M3 threads/el0/ipc proofs unchanged | P2_ARTIFACT | IDENTICAL |
-| 34 | firmware read all candidates (`^artifact_candidates: N$`), report not truncated, final report | P2_ARTIFACT | DIFFERS (the kernel reads the fw_cfg bundle, not firmware files; same line and count; also fails on `artifact_bundle: malformed`) |
-| 35 | frames reclaimed (`artifact_frames_free_before` == `_after`) | P2_ARTIFACT | IDENTICAL (absolute counts differ) |
+| 34 | firmware read all candidates (`^artifact_candidates: N$`), report not truncated, final report | P2_ARTIFACT | DIFFERS (the store stage reads the candidates from the sealed Store on the NVMe boot disk, not firmware files; same line and count; also requires `artifact_source: nvme_store`, one `artifact_disk:` line per artifact whose SHA-256 equals the host file, disk read before the NVMe DMA revoke, the heap copies released after the loader, no TEST-ONLY fw_cfg source, and fails on `artifact_bundle: malformed`) |
+| 35 | frames reclaimed (`artifact_frames_free_before` == `_after`) | P2_ARTIFACT | IDENTICAL (absolute counts differ; verifies execution page frames are reclaimed; candidate heap buffers are also released via ck_stage_disk_artifacts_free) |
 | 36 | qualification build labelled TEST ONLY, receipt tier line | P2_ARTIFACT | IDENTICAL |
 | 37 | P26SEED read via grant, write/forged denied, granted subset of requested, exactly one capability, receipt | P2_ARTIFACT | IDENTICAL |
 | 38 | P25EXEC / P25WX (W^X fault) / P25SPIN (time budget) / P25TAMP (BadSignature) outcomes + receipts | P2_ARTIFACT | IDENTICAL |
-| 39 | hostile set: each refused at its stage or admitted-and-contained, receipts checked by the host tool | P2_ARTIFACT | DIFFERS (same expected.txt and checks, receipts checked by the C tool; also requires at least 29 cases) |
+| 39 | hostile set: each refused at its stage or admitted-and-contained, receipts checked by the host tool | P2_ARTIFACT | DIFFERS (same expected.txt and checks, receipts checked by the C tool; also requires at least 29 cases, plus two hostile disk cases: an artifact named in the disk index without bytes refused at `received` FirmwareRead with its receipt, and a boot on a disk with one sealed artifact byte flipped where the Store is refused and nothing is read or admitted) |
 | 40 | H29 READ\|WRITE requested -> READ granted | P2_ARTIFACT | IDENTICAL |
 | 41 | production build refuses every candidate, zero admitted | P2_ARTIFACT | IDENTICAL |
 
@@ -314,7 +336,7 @@ complete.
 
 **C kernel receipt tally (QEMU only, no physical run):** 9 of 14 CK gates PASS, 5 NOT_RUN (M0_ROLLBACK, M4_STORE_CRASH, M4_CONTINUITY, M4_RECOVERY, KEYBOARD), 0 FAIL, matching `evidence/ck_gates_bb4040322b026f5f561733fdcaf900770070f2281800b0e3603c2aa2c670b7ff.json` (run at 4f56a96). The row counts below are per Rust-parity row, not per gate.
 
-Rows 1-106: IDENTICAL 28, DIFFERS 37, NOT_RUN 41, counted from the table (the previous summary, 20/30/56, was miscounted: the table on main had 21/35/50; rows 33-41 then moved from NOT_RUN to 7 IDENTICAL + 2 DIFFERS with the C artifact loader; rows 92-95 have no CK gate at all; rows 96-106 are C-only). Rows 33-41 were checked against scripts/qemu_ck_artifact_test.sh. Rows 102-106 were checked against scripts/qemu_ck_net_test.sh. Rows 13, 24, 47-72, 76 and 96-101 were re-verified against scripts/qemu_ck_store_test.sh and scripts/lib_ck_m1_checks.sh at the commit that adds this line.
+Rows 1-106: IDENTICAL 28, DIFFERS 37, NOT_RUN 41, counted from the table; rows 34 and 39 now also cover the NVMe boot-disk source and its hostile disk cases (statuses unchanged) (the previous summary, 20/30/56, was miscounted: the table on main had 21/35/50; rows 33-41 then moved from NOT_RUN to 7 IDENTICAL + 2 DIFFERS with the C artifact loader; rows 92-95 have no CK gate at all; rows 96-106 are C-only). Rows 33-41 were checked against scripts/qemu_ck_artifact_test.sh. Rows 102-106 were checked against scripts/qemu_ck_net_test.sh. Rows 13, 24, 47-72, 76 and 96-101 were re-verified against scripts/qemu_ck_store_test.sh and scripts/lib_ck_m1_checks.sh at the commit that adds this line.
 
 `scripts/trust1_m5_qualify.sh --with-qemu` also runs three of these gates as
 qemu rows: `ck_m1_boot_qemu` (M1), `ck_store_kernel_qemu` (M4_STORE) and

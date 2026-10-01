@@ -1055,7 +1055,103 @@ static void print_receipt(const char *name, const struct report *r)
     ck_puts("\n");
 }
 
-/* ============================ fw_cfg source ========================= */
+/* ============================ candidate sources ===================== */
+
+/* Default source: the boot disk. The Store stage (svc/artifact_store.c) read
+ * the candidates from the sealed Store on NVMe before revoking the disk's DMA;
+ * here they are untrusted bytes and take the same verification path as any
+ * candidate. A test-only QEMU fw_cfg side channel exists only in images built
+ * with CK_TEST_FWCFG_ARTIFACTS=1 and is compiled out of every default image. */
+
+static struct report rep;
+static unsigned run_admitted, run_rejected, run_seen;
+
+static void source_preamble(uint32_t count)
+{
+    char vh[65], ph[65];
+    uint8_t pd[32];
+    cka_policy_digest(&policy, pd);
+    hex(vh, verifier_id, 32);
+    hex(ph, pd, 32);
+    ck_printf("artifact_candidates: %u\n", count);
+    ck_printf("artifact_receipt_tier: SEED-0B-QEMU\nartifact_verifier_identity: %s\n"
+              "artifact_policy_digest: %s\n",
+              vh, ph);
+    ck_printf("artifact_frames_free_before: %llu\n", (unsigned long long)free_frames());
+}
+
+/* Candidate names come from untrusted input: 1..MAX_NAME printable bytes. */
+static int candidate_name_ok(const char *name, unsigned *nlen)
+{
+    unsigned n = 0;
+    if (!name)
+        return 0;
+    while (n <= MAX_NAME && name[n]) {
+        if (name[n] <= ' ' || name[n] > '~')
+            return 0;
+        n++;
+    }
+    *nlen = n;
+    return n >= 1 && n <= MAX_NAME;
+}
+
+static void finish_candidate(const char *name)
+{
+    run_seen++;
+    if (rep.admitted)
+        run_admitted++;
+    else
+        run_rejected++;
+    print_candidate(name, &rep);
+    print_grants(name, &rep);
+    print_receipt(name, &rep);
+}
+
+#ifndef CK_TEST_FWCFG_ARTIFACTS
+static uint32_t disk_source(void)
+{
+    struct ck_disk_artifacts da;
+    const char *why = 0;
+    memset(&da, 0, sizeof da);
+    if (!ck_stage_disk_artifacts)
+        why = "no Store stage in this image";
+    else if (ck_stage_disk_artifacts(&da))
+        why = "Store stage did not run";
+    else if (!da.available)
+        why = da.why ? da.why : "no artifacts";
+    uint32_t count = why ? 0 : da.count;
+    if (count > MAX_CANDIDATES)
+        count = MAX_CANDIDATES;
+    if (why)
+        ck_printf("artifact_source: none (%s)\n", why);
+    else
+        ck_printf("artifact_source: nvme_store generation=%llu candidates=%u "
+                  "(read by the store stage; bytes untrusted until verified)\n",
+                  (unsigned long long)da.generation, count);
+    source_preamble(count);
+    for (uint32_t c = 0; c < count; c++) {
+        const struct ck_disk_artifact *a = &da.a[c];
+        char name[MAX_NAME + 1];
+        unsigned nlen = 0;
+        if (!candidate_name_ok(a->name, &nlen))
+            break;
+        memcpy(name, a->name, nlen);
+        name[nlen] = 0;
+        if (a->state == CK_DISK_ART_OK && a->bytes && a->len >= 1 && a->len <= MAX_BATCH * PAGE)
+            process_candidate(a->bytes, a->len, &rep);
+        else if (a->state == CK_DISK_ART_TOO_LARGE || a->len > MAX_BATCH * PAGE)
+            firmware_rejection(&rep, CKL_STAGING_TOO_LARGE);
+        else
+            firmware_rejection(&rep, CKL_FIRMWARE_READ); /* missing on disk */
+        finish_candidate(name);
+    }
+    return count;
+}
+#else
+/* ======== TEST-ONLY fw_cfg source (CK_TEST_FWCFG_ARTIFACTS=1) ======== */
+#define FWCFG_TEST_BANNER                                                            \
+    "artifact_source_mode: TEST-ONLY QEMU fw_cfg side channel "                       \
+    "(CK_TEST_FWCFG_ARTIFACTS=1); not the boot disk; never counts toward a PASS\n"
 
 static volatile uint8_t *fwcfg;
 
@@ -1138,24 +1234,8 @@ static int fw_find(uint16_t *sel, uint32_t *size)
     return -1;
 }
 
-static struct report rep;
-
-void ck_artifact_run(void)
+static uint32_t fwcfg_source(void)
 {
-    static int ran;
-    if (ran)
-        return;
-    ran = 1;
-    ck_set_stage("artifacts");
-#ifdef CK_SEED0B_TEST_ANCHOR
-    ck_puts("artifact_trust: seed0b-test qualification build \xe2\x80\x94 TEST ONLY\n");
-#endif
-    if (NANCHORS)
-        cka_boot_policy(&policy, anchors, NANCHORS);
-    else
-        cka_boot_policy(&policy, 0, 0);
-    cka_verifier_identity(AIENOS_COMMIT, FEATURE_TEST_ANCHOR, verifier_id);
-
     const char *why = 0;
     uint64_t base = fwcfg_from_dsdt(&why);
     uint16_t sel = 0;
@@ -1189,26 +1269,17 @@ void ck_artifact_run(void)
     if (!base)
         ck_printf("artifact_source: none (%s)\n", why);
     else
-        ck_printf("artifact_source: fw_cfg base=0x%llx file=opt/aienos/artifacts bytes=%u\n",
+        ck_printf("artifact_source: fw_cfg TEST-ONLY base=0x%llx file=opt/aienos/artifacts bytes=%u\n",
                   (unsigned long long)base, size);
     if (count > MAX_CANDIDATES)
         count = MAX_CANDIDATES;
-    char vh[65], ph[65];
-    uint8_t pd[32];
-    cka_policy_digest(&policy, pd);
-    hex(vh, verifier_id, 32);
-    hex(ph, pd, 32);
-    ck_printf("artifact_candidates: %u\n", count);
-    ck_printf("artifact_receipt_tier: SEED-0B-QEMU\nartifact_verifier_identity: %s\n"
-              "artifact_policy_digest: %s\n",
-              vh, ph);
-    ck_printf("artifact_frames_free_before: %llu\n", (unsigned long long)free_frames());
+    source_preamble(count);
 
-    unsigned admitted = 0, rejected = 0, seen = 0;
     uint64_t left = size >= 12 ? size - 12 : 0;
     for (uint32_t c = 0; c < count; c++) {
         uint8_t nb[2], lb[4];
         char name[MAX_NAME + 1];
+        unsigned ok_len = 0;
         if (left < 2)
             break;
         fw_read(nb, 2);
@@ -1224,13 +1295,8 @@ void ck_artifact_run(void)
         if (len > left)
             break;
         left -= len;
-        int ok_name = 1;
-        for (unsigned i = 0; i < nlen; i++)
-            if (name[i] <= ' ' || name[i] > '~')
-                ok_name = 0;
-        if (!ok_name)
+        if (!candidate_name_ok(name, &ok_len) || ok_len != nlen)
             break;
-        seen++;
         uint64_t pages = (len + PAGE - 1) / PAGE, in = 0;
         if (len > MAX_BATCH * PAGE) {
             fw_skip(len);
@@ -1247,20 +1313,46 @@ void ck_artifact_run(void)
                 ck_mm_frames_free(in, pages);
             }
         }
-        if (rep.admitted)
-            admitted++;
-        else
-            rejected++;
-        print_candidate(name, &rep);
-        print_grants(name, &rep);
-        print_receipt(name, &rep);
+        finish_candidate(name);
     }
-    if (seen != count)
-        ck_printf("artifact_bundle: malformed after %u of %u candidates\n", seen, count);
+    return count;
+}
+#endif
+
+void ck_artifact_run(void)
+{
+    static int ran;
+    if (ran)
+        return;
+    ran = 1;
+    ck_set_stage("artifacts");
+#ifdef CK_SEED0B_TEST_ANCHOR
+    ck_puts("artifact_trust: seed0b-test qualification build \xe2\x80\x94 TEST ONLY\n");
+#endif
+#ifdef CK_TEST_FWCFG_ARTIFACTS
+    ck_puts(FWCFG_TEST_BANNER);
+#endif
+    if (NANCHORS)
+        cka_boot_policy(&policy, anchors, NANCHORS);
+    else
+        cka_boot_policy(&policy, 0, 0);
+    cka_verifier_identity(AIENOS_COMMIT, FEATURE_TEST_ANCHOR, verifier_id);
+
+#ifdef CK_TEST_FWCFG_ARTIFACTS
+    uint32_t count = fwcfg_source();
+#else
+    uint32_t count = disk_source();
+#endif
+    if (run_seen != count)
+        ck_printf("artifact_bundle: malformed after %u of %u candidates\n", run_seen, count);
     ck_printf("artifact_frames_free_after: %llu\n", (unsigned long long)free_frames());
     ck_artifact_summary.candidates = count;
-    ck_artifact_summary.admitted = admitted;
-    ck_artifact_summary.rejected = rejected;
+    ck_artifact_summary.admitted = run_admitted;
+    ck_artifact_summary.rejected = run_rejected;
+#ifndef CK_TEST_FWCFG_ARTIFACTS
+    if (ck_stage_disk_artifacts_free)
+        ck_stage_disk_artifacts_free();
+#endif
 }
 
 
@@ -1268,6 +1360,9 @@ void ck_artifact_final(void)
 {
 #ifdef CK_SEED0B_TEST_ANCHOR
     ck_puts("artifact_trust: seed0b-test qualification build \xe2\x80\x94 TEST ONLY\n");
+#endif
+#ifdef CK_TEST_FWCFG_ARTIFACTS
+    ck_puts(FWCFG_TEST_BANNER);
 #endif
     ck_printf("artifacts: candidates=%u admitted=%u rejected=%u\n", ck_artifact_summary.candidates,
               ck_artifact_summary.admitted, ck_artifact_summary.rejected);

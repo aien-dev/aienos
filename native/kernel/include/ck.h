@@ -119,4 +119,25 @@ __attribute__((weak)) int ck_stage_store(void);    /* sealed Store on NVMe */
  * off (final report, panic, fault), so no device keeps DMA across a reset. */
 __attribute__((weak)) void ck_stage_quiesce(void);
 
+/* Optional Store-stage hook: signed P2 artifact candidates read from the boot
+ * disk Store (svc/artifact_store.c) during ck_stage_store, before the NVMe
+ * release. The bytes are UNTRUSTED: the core loader verifies them exactly as
+ * any other candidate. Returns 0 and fills *out once the store stage ran. */
+enum { CK_DISK_ART_OK = 0, CK_DISK_ART_MISSING = 1, CK_DISK_ART_TOO_LARGE = 2 };
+struct ck_disk_artifact {
+    const char *name;     /* 1..32 printable bytes */
+    const uint8_t *bytes; /* len bytes when state == CK_DISK_ART_OK, else NULL */
+    uint64_t len;
+    int state;            /* CK_DISK_ART_* */
+};
+struct ck_disk_artifacts {
+    int available;        /* an artifact index was read from the Store */
+    const char *why;      /* reason when not available */
+    uint64_t generation;  /* Store generation of the index */
+    unsigned count;
+    const struct ck_disk_artifact *a;
+};
+__attribute__((weak)) int ck_stage_disk_artifacts(struct ck_disk_artifacts *out);
+__attribute__((weak)) void ck_stage_disk_artifacts_free(void);
+
 #endif

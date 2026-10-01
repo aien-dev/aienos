@@ -11,6 +11,14 @@
 #                        $(OUT)/full-qemu-unsafe-dma/BOOTAA64.EFI (only
 #                        scripts/qemu_ck_store_test.sh sets this; refused
 #                        together with CK_HARDWARE_STAGING=1)
+#   make [full] CK_TEST_FWCFG_ARTIFACTS=1
+#                        TEST-ONLY: loader takes candidates from the QEMU fw_cfg
+#                        side channel instead of the boot disk Store; own OUT
+#                        (target/native-kernel-test-fwcfg); announces itself and
+#                        never counts toward a PASS. Default images are checked
+#                        to contain no fw_cfg artifact code.
+#   make store-image     host tool $(OUT)/host/ck_store_image: signed artifacts
+#                        into the sealed Store on a raw NVMe disk image
 #   make test            host unit tests            -> CK_CORE_HOST: PASS
 #   make sanitize        same under ASan + UBSan    -> CK_CORE_HOST: PASS
 #   make stage-test | stage-sanitize | stage-free   stage host tests (stage.mk)
@@ -45,6 +53,21 @@ KNM := $(CROSS)nm
 KREADELF := $(CROSS)readelf
 HOSTCC ?= cc
 
+# TEST-ONLY artifact source: CK_TEST_FWCFG_ARTIFACTS=1 compiles the QEMU fw_cfg
+# side channel (opt/aienos/artifacts) into the loader instead of the boot disk
+# Store. Every image built without it is checked to contain no fw_cfg artifact
+# code. Such an image announces itself on the console and never counts toward
+# a PASS. Its default OUT is separate so it never replaces a default image.
+CK_TEST_FWCFG_ARTIFACTS ?=
+ifneq ($(strip $(CK_TEST_FWCFG_ARTIFACTS)),)
+ifneq ($(strip $(CK_TEST_FWCFG_ARTIFACTS)),1)
+$(error CK_TEST_FWCFG_ARTIFACTS must be empty or 1)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_TEST_FWCFG_ARTIFACTS (QEMU fw_cfg test source) cannot be combined with CK_HARDWARE_STAGING)
+endif
+OUT ?= $(REPO)/target/native-kernel-test-fwcfg
+endif
 OUT ?= $(REPO)/target/native-kernel
 AIENOS_COMMIT ?= $(shell git -C $(REPO) rev-parse HEAD 2>/dev/null || echo unknown)
 
@@ -76,6 +99,9 @@ endif
 ART_TRUST_FLAGS := -DCK_SEED0B_TEST_ANCHOR=1
 else
 ART_TRUST_FLAGS :=
+endif
+ifeq ($(strip $(CK_TEST_FWCFG_ARTIFACTS)),1)
+ART_TRUST_FLAGS += -DCK_TEST_FWCFG_ARTIFACTS=1
 endif
 
 KINC := -I$(KDIR)/include -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/arch -I$(BOOT)
@@ -182,6 +208,19 @@ $(STAGE_KOBJ)/$(subst /,_,$(patsubst $(REPO)/%,%,$(abspath $(1)))).o: $(1) $(STA
 endef
 $(foreach s,$(STAGE_SRCS),$(eval $(call stage_rule,$(s))))
 
+# fwcfg_check(elf): a default image (no CK_TEST_FWCFG_ARTIFACTS) must carry no
+# fw_cfg artifact code or strings; a test image must carry its announcement.
+define fwcfg_check
+	@if [ "$(strip $(CK_TEST_FWCFG_ARTIFACTS))" = 1 ]; then \
+	  grep -aqF "TEST-ONLY QEMU fw_cfg side channel" $(1) || { echo "test fw_cfg image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
+	else \
+	  s=$$(grep -aoE "opt/aienos/artifacts|fw_cfg|QEMU0002" $(1) | sort -u | tr "\n" " "); \
+	  y=$$($(KNM) $(1) | grep -E " (fw_select|fw_read|fw_skip|fw_find|fwcfg_from_dsdt|fwcfg_source|fwcfg)$$" | tr "\n" " "); \
+	  if [ -n "$$s$$y" ]; then echo "default image carries fw_cfg artifact code: $$s$$y"; rm -f $(1); exit 1; fi; \
+	  echo "no fw_cfg artifact code in $(1)"; \
+	fi
+endef
+
 # link_image(output elf, objects): refuses undefined symbols (weak stage
 # references excepted) and any relocation other than R_AARCH64_RELATIVE.
 define link_image
@@ -204,11 +243,13 @@ $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
 	$(call link_image,$@,$(CORE_OBJS))
 	@s=$$($(KNM) $@ | grep -E ' [TtDdBbWwVv] ck_stage_(devices|security|store|quiesce)$$' || true); \
 	if [ -n "$$s" ]; then echo "core image defines stage symbols: $$s"; rm -f $@; exit 1; fi
+	$(call fwcfg_check,$@)
 
 $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	$(call link_image,$@,$(CORE_OBJS) $(STAGE_LINK))
-	@for s in ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce; do \
+	@for s in ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce ck_stage_disk_artifacts; do \
 	  $(KNM) $@ | grep -qE " [TW] $$s$$" || { echo "full image lacks $$s"; rm -f $@; exit 1; }; done
+	$(call fwcfg_check,$@)
 
 $(EFI): $(ELF)
 	$(call pe_image,$<,$@)
@@ -266,8 +307,19 @@ $(ART_TOOL): $(KDIR)/tools/ck_artifact_tool.c $(ART_HOST_DEPS)
 	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror $(ART_HOST_INC) -o $@ $< $(ART_HOST_SRCS)
 tool: $(ART_TOOL)
 
+# Boot-disk image tool (scripts/qemu_ck_artifact_test.sh): writes signed artifacts
+# into the sealed Store on a raw NVMe image with the kernel's own Store code
+# (store_boot.c, artifact_store.c). Hosted; never part of an image.
+STORE_IMG_TOOL := $(OUT)/host/ck_store_image
+STORE_IMG_SRCS := $(STAGE_OWN_SRCS) $(STAGE_NATIVE_SRCS) $(NATIVE)/disk/disk_file.c \
+	$(KDIR)/svc/tests/ck_host.c $(KDIR)/tools/ck_store_image.c
+$(STORE_IMG_TOOL): $(STORE_IMG_SRCS) $(STAGE_HDRS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(STAGE_HOST_FLAGS) $(STAGE_INC) -o $@ $(STORE_IMG_SRCS)
+store-image: $(STORE_IMG_TOOL)
+
 clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize clean print-kcflags udp-echo tool FORCE
+.PHONY: all full test sanitize clean print-kcflags udp-echo tool store-image FORCE
