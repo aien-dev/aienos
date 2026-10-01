@@ -10,11 +10,23 @@ static ck_nvme g_nvme;
 
 const disk_dev *ck_dev_boot_disk(void) { return g_nvme.bound ? &g_nvme.disk : 0; }
 
+void ck_dev_nvme_release(void)
+{
+    if (!g_nvme.pf || !g_nvme.bm_on) return;
+    g_nvme.bound = 0;
+    g_nvme.bm_on = 0;
+    if (pci_bus_master_off(g_nvme.pf) == 0)
+        ck_printf("dma_gate: nvme bus master revoked\n");
+    else
+        ck_printf("dma_gate: nvme bus master revoke FAILED (command register still has BME)\n");
+}
+
 int ck_stage_devices(void)
 {
     int rc = pci_stage_probe(&g_pci);
     if (rc) return rc;
     int nrc = ck_nvme_bind(&g_nvme, &g_pci);
+    if (nrc) ck_dev_nvme_release(); /* a failed bind never keeps DMA */
     virtio_pci_caps caps;
     int vrc = ck_virtio_net_probe(&g_pci, &caps);
     ck_printf("devices: pci=ok nvme=%s virtio_net=%s\n", g_nvme.bound ? "bound" : "unbound",

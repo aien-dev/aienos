@@ -215,7 +215,13 @@ static void test_store(void)
     uint64_t plba = 0;
     CHECK(ck_disk_rw_probe(&g_d, 7, &plba) == 0 && plba == (uint64_t)(T_UNITS - 1) * T_BPU);
     dclose();
-    /* the probe left non-zero data in the last unit only; the disk still counts as blank */
+    /* the probe restored the unit it wrote: the fresh image is still all zero */
+    CHECK(load(now) == 0);
+    {
+        size_t nz = 0;
+        for (size_t i = 0; i < T_BYTES; i++) nz += now[i] != 0;
+        CHECK(nz == 0);
+    }
 
     printf("  [store boot 1: blank disk]\n");
     CHECK(boot(&k, "commit-one", &r) == 0);

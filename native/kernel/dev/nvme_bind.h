@@ -15,6 +15,7 @@ typedef struct {
     volatile uint8_t *bar0;
     const pci_func *pf;
     int bound;
+    int bm_on; /* bus mastering was enabled for this function */
 } ck_nvme;
 
 /* Find the first class 01/08/02 function, gate DMA, map BAR0, init the
@@ -25,6 +26,8 @@ typedef struct {
 int ck_nvme_bind(ck_nvme *n, const pci_system *pci);
 
 /* Run the write/flush/read-back probe on the last whole unit of `d`
- * (shared with the host tests). `seed` varies the pattern per boot. */
+ * (shared with the host tests). `seed` varies the pattern per boot.
+ * The unit's original bytes are read first and written back (flushed and
+ * verified) afterwards, so a boot leaves the disk bytes as it found them. */
 int ck_disk_rw_probe(const disk_dev *d, uint32_t seed, uint64_t *lba_out);
 #endif

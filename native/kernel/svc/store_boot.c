@@ -225,6 +225,7 @@ void store_boot_print(const ck_store_report *r)
 
 /* Kernel stage. ck_dev_boot_disk comes from dev/devices.c. */
 const disk_dev *ck_dev_boot_disk(void);
+void ck_dev_nvme_release(void);
 
 int ck_stage_store(void)
 {
@@ -240,5 +241,6 @@ int ck_stage_store(void)
     int rc = store_boot_run(d, &keys, ck_store_test_uuid, commit ? commit : "unknown", &r);
     bz(&keys, sizeof keys);
     store_boot_print(&r);
+    ck_dev_nvme_release(); /* last disk user: revoke NVMe bus mastering */
     return rc;
 }

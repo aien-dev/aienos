@@ -98,6 +98,8 @@ int pci_enumerate(pci_system *s, pci_window *win);
 
 /* Turn on memory decode (+ bus master when bm != 0). */
 void pci_enable(const pci_func *f, int bm);
+/* Clear Bus Master Enable and read it back: 0 when it reads clear. */
+int pci_bus_master_off(const pci_func *f);
 
 /* First function with this class (class/subclass/progif masked by mask). */
 const pci_func *pci_find_class(const pci_system *s, uint32_t class_code, uint32_t mask);

@@ -3,8 +3,23 @@
 #include "ck.h"
 #include "disk_layout.h"
 
-#ifndef CK_NVME_DMA_BYPASS
-#define CK_NVME_DMA_BYPASS 0
+/* NVMe DMA rule: no SMMU confinement means no DMA. ck.h has no SMMU service,
+ * so the default build refuses NVMe DMA (fail-closed). The unconfined bypass
+ * exists only for QEMU and only when the QEMU gate script asks for it with
+ * CK_QEMU_UNSAFE_DMA=1; it can never be combined with a hardware-staging
+ * build (same rule as the compile_error! in crates/aienos-boot/src/lib.rs). */
+#if defined(CK_NVME_DMA_BYPASS)
+#error "CK_NVME_DMA_BYPASS is retired: the unconfined NVMe DMA bypass is CK_QEMU_UNSAFE_DMA=1 (QEMU only)"
+#endif
+#if defined(CK_QEMU_UNSAFE_DMA) && defined(CK_HARDWARE_STAGING)
+#error "CK_QEMU_UNSAFE_DMA (unconfined DMA, QEMU debug only) cannot be combined with CK_HARDWARE_STAGING: no SMMU confinement means no DMA"
+#endif
+#if defined(CK_QEMU_UNSAFE_DMA) && CK_QEMU_UNSAFE_DMA == 1
+#define CK_NVME_UNSAFE_BYPASS 1
+#elif defined(CK_QEMU_UNSAFE_DMA) && CK_QEMU_UNSAFE_DMA != 0
+#error "CK_QEMU_UNSAFE_DMA must be 0 or 1"
+#else
+#define CK_NVME_UNSAFE_BYPASS 0
 #endif
 
 static uint32_t m_r32(void *ctx, uint32_t off)
@@ -30,6 +45,7 @@ static void m_delay(void *ctx, uint32_t us)
 
 static uint8_t probe_buf[CK_LAYOUT_UNIT];
 static uint8_t probe_rd[CK_LAYOUT_UNIT];
+static uint8_t probe_orig[CK_LAYOUT_UNIT];
 
 int ck_disk_rw_probe(const disk_dev *d, uint32_t seed, uint64_t *lba_out)
 {
@@ -38,6 +54,8 @@ int ck_disk_rw_probe(const disk_dev *d, uint32_t seed, uint64_t *lba_out)
     if (units < 1) return DISK_EGEOMETRY;
     uint64_t lba = (units - 1u) * bpu;
     if (lba_out) *lba_out = lba;
+    int rc = disk_read(d, lba, bpu, probe_orig);
+    if (rc) return rc;
     uint32_t x = seed ? seed : 0x9e3779b9u;
     for (uint32_t i = 0; i < CK_LAYOUT_UNIT; i++) {
         x ^= x << 13;
@@ -46,20 +64,34 @@ int ck_disk_rw_probe(const disk_dev *d, uint32_t seed, uint64_t *lba_out)
         probe_buf[i] = (uint8_t)x;
         probe_rd[i] = 0;
     }
-    int rc = disk_write(d, lba, bpu, probe_buf);
+    rc = disk_write(d, lba, bpu, probe_buf);
+    if (rc) return rc;
+    rc = disk_flush(d);
+    if (rc) return rc;
+    rc = disk_read(d, lba, bpu, probe_rd);
+    if (rc) return rc;
+    int match = 1;
+    for (uint32_t i = 0; i < CK_LAYOUT_UNIT; i++)
+        if (probe_rd[i] != probe_buf[i]) match = 0;
+    /* Put the original bytes back, durably, and verify them. */
+    rc = disk_write(d, lba, bpu, probe_orig);
     if (rc) return rc;
     rc = disk_flush(d);
     if (rc) return rc;
     rc = disk_read(d, lba, bpu, probe_rd);
     if (rc) return rc;
     for (uint32_t i = 0; i < CK_LAYOUT_UNIT; i++)
-        if (probe_rd[i] != probe_buf[i]) return DISK_EIO;
-    return DISK_OK;
+        if (probe_rd[i] != probe_orig[i]) return DISK_EIO;
+    return match ? DISK_OK : DISK_EIO;
 }
 
 int ck_nvme_bind(ck_nvme *n, const pci_system *pci)
 {
     n->bound = 0;
+    n->bm_on = 0;
+#if CK_NVME_UNSAFE_BYPASS
+    ck_printf("WARNING: UNSAFE NVME DMA BYPASS BUILD (CK_QEMU_UNSAFE_DMA=1, QEMU debug only)\n");
+#endif
     const pci_func *f = pci_find_class(pci, 0x010802u, 0xffffffu);
     if (!f) {
         ck_printf("nvme: no class 0x010802 function\n");
@@ -77,8 +109,8 @@ int ck_nvme_bind(ck_nvme *n, const pci_system *pci)
     /* DMA gate. The ck core has no SMMU service, so DMA cannot be confined
      * to a window. The Rust kernel denies NVMe DMA without an SMMU unless
      * built with its unsafe bypass; this stage mirrors that choice at build
-     * time (CK_NVME_DMA_BYPASS). */
-#if CK_NVME_DMA_BYPASS
+     * time (CK_QEMU_UNSAFE_DMA=1, QEMU gate only). */
+#if CK_NVME_UNSAFE_BYPASS
     ck_printf("WARNING: UNSAFE NVME DMA BYPASS ACTIVE (ck core has no SMMU service; device can DMA anywhere)\n");
     ck_printf("dma_gate: nvme granted (UnsafeBypass), bus master on\n");
 #else
@@ -88,6 +120,7 @@ int ck_nvme_bind(ck_nvme *n, const pci_system *pci)
 #endif
     n->bar0 = (volatile uint8_t *)ck_mmio_map(b->addr, (size_t)b->size);
     pci_enable(f, 1);
+    n->bm_on = 1;
     uint64_t phys = 0;
     uint8_t *dma = ck_dma_alloc(CK_NVME_DMA_BYTES, NVME_PAGE, &phys);
     if (!dma) {

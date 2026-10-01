@@ -37,9 +37,10 @@ STAGE_INC := -I$(STAGE_DIR)/include -I$(STAGE_DIR)/dev -I$(STAGE_DIR)/svc \
              -I$(STAGE_NATIVE)/disk -I$(STAGE_NATIVE)/store -I$(STAGE_NATIVE)/m5 -I$(STAGE_NATIVE)/crypto \
              -I$(STAGE_NATIVE)/argus -I$(STAGE_NATIVE)/capability -I$(STAGE_NATIVE)/net
 # compat first: <pthread.h> <stdlib.h> <stdio.h> <time.h> resolve to the stand-ins.
-# CK_NVME_DMA_BYPASS=1: the core has no SMMU service, so NVMe DMA runs unconfined
-# and says so on the console (same meaning as the Rust UnsafeBypass gate).
-STAGE_CFLAGS := -I$(STAGE_DIR)/svc/compat $(STAGE_INC) -DCK_NVME_DMA_BYPASS=1
+# NVMe DMA: refused by default (ck.h has no SMMU service). The kernel Makefile
+# adds -DCK_QEMU_UNSAFE_DMA=1 only for "make full CK_QEMU_UNSAFE_DMA=1" (the QEMU
+# store gate); dev/nvme_bind.c refuses it together with CK_HARDWARE_STAGING.
+STAGE_CFLAGS := -I$(STAGE_DIR)/svc/compat $(STAGE_INC)
 
 # ---- freestanding check --------------------------------------------------
 STAGE_CC ?= cc

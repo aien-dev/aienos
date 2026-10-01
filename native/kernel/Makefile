@@ -1,20 +1,25 @@
 # AIENOS C kernel core (Lane 18): UEFI entry stub + kernel core as one
 # AArch64 PE32+ image, plus host unit tests. Toolchain: gcc, binutils, make.
 #
-#   make                 build $(OUT)/BOOTAA64.EFI (and the .elf)
+#   make                 core-only image $(OUT)/BOOTAA64.EFI (stages print
+#                        "not linked"; the M1 gate boots this one)
+#   make full            full image with the boot stages (devices, security,
+#                        Store) from stage.mk: $(OUT)/full/BOOTAA64.EFI,
+#                        NVMe DMA refused (no SMMU service in ck.h)
+#   make full CK_QEMU_UNSAFE_DMA=1
+#                        QEMU-only image with the unconfined NVMe DMA bypass:
+#                        $(OUT)/full-qemu-unsafe-dma/BOOTAA64.EFI (only
+#                        scripts/qemu_ck_store_test.sh sets this; refused
+#                        together with CK_HARDWARE_STAGING=1)
 #   make test            host unit tests            -> CK_CORE_HOST: PASS
 #   make sanitize        same under ASan + UBSan    -> CK_CORE_HOST: PASS
+#   make stage-test | stage-sanitize | stage-free   stage host tests (stage.mk)
 #   make print-kcflags   flags stage code must be built with
 #
-# Stage hook (the stage worker's devices/security/store code):
-#   STAGE_SRCS=...   C sources compiled here with the kernel flags,
-#                    $(STAGE_CFLAGS) and the native module include paths
-#   STAGE_OBJS=...   extra prebuilt freestanding objects linked as given
-#   STAGE_CFLAGS=... extra flags for STAGE_SRCS
 #   CK_EXTRA_CFLAGS=... extra kernel flags for one-off checks, e.g.
 #                    -DCK_SELFTEST_EL2_FAULT (brk at EL2: the EL2 fatal path)
-# The stages are weak in ck.h: with none linked the kernel prints
-# "stage <name>: not linked".
+# The stages are weak references in ck.h (the core defines no defaults):
+# with none linked the kernel prints "stage <name>: not linked".
 #
 # Output goes to <repo>/target/native-kernel (ignored by git) unless OUT is set.
 # Builds natively on an aarch64 host, else with the aarch64-linux-gnu- prefix.
@@ -41,18 +46,27 @@ HOSTCC ?= cc
 OUT ?= $(REPO)/target/native-kernel
 AIENOS_COMMIT ?= $(shell git -C $(REPO) rev-parse HEAD 2>/dev/null || echo unknown)
 
-STAGE_SRCS ?=
-STAGE_OBJS ?=
-STAGE_CFLAGS ?=
 CK_EXTRA_CFLAGS ?=
+# Build-time DMA policy for the full image (see dev/nvme_bind.c):
+# default refuse; 1 = QEMU-only unconfined bypass. Never with hardware staging.
+CK_QEMU_UNSAFE_DMA ?=
+CK_HARDWARE_STAGING ?=
+ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),)
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_QEMU_UNSAFE_DMA (unconfined DMA, QEMU debug only) cannot be combined with CK_HARDWARE_STAGING: no SMMU confinement means no DMA)
+endif
+ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),1)
+$(error CK_QEMU_UNSAFE_DMA must be empty or 1)
+endif
+endif
 
 KINC := -I$(KDIR)/include -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/arch -I$(BOOT)
 MODULE_INC := -I$(NATIVE)/disk -I$(NATIVE)/store -I$(NATIVE)/m5 -I$(NATIVE)/crypto \
 	-I$(NATIVE)/capability -I$(NATIVE)/argus -I$(NATIVE)/net
 KCFLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -nostdlib -fno-builtin \
 	-fno-stack-protector -fno-tree-loop-distribute-patterns -mstrict-align \
-	-mgeneral-regs-only -fno-asynchronous-unwind-tables -fpie -fvisibility=hidden \
-	-fno-plt $(KINC) $(CK_EXTRA_CFLAGS)
+	-mgeneral-regs-only -mno-outline-atomics -fno-asynchronous-unwind-tables -fpie \
+	-fvisibility=hidden -fno-plt $(KINC) $(CK_EXTRA_CFLAGS)
 KLDFLAGS := -nostdlib -pie --no-dynamic-linker -z norelro -z noexecstack -z max-page-size=4096 --no-warn-rwx-segments \
 	-T $(BOOT)/image.ld
 
@@ -67,12 +81,35 @@ HDRS := $(wildcard $(KDIR)/include/*.h $(KDIR)/*/*.h $(BOOT)/*.h)
 KOBJ := $(OUT)/obj
 CORE_OBJS := $(patsubst $(NATIVE)/%.c,$(KOBJ)/%.o,$(CORE_C)) \
 	$(patsubst $(NATIVE)/%.S,$(KOBJ)/%.o,$(CORE_S))
-STAGE_BUILT := $(foreach s,$(STAGE_SRCS),$(KOBJ)/stage/$(subst /,_,$(patsubst $(REPO)/%,%,$(abspath $(s)))).o)
+
+.DEFAULT_GOAL := all
+
+# ---- boot stages (stage.mk: STAGE_SRCS, STAGE_CFLAGS, stage-* host targets) ----
+include $(KDIR)/stage.mk
+ifeq ($(strip $(CK_QEMU_UNSAFE_DMA)),1)
+FULL_NAME := full-qemu-unsafe-dma
+STAGE_DMA_FLAGS := -DCK_QEMU_UNSAFE_DMA=1
+else
+FULL_NAME := full
+STAGE_DMA_FLAGS :=
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+STAGE_DMA_FLAGS += -DCK_HARDWARE_STAGING=1
+endif
+FULL_OUT := $(OUT)/$(FULL_NAME)
+STAGE_KOBJ := $(OUT)/obj/stage-$(FULL_NAME)
+STAGE_HDRS := $(HDRS) $(wildcard $(NATIVE)/*/*.h $(NATIVE)/argus/bridge/*.h $(KDIR)/svc/compat/*.h)
+STAGE_BUILT := $(foreach s,$(STAGE_SRCS),$(STAGE_KOBJ)/$(subst /,_,$(patsubst $(REPO)/%,%,$(abspath $(s)))).o)
+# STAGE_CFLAGS first: svc/compat must shadow the hosted headers. No fortify.
+STAGE_KCFLAGS := $(STAGE_CFLAGS) $(KCFLAGS) $(MODULE_INC) -U_FORTIFY_SOURCE $(STAGE_DMA_FLAGS)
 
 ELF := $(OUT)/aienos-ck.elf
 EFI := $(OUT)/BOOTAA64.EFI
+FULL_ELF := $(FULL_OUT)/aienos-ck.elf
+FULL_EFI := $(FULL_OUT)/BOOTAA64.EFI
 
 all: $(EFI)
+full: $(FULL_EFI)
 
 print-kcflags:
 	@echo $(KCFLAGS) $(MODULE_INC)
@@ -94,25 +131,45 @@ $(KOBJ)/%.o: $(NATIVE)/%.S
 	$(KCC) $(KCFLAGS) -c -o $@ $<
 
 define stage_rule
-$(KOBJ)/stage/$(subst /,_,$(patsubst $(REPO)/%,%,$(abspath $(1)))).o: $(1) $(HDRS)
+$(STAGE_KOBJ)/$(subst /,_,$(patsubst $(REPO)/%,%,$(abspath $(1)))).o: $(1) $(STAGE_HDRS)
 	@mkdir -p $$(dir $$@)
-	$(KCC) $(KCFLAGS) $(MODULE_INC) $(STAGE_CFLAGS) -c -o $$@ $(1)
+	$(KCC) $(STAGE_KCFLAGS) -c -o $$@ $(1)
 endef
 $(foreach s,$(STAGE_SRCS),$(eval $(call stage_rule,$(s))))
 
-$(ELF): $(CORE_OBJS) $(STAGE_BUILT) $(STAGE_OBJS) $(BOOT)/image.ld
-	$(KLD) $(KLDFLAGS) -o $@ $(CORE_OBJS) $(STAGE_BUILT) $(STAGE_OBJS)
-	@u=$$($(KNM) -u $@ | grep -v ' w ' || true); \
-	if [ -n "$$u" ]; then echo "image has undefined symbols: $$u"; rm -f $@; exit 1; fi
-	@bad=$$($(KREADELF) -rW $@ | grep -E '^[0-9a-f]+ ' | grep -v R_AARCH64_RELATIVE || true); \
-	if [ -n "$$bad" ]; then echo "image has non-RELATIVE relocations:"; echo "$$bad"; rm -f $@; exit 1; fi
+# link_image(output elf, objects): refuses undefined symbols (weak stage
+# references excepted) and any relocation other than R_AARCH64_RELATIVE.
+define link_image
+	@mkdir -p $(dir $(1))
+	$(KLD) $(KLDFLAGS) -o $(1) $(2)
+	@u=$$($(KNM) -u $(1) | grep -v ' w ' || true); \
+	if [ -n "$$u" ]; then echo "image has undefined symbols: $$u"; rm -f $(1); exit 1; fi
+	@bad=$$($(KREADELF) -rW $(1) | grep -E '^[0-9a-f]+ ' | grep -v R_AARCH64_RELATIVE || true); \
+	if [ -n "$$bad" ]; then echo "image has non-RELATIVE relocations:"; echo "$$bad"; rm -f $(1); exit 1; fi
+endef
+define pe_image
+	$(KOBJCOPY) -O binary $(1) $(2)
+	@sz=$$(stat -c %s $(2)); pad=$$(( (4096 - sz % 4096) % 4096 )); \
+	if [ $$pad -gt 0 ]; then head -c $$pad /dev/zero >> $(2); fi
+	@[ "$$(head -c 2 $(2))" = "MZ" ] || { echo "not a PE image"; rm -f $(2); exit 1; }
+	@echo "built $(2) (commit $(AIENOS_COMMIT))"
+endef
+
+$(ELF): $(CORE_OBJS) $(BOOT)/image.ld
+	$(call link_image,$@,$(CORE_OBJS))
+	@s=$$($(KNM) $@ | grep -E ' [TtDdBbWwVv] ck_stage_(devices|security|store)$$' || true); \
+	if [ -n "$$s" ]; then echo "core image defines stage symbols: $$s"; rm -f $@; exit 1; fi
+
+$(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
+	$(call link_image,$@,$(CORE_OBJS) $(STAGE_BUILT))
+	@for s in ck_stage_devices ck_stage_security ck_stage_store; do \
+	  $(KNM) $@ | grep -qE " [TW] $$s$$" || { echo "full image lacks $$s"; rm -f $@; exit 1; }; done
 
 $(EFI): $(ELF)
-	$(KOBJCOPY) -O binary $< $@
-	@sz=$$(stat -c %s $@); pad=$$(( (4096 - sz % 4096) % 4096 )); \
-	if [ $$pad -gt 0 ]; then head -c $$pad /dev/zero >> $@; fi
-	@[ "$$(head -c 2 $@)" = "MZ" ] || { echo "not a PE image"; rm -f $@; exit 1; }
-	@echo "built $@ (commit $(AIENOS_COMMIT))"
+	$(call pe_image,$<,$@)
+
+$(FULL_EFI): $(FULL_ELF)
+	$(call pe_image,$<,$@)
 
 # ---- host unit tests ----
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/mm/frames.c \
@@ -141,4 +198,4 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all test sanitize clean print-kcflags FORCE
+.PHONY: all full test sanitize clean print-kcflags FORCE

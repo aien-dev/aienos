@@ -224,6 +224,13 @@ void pci_enable(const pci_func *f, int bm)
     pci_w16(f->cfg, CFG_COMMAND, cmd);
 }
 
+int pci_bus_master_off(const pci_func *f)
+{
+    uint16_t cmd = pci_r16(f->cfg, CFG_COMMAND);
+    pci_w16(f->cfg, CFG_COMMAND, (uint16_t)(cmd & ~CMD_BM));
+    return (pci_r16(f->cfg, CFG_COMMAND) & CMD_BM) ? -1 : 0;
+}
+
 const pci_func *pci_find_class(const pci_system *s, uint32_t cc, uint32_t mask)
 {
     for (uint32_t i = 0; i < s->n; i++)
