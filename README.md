@@ -30,7 +30,7 @@ AIENOS owns the trusted operating substrate. [omega](https://github.com/aien-dev
 
 ## Standing rules
 
-C is the target language, with assembly only where measured. No new Rust. No Python, no CUDA toolkit, no CUDA-shaped APIs, no systemd or Linux init in boot, services or tooling. Dependencies in the trusted base are rare and built offline.
+Language rule: Rust is scaffolding, Omega is the destination, and C or assembly stay only where hardware, boot, ABI or measurement justifies them (aien-architecture ADR 0024, which supersedes the old "C is the target, no new Rust" rule). No Python, no CUDA toolkit, no CUDA-shaped APIs, no systemd or Linux init in boot, services or tooling. Dependencies in the trusted base are rare and built offline.
 
 ## Build and verify
 

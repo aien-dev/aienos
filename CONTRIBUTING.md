@@ -32,7 +32,7 @@ becomes part of `verify_all.sh`.
 
 ## Rules for code
 
-- **C.** The target language is C, with assembly only where a measurement shows it is faster. No new Rust; the existing Rust in `crates/` is legacy and is being replaced.
+- **Language.** Language rule: Rust is scaffolding, Omega is the destination, and C or assembly stay only where hardware, boot, ABI or measurement justifies them (aien-architecture ADR 0024, which supersedes the old "C is the target, no new Rust" rule). The existing Rust in `crates/` is frozen scaffolding and reference, not legacy to be replaced.
 - **No Python, no CUDA, no CUDA-shaped APIs** anywhere in the repository.
 - **Sovereign trusted base.** Boot, kernel, memory management, scheduling,
   storage, cryptography, identity, AEGIS and recovery build from inspectable
