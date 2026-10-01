@@ -29,7 +29,7 @@ grep -q "^AIENOS_NET_SECURE_TESTS: PASS" "$log/sanitize.txt" || secure=FAIL
 grep -q "^X25519_RFC7748: PASS" "$log/test.txt" || secure=FAIL
 live="NET_RUST_DIFFERENTIAL_LIVE: NOT_RUN (no RUSTDIFF driver given; pinned digest checked)"
 if [ -n "${RUSTDIFF:-}" ]; then
-    if "$RUSTDIFF" < out/diff_corpus.bin > "$log/rust.txt" && cmp -s "$log/rust.txt" out/diff_c.txt; then
+    if "$RUSTDIFF" < out/diff_corpus.bin > "$log/rust.txt" && cmp -s "$log/rust.txt" out/diff_ref.txt; then
         live="NET_RUST_DIFFERENTIAL_LIVE: PASS (driver sha256 $(sha256sum "$RUSTDIFF" | cut -d' ' -f1))"
     else
         live="NET_RUST_DIFFERENTIAL_LIVE: FAIL"; status=FAIL
@@ -48,10 +48,13 @@ body="$log/body.txt"
     echo "scope M6-B: hosted protocol code only; no real keys, no timing measurement, no formal protocol analysis"
     echo "sources:"
     for f in aienos_net.c aienos_net.h aienos_virtio_pci.c aienos_virtio_pci.h aienos_ctl.c aienos_ctl.h \
+             aienos_virtio_net.c aienos_virtio_net.h \
              x25519.c x25519.h aienos_sec.c aienos_sec.h ../argus/sha256.c \
              ../crypto/aes.c ../crypto/polyval.c ../crypto/gcm_siv.c ../crypto/hmac.c ../crypto/ct.c \
              ../sig/ed25519.c ../sig/sha512.c ../sig/ct.c \
-             tests/net_test.c tests/ctl_test.c tests/net_diff.c tests/x25519_test.c tests/sec_test.c \
+             tests/net_test.c tests/ctl_test.c tests/net_diff.c tests/x25519_test.c tests/sec_test.c tests/vnet_test.c \
+             tests/fixtures/qemu822_virtio_net_pci_transitional.cfg tests/fixtures/qemu822_virtio_net_pci_modern.cfg \
+             tests/fixtures/dump_qemu_virtio_net_cfg.sh \
              Makefile receipt.sh; do
         echo "  $(sha256sum "$f" | cut -d' ' -f1)  native/net/$f"
     done
@@ -61,7 +64,7 @@ body="$log/body.txt"
     done
     echo "differential corpus: $(sha256sum out/diff_corpus.bin | cut -d' ' -f1)"
     echo "results:"
-    grep -hE '^(net_test|ctl_test|lib-checks|NET_|CTL_|X25519_|AIENOS_NET_|  [a-z+0-9-]+ +(done|link_down))' "$log/test.txt" "$log/sanitize.txt" "$log/mutants.txt" | sed 's/^/  /'
+    grep -hE '^(net_test|ctl_test|vnet_test|lib-checks|NET_|CTL_|VNET_|VIRTIO_|X25519_|AIENOS_NET_|  [a-z+0-9-]+ +(done|link_down))' "$log/test.txt" "$log/sanitize.txt" "$log/mutants.txt" | sed 's/^/  /'
     echo "  $live"
     echo "deferred (not claimed): native binding -> needs a C kernel (no-Rust rule; port order open);"
     echo "  production identity and keys -> needs M5 key hierarchy (TRUST-1); M6-B runs on TEST keys only;"
