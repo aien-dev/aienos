@@ -72,7 +72,8 @@ m5_store_encrypted_objects|missing|-|-|-|M5: Store integration of encrypted obje
 m5_owner_signed_chain_machine1|missing|-|-|-|M5: owner-signed trust chain on Machine 1
 m5_production_store_512b|missing|-|-|-|M5: production Store on 512-byte geometry (needs 4K atomic-root predicate, aienos-boot nvme_read.rs; no C disk layer)
 t1_gate4_manifest_ab|missing|-|-|-|Gate 4: signed boot manifest + A/B slot selection in the loader (awaits the C/asm loader)
-m5_migration_owner_signature|missing|-|-|-|M5: migration authorization bound to an owner signature (no in-house signature primitive)
+m5_migration_sig_test_key|auto|run_native_m5_migsig|-|^AIENOS_M5_MIGRATION_SIG: PASS$|M5: owner-signed migration record (native/m5 + native/sig Ed25519), host test with TEST keys only
+m5_migration_owner_signature|operator|-|-|-|M5: migration signed by the real owner key (needs the Gate 3 offline key ceremony)
 '
 # ===========================================================================
 
@@ -117,6 +118,7 @@ run_cargo_kernel()      { (cd "${repo_root}" && cargo test -p aienos-kernel --li
 run_gate5_sim()      { bash "${repo_root}/scripts/trust1_gate5_policy_sim.sh" selftest; }
 run_native_m5()     { native_make_test m5; }
 run_native_crypto() { native_make_test crypto; }
+run_native_m5_migsig() { native_make_test m5; }
 run_qemu_sb()       { bash "${repo_root}/scripts/qemu_secureboot_signing_test.sh"; }
 run_qemu_store512() { bash "${repo_root}/scripts/qemu_store_512b_crash_test.sh"; }
 
@@ -126,6 +128,7 @@ auto_present() {
         run_gate5_sim) [[ -f "${repo_root}/scripts/trust1_gate5_policy_sim.sh" ]] ;;
         run_native_m5) [[ -f "${repo_root}/native/m5/Makefile" ]] ;;
         run_native_crypto) [[ -f "${repo_root}/native/crypto/Makefile" ]] ;;
+        run_native_m5_migsig) [[ -f "${repo_root}/native/m5/m5_owner_sig.c" ]] ;;
         *) declare -F "$1" >/dev/null ;;
     esac
 }
