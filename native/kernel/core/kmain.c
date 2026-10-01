@@ -118,6 +118,9 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     /* M3 isolation checks (core/m3.c), before any stage registers an IRQ. */
     ck_m3_run();
 
+    /* P2 sealed-artifact loader (core/artifact_loader.c). */
+    ck_artifact_run();
+
     run_stage("devices", ck_stage_devices);
     run_stage("security", ck_stage_security);
     run_stage("store", ck_stage_store);
@@ -131,6 +134,7 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     ck_set_stage("final");
     ck_puts("\n");
     ck_report_header("final");
+    ck_artifact_final();
     ck_puts("note: QEMU qualifies nothing physical\n");
     ck_reset();
 }

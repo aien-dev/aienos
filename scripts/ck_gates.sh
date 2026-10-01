@@ -4,7 +4,7 @@
 #
 # It refuses a dirty tree, runs the C kernel QEMU scripts that exist
 # (scripts/qemu_ck_boot_test.sh, scripts/qemu_ck_store_test.sh,
-# scripts/qemu_ck_net_test.sh), and prints
+# scripts/qemu_ck_net_test.sh, scripts/qemu_ck_artifact_test.sh), and prints
 # one line per gate:
 #     AIENOS_CK_<gate>: PASS|FAIL|NOT_RUN [(reason)]
 # for M1 M3 SMMU NVME_SHUTDOWN P2_ARTIFACT M0_ROLLBACK M4_NVME M4_STORE M4_STORE_CRASH
@@ -39,6 +39,7 @@ set -uo pipefail
 # source: boot  -> verdict line from scripts/qemu_ck_boot_test.sh
 #         store -> verdict line from scripts/qemu_ck_store_test.sh
 #         net   -> verdict line from scripts/qemu_ck_net_test.sh
+#         artifact -> verdict line from scripts/qemu_ck_artifact_test.sh
 #         missing -> NOT_RUN (MISSING_IMPLEMENTATION), never run, never PASS
 # ===========================================================================
 CK_GATE_TABLE='
@@ -46,7 +47,7 @@ M1|boot|-
 M3|boot|-
 SMMU|store|-
 NVME_SHUTDOWN|store|-
-P2_ARTIFACT|missing|no signed artifact loader (EL0, W^X, admission receipts) in the C kernel
+P2_ARTIFACT|artifact|-
 M0_ROLLBACK|missing|C loader signatures, A/B, BootNext and rollback are parked (native/boot/README.md)
 M4_NVME|store|-
 M4_STORE|store|-
@@ -57,7 +58,7 @@ ARGUS1_REVOKE|store|-
 KEYBOARD|missing|no xHCI/USB HID keyboard driver in the C kernel
 NET|net|-
 '
-CHILDREN=(boot store net)
+CHILDREN=(boot store net artifact)
 # ===========================================================================
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -95,6 +96,7 @@ set_default_children() {
         [boot]="${repo_root}/scripts/qemu_ck_boot_test.sh"
         [store]="${repo_root}/scripts/qemu_ck_store_test.sh"
         [net]="${repo_root}/scripts/qemu_ck_net_test.sh"
+        [artifact]="${repo_root}/scripts/qemu_ck_artifact_test.sh"
     )
 }
 
@@ -324,11 +326,11 @@ self_test() {
     }
     expect_missing_all() {
         local g
-        for g in P2_ARTIFACT M0_ROLLBACK M4_STORE_CRASH M4_CONTINUITY M4_RECOVERY KEYBOARD; do expect "${g}" NOT_RUN; done
+        for g in P2_ARTIFACT M0_ROLLBACK M4_STORE_CRASH M4_CONTINUITY M4_RECOVERY KEYBOARD; do expect "${g}" NOT_RUN; done  # P2_ARTIFACT: no artifact child in A..G
     }
-    scenario() { # NAME BOOT_SCRIPT STORE_SCRIPT [NET_SCRIPT] (no NET_SCRIPT: missing)
+    scenario() { # NAME BOOT_SCRIPT STORE_SCRIPT [NET_SCRIPT] [ARTIFACT_SCRIPT] (absent: missing)
         scen="$1"
-        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}")
+        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}")
         run_children 2>/dev/null
         evaluate_table >"${tmp}/${scen}.out"
     }
@@ -385,6 +387,19 @@ self_test() {
         "$(fake storeG 0 'AIENOS_CK_M3: PASS' 'AIENOS_CK_M4_NVME: PASS')"
     expect M1 PASS; expect M3 FAIL; expect M4_NVME PASS
 
+    # H: artifact child PASS -> P2_ARTIFACT PASS; its claim for M0_ROLLBACK
+    # (no C implementation) stays NOT_RUN. I: artifact child NOT_RUN (quiet
+    # flag held, exit 3) -> NOT_RUN; J: FAIL -> FAIL.
+    scenario H "$(fake bootH 0 'AIENOS_CK_M1: PASS')" "$(fake storeH 0 'AIENOS_CK_M4_NVME: PASS')" "" \
+        "$(fake artH 0 'PASS  x' 'AIENOS_CK_M0_ROLLBACK: PASS' 'AIENOS_CK_P2_ARTIFACT: PASS')"
+    expect P2_ARTIFACT PASS; expect M0_ROLLBACK NOT_RUN; expect M1 PASS
+    scenario I "$(fake bootI 0 'AIENOS_CK_M1: PASS')" "$(fake storeI 0 'AIENOS_CK_M4_NVME: PASS')" "" \
+        "$(fake artI 3 'NOT_RUN  quiet flag held' 'AIENOS_CK_P2_ARTIFACT: NOT_RUN')"
+    expect P2_ARTIFACT NOT_RUN
+    scenario J "$(fake bootJ 0 'AIENOS_CK_M1: PASS')" "$(fake storeJ 0 'AIENOS_CK_M4_NVME: PASS')" "" \
+        "$(fake artJ 1 'FAIL  P25WX' 'AIENOS_CK_P2_ARTIFACT: FAIL')"
+    expect P2_ARTIFACT FAIL
+
     # Receipt: named by its content hash, valid JSON, physical NOT_RUN, never overwritten.
     scenario R "$(fake bootR 0 'AIENOS_CK_M1: PASS')" "$(fake storeR 0 'AIENOS_CK_M4_NVME: PASS')"
     count_rows
@@ -401,7 +416,7 @@ self_test() {
         jq -e '.physical == "NOT_RUN" and (.gates | length) == 14 and .verdict == "NOT_ALL_GATES_PASS"
                and ([.gates[] | select(.id == "M1")][0].verdict == "PASS")
                and ([.gates[] | select(.id == "ARGUS1_REVOKE")][0].verdict == "FAIL")
-               and (.children | length) == 3 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
+               and (.children | length) == 4 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
             && ok "receipt is valid JSON (jq) with expected fields" || bad "receipt JSON invalid or fields wrong"
     else
         echo "SKIP  jq not installed; JSON validity not machine-checked"
@@ -420,7 +435,7 @@ self_test() {
         [[ -n "${g}" ]] || continue
         rows=$((rows + 1))
         case "${s}" in
-            boot|store|net) [[ "${w}" == - ]] || tbad=1 ;;
+            boot|store|net|artifact) [[ "${w}" == - ]] || tbad=1 ;;
             missing) [[ -n "${w}" && "${w}" != - ]] || tbad=1 ;;
             *) tbad=1 ;;
         esac

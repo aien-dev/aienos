@@ -339,3 +339,51 @@ int ck_mm_guard_selftest(char *detail, size_t n)
                 (unsigned long long)rep.heap_guard_hi);
     return 0;
 }
+
+/* ---- artifact loader support (core/artifact_loader.c) ---- */
+
+int ck_mm_frames_alloc(uint64_t npages, uint64_t *pa)
+{
+    return npages ? ck_frames_alloc(&frames, npages, CK_PAGE, pa) : -1;
+}
+
+int ck_mm_frames_free(uint64_t pa, uint64_t npages)
+{
+    return ck_frames_add(&frames, pa, pa + npages * CK_PAGE);
+}
+
+uint64_t ck_mm_free_frames(void) { return ck_frames_free_bytes(&frames) / CK_PAGE; }
+
+int ck_mm_mapped(uint64_t pa, uint64_t len)
+{
+    uint64_t lo = pa & ~(CK_PAGE - 1), hi = pa + len;
+    if (hi < pa)
+        return 0;
+    for (uint64_t p = lo; p < hi; p += CK_PAGE) {
+        uint64_t a;
+        if (ck_pt_lookup(&pt, p, &a, 0, 0) != 0 || a != p)
+            return 0;
+    }
+    return 1;
+}
+
+volatile void *ck_mm_mmio_try_map(uint64_t phys, size_t len)
+{
+    uint64_t lo = phys & ~(CK_PAGE - 1);
+    uint64_t hi = (phys + len + CK_PAGE - 1) & ~(CK_PAGE - 1);
+    if (!len || hi <= lo || overlaps_ram(lo, hi))
+        return 0;
+    for (uint64_t p = lo; p < hi; p += CK_PAGE) {
+        uint64_t a;
+        if (ck_pt_lookup(&pt, p, &a, 0, 0) == 0) {
+            if (a != p)
+                return 0;
+            continue;
+        }
+        if (ck_pt_map(&pt, p, p, CK_PAGE, CK_PT_DEVICE))
+            return 0;
+    }
+    if (pt.live)
+        tlb_sync();
+    return (volatile void *)(uintptr_t)phys;
+}

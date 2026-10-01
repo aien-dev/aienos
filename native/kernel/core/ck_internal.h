@@ -59,6 +59,21 @@ uint64_t ck_mm_sctlr(void);
 /* Guard-page self test (EL1). 0 if every guard faulted and was contained. */
 int ck_mm_guard_selftest(char *detail, size_t n);
 
+/* ---- artifact loader support (mm/mmu.c) ---- */
+/* Contiguous 4 KiB frames from the free list; 0 on success. */
+int ck_mm_frames_alloc(uint64_t npages, uint64_t *pa);
+/* Returns the frames; nonzero if the free list refused them. */
+int ck_mm_frames_free(uint64_t pa, uint64_t npages);
+uint64_t ck_mm_free_frames(void);
+/* 1 if [pa, pa+len) is identity mapped in the kernel tables. */
+int ck_mm_mapped(uint64_t pa, uint64_t len);
+/* ck_mmio_map without the panic: 0 on RAM overlap or map failure. */
+volatile void *ck_mm_mmio_try_map(uint64_t phys, size_t len);
+
+/* ---- P2 artifact loader (core/artifact_loader.c) ---- */
+void ck_artifact_run(void);
+void ck_artifact_final(void);
+
 /* ---- GIC and timer (arch/gic.c, arch/timer.c) ---- */
 struct ck_gic_report {
     uint64_t gicd, gicr;

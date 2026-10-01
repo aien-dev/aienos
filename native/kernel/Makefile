@@ -63,6 +63,21 @@ $(error CK_QEMU_UNSAFE_DMA must be empty or 1)
 endif
 endif
 
+# SEED-0B qualification build: trusts the RFC 8032 TEST 1 public key only.
+# TEST ONLY; never combined with hardware staging. Use its own OUT.
+CK_SEED0B_TEST_ANCHOR ?=
+ifneq ($(strip $(CK_SEED0B_TEST_ANCHOR)),)
+ifneq ($(strip $(CK_SEED0B_TEST_ANCHOR)),1)
+$(error CK_SEED0B_TEST_ANCHOR must be empty or 1)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_SEED0B_TEST_ANCHOR (TEST key trust) cannot be combined with CK_HARDWARE_STAGING)
+endif
+ART_TRUST_FLAGS := -DCK_SEED0B_TEST_ANCHOR=1
+else
+ART_TRUST_FLAGS :=
+endif
+
 KINC := -I$(KDIR)/include -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/arch -I$(BOOT)
 MODULE_INC := -I$(NATIVE)/disk -I$(NATIVE)/store -I$(NATIVE)/m5 -I$(NATIVE)/crypto \
 	-I$(NATIVE)/capability -I$(NATIVE)/argus -I$(NATIVE)/net
@@ -80,6 +95,14 @@ CORE_C := $(BOOT)/efi_main.c \
 	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c \
 	$(KDIR)/core/m3.c \
 	$(KDIR)/mm/frames.c $(KDIR)/mm/heap.c $(KDIR)/mm/mmu.c $(KDIR)/mm/pt.c
+# P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
+# (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
+# the loader; the TEST-anchor qualification build is CK_SEED0B_TEST_ANCHOR=1.
+ART_C := $(KDIR)/core/artifact_loader.c $(KDIR)/artifact/format.c $(KDIR)/artifact/admission.c \
+	$(KDIR)/artifact/receipt.c $(NATIVE)/argus/sha256.c $(NATIVE)/sig/sha512.c \
+	$(NATIVE)/sig/ed25519.c $(NATIVE)/sig/ct.c
+ART_INC := -I$(KDIR)/svc/compat -I$(KDIR)/artifact -I$(NATIVE)/sig -I$(NATIVE)/argus
+CORE_C += $(ART_C)
 CORE_S := $(BOOT)/efi_entry.S $(KDIR)/arch/vectors.S $(KDIR)/arch/m3.S
 HDRS := $(wildcard $(KDIR)/include/*.h $(KDIR)/*/*.h $(BOOT)/*.h)
 
@@ -107,6 +130,8 @@ STAGE_HDRS := $(HDRS) $(wildcard $(NATIVE)/*/*.h $(NATIVE)/argus/bridge/*.h $(KD
 STAGE_BUILT := $(foreach s,$(STAGE_SRCS),$(STAGE_KOBJ)/$(subst /,_,$(patsubst $(REPO)/%,%,$(abspath $(s)))).o)
 # STAGE_CFLAGS first: svc/compat must shadow the hosted headers. No fortify.
 STAGE_KCFLAGS := $(STAGE_CFLAGS) $(KCFLAGS) $(MODULE_INC) -U_FORTIFY_SOURCE $(STAGE_DMA_FLAGS)
+# The core already links argus/sha256.c (artifact loader); link it once.
+STAGE_LINK := $(filter-out %/native_argus_sha256.c.o,$(STAGE_BUILT))
 
 ELF := $(OUT)/aienos-ck.elf
 EFI := $(OUT)/BOOTAA64.EFI
@@ -130,6 +155,21 @@ $(KOBJ)/%.o: $(NATIVE)/%.c $(HDRS)
 $(KOBJ)/kernel/core/report.o: $(KDIR)/core/report.c $(HDRS) $(OUT)/commit.stamp
 	@mkdir -p $(dir $@)
 	$(KCC) $(KCFLAGS) -DAIENOS_COMMIT='"$(AIENOS_COMMIT)"' -c -o $@ $<
+
+# Artifact loader objects: compat headers for <string.h>, TEST-anchor flag.
+ART_OBJS := $(patsubst $(NATIVE)/%.c,$(KOBJ)/%.o,$(ART_C))
+ART_HDRS := $(wildcard $(NATIVE)/sig/*.h $(NATIVE)/argus/sha256.h $(KDIR)/svc/compat/*.h)
+$(ART_OBJS): KCFLAGS += $(ART_INC)
+$(ART_OBJS): $(ART_HDRS)
+
+$(OUT)/trust.stamp: FORCE
+	@mkdir -p $(OUT)
+	@echo '$(ART_TRUST_FLAGS)' | cmp -s - $@ || echo '$(ART_TRUST_FLAGS)' > $@
+
+$(KOBJ)/kernel/core/artifact_loader.o: $(KDIR)/core/artifact_loader.c $(HDRS) $(ART_HDRS) \
+		$(OUT)/commit.stamp $(OUT)/trust.stamp
+	@mkdir -p $(dir $@)
+	$(KCC) $(KCFLAGS) $(ART_TRUST_FLAGS) -DAIENOS_COMMIT='"$(AIENOS_COMMIT)"' -c -o $@ $<
 
 $(KOBJ)/%.o: $(NATIVE)/%.S
 	@mkdir -p $(dir $@)
@@ -166,7 +206,7 @@ $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
 	if [ -n "$$s" ]; then echo "core image defines stage symbols: $$s"; rm -f $@; exit 1; fi
 
 $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
-	$(call link_image,$@,$(CORE_OBJS) $(STAGE_BUILT))
+	$(call link_image,$@,$(CORE_OBJS) $(STAGE_LINK))
 	@for s in ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce; do \
 	  $(KNM) $@ | grep -qE " [TW] $$s$$" || { echo "full image lacks $$s"; rm -f $@; exit 1; }; done
 
@@ -179,7 +219,7 @@ $(FULL_EFI): $(FULL_ELF)
 # ---- host unit tests ----
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c
-TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc
+TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -205,8 +245,29 @@ $(OUT)/host/ck_udp_echo: $(KDIR)/tools/ck_udp_echo.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -o $@ $<
 
+# Artifact library host test and the in-tree C artifact tool (pack, sign with
+# TEST keys, negative corpus, bundle, receipt check) used by the QEMU gate.
+ART_HOST_SRCS := $(KDIR)/artifact/format.c $(KDIR)/artifact/admission.c $(KDIR)/artifact/receipt.c \
+	$(NATIVE)/argus/sha256.c $(NATIVE)/sig/sha512.c $(NATIVE)/sig/ed25519.c $(NATIVE)/sig/ct.c
+ART_HOST_INC := -I$(KDIR)/artifact -I$(NATIVE)/sig -I$(NATIVE)/argus
+ART_HOST_DEPS := $(ART_HOST_SRCS) $(wildcard $(KDIR)/artifact/*.h) $(ART_HDRS)
+
+$(OUT)/host/test_artifact: $(KDIR)/tests/test_artifact.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(ART_HOST_INC) -o $@ $< $(ART_HOST_SRCS)
+
+$(OUT)/host-san/test_artifact: $(KDIR)/tests/test_artifact.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(ART_HOST_INC) -o $@ $< $(ART_HOST_SRCS)
+
+ART_TOOL := $(OUT)/host/ck_artifact_tool
+$(ART_TOOL): $(KDIR)/tools/ck_artifact_tool.c $(ART_HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror $(ART_HOST_INC) -o $@ $< $(ART_HOST_SRCS)
+tool: $(ART_TOOL)
+
 clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize clean print-kcflags udp-echo FORCE
+.PHONY: all full test sanitize clean print-kcflags udp-echo tool FORCE
