@@ -109,7 +109,28 @@ sb_gen_off=56              # superblock generation (native/store/store_engine.c 
 sb_crc_off=168             # SV1_SB_CRC_OFFSET (native/store/store_v1.h)
 cps=(before_first_write after_payload_objects after_catalog after_commit_record after_first_flush
      after_inactive_superblock after_final_flush before_anchor after_anchor)
+# Gate cases beyond "every checkpoint, policy all" (per geometry and settle).
+gate_extra=("after_commit_record newest" "after_inactive_superblock drop" "after_inactive_superblock newest" "after_inactive_superblock torn")
+gate_geos=(512 4096); gate_settles=(0 3)
+# Result rows a complete gate campaign prints: 2 x 2 x (9 + 4) = 52.
+gate_rows_want=$(( ${#gate_geos[@]} * ${#gate_settles[@]} * (${#cps[@]} + ${#gate_extra[@]}) ))
 commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+
+# rows_all_ok FILE WANT: port of rows_all_ok in scripts/qemu_store_crash_test.sh
+# lines 19-31 (main e4f1513 and later). True only when FILE holds exactly WANT
+# result rows (lines with " -> ") and every one ends in "-> OK". A missing
+# file, an empty or short campaign, an extra row or any BAD row is false, so a
+# loop that never ran (or stopped early) cannot read as PASS.
+rows_all_ok() {
+    local f="$1" want="$2" total=0 ok=0
+    rows_why=""
+    [[ -f "${f}" ]] || { rows_why="results file ${f##*/} missing (want ${want} OK rows)"; return 1; }
+    total=$(grep -c ' -> ' "${f}" || true)
+    ok=$(grep -c ' -> OK$' "${f}" || true)
+    if [[ "${want}" -gt 0 && "${total}" == "${want}" && "${ok}" == "${want}" ]]; then return 0; fi
+    rows_why="${f##*/} has ${total} rows, ${ok} OK; want exactly ${want} OK"
+    return 1
+}
 
 # --------------------------------------------------------------- pure logic
 # expect_for CHECKPOINT POLICY -> N | NP1 | N_NP1 (generation the verify boot opens)
@@ -326,6 +347,30 @@ self_test() {
     cp "${t}/a" "${t}/a3"; printf 'x' | dd of="${t}/a3" bs=1 seek=$(( store_off + 3 )) conv=notrunc status=none
     tear_closure "${t}/b" "${t}/a3" 4 && bad "tear closure accepted two changed slots" || ok "tear closure refuses two changed slots (${tc_why})"
 
+    # Row tally (mirrors the Rust --verdict-self-test, scripts/qemu_store_crash_test.sh
+    # lines 33-53): only a complete all-OK table passes.
+    [[ "${gate_rows_want}" == 52 ]] && ok "gate campaign wants 52 rows (2 geometries x 2 settles x 13 cases)" \
+        || bad "gate campaign row count ${gate_rows_want}, expected 52"
+    want_rows() { # NAME WANT EXPECT(0 pass|1 fail) LINES...
+        local name="$1" want="$2" expect="$3" got=0; shift 3
+        : >"${t}/rows"; for l in "$@"; do printf '%s\n' "${l}" >>"${t}/rows"; done
+        rows_all_ok "${t}/rows" "${want}" || got=1
+        [[ "${got}" == "${expect}" ]] && ok "row tally: ${name} -> $([[ ${got} == 0 ]] && echo PASS || echo FAIL)" \
+            || bad "row tally: ${name} gave the wrong verdict"
+    }
+    want_rows "empty campaign" 3 1
+    want_rows "one row short" 3 1 "a -> OK" "b -> OK"
+    want_rows "one BAD row" 3 1 "a -> OK" "b -> BAD (x)" "c -> OK"
+    want_rows "one extra row" 3 1 "a -> OK" "b -> OK" "c -> OK" "d -> OK"
+    want_rows "zero rows wanted is never a pass" 0 1
+    want_rows "complete, all OK" 3 0 "a -> OK" "b -> OK" "c -> OK"
+    rm -f "${t}/rows"; rows_all_ok "${t}/rows" 3 && bad "row tally: missing file read as PASS" || ok "row tally: missing results file -> FAIL"
+    # The gate's own row format: a real OK and BAD line from run_case's printf.
+    printf 'bs=%-4s settle=%s cp=%-26s policy=%-6s saw=%s N=%-2s opened=%-3s expect=%-5s -> %s%s\n' \
+        512 0 after_catalog all 1 1 1 N OK "" 4096 3 after_anchor all 1 4 5 NP1 BAD " (verify: x)" >"${t}/rows"
+    rows_all_ok "${t}/rows" 2 && bad "row tally: a BAD gate row passed" || ok "row tally: gate-format BAD row -> FAIL (${rows_why})"
+    rows_all_ok "${t}/rows" 1 && bad "row tally: over-full gate rows passed" || ok "row tally: gate-format extra row -> FAIL"
+
     if command -v make >/dev/null; then
         make_refusals || st=1
     else
@@ -525,15 +570,15 @@ if [[ "${mode}" == gate ]]; then
 fi
 
 mutant_hit=0; mutant_cases=0
-for bs in 512 4096; do
+for bs in "${gate_geos[@]}"; do
     echo "=== ${bs}-byte LBA ==="
-    for settle in 0 3; do
+    for settle in "${gate_settles[@]}"; do
         if [[ "${mode}" == mutant && "${mutant}" == accept_bad_root_crc && "${settle}" == 0 ]]; then continue; fi
         base="$(setup_image "${bs}" "${settle}")"
         plan=()
         if [[ "${mode}" == gate ]]; then
             for cp in "${cps[@]}"; do plan+=("${cp} all"); done
-            plan+=("after_commit_record newest" "after_inactive_superblock drop" "after_inactive_superblock newest" "after_inactive_superblock torn")
+            plan+=("${gate_extra[@]}")
         elif [[ "${mutant}" == skip_root_flush ]]; then
             plan=("after_inactive_superblock newest" "after_inactive_superblock torn")
         else
@@ -587,7 +632,15 @@ echo "CK_STORE_INJECTED_ROOT_QEMU: $(pf "$(( inject_ok & inject_ran ))")"
 echo "CK_STORE_CRASH_HOOK_REFUSED_ON_HARDWARE: $(pf "${hw_ok}")"
 echo "CK_STORE_SLOT_REUSE: NOT_RUN (MISSING_IMPLEMENTATION: the C Store is append-only, no reclaim/slot reuse)"
 [[ "${m1_fail}" != 0 ]] && echo "M1 checks or QEMU exit failed on at least one setup/verify boot: no verdict can pass"
-if [[ "${fail}" == 0 && "${m1_fail}" == 0 && "${closure_ok}" == 1 && "${inject_ok}" == 1 && "${inject_ran}" == 1 \
+# Complete campaign: exactly gate_rows_want rows, all OK (rows_all_ok, as in
+# the Rust scripts); an empty, short or over-full table is FAIL.
+rows_ok=0
+if rows_all_ok "${results}" "${gate_rows_want}"; then
+    rows_ok=1; echo "CK_STORE_CRASH_ROWS: PASS (${gate_rows_want} of ${gate_rows_want} rows OK)"
+else
+    echo "CK_STORE_CRASH_ROWS: FAIL (${rows_why})"
+fi
+if [[ "${rows_ok}" == 1 && "${fail}" == 0 && "${m1_fail}" == 0 && "${closure_ok}" == 1 && "${inject_ok}" == 1 && "${inject_ran}" == 1 \
       && "${hw_ok}" == 1 && "${geo_ok[512]}" == 1 && "${geo_ok[4096]}" == 1 ]]; then
     verdict PASS; exit 0
 fi
