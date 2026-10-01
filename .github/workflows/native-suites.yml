@@ -1,0 +1,109 @@
+# Host-side suites for the native C libraries. Before this workflow, GitHub CI
+# only compiled these into the kernel image; nothing ran their own tests.
+#
+# Coverage map (what runs where):
+#   native/capability  test, mutants          ci.yml (test), not repeated here
+#   native/store       test mutants           ci.yml
+#   native/kernel      test sanitize + gates  ck-kernel.yml (owned by another lane)
+#   native/net         test sanitize mutants  this file
+#   native/sig         test sanitize mutants  this file
+#   native/crypto      test sanitize mutants  this file
+#   native/m5          test sanitize mutants  this file
+#   native/disk        test sanitize mutants  this file
+#   native/disk/qemu   bare-metal NVMe payload under QEMU  this file (QEMU is an
+#                      emulator: PASS says nothing about a physical controller)
+#   native/argus       test sanitize          this file
+#
+# SKIP list (declared, never green):
+#   native/argus mutants: the argus Makefile has no mutants target.
+#   native/argus bench:   timing benchmark, not a correctness test.
+#
+# Each job greps for an explicit pass marker so a suite that silently does
+# nothing cannot turn the job green.
+
+name: Native suites
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - "native/**"
+      - ".github/workflows/native-suites.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    name: native/${{ matrix.suite }} (${{ matrix.targets }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { suite: net, targets: "test sanitize mutants" }
+          - { suite: sig, targets: "test sanitize mutants" }
+          - { suite: crypto, targets: "test sanitize mutants" }
+          - { suite: m5, targets: "test sanitize mutants" }
+          - { suite: disk, targets: "test sanitize mutants" }
+          - { suite: argus, targets: "test sanitize" }
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+          cc --version | head -1
+
+      - name: Run make ${{ matrix.targets }}
+        run: |
+          set -o pipefail
+          make -C native/${{ matrix.suite }} ${{ matrix.targets }} 2>&1 | tee suite.log
+
+      - name: Require that something really ran
+        run: |
+          # make exits nonzero on failure; this guards against an empty run.
+          test "$(wc -l < suite.log)" -gt 10
+          if grep -qiE 'skipped|NOT_RUN' suite.log; then
+            echo "log mentions skipped/NOT_RUN lines:"; grep -iE 'skipped|NOT_RUN' suite.log | head
+          fi
+
+  disk-qemu:
+    name: native/disk qemu NVMe payload
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+          qemu-system-aarch64 --version | head -1
+
+      - name: Run QEMU NVMe gate
+        env:
+          AIENOS_QUIET_FLAG: ${{ runner.temp }}/aienos-quiet-flag
+        run: |
+          bash scripts/qemu_native_nvme_test.sh 2>&1 | tee qemu.log
+          # The script exits 0 on NOT_RUN; only an explicit PASS counts.
+          grep -qx 'AIENOS_STORE_NVME_QEMU: PASS' qemu.log
+
+  argus-mutants:
+    name: "native/argus mutants (SKIP: no mutants target in argus Makefile)"
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo skipped
+
+  argus-bench:
+    name: "native/argus bench (SKIP: timing benchmark, not a correctness test)"
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo skipped
