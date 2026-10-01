@@ -1,24 +1,26 @@
-/* M5 chunked AES-256-GCM-SIV object envelope. Port of envelope.rs with a v2
- * header that also binds store generation, chunk count and identity class.
+/* M5 chunked AES-256-GCM-SIV object envelope. Byte-compatible port of
+ * crates/aienos-kernel/src/crypto/envelope.rs (V1 header and chunk AAD).
  *
- * Header (80 bytes, little-endian):
- *   0 magic "AIENENV1" | 8 version u16 = 2 | 10 cipher_suite u16 = 1
+ * Header (64 bytes, little-endian), as EnvelopeHeader::encode:
+ *   0 magic "AIENENV1" | 8 version u16 = 1 | 10 cipher_suite u16 = 1
  *   12 flags u32 = 0 | 16 chunk_size u32 | 20 total_plaintext_len u64
- *   28 object_id[16] | 44 nonce_prefix[8] | 52 key_generation u64
- *   60 store_generation u64 | 68 chunk_count u32 | 72 identity_class u8
- *   73..80 reserved (zero)
- * Body: chunk_count chunks of (ciphertext || 16-byte tag); an empty plaintext
- * is one chunk holding only a tag.
- * Chunk nonce: nonce_prefix[8] || chunk_index u32le (as in Rust).
- * Chunk AAD: "AIENOS-M5-CHUNK-V2\0" || store_uuid || kind u16 || version u16
- *   || header[80] || chunk_index u32 || chunk_count u32 || last u8 || chunk_len u32.
- * Chunk key: per-object key from m5_derive_object_key (binds object id, both
- * generations and identity class).
+ *   28 envelope_id[16] | 44 nonce_prefix[8] | 52 key_epoch u64 | 60 reserved u32 = 0
+ * Body: chunks of (ciphertext || 16-byte tag); an empty plaintext is one
+ * chunk holding only a tag. Chunk nonce: nonce_prefix[8] || chunk_index u32le.
+ * Chunk AAD (AGENTS.md section 3, 111 bytes): "AIENOS-M5-CHUNK-V1\0" ||
+ *   store_uuid || kind u16 || version u16 || header[64] || chunk_index u32 ||
+ *   chunk_plaintext_length u32.
+ * No ObjectId and no Store generation enter the AAD or the key. Truncation
+ * and extension are refused because total_plaintext_len is in every chunk's
+ * AAD and the length must match it exactly.
+ * Chunk key: m5_derive_object_key (store, kind, version, envelope_id,
+ * key generation, identity class), so a chunk from another envelope fails.
  */
 #include "m5_internal.h"
 
-#define CHUNK_AAD_LABEL "AIENOS-M5-CHUNK-V2"
-#define CHUNK_AAD_LEN (sizeof(CHUNK_AAD_LABEL) + 16 + 2 + 2 + M5_ENV_HEADER_LEN + 4 + 4 + 1 + 4)
+#define CHUNK_AAD_LABEL "AIENOS-M5-CHUNK-V1"
+#define CHUNK_AAD_LEN (sizeof(CHUNK_AAD_LABEL) + 16 + 2 + 2 + M5_ENV_HEADER_LEN + 4 + 4)
+_Static_assert(CHUNK_AAD_LEN == 111, "chunk AAD must match envelope.rs CHUNK_AAD_LEN");
 
 static uint64_t chunks_for(uint64_t pt_len, uint32_t chunk_size)
 {
@@ -45,12 +47,9 @@ static void header_encode(const m5_env_header *h, uint8_t out[M5_ENV_HEADER_LEN]
     m5_put32(out + 12, h->flags);
     m5_put32(out + 16, h->chunk_size);
     m5_put64(out + 20, h->total_plaintext_len);
-    memcpy(out + 28, h->object_id, 16);
+    memcpy(out + 28, h->envelope_id, 16);
     memcpy(out + 44, h->nonce_prefix, 8);
-    m5_put64(out + 52, h->key_generation);
-    m5_put64(out + 60, h->store_generation);
-    m5_put32(out + 68, h->chunk_count);
-    out[72] = h->identity_class;
+    m5_put64(out + 52, h->key_epoch);
 }
 
 int m5_envelope_parse_header(const uint8_t *env, size_t env_len, m5_env_header *h)
@@ -64,27 +63,24 @@ int m5_envelope_parse_header(const uint8_t *env, size_t env_len, m5_env_header *
     h->flags = m5_get32(env + 12);
     h->chunk_size = m5_get32(env + 16);
     h->total_plaintext_len = m5_get64(env + 20);
-    memcpy(h->object_id, env + 28, 16);
+    memcpy(h->envelope_id, env + 28, 16);
     memcpy(h->nonce_prefix, env + 44, 8);
-    h->key_generation = m5_get64(env + 52);
-    h->store_generation = m5_get64(env + 60);
-    h->chunk_count = m5_get32(env + 68);
-    h->identity_class = env[72];
-    if (h->version != 2 || h->cipher_suite != 1 || h->flags != 0) return M5_ERR_FORMAT;
-    if (!m5_all_zero(env + 73, 7)) return M5_ERR_FORMAT;
-    if (!m5_valid_class(h->identity_class)) return M5_ERR_FORMAT;
-    /* Bound every unauthenticated length/count before deriving anything from it. */
+    h->key_epoch = m5_get64(env + 52);
+    if (h->version != 1 || h->cipher_suite != 1 || h->flags != 0) return M5_ERR_FORMAT;
+    if (m5_get32(env + 60) != 0) return M5_ERR_FORMAT;
+    /* Bound every unauthenticated length before deriving anything from it. */
     if (h->chunk_size == 0 || h->chunk_size > M5_ENV_MAX_CHUNK) return M5_ERR_BOUNDS;
     if (h->total_plaintext_len > M5_ENV_MAX_PLAINTEXT) return M5_ERR_BOUNDS;
-    if (h->chunk_count == 0 || h->chunk_count > M5_ENV_MAX_CHUNKS) return M5_ERR_BOUNDS;
-    if (h->chunk_count != chunks_for(h->total_plaintext_len, h->chunk_size)) return M5_ERR_BOUNDS; /* GUARD:count-match */
+    uint64_t count = chunks_for(h->total_plaintext_len, h->chunk_size);
+    if (count > M5_ENV_MAX_CHUNKS) return M5_ERR_BOUNDS;
+    h->chunk_count = (uint32_t)count;
     size_t want = m5_envelope_len(h->total_plaintext_len, h->chunk_size);
     if (want == 0 || env_len != want) return M5_ERR_BOUNDS; /* GUARD:env-len */
     return M5_OK;
 }
 
 static void chunk_aad(const m5_object_binding *b, const uint8_t hdr[M5_ENV_HEADER_LEN],
-                      uint32_t idx, uint32_t count, uint32_t len, uint8_t aad[CHUNK_AAD_LEN])
+                      uint32_t idx, uint32_t len, uint8_t aad[CHUNK_AAD_LEN])
 {
     uint8_t *p = aad;
     memcpy(p, CHUNK_AAD_LABEL, sizeof(CHUNK_AAD_LABEL)); p += sizeof(CHUNK_AAD_LABEL);
@@ -93,8 +89,6 @@ static void chunk_aad(const m5_object_binding *b, const uint8_t hdr[M5_ENV_HEADE
     m5_put16(p, b->object_version); p += 2;
     memcpy(p, hdr, M5_ENV_HEADER_LEN); p += M5_ENV_HEADER_LEN;
     m5_put32(p, idx); p += 4;
-    m5_put32(p, count); p += 4;
-    *p++ = (uint8_t)(idx + 1 == count);
     m5_put32(p, len);
 }
 
@@ -118,16 +112,14 @@ int m5_envelope_seal(const uint8_t domain_key[32], const m5_object_binding *b,
 
     m5_env_header h;
     memset(&h, 0, sizeof h);
-    h.version = 2;
+    h.version = 1;
     h.cipher_suite = 1;
     h.chunk_size = chunk_size;
     h.total_plaintext_len = pt_len;
-    memcpy(h.object_id, b->object_id, 16);
+    memcpy(h.envelope_id, b->envelope_id, 16);
     memcpy(h.nonce_prefix, nonce_prefix, 8);
-    h.key_generation = b->key_generation;
-    h.store_generation = b->store_generation;
+    h.key_epoch = b->key_generation;
     h.chunk_count = (uint32_t)chunks_for(pt_len, chunk_size);
-    h.identity_class = b->identity_class;
     header_encode(&h, out);
 
     uint8_t key[32];
@@ -137,7 +129,7 @@ int m5_envelope_seal(const uint8_t domain_key[32], const m5_object_binding *b,
     for (uint32_t i = 0; i < h.chunk_count; i++) {
         size_t n = pt_len - pos < chunk_size ? pt_len - pos : chunk_size;
         uint8_t aad[CHUNK_AAD_LEN], nonce[12];
-        chunk_aad(b, out, i, h.chunk_count, (uint32_t)n, aad);
+        chunk_aad(b, out, i, (uint32_t)n, aad);
         chunk_nonce(nonce_prefix, i, nonce);
         if (aienos_gcmsiv_seal(key, nonce, aad, sizeof aad, n ? pt + pos : NULL, n,
                                out + off, n + M5_TAG_LEN) != AIENOS_CRYPTO_OK) {
@@ -166,10 +158,10 @@ int m5_envelope_open(const uint8_t domain_key[32], uint8_t mode, const m5_object
     int rc = m5_envelope_parse_header(env, env_len, &h);
     if (rc != M5_OK) return rc;
     if (expect->identity_class != mode) return M5_ERR_IDENTITY; /* GUARD:env-mode */
-    if (h.identity_class != mode) return M5_ERR_IDENTITY; /* GUARD:env-class */
-    if (memcmp(h.object_id, expect->object_id, 16) != 0) return M5_ERR_BINDING; /* GUARD:env-objid */
-    if (h.key_generation != expect->key_generation) return M5_ERR_BINDING; /* GUARD:env-keygen */
-    if (h.store_generation != expect->store_generation) return M5_ERR_BINDING; /* GUARD:env-storegen */
+    /* Authenticated header fields (they are in every chunk's AAD) must name
+     * the envelope the caller expects. */
+    if (memcmp(h.envelope_id, expect->envelope_id, 16) != 0) return M5_ERR_BINDING; /* GUARD:env-envid */
+    if (h.key_epoch != expect->key_generation) return M5_ERR_BINDING; /* GUARD:env-keygen */
     if (out_cap < h.total_plaintext_len) return M5_ERR_SPACE;
 
     /* Private scratchpad: a chunk is decrypted here, its tag checked, and only
@@ -181,7 +173,7 @@ int m5_envelope_open(const uint8_t domain_key[32], uint8_t mode, const m5_object
     for (uint32_t i = 0; i < h.chunk_count; i++) {
         size_t n = h.total_plaintext_len - pos < h.chunk_size ? h.total_plaintext_len - pos : h.chunk_size;
         uint8_t aad[CHUNK_AAD_LEN], nonce[12];
-        chunk_aad(expect, env, i, h.chunk_count, (uint32_t)n, aad);
+        chunk_aad(expect, env, i, (uint32_t)n, aad);
         chunk_nonce(h.nonce_prefix, i, nonce);
         if (aienos_gcmsiv_open(key, nonce, aad, sizeof aad, env + off, n + M5_TAG_LEN,
                                scratch, n) != AIENOS_CRYPTO_OK) {

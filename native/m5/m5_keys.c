@@ -72,15 +72,14 @@ void m5_subkeys_wipe(m5_subkeys *k) { aienos_wipe(k, sizeof *k); }
 int m5_derive_object_key(const uint8_t domain_key[32], const m5_object_binding *b, uint8_t out[32])
 {
     if (!domain_key || !b || !out) return M5_ERR_ARG;
-    uint8_t info[sizeof(OBJECT_LABEL) + 16 + 2 + 2 + 16 + 8 + 8 + 1];
+    uint8_t info[sizeof(OBJECT_LABEL) + 16 + 2 + 2 + 16 + 8 + 1];
     uint8_t *p = info;
     memcpy(p, OBJECT_LABEL, sizeof(OBJECT_LABEL)); p += sizeof(OBJECT_LABEL);
     memcpy(p, b->store_uuid, 16); p += 16;
     m5_put16(p, b->object_kind); p += 2;
     m5_put16(p, b->object_version); p += 2;
-    memcpy(p, b->object_id, 16); p += 16;
+    memcpy(p, b->envelope_id, 16); p += 16;
     m5_put64(p, b->key_generation); p += 8;
-    m5_put64(p, b->store_generation); p += 8;
     *p = b->identity_class;
     return m5_hkdf_expand(domain_key, info, sizeof info, out, 32);
 }
@@ -190,21 +189,20 @@ int m5_keyslot_unwrap(const m5_keyslot *s, const uint8_t store_uuid[16],
     return M5_OK;
 }
 
-/* ---- SecurityManifest (C v2) ----
- * 0 magic "AIENSEC2" (distinct from Rust kind-22 "AIENSEC1") | 8 version u16 = 2 | 10 flags u16 = 0 | 12 identity_class u8
- * | 13..16 reserved | 16 store_uuid | 32 generation | 40 security_sequence
- * | 48 epoch | 56 key_epoch | 64 prev id | 96 keyslot id | 128 agent_root id
- * | 160 continuity id | 192 migration id | 224 owner_hierarchy_generation
- * | 232 root_mac (HMAC(k_root_auth, "AIENOS-M5-ROOT-AUTH-V2\0" || bytes[0..232])) */
-#define SECMAN_MAC_OFF 232
-#define ROOT_AUTH_DOMAIN "AIENOS-M5-ROOT-AUTH-V2"
+/* ---- SecurityManifest: Rust v1 layout (security.rs), 256 bytes ----
+ * 0 magic "AIENSEC1" | 8 format_version u16 = 1 | 10 flags u16 = 0 | 12 reserved u32 = 0
+ * | 16 store_uuid | 32 generation | 40 security_sequence | 48 epoch | 56 key_epoch
+ * | 64 prev id | 96 keyslot id | 128 agent_root id | 160 continuity id
+ * | 192 migration id | 224 root_mac (HMAC(k_root_auth, "AIENOS-M5-ROOT-AUTH-V1\0" || bytes[0..224]))
+ * Identity class and owner hierarchy generation are bound through k_root_auth. */
+#define SECMAN_MAC_OFF 224
+#define ROOT_AUTH_DOMAIN "AIENOS-M5-ROOT-AUTH-V1"
 
 static void secman_encode_body(const m5_secman *m, uint8_t out[M5_SECMAN_LEN])
 {
     memset(out, 0, M5_SECMAN_LEN);
-    memcpy(out, "AIENSEC2", 8);
-    m5_put16(out + 8, 2);
-    out[12] = m->identity_class;
+    memcpy(out, "AIENSEC1", 8);
+    m5_put16(out + 8, 1);
     memcpy(out + 16, m->store_uuid, 16);
     m5_put64(out + 32, m->generation);
     m5_put64(out + 40, m->security_sequence);
@@ -215,36 +213,30 @@ static void secman_encode_body(const m5_secman *m, uint8_t out[M5_SECMAN_LEN])
     memcpy(out + 128, m->agent_root_id, 32);
     memcpy(out + 160, m->continuity_manifest_id, 32);
     memcpy(out + 192, m->migration_manifest_id, 32);
-    m5_put64(out + 224, m->owner_hierarchy_generation);
 }
 
 int m5_secman_seal(m5_secman *m, const uint8_t k_root_auth[32], uint8_t out[M5_SECMAN_LEN])
 {
     if (!m || !k_root_auth || !out) return M5_ERR_ARG;
-    if (!m5_valid_class(m->identity_class)) return M5_ERR_ARG;
     secman_encode_body(m, out);
     m5_mac(k_root_auth, ROOT_AUTH_DOMAIN, sizeof(ROOT_AUTH_DOMAIN), out, SECMAN_MAC_OFF, m->root_mac);
     memcpy(out + SECMAN_MAC_OFF, m->root_mac, 32);
     return M5_OK;
 }
 
-int m5_secman_open(const uint8_t *b, size_t len, const uint8_t k_root_auth[32],
-                   uint8_t mode, m5_secman *m)
+int m5_secman_open(const uint8_t *b, size_t len, const uint8_t k_root_auth[32], m5_secman *m)
 {
     if (!b || !k_root_auth || !m) return M5_ERR_ARG;
     memset(m, 0, sizeof *m);
     if (len != M5_SECMAN_LEN) return M5_ERR_BOUNDS;
-    if (memcmp(b, "AIENSEC2", 8) != 0 || m5_get16(b + 8) != 2 || m5_get16(b + 10) != 0)
+    if (memcmp(b, "AIENSEC1", 8) != 0 || m5_get16(b + 8) != 1 || m5_get16(b + 10) != 0)
         return M5_ERR_FORMAT;
-    if (!m5_all_zero(b + 13, 3)) return M5_ERR_FORMAT;
-    if (!m5_valid_class(b[12])) return M5_ERR_FORMAT;
+    if (!m5_all_zero(b + 12, 4)) return M5_ERR_FORMAT;
     uint8_t mac[32];
     m5_mac(k_root_auth, ROOT_AUTH_DOMAIN, sizeof(ROOT_AUTH_DOMAIN), b, SECMAN_MAC_OFF, mac);
     int ok = aienos_ct_equal(mac, b + SECMAN_MAC_OFF, 32);
     aienos_wipe(mac, sizeof mac);
     if (!ok) return M5_ERR_AUTH; /* GUARD:secman-mac */
-    if (b[12] != mode) return M5_ERR_IDENTITY; /* GUARD:secman-class */
-    m->identity_class = b[12];
     memcpy(m->store_uuid, b + 16, 16);
     m->generation = m5_get64(b + 32);
     m->security_sequence = m5_get64(b + 40);
@@ -255,7 +247,6 @@ int m5_secman_open(const uint8_t *b, size_t len, const uint8_t k_root_auth[32],
     memcpy(m->agent_root_id, b + 128, 32);
     memcpy(m->continuity_manifest_id, b + 160, 32);
     memcpy(m->migration_manifest_id, b + 192, 32);
-    m->owner_hierarchy_generation = m5_get64(b + 224);
     memcpy(m->root_mac, b + SECMAN_MAC_OFF, 32);
     return M5_OK;
 }

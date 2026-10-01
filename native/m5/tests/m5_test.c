@@ -8,6 +8,7 @@
 
 #include "../m5.h"
 #include "../../argus/sha256.h"
+#include "../../crypto/aienos_crypto.h"
 
 static int g_fail;
 #define CHECK(c) do { if (!(c)) { printf("  check failed: %s (line %d)\n", #c, __LINE__); g_fail = 1; } } while (0)
@@ -21,8 +22,9 @@ static uint64_t rnd(void) { rng_state ^= rng_state << 13; rng_state ^= rng_state
 /* ---------- fixtures ---------- */
 #define CS 64u
 #define PT_LEN 224u /* 4 chunks: 64, 64, 64, 32 */
-#define ENV_LEN (80u + PT_LEN + 4u * 16u)
-#define CHUNK_OFF(i) (80u + (i) * (CS + 16u))
+#define ENV_LEN (64u + PT_LEN + 4u * 16u)
+#define CHUNK_OFF(i) (64u + (i) * (CS + 16u))
+#define SG 9u /* store generation of the fixture commit */
 
 static uint8_t K_VOL[32], NONCE8[8], PT[PT_LEN];
 static m5_subkeys SK, SK_TEST;
@@ -36,21 +38,21 @@ static void binding_init(m5_object_binding *b, uint8_t cls)
     memset(b->store_uuid, 0xA0, 16);
     b->object_kind = 7;
     b->object_version = 1;
-    memset(b->object_id, 0xB0, 16);
+    memset(b->envelope_id, 0xB0, 16);
     b->key_generation = 3;
-    b->store_generation = 9;
     b->identity_class = cls;
 }
 
-static void make_commit(const m5_object_binding *b, const uint8_t *env, size_t len, uint64_t counter,
+static void make_commit(const m5_object_binding *b, uint64_t sg, const uint8_t *env, size_t len, uint64_t counter,
                         const uint8_t key[32], uint8_t out[M5_COMMIT_LEN])
 {
     m5_commit c;
     memset(&c, 0, sizeof c);
     c.obj = *b;
+    c.store_generation = sg;
     c.counter = counter;
     c.object_sequence = 1;
-    sha256_hash(env, len, c.envelope_digest);
+    sha256_hash(env, len, c.object_id);
     m5_commit_seal(&c, key, out);
 }
 
@@ -81,7 +83,7 @@ static void fixtures(void)
         printf("fixture seal failed\n");
         g_fail = 1;
     }
-    make_commit(&OBJ, ENV, ENV_LEN, 5, SK.k_root_auth, COMMIT);
+    make_commit(&OBJ, SG, ENV, ENV_LEN, 5, SK.k_root_auth, COMMIT);
     make_anchor(M5_ID_PRODUCTION, OBJ.store_uuid, 9, 3, 5, COMMIT, SK.k_root_auth, ANCHOR);
 }
 
@@ -143,16 +145,15 @@ static void t_object_key_binds_every_field(void)
 {
     uint8_t base[32], k[32];
     m5_derive_object_key(SK.k_artifact, &OBJ, base);
-    for (int f = 0; f < 7; f++) {
+    for (int f = 0; f < 6; f++) {
         m5_object_binding b = OBJ;
         switch (f) {
         case 0: b.store_uuid[3] ^= 1; break;
         case 1: b.object_kind++; break;
         case 2: b.object_version++; break;
-        case 3: b.object_id[15] ^= 1; break;
+        case 3: b.envelope_id[15] ^= 1; break;
         case 4: b.key_generation++; break;
-        case 5: b.store_generation++; break;
-        case 6: b.identity_class = M5_ID_TEST; break;
+        case 5: b.identity_class = M5_ID_TEST; break;
         }
         m5_derive_object_key(SK.k_artifact, &b, k);
         CHECK(memcmp(base, k, 32) != 0);
@@ -224,76 +225,77 @@ static void t_keyslot_refusals(void)
     CHECK(m5_keyslot_unwrap(&d, uuid, kek, kv) == M5_ERR_FORMAT);
 }
 
-static m5_secman secman_fixture(uint8_t cls)
+static m5_secman secman_fixture(void)
 {
     m5_secman m;
     memset(&m, 0, sizeof m);
-    m.identity_class = cls;
     memset(m.store_uuid, 0xA0, 16);
     m.generation = 9; m.security_sequence = 4; m.epoch = 5; m.key_epoch = 3;
-    m.owner_hierarchy_generation = 1;
     memset(m.keyslot_manifest_id, 0x31, 32);
     memset(m.agent_root_id, 0x32, 32);
     return m;
 }
 
-static void t_secman_roundtrip_and_owner_generation_field(void)
+static void t_secman_roundtrip_rust_v1_layout(void)
 {
-    m5_secman m = secman_fixture(M5_ID_PRODUCTION), o;
+    m5_secman m = secman_fixture(), o;
     uint8_t buf[M5_SECMAN_LEN];
+    CHECK(M5_SECMAN_LEN == 256);
     CHECK(m5_secman_seal(&m, SK.k_root_auth, buf) == M5_OK);
-    CHECK(m5_secman_open(buf, sizeof buf, SK.k_root_auth, M5_ID_PRODUCTION, &o) == M5_OK);
-    CHECK(o.owner_hierarchy_generation == 1 && o.generation == 9 && o.key_epoch == 3);
+    CHECK(m5_secman_open(buf, sizeof buf, SK.k_root_auth, &o) == M5_OK);
+    CHECK(o.generation == 9 && o.security_sequence == 4 && o.epoch == 5 && o.key_epoch == 3);
     CHECK(memcmp(o.root_mac, m.root_mac, 32) == 0);
+    /* security.rs encode: magic, version 1, flags 0, reserved 0, fields, MAC at 224 */
+    CHECK(memcmp(buf, "AIENSEC1", 8) == 0 && buf[8] == 1 && buf[9] == 0);
+    CHECK(all_zero(buf + 10, 6));
+    CHECK(memcmp(buf + 16, m.store_uuid, 16) == 0 && buf[32] == 9 && buf[56] == 3);
+    CHECK(memcmp(buf + 96, m.keyslot_manifest_id, 32) == 0 && memcmp(buf + 128, m.agent_root_id, 32) == 0);
+    /* compute_mac: HMAC(k_root_auth, "AIENOS-M5-ROOT-AUTH-V1\0" || bytes[0..224]) */
+    aienos_hmac_sha256_ctx h;
+    uint8_t mac[32];
+    aienos_hmac_sha256_init(&h, SK.k_root_auth);
+    aienos_hmac_sha256_update(&h, (const uint8_t *)"AIENOS-M5-ROOT-AUTH-V1", 23);
+    aienos_hmac_sha256_update(&h, buf, 224);
+    aienos_hmac_sha256_final(&h, mac);
+    CHECK(memcmp(mac, buf + 224, 32) == 0);
+    /* identity class and owner generation are bound through k_root_auth */
+    m5_subkeys g2;
+    m5_derive_subkeys(K_VOL, M5_ID_PRODUCTION, 2, &g2);
+    CHECK(m5_secman_open(buf, sizeof buf, g2.k_root_auth, &o) == M5_ERR_AUTH);
+    CHECK(m5_secman_open(buf, sizeof buf, SK_TEST.k_root_auth, &o) == M5_ERR_AUTH);
+    /* reserved and flags must stay zero (as Rust decode) */
+    buf[12] = 1;
+    CHECK(m5_secman_open(buf, sizeof buf, SK.k_root_auth, &o) == M5_ERR_FORMAT);
 }
 
 static void t_secman_wrong_root_auth_key_refused(void)
 {
-    m5_secman m = secman_fixture(M5_ID_PRODUCTION), o;
+    m5_secman m = secman_fixture(), o;
     uint8_t buf[M5_SECMAN_LEN];
     m5_secman_seal(&m, SK.k_root_auth, buf);
     m5_subkeys g2, other;
     m5_derive_subkeys(K_VOL, M5_ID_PRODUCTION, 2, &g2); /* other owner hierarchy generation */
     uint8_t kv2[32]; memset(kv2, 0x99, 32);
     m5_derive_subkeys(kv2, M5_ID_PRODUCTION, 1, &other); /* other volume */
-    CHECK(m5_secman_open(buf, sizeof buf, g2.k_root_auth, M5_ID_PRODUCTION, &o) == M5_ERR_AUTH);
-    CHECK(m5_secman_open(buf, sizeof buf, other.k_root_auth, M5_ID_PRODUCTION, &o) == M5_ERR_AUTH);
-    CHECK(m5_secman_open(buf, sizeof buf, SK.k_artifact, M5_ID_PRODUCTION, &o) == M5_ERR_AUTH);
+    CHECK(m5_secman_open(buf, sizeof buf, g2.k_root_auth, &o) == M5_ERR_AUTH);
+    CHECK(m5_secman_open(buf, sizeof buf, other.k_root_auth, &o) == M5_ERR_AUTH);
+    CHECK(m5_secman_open(buf, sizeof buf, SK.k_artifact, &o) == M5_ERR_AUTH);
 }
 
 static void t_secman_every_byte_tamper_refused(void)
 {
-    m5_secman m = secman_fixture(M5_ID_PRODUCTION), o;
+    m5_secman m = secman_fixture(), o;
     uint8_t buf[M5_SECMAN_LEN];
     m5_secman_seal(&m, SK.k_root_auth, buf);
     for (size_t i = 0; i < sizeof buf; i++) {
         buf[i] ^= 0x01;
-        CHECK(m5_secman_open(buf, sizeof buf, SK.k_root_auth, M5_ID_PRODUCTION, &o) < 0);
+        CHECK(m5_secman_open(buf, sizeof buf, SK.k_root_auth, &o) < 0);
         buf[i] ^= 0x01;
     }
-    CHECK(m5_secman_open(buf, sizeof buf - 1, SK.k_root_auth, M5_ID_PRODUCTION, &o) == M5_ERR_BOUNDS);
+    CHECK(m5_secman_open(buf, sizeof buf - 1, SK.k_root_auth, &o) == M5_ERR_BOUNDS);
 }
 
 
-/* The C v2 manifest is a separate format: its own magic, and a Rust kind-22
- * v1 shaped buffer (256 bytes, "AIENSEC1") is refused, never misread. */
-static void t_secman_distinct_from_rust_v1(void)
-{
-    m5_secman m = secman_fixture(M5_ID_PRODUCTION), o;
-    uint8_t buf[M5_SECMAN_LEN];
-    m5_secman_seal(&m, SK.k_root_auth, buf);
-    CHECK(memcmp(buf, "AIENSEC2", 8) == 0);
-    CHECK(memcmp(buf, "AIENSEC1", 8) != 0);
-    uint8_t v1[256];
-    memcpy(v1, buf, sizeof v1);
-    memcpy(v1, "AIENSEC1", 8);
-    v1[8] = 1; v1[9] = 0;
-    CHECK(m5_secman_open(v1, sizeof v1, SK.k_root_auth, M5_ID_PRODUCTION, &o) == M5_ERR_BOUNDS);
-    uint8_t relabeled[M5_SECMAN_LEN];
-    memcpy(relabeled, buf, sizeof relabeled);
-    memcpy(relabeled, "AIENSEC1", 8);
-    CHECK(m5_secman_open(relabeled, sizeof relabeled, SK.k_root_auth, M5_ID_PRODUCTION, &o) == M5_ERR_FORMAT);
-}
 /* ---------- 2. envelopes ---------- */
 static void t_env_roundtrip_sizes(void)
 {
@@ -313,7 +315,7 @@ static void t_env_roundtrip_sizes(void)
     uint8_t *env = malloc(len), *pt = malloc(pl), *out = malloc(pl);
     memset(pt, 0x5A, pl);
     size_t n = 0, m = 0;
-    CHECK(len == 80 + pl + 3 * 16);
+    CHECK(len == 64 + pl + 3 * 16);
     CHECK(m5_envelope_seal(SK.k_artifact, &OBJ, NONCE8, M5_ENV_MAX_CHUNK, pt, pl, env, len, &n) == M5_OK);
     CHECK(m5_envelope_open(SK.k_artifact, M5_ID_PRODUCTION, &OBJ, env, n, out, pl, &m) == M5_OK && m == pl);
     CHECK(memcmp(out, pt, pl) == 0);
@@ -330,31 +332,58 @@ static void t_env_header_bounds_each_field(void)
         {16, 4, 0}, {16, 4, M5_ENV_MAX_CHUNK + 1}, {16, 4, 0xFFFFFFFFu}, {16, 4, 1},
         {20, 8, 0}, {20, 8, PT_LEN + 1}, {20, 8, M5_ENV_MAX_PLAINTEXT + 1}, {20, 8, UINT64_MAX},
         {20, 8, UINT64_MAX - 15},
-        {68, 4, 0}, {68, 4, 3}, {68, 4, 5}, {68, 4, M5_ENV_MAX_CHUNKS + 1}, {68, 4, 0xFFFFFFFFu},
-        {8, 2, 1}, {10, 2, 2}, {12, 4, 1}, {72, 1, 0}, {72, 1, 3}, {73, 1, 1}, {79, 1, 0x80},
+        {8, 2, 2}, {8, 2, 0}, {10, 2, 2}, {12, 4, 1}, {12, 4, 0x80000000u},
+        {60, 4, 1}, {60, 4, 0x80000000u},
     };
     for (size_t k = 0; k < sizeof edges / sizeof edges[0]; k++) {
         memcpy(e, ENV, ENV_LEN);
         if (edges[k].width == 8) put64(e + edges[k].off, edges[k].v);
         else if (edges[k].width == 4) put32(e + edges[k].off, (uint32_t)edges[k].v);
-        else if (edges[k].width == 2) { e[edges[k].off] = (uint8_t)edges[k].v; e[edges[k].off + 1] = 0; }
-        else e[edges[k].off] = (uint8_t)edges[k].v;
+        else { e[edges[k].off] = (uint8_t)edges[k].v; e[edges[k].off + 1] = 0; }
         open_refused(e, ENV_LEN, &OBJ, M5_ID_PRODUCTION);
     }
     m5_env_header h;
-    memcpy(e, ENV, ENV_LEN);
-    put32(e + 68, 3); /* count disagrees with total/chunk_size */
-    CHECK(m5_envelope_parse_header(e, ENV_LEN, &h) == M5_ERR_BOUNDS);
     CHECK(m5_envelope_parse_header(ENV, ENV_LEN + 1, &h) == M5_ERR_BOUNDS);
     CHECK(m5_envelope_parse_header(ENV, ENV_LEN - 1, &h) == M5_ERR_BOUNDS);
-    CHECK(m5_envelope_parse_header(ENV, 79, &h) == M5_ERR_BOUNDS);
+    CHECK(m5_envelope_parse_header(ENV, 63, &h) == M5_ERR_BOUNDS);
     CHECK(m5_envelope_parse_header(ENV, ENV_LEN, &h) == M5_OK && h.chunk_count == 4);
     /* a trailing byte must not be ignored */
     uint8_t big[ENV_LEN + 1];
     memcpy(big, ENV, ENV_LEN); big[ENV_LEN] = 0;
     CHECK(open_refused(big, sizeof big, &OBJ, M5_ID_PRODUCTION) == M5_ERR_BOUNDS);
-    put32(e + 68, 3);
-    CHECK(open_refused(e, ENV_LEN, &OBJ, M5_ID_PRODUCTION) == M5_ERR_BOUNDS);
+    /* nonzero reserved (Rust NonzeroReserved) */
+    memcpy(e, ENV, ENV_LEN); e[63] = 1;
+    CHECK(open_refused(e, ENV_LEN, &OBJ, M5_ID_PRODUCTION) == M5_ERR_FORMAT);
+}
+
+/* The sealed bytes follow envelope.rs exactly: 64-byte V1 header and the
+ * AGENTS.md section 3 chunk AAD, rebuilt here by hand. */
+static void t_env_rust_v1_header_and_standard_aad(void)
+{
+    CHECK(M5_ENV_HEADER_LEN == 64);
+    CHECK(memcmp(ENV, "AIENENV1", 8) == 0 && ENV[8] == 1 && ENV[9] == 0 && ENV[10] == 1 && ENV[11] == 0);
+    CHECK(all_zero(ENV + 12, 4));
+    CHECK(ENV[16] == CS && all_zero(ENV + 17, 3));
+    CHECK(ENV[20] == PT_LEN && all_zero(ENV + 21, 7));
+    CHECK(memcmp(ENV + 28, OBJ.envelope_id, 16) == 0 && memcmp(ENV + 44, NONCE8, 8) == 0);
+    CHECK(ENV[52] == 3 && all_zero(ENV + 53, 7) && all_zero(ENV + 60, 4));
+    uint8_t key[32];
+    m5_derive_object_key(SK.k_artifact, &OBJ, key);
+    for (uint32_t c = 0; c < 4; c++) {
+        uint32_t n = c < 3 ? CS : PT_LEN - 3 * CS;
+        uint8_t aad[111], *p = aad, nonce[12], pt[CS];
+        memcpy(p, "AIENOS-M5-CHUNK-V1", 19); p += 19; /* includes the trailing NUL */
+        memcpy(p, OBJ.store_uuid, 16); p += 16;
+        *p++ = 7; *p++ = 0;   /* object_kind u16le */
+        *p++ = 1; *p++ = 0;   /* object_version u16le */
+        memcpy(p, ENV, 64); p += 64;
+        put32(p, c); p += 4;
+        put32(p, n); p += 4;
+        CHECK(p == aad + 111);
+        memcpy(nonce, NONCE8, 8); put32(nonce + 8, c);
+        CHECK(aienos_gcmsiv_open(key, nonce, aad, sizeof aad, ENV + CHUNK_OFF(c), n + 16, pt, n) == AIENOS_CRYPTO_OK);
+        CHECK(memcmp(pt, PT + c * CS, n) == 0);
+    }
 }
 
 static void t_env_hostile_header_fuzz(void)
@@ -369,15 +398,15 @@ static void t_env_hostile_header_fuzz(void)
         size_t len = ENV_LEN;
         memcpy(tmp, ENV, ENV_LEN);
         switch (it % 5) {
-        case 0: for (int j = 1 + (int)(rnd() % 4); j > 0; j--) tmp[rnd() % 80] ^= (uint8_t)(1 + rnd() % 255); break;
-        case 1: { static const size_t off[] = {16, 20, 68}; size_t o = off[rnd() % 3];
+        case 0: for (int j = 1 + (int)(rnd() % 4); j > 0; j--) tmp[rnd() % 64] ^= (uint8_t)(1 + rnd() % 255); break;
+        case 1: { static const size_t off[] = {16, 20, 60}; size_t o = off[rnd() % 3];
                   if (o == 20) put64(tmp + o, edge[rnd() % ne]); else put32(tmp + o, (uint32_t)edge[rnd() % ne]); } break;
         case 2: len = (size_t)(rnd() % sizeof tmp); for (size_t i = ENV_LEN; i < len; i++) tmp[i] = (uint8_t)rnd(); break;
         case 3: len = (size_t)(rnd() % sizeof tmp); for (size_t i = 0; i < len; i++) tmp[i] = (uint8_t)rnd();
                 if (len >= 8) { memcpy(tmp, "AIENENV1", 8); }
                 break;
         case 4: put32(tmp + 16, (uint32_t)edge[rnd() % ne]); put64(tmp + 20, edge[rnd() % ne]);
-                put32(tmp + 68, (uint32_t)edge[rnd() % ne]); len = (size_t)(rnd() % sizeof tmp); break;
+                put32(tmp + 60, (uint32_t)edge[rnd() % ne]); len = (size_t)(rnd() % sizeof tmp); break;
         }
         if (len == ENV_LEN && memcmp(tmp, ENV, ENV_LEN) == 0) continue;
         uint8_t *e = malloc(len ? len : 1);
@@ -423,9 +452,13 @@ static void t_all_or_nothing_late_chunk_failure_zeroes_output(void)
 static void t_corrupt_header(void)
 {
     uint8_t e[ENV_LEN];
-    /* bytes that pass every structural check: object id, nonce prefix */
+    /* bytes that pass every structural check: nonce prefix, envelope id */
     memcpy(e, ENV, ENV_LEN); e[44] ^= 1;
     CHECK(open_refused(e, ENV_LEN, &OBJ, M5_ID_PRODUCTION) == M5_ERR_AUTH);
+    memcpy(e, ENV, ENV_LEN); e[28] ^= 1;
+    CHECK(open_refused(e, ENV_LEN, &OBJ, M5_ID_PRODUCTION) == M5_ERR_BINDING);
+    m5_object_binding b = OBJ; b.envelope_id[0] ^= 1; /* attacker relabels the expectation too */
+    CHECK(open_refused(e, ENV_LEN, &b, M5_ID_PRODUCTION) == M5_ERR_AUTH);
     memcpy(e, ENV, ENV_LEN); e[0] ^= 1;
     CHECK(open_refused(e, ENV_LEN, &OBJ, M5_ID_PRODUCTION) == M5_ERR_FORMAT);
 }
@@ -481,6 +514,8 @@ static void t_corrupt_rollback_anchor(void)
     CHECK(recover(COMMIT, ANCHOR, M5_ANCHOR_LEN - 1, c, 1, out, sizeof out, &ch) == M5_ERR_BOUNDS);
 }
 
+/* Key generation is the header key_epoch (inside every chunk's AAD) and is
+ * also bound by the commit record, which is checked after sealing. */
 static void t_corrupt_key_generation(void)
 {
     uint8_t e[ENV_LEN];
@@ -489,16 +524,62 @@ static void t_corrupt_key_generation(void)
     m5_object_binding b = OBJ; b.key_generation = 4; /* attacker also relabels the expectation */
     CHECK(open_refused(e, ENV_LEN, &b, M5_ID_PRODUCTION) == M5_ERR_AUTH);
     CHECK(open_refused(ENV, ENV_LEN, &b, M5_ID_PRODUCTION) == M5_ERR_BINDING);
+    /* commit record layer: tampered key_generation field */
+    m5_candidate c[1] = {{ENV, ENV_LEN}};
+    uint8_t out[PT_LEN], bad[M5_COMMIT_LEN]; size_t ch;
+    memcpy(bad, COMMIT, sizeof bad); bad[56] ^= 1;
+    m5_commit co;
+    CHECK(m5_commit_open(bad, sizeof bad, SK.k_root_auth, M5_ID_PRODUCTION, &co) == M5_ERR_AUTH);
+    CHECK(recover(bad, ANCHOR, M5_ANCHOR_LEN, c, 1, out, sizeof out, &ch) == M5_ERR_AUTH);
+    /* an authentic commit naming another key generation for these bytes */
+    uint8_t cb[M5_COMMIT_LEN];
+    make_commit(&b, SG, ENV, ENV_LEN, 5, SK.k_root_auth, cb);
+    CHECK(m5_commit_open(cb, sizeof cb, SK.k_root_auth, M5_ID_PRODUCTION, &co) == M5_OK);
+    CHECK(m5_commit_check_object(&co, ENV, ENV_LEN) == M5_ERR_BINDING);
 }
 
+/* Store generation is not in the envelope (AGENTS.md section 3): it is bound
+ * by the commit record and checked against the anchor. */
 static void t_corrupt_store_generation(void)
 {
+    m5_candidate c[1] = {{ENV, ENV_LEN}};
+    uint8_t out[PT_LEN], bad[M5_COMMIT_LEN], cb[M5_COMMIT_LEN], ab[M5_ANCHOR_LEN]; size_t ch;
+    m5_commit co;
+    /* tampered store_generation field in the commit record */
+    memcpy(bad, COMMIT, sizeof bad); bad[48] ^= 1;
+    CHECK(m5_commit_open(bad, sizeof bad, SK.k_root_auth, M5_ID_PRODUCTION, &co) == M5_ERR_AUTH);
+    CHECK(recover(bad, ANCHOR, M5_ANCHOR_LEN, c, 1, out, sizeof out, &ch) == M5_ERR_AUTH);
+    /* authentic commit from an older store generation: rollback against the anchor */
+    make_commit(&OBJ, SG - 1, ENV, ENV_LEN, 6, SK.k_root_auth, cb);
+    CHECK(recover(cb, ANCHOR, M5_ANCHOR_LEN, c, 1, out, sizeof out, &ch) == M5_ERR_ROLLBACK);
+    /* authentic commit claiming another store generation at the anchored counter: fork */
+    make_commit(&OBJ, SG + 1, ENV, ENV_LEN, 5, SK.k_root_auth, cb);
+    CHECK(recover(cb, ANCHOR, M5_ANCHOR_LEN, c, 1, out, sizeof out, &ch) == M5_ERR_ROLLBACK);
+    /* the same immutable envelope reused in the next store generation is valid */
+    make_commit(&OBJ, SG + 1, ENV, ENV_LEN, 6, SK.k_root_auth, cb);
+    CHECK(recover(cb, ANCHOR, M5_ANCHOR_LEN, c, 1, out, sizeof out, &ch) == M5_OK && memcmp(out, PT, PT_LEN) == 0);
+    make_anchor(M5_ID_PRODUCTION, OBJ.store_uuid, SG + 1, 3, 6, cb, SK.k_root_auth, ab);
+    CHECK(recover(cb, ab, M5_ANCHOR_LEN, c, 1, out, sizeof out, &ch) == M5_OK);
+    /* and the old generation's commit is then a rollback */
+    CHECK(recover(COMMIT, ab, M5_ANCHOR_LEN, c, 1, out, sizeof out, &ch) == M5_ERR_ROLLBACK);
+}
+
+/* Post-seal ObjectId check: SHA-256 of the bytes must match the commit. */
+static void t_commit_check_object(void)
+{
+    m5_commit co;
+    CHECK(m5_commit_open(COMMIT, M5_COMMIT_LEN, SK.k_root_auth, M5_ID_PRODUCTION, &co) == M5_OK);
+    CHECK(m5_commit_check_object(&co, ENV, ENV_LEN) == M5_OK);
     uint8_t e[ENV_LEN];
-    memcpy(e, ENV, ENV_LEN); put64(e + 60, 8);
-    CHECK(open_refused(e, ENV_LEN, &OBJ, M5_ID_PRODUCTION) == M5_ERR_BINDING);
-    m5_object_binding b = OBJ; b.store_generation = 8;
-    CHECK(open_refused(e, ENV_LEN, &b, M5_ID_PRODUCTION) == M5_ERR_AUTH);
-    CHECK(open_refused(ENV, ENV_LEN, &b, M5_ID_PRODUCTION) == M5_ERR_BINDING);
+    memcpy(e, ENV, ENV_LEN); e[CHUNK_OFF(2) + 3] ^= 1;
+    CHECK(m5_commit_check_object(&co, e, ENV_LEN) == M5_ERR_TORN);
+    CHECK(m5_commit_check_object(&co, ENV, ENV_LEN - 1) == M5_ERR_TORN);
+    /* authentic commit, right ObjectId, but naming another envelope id */
+    m5_object_binding b = OBJ; b.envelope_id[3] ^= 1;
+    uint8_t cb[M5_COMMIT_LEN];
+    make_commit(&b, SG, ENV, ENV_LEN, 5, SK.k_root_auth, cb);
+    CHECK(m5_commit_open(cb, sizeof cb, SK.k_root_auth, M5_ID_PRODUCTION, &co) == M5_OK);
+    CHECK(m5_commit_check_object(&co, ENV, ENV_LEN) == M5_ERR_BINDING);
 }
 
 static void t_truncate_drop_last_chunk(void)
@@ -506,7 +587,7 @@ static void t_truncate_drop_last_chunk(void)
     uint8_t e[ENV_LEN];
     size_t tl = CHUNK_OFF(3);
     CHECK(open_refused(ENV, tl, &OBJ, M5_ID_PRODUCTION) == M5_ERR_BOUNDS);
-    memcpy(e, ENV, tl); put64(e + 20, 192); put32(e + 68, 3); /* header rewritten to match */
+    memcpy(e, ENV, tl); put64(e + 20, 192); /* header rewritten to match */
     CHECK(open_refused(e, tl, &OBJ, M5_ID_PRODUCTION) == M5_ERR_AUTH);
 }
 
@@ -517,11 +598,11 @@ static void t_extend_append_chunk(void)
     memcpy(e + ENV_LEN, ENV + CHUNK_OFF(0), CS + 16);
     CHECK(open_refused(e, sizeof e, &OBJ, M5_ID_PRODUCTION) == M5_ERR_BOUNDS);
     /* rewrite the last chunk position: 4 full chunks + appended chunk 0 as #5 */
-    uint8_t f[80 + 5 * (CS + 16)];
+    uint8_t f[64 + 5 * (CS + 16)];
     memset(f, 0, sizeof f);
     memcpy(f, ENV, ENV_LEN);
     memcpy(f + CHUNK_OFF(4), ENV + CHUNK_OFF(0), CS + 16);
-    put64(f + 20, 4 * CS + CS); put32(f + 68, 5);
+    put64(f + 20, 4 * CS + CS);
     CHECK(open_refused(f, sizeof f, &OBJ, M5_ID_PRODUCTION) == M5_ERR_AUTH);
 }
 
@@ -537,7 +618,7 @@ static void t_reorder_chunks(void)
 static void t_splice_cross_object(void)
 {
     m5_object_binding b2 = OBJ;
-    b2.object_id[0] ^= 0xFF;
+    b2.envelope_id[0] ^= 0xFF;
     uint8_t env2[ENV_LEN], e[ENV_LEN];
     size_t n;
     CHECK(m5_envelope_seal(SK.k_artifact, &b2, NONCE8, CS, PT, PT_LEN, env2, sizeof env2, &n) == M5_OK);
@@ -547,8 +628,8 @@ static void t_splice_cross_object(void)
     memcpy(e, ENV, ENV_LEN);
     memcpy(e + CHUNK_OFF(1), env2 + CHUNK_OFF(1), CS + 16);
     CHECK(open_refused(e, ENV_LEN, &OBJ, M5_ID_PRODUCTION) == M5_ERR_AUTH);
-    /* chunk from another store generation of the same object */
-    m5_object_binding b3 = OBJ; b3.store_generation = 10;
+    /* chunk from another key generation of the same object */
+    m5_object_binding b3 = OBJ; b3.key_generation = 4;
     uint8_t env3[ENV_LEN];
     m5_envelope_seal(SK.k_artifact, &b3, NONCE8, CS, PT, PT_LEN, env3, sizeof env3, &n);
     memcpy(e, ENV, ENV_LEN);
@@ -666,20 +747,22 @@ static void t_identity_production_refuses_test(void)
     m5_object_binding tb; binding_init(&tb, M5_ID_TEST);
     uint8_t env[ENV_LEN]; size_t n;
     CHECK(m5_envelope_seal(SK.k_artifact, &tb, NONCE8, CS, PT, PT_LEN, env, sizeof env, &n) == M5_OK);
-    /* production mode, header TEST, caller expects PRODUCTION */
-    CHECK(open_refused(env, ENV_LEN, &OBJ, M5_ID_PRODUCTION) == M5_ERR_IDENTITY);
+    /* production mode, TEST-class object, caller expects PRODUCTION: the class
+     * is bound only through the object key, so authentication fails */
+    CHECK(open_refused(env, ENV_LEN, &OBJ, M5_ID_PRODUCTION) == M5_ERR_AUTH);
     /* production mode, caller expectation TEST */
     CHECK(open_refused(env, ENV_LEN, &tb, M5_ID_PRODUCTION) == M5_ERR_IDENTITY);
     /* header PRODUCTION but expectation TEST in production mode */
     CHECK(open_refused(ENV, ENV_LEN, &tb, M5_ID_PRODUCTION) == M5_ERR_IDENTITY);
-    /* TEST manifest, commit, anchor under the same key are refused in production */
-    m5_secman m = secman_fixture(M5_ID_TEST), o;
+    /* a TEST-hierarchy manifest does not authenticate under the production key;
+     * TEST commit and anchor records under the same key are refused by class */
+    m5_secman m = secman_fixture(), o;
     uint8_t sb[M5_SECMAN_LEN];
-    m5_secman_seal(&m, SK.k_root_auth, sb);
-    CHECK(m5_secman_open(sb, sizeof sb, SK.k_root_auth, M5_ID_PRODUCTION, &o) == M5_ERR_IDENTITY);
+    m5_secman_seal(&m, SK_TEST.k_root_auth, sb);
+    CHECK(m5_secman_open(sb, sizeof sb, SK.k_root_auth, &o) == M5_ERR_AUTH);
     uint8_t cb[M5_COMMIT_LEN], ab[M5_ANCHOR_LEN];
     m5_commit co; m5_anchor ao;
-    make_commit(&tb, env, ENV_LEN, 5, SK.k_root_auth, cb);
+    make_commit(&tb, SG, env, ENV_LEN, 5, SK.k_root_auth, cb);
     CHECK(m5_commit_open(cb, sizeof cb, SK.k_root_auth, M5_ID_PRODUCTION, &co) == M5_ERR_IDENTITY);
     make_anchor(M5_ID_TEST, OBJ.store_uuid, 9, 3, 5, cb, SK.k_root_auth, ab);
     CHECK(m5_anchor_open(ab, sizeof ab, SK.k_root_auth, M5_ID_PRODUCTION, &ao) == M5_ERR_IDENTITY);
@@ -690,38 +773,38 @@ static void t_identity_test_refuses_production(void)
     m5_object_binding tb; binding_init(&tb, M5_ID_TEST);
     uint8_t out[PT_LEN]; size_t n = 1;
     memset(out, 0xAA, sizeof out);
-    CHECK(m5_envelope_open(SK.k_artifact, M5_ID_TEST, &tb, ENV, ENV_LEN, out, sizeof out, &n) == M5_ERR_IDENTITY);
+    /* a PRODUCTION object opened in TEST mode: the class is in the key */
+    CHECK(m5_envelope_open(SK.k_artifact, M5_ID_TEST, &tb, ENV, ENV_LEN, out, sizeof out, &n) == M5_ERR_AUTH);
     CHECK(all_zero(out, sizeof out));
-    m5_secman m = secman_fixture(M5_ID_PRODUCTION), o;
+    m5_secman m = secman_fixture(), o;
     uint8_t sb[M5_SECMAN_LEN];
     m5_secman_seal(&m, SK.k_root_auth, sb);
-    CHECK(m5_secman_open(sb, sizeof sb, SK.k_root_auth, M5_ID_TEST, &o) == M5_ERR_IDENTITY);
+    CHECK(m5_secman_open(sb, sizeof sb, SK_TEST.k_root_auth, &o) == M5_ERR_AUTH);
     m5_commit co;
     CHECK(m5_commit_open(COMMIT, M5_COMMIT_LEN, SK.k_root_auth, M5_ID_TEST, &co) == M5_ERR_IDENTITY);
     /* a TEST-hierarchy store works in TEST mode */
-    m5_secman t = secman_fixture(M5_ID_TEST);
+    m5_secman t = secman_fixture();
     m5_secman_seal(&t, SK_TEST.k_root_auth, sb);
-    CHECK(m5_secman_open(sb, sizeof sb, SK_TEST.k_root_auth, M5_ID_TEST, &o) == M5_OK);
+    CHECK(m5_secman_open(sb, sizeof sb, SK_TEST.k_root_auth, &o) == M5_OK);
 }
 
 static void t_identity_relabel_breaks_mac(void)
 {
-    m5_secman t = secman_fixture(M5_ID_TEST), o;
+    m5_secman t = secman_fixture(), o;
     uint8_t sb[M5_SECMAN_LEN];
     m5_secman_seal(&t, SK_TEST.k_root_auth, sb);
-    sb[12] = M5_ID_PRODUCTION;
-    CHECK(m5_secman_open(sb, sizeof sb, SK_TEST.k_root_auth, M5_ID_PRODUCTION, &o) == M5_ERR_AUTH);
-    CHECK(m5_secman_open(sb, sizeof sb, SK.k_root_auth, M5_ID_PRODUCTION, &o) == M5_ERR_AUTH);
-    /* relabel a TEST envelope as PRODUCTION */
+    CHECK(m5_secman_open(sb, sizeof sb, SK_TEST.k_root_auth, &o) == M5_OK);
+    /* the manifest carries no class byte: its class is bound by the hierarchy key */
+    CHECK(m5_secman_open(sb, sizeof sb, SK.k_root_auth, &o) == M5_ERR_AUTH);
+    /* a TEST envelope presented as PRODUCTION */
     m5_object_binding tb; binding_init(&tb, M5_ID_TEST);
     uint8_t env[ENV_LEN]; size_t n;
     m5_envelope_seal(SK_TEST.k_artifact, &tb, NONCE8, CS, PT, PT_LEN, env, sizeof env, &n);
-    env[72] = M5_ID_PRODUCTION;
     CHECK(open_refused(env, ENV_LEN, &OBJ, M5_ID_PRODUCTION) == M5_ERR_AUTH);
     /* relabel a TEST commit record and anchor */
     uint8_t cb[M5_COMMIT_LEN], ab[M5_ANCHOR_LEN];
     m5_commit co; m5_anchor ao;
-    make_commit(&tb, env, ENV_LEN, 5, SK_TEST.k_root_auth, cb);
+    make_commit(&tb, SG, env, ENV_LEN, 5, SK_TEST.k_root_auth, cb);
     cb[10] = M5_ID_PRODUCTION;
     CHECK(m5_commit_open(cb, sizeof cb, SK_TEST.k_root_auth, M5_ID_PRODUCTION, &co) == M5_ERR_AUTH);
     make_anchor(M5_ID_TEST, OBJ.store_uuid, 9, 3, 5, cb, SK_TEST.k_root_auth, ab);
@@ -809,8 +892,8 @@ static void t_mig_test_identity_refused_in_production(void)
 static void t_recovery_deterministic(void)
 {
     /* candidates: committed version, an older version, an uncommitted newer torn copy, junk */
-    m5_object_binding old = OBJ; old.store_generation = 8;
-    m5_object_binding nw = OBJ; nw.store_generation = 10;
+    m5_object_binding old = OBJ; old.envelope_id[0] ^= 0x11;
+    m5_object_binding nw = OBJ; nw.envelope_id[0] ^= 0x22;
     uint8_t env_old[ENV_LEN], env_new[ENV_LEN], junk[100];
     size_t n;
     m5_envelope_seal(SK.k_artifact, &old, NONCE8, CS, PT, PT_LEN, env_old, sizeof env_old, &n);
@@ -862,11 +945,11 @@ static void t_recovery_ambiguous_refused(void)
 static void t_recovery_old_commit_is_rollback(void)
 {
     /* anchor advanced to counter 6 for a newer commit; the old commit (counter 5) is replayed */
-    m5_object_binding nw = OBJ; nw.store_generation = 10;
+    m5_object_binding nw = OBJ; nw.envelope_id[0] ^= 0x22;
     uint8_t env_new[ENV_LEN], cnew[M5_COMMIT_LEN], anew[M5_ANCHOR_LEN], out[PT_LEN];
     size_t n, ch;
     m5_envelope_seal(SK.k_artifact, &nw, NONCE8, CS, PT, PT_LEN, env_new, sizeof env_new, &n);
-    make_commit(&nw, env_new, ENV_LEN, 6, SK.k_root_auth, cnew);
+    make_commit(&nw, 10, env_new, ENV_LEN, 6, SK.k_root_auth, cnew);
     make_anchor(M5_ID_PRODUCTION, OBJ.store_uuid, 10, 3, 6, cnew, SK.k_root_auth, anew);
     m5_candidate c[2] = {{ENV, ENV_LEN}, {env_new, ENV_LEN}};
     CHECK(recover(COMMIT, anew, M5_ANCHOR_LEN, c, 2, out, sizeof out, &ch) == M5_ERR_ROLLBACK);
@@ -883,7 +966,7 @@ static void t_recovery_store_binding(void)
     uint8_t envb[ENV_LEN], cb[M5_COMMIT_LEN], ab[M5_ANCHOR_LEN], out[PT_LEN];
     size_t n, ch;
     m5_envelope_seal(SK.k_artifact, &bb, NONCE8, CS, PT, PT_LEN, envb, sizeof envb, &n);
-    make_commit(&bb, envb, ENV_LEN, 5, SK.k_root_auth, cb);
+    make_commit(&bb, SG, envb, ENV_LEN, 5, SK.k_root_auth, cb);
     make_anchor(M5_ID_PRODUCTION, OBJ.store_uuid, 9, 3, 5, cb, SK.k_root_auth, ab);
     m5_candidate c[1] = {{envb, ENV_LEN}};
     CHECK(recover(cb, ab, M5_ANCHOR_LEN, c, 1, out, sizeof out, &ch) == M5_ERR_BINDING);
@@ -893,13 +976,13 @@ struct test { const char *name; void (*fn)(void); };
 static const struct test TESTS[] = {
 #define T(x) {#x, x}
     T(t_hkdf_rfc5869_case1), T(t_subkeys_deterministic_and_separated), T(t_object_key_binds_every_field),
-    T(t_keyslot_wrap_unwrap), T(t_keyslot_refusals), T(t_secman_roundtrip_and_owner_generation_field),
-    T(t_secman_wrong_root_auth_key_refused), T(t_secman_every_byte_tamper_refused), T(t_secman_distinct_from_rust_v1),
-    T(t_env_roundtrip_sizes), T(t_env_header_bounds_each_field), T(t_env_hostile_header_fuzz),
+    T(t_keyslot_wrap_unwrap), T(t_keyslot_refusals), T(t_secman_roundtrip_rust_v1_layout),
+    T(t_secman_wrong_root_auth_key_refused), T(t_secman_every_byte_tamper_refused),
+    T(t_env_roundtrip_sizes), T(t_env_header_bounds_each_field), T(t_env_rust_v1_header_and_standard_aad), T(t_env_hostile_header_fuzz),
     T(t_all_or_nothing_late_chunk_failure_zeroes_output),
     T(t_corrupt_header), T(t_corrupt_first_chunk), T(t_corrupt_middle_chunk), T(t_corrupt_last_chunk),
     T(t_corrupt_commit_record), T(t_corrupt_rollback_anchor), T(t_corrupt_key_generation),
-    T(t_corrupt_store_generation), T(t_truncate_drop_last_chunk), T(t_extend_append_chunk),
+    T(t_corrupt_store_generation), T(t_commit_check_object), T(t_truncate_drop_last_chunk), T(t_extend_append_chunk),
     T(t_reorder_chunks), T(t_splice_cross_object),
     T(t_anchor_caller_buffer_roundtrip), T(t_rb_valid_resume_and_advance), T(t_rb_older_store_generation_refused),
     T(t_rb_older_key_generation_refused), T(t_rb_lower_counter_refused), T(t_rb_fork_at_same_counter_refused),

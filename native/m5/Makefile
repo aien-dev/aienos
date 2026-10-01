@@ -66,9 +66,10 @@ endif
 # Mutants: delete each GUARD-tagged line (in whichever source holds it) in
 # turn. The tests must fail (or crash) for every mutant, or that rule is not
 # tested. A mutant that does not compile counts as a harness failure.
-GUARDS = class-in-kdf slot-empty slot-check slot-suite slot-kdf slot-flags secman-mac secman-class \
-	count-match env-len env-mode env-class env-objid env-keygen env-storegen wipe-all \
-	commit-mac commit-class anchor-mac anchor-class anchor-missing anchor-store \
+GUARDS = class-in-kdf slot-empty slot-check slot-suite slot-kdf slot-flags secman-mac \
+	env-len env-mode env-envid env-keygen wipe-all \
+	commit-mac commit-class commit-objid commit-envid commit-keygen \
+	anchor-mac anchor-class anchor-missing anchor-store \
 	rb-storegen rb-keygen rb-counter \
 	mig-mac mig-class mig-self mig-source mig-dest mig-gen mig-anchor mig-digest mig-replay \
 	rec-store rec-conflict rec-torn

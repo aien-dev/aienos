@@ -3,12 +3,14 @@
 #include "m5_internal.h"
 #include "../argus/sha256.h"
 
-/* ---- commit record ----
- * 0 "AIENCMT1" | 8 version u16 = 1 | 10 identity_class | 11 reserved | 12 kind u16
- * | 14 object_version u16 | 16 store_uuid | 32 object_id | 48 store_generation
- * | 56 key_generation | 64 counter | 72 object_sequence | 80 envelope_digest[32]
- * | 112 mac = HMAC(k_root_auth, "AIENOS-M5-COMMIT-V1\0" || bytes[0..112]) */
-#define COMMIT_DOMAIN "AIENOS-M5-COMMIT-V1"
+/* ---- commit record (written after sealing) ----
+ * 0 "AIENCMT1" | 8 version u16 = 2 | 10 identity_class | 11 reserved | 12 kind u16
+ * | 14 object_version u16 | 16 store_uuid | 32 envelope_id[16] | 48 store_generation
+ * | 56 key_generation | 64 counter | 72 object_sequence | 80 object_id[32]
+ * | 112 mac = HMAC(k_root_auth, "AIENOS-M5-COMMIT-V2\0" || bytes[0..112])
+ * object_id is SHA-256 of the sealed envelope, so Store generation and the
+ * ObjectId are bound here, after sealing, never inside the envelope. */
+#define COMMIT_DOMAIN "AIENOS-M5-COMMIT-V2"
 #define COMMIT_MAC_OFF 112
 
 int m5_commit_seal(const m5_commit *c, const uint8_t k_root_auth[32], uint8_t out[M5_COMMIT_LEN])
@@ -17,17 +19,17 @@ int m5_commit_seal(const m5_commit *c, const uint8_t k_root_auth[32], uint8_t ou
     if (!m5_valid_class(c->obj.identity_class)) return M5_ERR_ARG;
     memset(out, 0, M5_COMMIT_LEN);
     memcpy(out, "AIENCMT1", 8);
-    m5_put16(out + 8, 1);
+    m5_put16(out + 8, 2);
     out[10] = c->obj.identity_class;
     m5_put16(out + 12, c->obj.object_kind);
     m5_put16(out + 14, c->obj.object_version);
     memcpy(out + 16, c->obj.store_uuid, 16);
-    memcpy(out + 32, c->obj.object_id, 16);
-    m5_put64(out + 48, c->obj.store_generation);
+    memcpy(out + 32, c->obj.envelope_id, 16);
+    m5_put64(out + 48, c->store_generation);
     m5_put64(out + 56, c->obj.key_generation);
     m5_put64(out + 64, c->counter);
     m5_put64(out + 72, c->object_sequence);
-    memcpy(out + 80, c->envelope_digest, 32);
+    memcpy(out + 80, c->object_id, 32);
     m5_mac(k_root_auth, COMMIT_DOMAIN, sizeof(COMMIT_DOMAIN), out, COMMIT_MAC_OFF, out + COMMIT_MAC_OFF);
     return M5_OK;
 }
@@ -38,7 +40,7 @@ int m5_commit_open(const uint8_t *b, size_t len, const uint8_t k_root_auth[32],
     if (!b || !k_root_auth || !c) return M5_ERR_ARG;
     memset(c, 0, sizeof *c);
     if (len != M5_COMMIT_LEN) return M5_ERR_BOUNDS;
-    if (memcmp(b, "AIENCMT1", 8) != 0 || m5_get16(b + 8) != 1 || b[11] != 0) return M5_ERR_FORMAT;
+    if (memcmp(b, "AIENCMT1", 8) != 0 || m5_get16(b + 8) != 2 || b[11] != 0) return M5_ERR_FORMAT;
     if (!m5_valid_class(b[10])) return M5_ERR_FORMAT;
     uint8_t mac[32];
     m5_mac(k_root_auth, COMMIT_DOMAIN, sizeof(COMMIT_DOMAIN), b, COMMIT_MAC_OFF, mac);
@@ -49,12 +51,26 @@ int m5_commit_open(const uint8_t *b, size_t len, const uint8_t k_root_auth[32],
     c->obj.object_kind = m5_get16(b + 12);
     c->obj.object_version = m5_get16(b + 14);
     memcpy(c->obj.store_uuid, b + 16, 16);
-    memcpy(c->obj.object_id, b + 32, 16);
-    c->obj.store_generation = m5_get64(b + 48);
+    memcpy(c->obj.envelope_id, b + 32, 16);
+    c->store_generation = m5_get64(b + 48);
     c->obj.key_generation = m5_get64(b + 56);
     c->counter = m5_get64(b + 64);
     c->object_sequence = m5_get64(b + 72);
-    memcpy(c->envelope_digest, b + 80, 32);
+    memcpy(c->object_id, b + 80, 32);
+    return M5_OK;
+}
+
+int m5_commit_check_object(const m5_commit *c, const uint8_t *env, size_t env_len)
+{
+    if (!c || !env) return M5_ERR_ARG;
+    uint8_t dg[32];
+    sha256_hash(env, env_len, dg);
+    if (!aienos_ct_equal(dg, c->object_id, 32)) return M5_ERR_TORN; /* GUARD:commit-objid */
+    m5_env_header h;
+    int rc = m5_envelope_parse_header(env, env_len, &h);
+    if (rc != M5_OK) return rc;
+    if (memcmp(h.envelope_id, c->obj.envelope_id, 16) != 0) return M5_ERR_BINDING; /* GUARD:commit-envid */
+    if (h.key_epoch != c->obj.key_generation) return M5_ERR_BINDING; /* GUARD:commit-keygen */
     return M5_OK;
 }
 
@@ -220,7 +236,7 @@ int m5_recover_object(const uint8_t k_root_auth[32], const uint8_t domain_key[32
     if (memcmp(c.obj.store_uuid, store_uuid, 16) != 0) return M5_ERR_BINDING; /* GUARD:rec-store */
 
     m5_disk_state d;
-    d.store_generation = c.obj.store_generation;
+    d.store_generation = c.store_generation;
     d.key_generation = c.obj.key_generation;
     d.counter = c.counter;
     sha256_hash(commit_buf, M5_COMMIT_LEN, d.commit_digest);
@@ -236,15 +252,14 @@ int m5_recover_object(const uint8_t k_root_auth[32], const uint8_t domain_key[32
         if (!cands[i].bytes) continue;
         uint8_t dg[32];
         sha256_hash(cands[i].bytes, cands[i].len, dg);
-        if (aienos_ct_equal(dg, c.envelope_digest, 32)) {
+        if (aienos_ct_equal(dg, c.object_id, 32)) {
             if (first == SIZE_MAX) first = i;
             continue;
         }
         /* Raw header fields only: a torn copy still names the object it claims. */
-        if (cands[i].len >= 68 && memcmp(cands[i].bytes, "AIENENV1", 8) == 0 &&
-            memcmp(cands[i].bytes + 28, c.obj.object_id, 16) == 0 &&
-            m5_get64(cands[i].bytes + 52) == c.obj.key_generation &&
-            m5_get64(cands[i].bytes + 60) == c.obj.store_generation)
+        if (cands[i].len >= 60 && memcmp(cands[i].bytes, "AIENENV1", 8) == 0 &&
+            memcmp(cands[i].bytes + 28, c.obj.envelope_id, 16) == 0 &&
+            m5_get64(cands[i].bytes + 52) == c.obj.key_generation)
             conflict = 1;
     }
     if (first == SIZE_MAX) return M5_ERR_TORN; /* GUARD:rec-torn */

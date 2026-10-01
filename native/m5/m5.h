@@ -53,18 +53,23 @@ int m5_derive_subkeys(const uint8_t k_vol[32], uint8_t identity_class,
                       uint64_t owner_hierarchy_generation, m5_subkeys *out);
 void m5_subkeys_wipe(m5_subkeys *k);
 
-/* Binding of one object version. Every field is authenticated. */
+/* Pre-seal binding of one envelope. Per AGENTS.md section 3 it holds no
+ * ObjectId (SHA-256 of the sealed bytes, which does not exist yet) and no
+ * Store generation: those are bound after sealing, in the commit record.
+ * envelope_id is the 16-byte logical id carried in the envelope header;
+ * key_generation is the header key_epoch. */
 typedef struct {
     uint8_t store_uuid[16];
     uint16_t object_kind;
     uint16_t object_version;
-    uint8_t object_id[16];
+    uint8_t envelope_id[16];
     uint64_t key_generation;
-    uint64_t store_generation;
     uint8_t identity_class;
 } m5_object_binding;
 
-/* Per-object key from a domain subkey (k_cortex/k_agent/k_artifact). */
+/* Per-object key from a domain subkey (k_cortex/k_agent/k_artifact):
+ * HKDF-Expand(domain, "AIENOS/M5/OBJECT-KEY-V2\0" || store_uuid || kind ||
+ * version || envelope_id || key_generation || identity_class). */
 int m5_derive_object_key(const uint8_t domain_key[32], const m5_object_binding *b,
                          uint8_t out[32]);
 
@@ -97,20 +102,20 @@ int m5_keyslot_wrap(m5_keyslot *s, const uint8_t store_uuid[16], const uint8_t k
 int m5_keyslot_unwrap(const m5_keyslot *s, const uint8_t store_uuid[16],
                       const uint8_t kek[32], uint8_t k_vol_out[32]);
 
-/* ---- C SecurityManifest v2: a SEPARATE format from Rust kind-22 v1 (256 bytes,
- *      magic "AIENSEC1"). Magic "AIENSEC2", 264 bytes. Neither reader accepts
- *      the other: Rust refuses by size+magic, m5_secman_open refuses by size
- *      and magic. Converting a v1 manifest needs a re-seal under the owner
- *      root-auth key (not implemented here). ---- */
-#define M5_SECMAN_LEN 264
+/* ---- SecurityManifest (kind 22): byte-compatible with Rust v1 ----
+ * 256 bytes, magic "AIENSEC1", format_version 1, flags 0, reserved 0,
+ * root_mac = HMAC(k_root_auth, "AIENOS-M5-ROOT-AUTH-V1\0" || bytes[0..224]).
+ * Identity class and owner hierarchy generation are not wire fields: they are
+ * bound through k_root_auth, which m5_derive_subkeys derives from (K_vol,
+ * identity_class, owner_hierarchy_generation). A manifest sealed under one
+ * class or owner generation fails the MAC under any other. */
+#define M5_SECMAN_LEN 256
 typedef struct {
-    uint8_t identity_class;
     uint8_t store_uuid[16];
     uint64_t generation;
     uint64_t security_sequence;
     uint64_t epoch;
     uint64_t key_epoch;
-    uint64_t owner_hierarchy_generation;
     uint8_t previous_security_manifest_id[32];
     uint8_t keyslot_manifest_id[32];
     uint8_t agent_root_id[32];
@@ -121,14 +126,19 @@ typedef struct {
 
 /* Compute root_mac under k_root_auth and encode. */
 int m5_secman_seal(m5_secman *m, const uint8_t k_root_auth[32], uint8_t out[M5_SECMAN_LEN]);
-/* Bounded decode, identity class must equal mode, MAC must verify. */
-int m5_secman_open(const uint8_t *buf, size_t len, const uint8_t k_root_auth[32],
-                   uint8_t mode, m5_secman *out);
+/* Bounded decode; the MAC must verify under k_root_auth. */
+int m5_secman_open(const uint8_t *buf, size_t len, const uint8_t k_root_auth[32], m5_secman *out);
 
-/* ---- chunked AES-256-GCM-SIV envelope (C v2 header, 80 bytes) ---- */
-#define M5_ENV_HEADER_LEN 80
+/* ---- chunked AES-256-GCM-SIV envelope: Rust V1 header, 64 bytes ----
+ * 0 magic "AIENENV1" | 8 version u16 = 1 | 10 cipher_suite u16 = 1
+ * | 12 flags u32 = 0 | 16 chunk_size u32 | 20 total_plaintext_len u64
+ * | 28 envelope_id[16] | 44 nonce_prefix[8] | 52 key_epoch u64 | 60 reserved u32 = 0
+ * Chunk AAD (AGENTS.md section 3, envelope.rs compute_chunk_aad, 111 bytes):
+ * "AIENOS-M5-CHUNK-V1\0" || store_uuid || kind u16 || version u16 || header[64]
+ * || chunk_index u32 || chunk_plaintext_length u32. Nonce: prefix[8] || index u32. */
+#define M5_ENV_HEADER_LEN 64
 #define M5_ENV_MAX_CHUNK 65536u
-#define M5_ENV_MAX_CHUNKS 4096u
+#define M5_ENV_MAX_CHUNKS 4096u /* C-only cap; Rust seals 64 KiB chunks, <= 1024 */
 #define M5_ENV_MAX_PLAINTEXT (UINT64_C(64) * 1024 * 1024)
 #define M5_TAG_LEN 16
 
@@ -138,17 +148,15 @@ typedef struct {
     uint32_t flags;
     uint32_t chunk_size;
     uint64_t total_plaintext_len;
-    uint8_t object_id[16];
+    uint8_t envelope_id[16];
     uint8_t nonce_prefix[8];
-    uint64_t key_generation;
-    uint64_t store_generation;
-    uint32_t chunk_count;
-    uint8_t identity_class;
+    uint64_t key_epoch;
+    uint32_t chunk_count; /* derived, not a wire field */
 } m5_env_header;
 
 /* Envelope length for pt_len bytes in chunk_size chunks, 0 if out of bounds. */
 size_t m5_envelope_len(uint64_t pt_len, uint32_t chunk_size);
-/* Bounded header parse: every length/count field is checked before use and
+/* Bounded header parse: every length field is checked before use and
  * env_len must equal the length the header implies. */
 int m5_envelope_parse_header(const uint8_t *env, size_t env_len, m5_env_header *h);
 int m5_envelope_seal(const uint8_t domain_key[32], const m5_object_binding *b,
@@ -160,18 +168,25 @@ int m5_envelope_open(const uint8_t domain_key[32], uint8_t mode, const m5_object
                      const uint8_t *env, size_t env_len,
                      uint8_t *out, size_t out_cap, size_t *out_len);
 
-/* ---- commit record (object level), 144 bytes, MAC by k_root_auth ---- */
+/* ---- commit record (object level, written after sealing), 144 bytes,
+ * MAC by k_root_auth. Binds the ObjectId (SHA-256 of the sealed envelope
+ * bytes) to its store generation, key generation and security counter. ---- */
 #define M5_COMMIT_LEN 144
 typedef struct {
-    m5_object_binding obj;      /* store_uuid, kind, version, id, generations, class */
+    m5_object_binding obj;      /* store_uuid, kind, version, envelope_id, key generation, class */
+    uint64_t store_generation;
     uint64_t counter;           /* monotonic security counter (anchor counter) */
     uint64_t object_sequence;
-    uint8_t envelope_digest[32]; /* SHA-256 of the committed envelope bytes */
+    uint8_t object_id[32];      /* ObjectId = SHA-256 of the committed envelope bytes */
 } m5_commit;
 
 int m5_commit_seal(const m5_commit *c, const uint8_t k_root_auth[32], uint8_t out[M5_COMMIT_LEN]);
 int m5_commit_open(const uint8_t *buf, size_t len, const uint8_t k_root_auth[32],
                    uint8_t mode, m5_commit *out);
+/* Post-seal check of envelope bytes against a verified commit record:
+ * SHA-256(env) must equal object_id (M5_ERR_TORN), and the header's
+ * envelope_id and key_epoch must equal the commit's (M5_ERR_BINDING). */
+int m5_commit_check_object(const m5_commit *c, const uint8_t *env, size_t env_len);
 
 /* ---- anti-rollback anchor, 120 bytes, MAC by k_root_auth ----
  * Persistence is the caller's buffer only. On hardware this is TPM NV,
@@ -239,7 +254,7 @@ typedef struct {
 } m5_candidate;
 
 /* Picks the candidate whose SHA-256 equals the verified commit record's
- * envelope digest, after the commit is checked against the anchor. Refuses
+ * object_id (ObjectId), after the commit is checked against the anchor. Refuses
  * (no silent repair) when the committed version is absent or torn
  * (M5_ERR_TORN) or when another copy claims the same object version with
  * different bytes (M5_ERR_AMBIGUOUS). On success the plaintext is in out and

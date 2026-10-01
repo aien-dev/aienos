@@ -22,12 +22,12 @@ or on the Spark, and nothing measures time or energy.
 
 | Requirement | Code | Tests |
 |---|---|---|
-| Owner-controlled key hierarchy | `m5_derive_subkeys` (K_vol -> identity/owner-generation root -> K_cortex, K_agent, K_artifact, K_root_auth), `m5_derive_object_key`, `m5_keyslot_wrap/unwrap`, `m5_secman_seal/open` (root-auth MAC, `owner_hierarchy_generation` field) | `t_hkdf_rfc5869_case1`, `t_subkeys_deterministic_and_separated`, `t_object_key_binds_every_field`, `t_keyslot_wrap_unwrap`, `t_keyslot_refusals`, `t_secman_*` (incl. `t_secman_distinct_from_rust_v1`) |
-| AES-256-GCM-SIV object envelopes | `m5_envelope_seal/open/parse_header` | `t_env_roundtrip_sizes`, `t_env_header_bounds_each_field`, `t_env_hostile_header_fuzz` (20 000 random/edge headers, exact-size heap buffers under ASan) |
+| Owner-controlled key hierarchy | `m5_derive_subkeys` (K_vol -> identity/owner-generation root -> K_cortex, K_agent, K_artifact, K_root_auth), `m5_derive_object_key`, `m5_keyslot_wrap/unwrap`, `m5_secman_seal/open` (root-auth MAC, `owner_hierarchy_generation` field) | `t_hkdf_rfc5869_case1`, `t_subkeys_deterministic_and_separated`, `t_object_key_binds_every_field`, `t_keyslot_wrap_unwrap`, `t_keyslot_refusals`, `t_secman_*` (incl. `t_secman_roundtrip_rust_v1_layout`) |
+| AES-256-GCM-SIV object envelopes | `m5_envelope_seal/open/parse_header` | `t_env_roundtrip_sizes`, `t_env_rust_v1_header_and_standard_aad`, `t_env_header_bounds_each_field`, `t_env_hostile_header_fuzz` (20 000 random/edge headers, exact-size heap buffers under ASan) |
 | All-or-nothing open | `m5_envelope_open`, `m5_recover_object` zero the whole caller buffer on every error | `t_all_or_nothing_late_chunk_failure_zeroes_output`; every refusal test asserts an all-zero buffer |
-| Corruption matrix | | `t_corrupt_header`, `t_corrupt_first_chunk`, `t_corrupt_middle_chunk`, `t_corrupt_last_chunk`, `t_corrupt_commit_record`, `t_corrupt_rollback_anchor`, `t_corrupt_key_generation`, `t_corrupt_store_generation`, `t_truncate_drop_last_chunk`, `t_extend_append_chunk`, `t_reorder_chunks`, `t_splice_cross_object` |
+| Corruption matrix | | `t_corrupt_header`, `t_corrupt_first_chunk`, `t_corrupt_middle_chunk`, `t_corrupt_last_chunk`, `t_corrupt_commit_record`, `t_corrupt_rollback_anchor`, `t_corrupt_key_generation`, `t_corrupt_store_generation`, `t_commit_check_object`, `t_truncate_drop_last_chunk`, `t_extend_append_chunk`, `t_reorder_chunks`, `t_splice_cross_object` |
 | Anti-rollback anchors | `m5_anchor_seal/open`, `m5_evaluate_anti_rollback` | `t_anchor_caller_buffer_roundtrip`, `t_rb_*` |
-| Production/test identity separation | identity class in key derivation, envelope header, chunk key, SecurityManifest, commit record, anchor and migration MACs; open/verify take a mode | `t_identity_production_refuses_test`, `t_identity_test_refuses_production`, `t_identity_relabel_breaks_mac` |
+| Production/test identity separation | identity class in the hierarchy key (so in every object key and K_root_auth MAC), plus an explicit class byte in commit record, anchor and migration; open/verify take a mode | `t_identity_production_refuses_test`, `t_identity_test_refuses_production`, `t_identity_relabel_breaks_mac` |
 | Migration authorization (MAC-bound) | `m5_migration_seal/authorize` | `t_mig_*` |
 | Deterministic recovery (object level) | `m5_recover_object` | `t_recovery_*` |
 
@@ -42,35 +42,47 @@ HMAC-SHA-256 under K_root_auth over `domain || bytes`, compared in constant time
   `K_class = HKDF-Expand(K_vol, "AIENOS/M5/OWNER-HIERARCHY-V2\0" || class || owner_hierarchy_generation)`
   and applies the v1 labels to K_class. Rust has no identity class or owner
   generation.
-- **Per-object keys** (new): `HKDF-Expand(domain subkey, "AIENOS/M5/OBJECT-KEY-V2\0" || store_uuid || kind || version || object_id || key_generation || store_generation || class)`.
+- **Per-object keys** (C only; Rust `seal_envelope` takes the key directly):
+  `HKDF-Expand(domain subkey, "AIENOS/M5/OBJECT-KEY-V2\0" || store_uuid || kind || version || envelope_id || key_generation || class)`.
+  No ObjectId and no Store generation, per AGENTS.md section 3.
 - **Keyslot descriptor**: same 128-byte layout and decode bounds as Rust.
   The wrap AAD is stronger: `"AIENOS-M5-KEYSLOT-V2\0" || store_uuid || slot_id || slot_type || key_epoch`
   (Rust: `slot_id` only). Decode and unwrap also refuse a wrap_suite other than
   0x01 (Empty may hold 0), kdf_suite above 0x02 and any flag bit (ADR 0017;
   Rust does not check these). KeySlotManifest (kind 21) itself is not ported.
-- **SecurityManifest**: a separate C v2 format, magic `AIENSEC2`, 264 bytes
-  (Rust kind-22 v1: `AIENSEC1`, 256 bytes). Byte 12 is the identity class
-  (Rust: reserved), `owner_hierarchy_generation` at 224, MAC at 232 with domain
-  `"AIENOS-M5-ROOT-AUTH-V2\0"`. The two formats never cross-read: each reader
-  refuses the other by size and magic (`t_secman_distinct_from_rust_v1`).
-  Compatibility path: an existing v1 manifest must be re-sealed as v2 under the
-  owner root-auth key; that converter is not written yet, and which format the
-  store adopts is a lead decision.
-- **Envelope**: magic `AIENENV1`, version 2, 80-byte header (Rust v1: 64).
-  Adds `store_generation` (60), explicit `chunk_count` (68, must equal the
-  value implied by length and chunk size) and identity class (72); `envelope_id`
-  is the object id, `key_epoch` is the key generation. Nonce is unchanged
-  (`nonce_prefix || chunk_index`). Chunk AAD is
-  `"AIENOS-M5-CHUNK-V2\0" || store_uuid || kind || version || header || index || count || last_flag || chunk_len`
-  and the chunk key is the per-object key, so chunks cannot be reordered,
-  truncated, extended or spliced across objects, stores or generations.
-  Bounds before use: chunk size 1..65536, plaintext <= 64 MiB, at most 4096
-  chunks, total length must match exactly. Like Rust, each chunk is decrypted into a private
-  64 KiB stack scratchpad and copied out only after its tag verifies; on any
-  failure the whole caller buffer is wiped as well, so a verified prefix never
-  survives as partial success.
-- **Commit record** (new, 144 bytes, `AIENCMT1`): object binding, counter,
-  object sequence, SHA-256 of the envelope, MAC (`"AIENOS-M5-COMMIT-V1\0"`).
+- **SecurityManifest**: byte-compatible with Rust kind-22 v1 (`AIENSEC1`,
+  version 1, 256 bytes, fields 16..224, MAC at 224 with domain
+  `"AIENOS-M5-ROOT-AUTH-V1\0"`; `t_secman_roundtrip_rust_v1_layout` checks the
+  layout and recomputes the MAC by hand). Decision: a separate `AIENSEC2` is
+  not needed, because the two M5 additions (identity class and owner hierarchy
+  generation) are already bound by the key: K_root_auth is derived from
+  `class || owner_hierarchy_generation`, so a manifest from the other class or
+  another owner generation fails its MAC (`t_identity_*`).
+- **Envelope**: byte-compatible with Rust V1. 64-byte header (`AIENENV1`,
+  version 1, suite 1, flags 0, chunk_size at 16, total at 20, envelope_id at
+  28, nonce_prefix at 44, key_epoch = key generation at 52, reserved at 60),
+  nonce `nonce_prefix || chunk_index`, chunk count derived from length and
+  chunk size. Chunk AAD is exactly the AGENTS.md Standard Envelope AAD (111
+  bytes, `t_env_rust_v1_header_and_standard_aad`):
+  `"AIENOS-M5-CHUNK-V1\0" || store_uuid || kind u16 || version u16 || 64-byte header || chunk_index u32 || chunk_len u32`.
+  The whole header (total length, envelope id, key generation) sits in every
+  chunk's AAD and the key is per object, so reorder, truncate, extend, header
+  edits and splices across objects, kinds, stores, classes or key generations
+  fail. Bounds before use: chunk size 1..65536, plaintext <= 64 MiB, at most
+  4096 chunks (C-only cap; Rust has none), total length must match exactly.
+  Like Rust, each chunk is decrypted into a private 64 KiB stack scratchpad
+  and copied out only after its tag verifies; on any failure the whole caller
+  buffer is wiped, so a verified prefix never survives as partial success.
+- **Commit record** (C only, `AIENCMT1` version 2, 144 bytes): binds, after
+  sealing, the object binding (class, kind, version, store, envelope id, key
+  generation), the **Store generation**, counter, object sequence and the
+  **ObjectId = SHA-256 of the encrypted bytes**, MAC
+  `"AIENOS-M5-COMMIT-V2\0"`. `m5_commit_check_object` refuses bytes whose
+  digest differs (TORN) or whose header names another envelope id or key
+  generation (BINDING). Store and key generation corruption is refused here
+  and by the anchor (`t_corrupt_key_generation`, `t_corrupt_store_generation`,
+  `t_commit_check_object`). An immutable envelope can be referenced by a
+  commit of a later Store generation without re-encryption.
 - **Rollback anchor** (120 bytes, `AIENRBA1`): store generation, key
   generation, monotonic counter, SHA-256 of the commit record, MAC
   (`"AIENOS-M5-ANCHOR-V1\0"`). Rust `RollbackAnchor` was an unauthenticated
@@ -82,9 +94,11 @@ HMAC-SHA-256 under K_root_auth over `domain || bytes`, compared in constant time
   identity class, agent root, genesis/source/destination store, source store
   generation, source anchor counter, migration counter, owner hierarchy
   generation and source commit digest under the source K_root_auth
-  (`"AIENOS-M5-MIGRATION-V2\0"`). Refuses wrong key, any binding mismatch,
-  source == destination, and a counter not above the last accepted one. The
-  Rust 64-byte `offline_signature` field is dropped (see below).
+  (`"AIENOS-M5-MIGRATION-V2\0"`). This is a post-seal attestation, so the
+  store generation in it does not conflict with AGENTS.md section 3. Refuses
+  wrong key, any binding mismatch, source == destination, and a counter not
+  above the last accepted one. The Rust 64-byte `offline_signature` field is
+  dropped (see below).
 
 ## Host-only, and what remains
 
@@ -106,22 +120,10 @@ HMAC-SHA-256 under K_root_auth over `domain || bytes`, compared in constant time
 - Recovery KDF (Argon2id / WebAuthn PRF) and KeySlotManifest lineage are not
   ported.
 
-## Recorded discrepancy with repo AGENTS.md section 3 (for the lead)
+## AGENTS.md section 3 (resolved)
 
-AGENTS.md section 3 says never to put the content hash (`ObjectId`) or the
-Store `generation` into AAD, and fixes the V1 chunk AAD. The M5 lane brief
-requires binding object id, key generation and store generation into the
-chunk AAD/key so cross-generation splices are refused. This port follows the
-brief and keeps the doctrine's intent as far as it can:
-
-- `object_id` here is the caller-chosen logical id (Rust `envelope_id`), not
-  the Store `ObjectId = SHA256(ciphertext)`, so there is no circularity.
-- `store_generation` is the **write generation** of that object version,
-  carried in its commit record. An immutable object sealed at generation 9 is
-  still opened at Store generation 12 with the binding from its commit record;
-  nothing is re-encrypted per generation.
-
-The chunk AAD is therefore V2, not the V1 text in AGENTS.md. If the lead
-decides V1 is binding, drop `store_generation` from the header, AAD and object
-key (the store-generation corruption test then relies on the commit record
-only).
+Chunk AAD is the V1 Standard Envelope AAD, and no ObjectId or Store generation
+enters any chunk AAD, object key or MAC body before sealing. Store and key
+generation are bound after sealing by the commit record and the anchor;
+ObjectId is the SHA-256 of the encrypted bytes and is referenced from the
+commit record.
