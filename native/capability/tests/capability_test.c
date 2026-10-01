@@ -26,6 +26,21 @@ static int checks;
 
 #define EQ(a, b) CHECK((a) == (b))
 
+/* Entries are compared field by field, never with memcmp. AienosCapEntry
+ * has padding (after cap_id, parent_id and minted_by_id), and a struct copy
+ * such as `*out = *e` need not copy padding bytes, so memcmp can see stack
+ * garbage in the padding of two equal entries. How a compiler copies differs
+ * by target (the suspected cause of the x86-64 CI baseline failure). */
+static int same_entry(const AienosCapEntry *x, const AienosCapEntry *y) {
+    return x->cap_id == y->cap_id && x->generation == y->generation && x->state == y->state &&
+           x->issuer == y->issuer && x->subject == y->subject && x->rights == y->rights &&
+           x->resource == y->resource && x->epoch == y->epoch &&
+           x->lease_expiry == y->lease_expiry && x->parent_id == y->parent_id &&
+           x->parent_generation == y->parent_generation &&
+           x->minted_by_id == y->minted_by_id &&
+           x->minted_by_generation == y->minted_by_generation;
+}
+
 static const AienosCapRef NONE = {AIENOS_CAP_PARENT_NONE, 0};
 
 typedef struct {
@@ -342,7 +357,7 @@ static int matches_view(Auth *a, const Rec *r) {
     AienosCapEntry now;
     AienosCapRef ref = {r->entry.cap_id, r->entry.generation};
     if (aienos_cap_inspect(a->view, ref, &now) != AIENOS_CAP_OK) return 0;
-    return memcmp(&now, &r->entry, sizeof now) == 0;
+    return same_entry(&now, &r->entry);
 }
 
 static void observer_sees_each_admin_operation_once(void) {
@@ -623,7 +638,7 @@ static int shadow_matches(Auth *a, const Shadow *sh) {
         }
         /* The epoch and clock move without touching entries; the entry
          * itself must be exactly what the shadow holds. */
-        if (rc != AIENOS_CAP_OK || memcmp(&now, &sh->e[i], sizeof now) != 0) return 0;
+        if (rc != AIENOS_CAP_OK || !same_entry(&now, &sh->e[i])) return 0;
     }
     return 1;
 }
@@ -727,16 +742,6 @@ typedef struct {
     pthread_mutex_t state_lock;
     MirrorCapState state;
 } MirrorCapShared;
-
-static int same_entry(const AienosCapEntry *x, const AienosCapEntry *y) {
-    return x->cap_id == y->cap_id && x->generation == y->generation && x->state == y->state &&
-           x->issuer == y->issuer && x->subject == y->subject && x->rights == y->rights &&
-           x->resource == y->resource && x->epoch == y->epoch &&
-           x->lease_expiry == y->lease_expiry && x->parent_id == y->parent_id &&
-           x->parent_generation == y->parent_generation &&
-           x->minted_by_id == y->minted_by_id &&
-           x->minted_by_generation == y->minted_by_generation;
-}
 
 static void validate_refuses_child_of_non_live_parent_in_corrupt_table(void) {
     Auth a = boot();

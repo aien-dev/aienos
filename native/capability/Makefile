@@ -132,7 +132,9 @@ mutants: $(TEST) $(CONTAIN_TEST) | $(OUT)
 	@ulimit -c 0; \
 	if ./$(TEST) > $(MUT_DIR)/baseline.log 2>&1 && ./$(CONTAIN_TEST) >> $(MUT_DIR)/baseline.log 2>&1; then \
 	  echo "baseline (no mutation): tests pass"; \
-	else echo "baseline (no mutation): tests FAIL, mutants are meaningless"; echo "AIENOS_CAP_MUTANTS: FAIL"; exit 1; fi; \
+	else echo "baseline (no mutation): tests FAIL, mutants are meaningless"; \
+	  echo "---- baseline log ($(MUT_DIR)/baseline.log) ----"; cat $(MUT_DIR)/baseline.log; echo "---- end baseline log ----"; \
+	  echo "AIENOS_CAP_MUTANTS: FAIL"; exit 1; fi; \
 	n=0; killed=0; fail=0; \
 	while IFS='|' read -r name file k from to; do \
 	  [ -n "$$name" ] || continue; n=$$((n+1)); d=$(MUT_DIR)/$$name; mkdir -p $$d; \
