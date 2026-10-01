@@ -96,7 +96,7 @@ test: $(TEST) $(STORE_TESTS) $(XCHECK) lib-checks
 	./$(OUT)/store_engine_test $(OUT) || fail=1; \
 	./$(OUT)/store_sealed_test $(OUT) || fail=1; \
 	./$(OUT)/store_powercut_test $(OUT) || fail=1; \
-	RUST_STORE_TOOL=$(RUST_STORE_TOOL) sh tests/rust_crosscheck.sh ./$(XCHECK) $(OUT) || fail=1; \
+	RUST_STORE_TOOL=$(RUST_STORE_TOOL) sh tests/rust_crosscheck.sh ./$(XCHECK) $(OUT); xrc=$$?; if [ $$xrc -ne 0 ] && [ $$xrc -ne 2 ]; then fail=1; fi; \
 	if [ $$fail -eq 0 ]; then echo "AIENOS_STORE_NATIVE: PASS"; else echo "AIENOS_STORE_NATIVE: FAIL"; exit 1; fi
 
 # Library objects must not allocate, read a clock, or do their own I/O.

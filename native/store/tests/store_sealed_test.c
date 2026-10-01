@@ -523,11 +523,12 @@ static void test_forgery(void)
         int refused = 0, ok = 0;
         for (uint32_t k = 0; k < s.nclaims; k++) {
             int rc = ss_read(&s, g_ws.claims[k].sid, out, sizeof out, &len, NULL);
+            if (rc == SS_E_ENVELOPE)
+                CHECK(len == 0, "refused read reports zero length (claim %u)", k);
             refused += rc == SS_E_ENVELOPE;
             ok += rc == 0;
         }
         CHECK(refused == 1 && ok == 3, "AEAD refuses exactly the tampered envelope (%d refused, %d ok)", refused, ok);
-        CHECK(len == 0 || ok, "len");
         rig_close(&r);
     }
     /* defence in depth at read: a claim whose digest no longer matches the

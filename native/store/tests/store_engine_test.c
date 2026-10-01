@@ -42,7 +42,7 @@ static void seed_generation_two(memdev *m)
     st_store s;
     mem_init(m, 32);
     seed_genesis(m);
-    open_mem(&s, m);
+    CHECK_EQ(open_mem(&s, m), 0, "setup open");
     st_object o = one("next generation");
     CHECK_EQ(st_transact(&s, &o, 1, NULL, NULL), 0, "seed gen 2");
     mem_clear_log(m);
@@ -278,7 +278,7 @@ static void t_history_deleting_entry(void)
     seed_generation_two(&m);
     {
         st_store t;
-        open_mem(&t, &m);
+        CHECK_EQ(open_mem(&t, &m), 0, "setup open");
         /* hand-build gen 3 with the object at unit 8 instead of 7 */
         const char *v = "gap";
         sv1_entry e[2];
@@ -325,7 +325,7 @@ static void build_gen3(memdev *m, uint64_t obj_unit, uint64_t cat_unit)
     st_store t;
     sv1_commit prev, c;
     seed_generation_two(m);
-    open_mem(&t, m);
+    CHECK_EQ(open_mem(&t, m), 0, "setup open");
     const char *v = "lay";
     sv1_entry e[2];
     e[0] = ws.cat[t.root.cat_index][0];
@@ -423,7 +423,7 @@ static void t_zero_write_errors(void)
     st_object o;
     mem_init(&m, 6);
     seed_genesis(&m);
-    open_mem(&s, &m);
+    CHECK_EQ(open_mem(&s, &m), 0, "setup open");
     o = one("cannot fit");
     CHECK_EQ(st_transact(&s, &o, 1, NULL, NULL), ST_E_NO_SPACE, "no space");
     CHECK(m.nwrites == 0 && m.flushes == 0, "no space: zero writes");
@@ -479,7 +479,7 @@ static void t_zero_write_errors(void)
     /* generation exhausted */
     mem_init(&m, 32);
     seed_genesis(&m);
-    open_mem(&s, &m);
+    CHECK_EQ(open_mem(&s, &m), 0, "setup open");
     mem_clear_log(&m);
     s.root.commit.generation = UINT64_MAX;
     s.root.sb.generation = UINT64_MAX;
@@ -539,7 +539,7 @@ static void t_dedup_and_tail_reuse(void)
     mem_init(&m, 32);
     seed_genesis(&m);
     memset(m.units[4], 0xa5, SV1_UNIT);
-    open_mem(&s, &m);
+    CHECK_EQ(open_mem(&s, &m), 0, "setup open");
     const char *value = "committed payload";
     st_object o = one(value);
     CHECK_EQ(st_transact(&s, &o, 1, NULL, NULL), 0, "first commit");
@@ -572,7 +572,7 @@ static void t_dedup_and_tail_reuse(void)
     /* in-request duplicates: identical is folded, different kind conflicts */
     mem_init(&m, 32);
     seed_genesis(&m);
-    open_mem(&s, &m);
+    CHECK_EQ(open_mem(&s, &m), 0, "setup open");
     st_object two[2] = {one("same"), one("same")};
     CHECK_EQ(st_transact(&s, two, 2, NULL, NULL), 0, "identical duplicates fold");
     CHECK(s.root.n == 1, "one entry");
@@ -599,10 +599,10 @@ static void t_checkpoint_order(void)
     mem_init(&a, 32);
     seed_genesis(&a);
     mem_clone(&b, &a);
-    open_mem(&s, &a);
+    CHECK_EQ(open_mem(&s, &a), 0, "setup open");
     st_object o = one("checkpointed");
-    st_transact(&s, &o, 1, NULL, NULL);
-    open_mem(&s, &b);
+    CHECK_EQ(st_transact(&s, &o, 1, NULL, NULL), 0, "setup transaction");
+    CHECK_EQ(open_mem(&s, &b), 0, "setup open");
     mem_clear_log(&a);
     ncps = 0;
     CHECK_EQ(st_transact(&s, &o, 1, record_cp, NULL), 0, "hooked transact");
@@ -623,10 +623,10 @@ static void t_dedup_corruption_conflict(void)
     st_store s;
     mem_init(&m, 32);
     seed_genesis(&m);
-    open_mem(&s, &m);
+    CHECK_EQ(open_mem(&s, &m), 0, "setup open");
     st_object o = one("dedup target");
-    st_transact(&s, &o, 1, NULL, NULL);
-    open_mem(&s, &m);
+    CHECK_EQ(st_transact(&s, &o, 1, NULL, NULL), 0, "setup transaction");
+    CHECK_EQ(open_mem(&s, &m), 0, "setup open");
     mem_clear_log(&m);
     m.units[4][0] ^= 1;
     CHECK_EQ(st_transact(&s, &o, 1, NULL, NULL), ST_E_CORRUPT, "dedup corruption");
@@ -638,7 +638,7 @@ static void t_dedup_corruption_conflict(void)
     mem_free(&m);
 
     seed_generation_two(&m);
-    open_mem(&s, &m);
+    CHECK_EQ(open_mem(&s, &m), 0, "setup open");
     mem_clear_log(&m);
     sv1_entry *e = &ws.cat[s.root.cat_index][0];
     uint8_t id[32];
@@ -652,7 +652,7 @@ static void t_dedup_corruption_conflict(void)
 
     /* C only: same id, stored bytes differ (hash collision stand-in) */
     seed_generation_two(&m);
-    open_mem(&s, &m);
+    CHECK_EQ(open_mem(&s, &m), 0, "setup open");
     e = &ws.cat[s.root.cat_index][0];
     const char *other = "next generatioN";
     sv1_object_id(3, 1, (const uint8_t *)other, 15, e->object_id);
@@ -696,12 +696,12 @@ static void t_peer_condition(void)
     st_store s;
     mem_init(&m, 32);
     seed_genesis(&m);
-    open_mem(&s, &m);
+    CHECK_EQ(open_mem(&s, &m), 0, "setup open");
     CHECK(s.peer == ST_PEER_ZERO, "peer zero");
     st_object o = one("second generation");
-    st_transact(&s, &o, 1, NULL, NULL);
+    CHECK_EQ(st_transact(&s, &o, 1, NULL, NULL), 0, "setup transaction");
     CHECK(s.peer == ST_PEER_VALID, "peer valid after commit");
-    open_mem(&s, &m);
+    CHECK_EQ(open_mem(&s, &m), 0, "setup open");
     CHECK(s.state == ST_VALID && s.peer == ST_PEER_VALID, "reopen valid/valid");
     sv1_superblock nb;
     sv1_superblock_decode(m.units[1], SV1_UNIT, 1, &nb);

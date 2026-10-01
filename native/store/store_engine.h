@@ -142,7 +142,10 @@ typedef struct {
 
 /* Store::open. Never writes or flushes. Returns 0 or ST_M_*. */
 int st_open(st_store *s, const st_dev *dev, st_workspace *ws);
-/* Store::transact / transact_with_hook (hook may be NULL). */
+/* Store::transact / transact_with_hook (hook may be NULL).
+ * The caller must keep every objects[i].data buffer unchanged and alive until
+ * st_transact returns: payloads are hashed and then written in separate passes
+ * and are not copied. */
 int st_transact(st_store *s, const st_object *objects, size_t n, st_hook hook, void *arg);
 /* Store::read_object into out (cap bytes). On any error out is zeroed. */
 int st_read_object(st_store *s, const uint8_t id[32], uint8_t *out, size_t cap, size_t *len);

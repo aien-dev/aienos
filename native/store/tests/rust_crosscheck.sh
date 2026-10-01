@@ -18,7 +18,7 @@ tool=${RUST_STORE_TOOL:-$here/target/release/aienos-store-tool}
 if [ ! -x "$tool" ]; then
   echo "rust cross-check: Rust store tool not found at $tool"
   echo "STORE_RUST_CROSSCHECK: NOT_RUN"
-  exit 0
+  exit 2
 fi
 echo "rust cross-check: tool $tool"
 fail=0

@@ -51,6 +51,7 @@ t1_gate7_preflight|software|run_gate7_preflight|-|^GATE7_PREFLIGHT: PASS|TRUST-1
 t1_recovery_tools|software|run_recovery_tools|-|^RECOVERY_TOOLS: PASS|recovery initrd ships mount, EFI repair and boot-entry restore tools
 store_torn_slot_c|software|run_store_c|-|^TORN_SLOT_HOST_EMULATION: PASS|Store C reference torn-write test (host block-device emulation)
 store_native_c|software|run_store_c|-|^AIENOS_STORE_NATIVE: PASS$|C twin of the System Store v1 engine + sealed Store (host file-backed; golden vectors byte-identical to Rust)
+store_rust_crosscheck|software|run_store_rust_xcheck|2|^STORE_RUST_CROSSCHECK: PASS$|Rust aienos-store-tool opens C-written stores and reads back the same generation and objects (C to Rust direction; NOT_RUN when the Rust tool is not built)
 m5_crypto_crate|cargo|run_cargo_crypto|-|^test result: ok\.|cargo test -p aienos-crypto
 m5_kernel_crypto_security|cargo|run_cargo_kernel|-|^test result: ok\.|cargo test -p aienos-kernel --lib (crypto:: security::)
 t1_gate5_policy_sim|auto|run_gate5_sim|-|^TRUST1_GATE5_POLICY_SIM: PASS$|TRUST-1 Gate 5 policy simulator self-test
@@ -117,6 +118,15 @@ native_make_test() {
     make -C "${dir}" OUT="$(realpath --relative-to="${dir}" "${out}")" test
 }
 run_store_c()           { native_make_test store; }
+# Rust cross-check of C-written stores: needs a built aienos-store-tool
+# (RUST_STORE_TOOL, else target/release/aienos-store-tool); exit 2 = NOT_RUN.
+run_store_rust_xcheck() {
+    local dir="${repo_root}/native/store" out="${work_dir}/build/store-xcheck"
+    mkdir -p "${out}"
+    local rel; rel="$(realpath --relative-to="${dir}" "${out}")"
+    make -C "${dir}" OUT="${rel}" "${rel}/store_xcheck" || return 1
+    (cd "${dir}" && sh tests/rust_crosscheck.sh "./${rel}/store_xcheck" "${rel}")
+}
 run_cargo_crypto()      { (cd "${repo_root}" && cargo test -p aienos-crypto); }
 run_cargo_kernel()      { (cd "${repo_root}" && cargo test -p aienos-kernel --lib -- crypto:: security::); }
 run_gate5_sim()      { bash "${repo_root}/scripts/trust1_gate5_policy_sim.sh" selftest; }

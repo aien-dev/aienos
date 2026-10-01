@@ -219,6 +219,11 @@ int st_open(st_store *s, const st_dev *dev, st_workspace *ws)
 {
     if (!s || !dev || !ws)
         return ST_E_ARG;
+    /* No state from an earlier open (or an uninitialised caller struct) may
+     * survive: every successful return below sets state and peer itself. */
+    s->state = -1;
+    s->peer = -1;
+    s->poisoned = 1;
     uint64_t units = dev->region_units;
     if (units < 4 || units > SV1_MAX_REGION_UNITS)
         return ST_M_CORRUPT_RECOVERY_REQUIRED;
