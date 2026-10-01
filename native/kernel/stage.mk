@@ -18,7 +18,7 @@ STAGE_OUT ?= $(abspath $(STAGE_DIR)/../../target/stage)
 STAGE_OWN_SRCS := $(STAGE_DIR)/dev/pci.c $(STAGE_DIR)/dev/nvme_bind.c $(STAGE_DIR)/dev/nvme_shutdown.c $(STAGE_DIR)/dev/virtio_net.c \
                   $(STAGE_DIR)/dev/net_bind.c $(STAGE_DIR)/dev/net_udp.c $(STAGE_DIR)/dev/xhci_fence.c \
                   $(STAGE_DIR)/dev/devices.c $(STAGE_DIR)/svc/security.c $(STAGE_DIR)/svc/store_boot.c \
-                  $(STAGE_DIR)/svc/artifact_store.c
+                  $(STAGE_DIR)/svc/artifact_store.c $(STAGE_DIR)/svc/store_crash.c
 # Native modules, compiled unmodified.
 STAGE_NATIVE_SRCS := \
   $(STAGE_NATIVE)/disk/disk.c $(STAGE_NATIVE)/disk/disk_nvme.c \

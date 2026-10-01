@@ -5,7 +5,7 @@
 # It refuses a dirty tree, runs the C kernel QEMU scripts that exist
 # (scripts/qemu_ck_boot_test.sh, scripts/qemu_ck_store_test.sh,
 # scripts/qemu_ck_net_test.sh, scripts/qemu_ck_artifact_test.sh,
-# scripts/qemu_ck_smp_test.sh), and prints
+# scripts/qemu_ck_smp_test.sh, scripts/qemu_ck_store_crash_test.sh), and prints
 # one line per gate:
 #     AIENOS_CK_<gate>: PASS|FAIL|NOT_RUN [(reason)]
 # for M1 M3 SMMU NVME_SHUTDOWN P2_ARTIFACT M0_ROLLBACK M4_NVME M4_STORE M4_STORE_CRASH
@@ -42,6 +42,7 @@ set -uo pipefail
 #         net   -> verdict line from scripts/qemu_ck_net_test.sh
 #         artifact -> verdict line from scripts/qemu_ck_artifact_test.sh
 #         smp   -> verdict line from scripts/qemu_ck_smp_test.sh
+#         crash -> verdict line from scripts/qemu_ck_store_crash_test.sh
 #         missing -> NOT_RUN (MISSING_IMPLEMENTATION), never run, never PASS
 # ===========================================================================
 CK_GATE_TABLE='
@@ -53,7 +54,7 @@ P2_ARTIFACT|artifact|-
 M0_ROLLBACK|missing|C loader signatures, A/B, BootNext and rollback are parked (native/boot/README.md)
 M4_NVME|store|-
 M4_STORE|store|-
-M4_STORE_CRASH|missing|no C Store crash/kill campaign (4 KiB or 512 B) and no slot reuse (C Store is append-only)
+M4_STORE_CRASH|crash|-
 M4_CONTINUITY|missing|no continuity core (ADR 0016 agent identity and memory) in the C kernel
 M4_RECOVERY|missing|no Recovery Core (ADR 0006) in the C kernel
 ARGUS1_REVOKE|store|-
@@ -61,7 +62,7 @@ KEYBOARD|missing|no xHCI/USB HID keyboard driver in the C kernel
 NET|net|-
 SMP|smp|-
 '
-CHILDREN=(boot store net artifact smp)
+CHILDREN=(boot store net artifact smp crash)
 # ===========================================================================
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -104,6 +105,7 @@ set_default_children() {
         [net]="${repo_root}/scripts/qemu_ck_net_test.sh"
         [artifact]="${repo_root}/scripts/qemu_ck_artifact_test.sh"
         [smp]="${repo_root}/scripts/qemu_ck_smp_test.sh"
+        [crash]="${repo_root}/scripts/qemu_ck_store_crash_test.sh"
     )
 }
 
@@ -333,11 +335,11 @@ self_test() {
     }
     expect_missing_all() {
         local g
-        for g in P2_ARTIFACT M0_ROLLBACK M4_STORE_CRASH M4_CONTINUITY M4_RECOVERY KEYBOARD; do expect "${g}" NOT_RUN; done  # P2_ARTIFACT: no artifact child in A..G
+        for g in P2_ARTIFACT M0_ROLLBACK M4_STORE_CRASH M4_CONTINUITY M4_RECOVERY KEYBOARD; do expect "${g}" NOT_RUN; done  # P2_ARTIFACT: no artifact child in A..G; M4_STORE_CRASH: no crash child in A..J and R
     }
-    scenario() { # NAME BOOT_SCRIPT STORE_SCRIPT [NET_SCRIPT] [ARTIFACT_SCRIPT] [SMP_SCRIPT] (absent: missing)
+    scenario() { # NAME BOOT_SCRIPT STORE_SCRIPT [NET_SCRIPT] [ARTIFACT_SCRIPT] [SMP_SCRIPT] [CRASH_SCRIPT] (absent: missing)
         scen="$1"
-        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}" [smp]="${6:-${tmp}/kids/no_smp_child.sh}")
+        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}" [smp]="${6:-${tmp}/kids/no_smp_child.sh}" [crash]="${7:-${tmp}/kids/no_crash_child.sh}")
         run_children 2>/dev/null
         evaluate_table >"${tmp}/${scen}.out"
     }
@@ -345,7 +347,7 @@ self_test() {
     # A: all present gates PASS; the store child also claims PASS for gates
     # with no C implementation, which must stay NOT_RUN.
     scenario A "$(fake bootA 0 'PASS  x' 'AIENOS_CK_M3: PASS' 'AIENOS_CK_M1: PASS')" \
-        "$(fake storeA 0 'AIENOS_CK_M4_NVME: PASS' 'AIENOS_CK_M4_STORE: PASS' 'AIENOS_CK_ARGUS1_REVOKE: PASS (narrow)' \
+        "$(fake storeA 0 'AIENOS_CK_M4_NVME: PASS' 'AIENOS_CK_M4_STORE: PASS' 'AIENOS_CK_M4_STORE_CRASH: PASS' 'AIENOS_CK_ARGUS1_REVOKE: PASS (narrow)' \
             'AIENOS_CK_SMMU: PASS' 'AIENOS_CK_NVME_SHUTDOWN: PASS' 'AIENOS_CK_KEYBOARD: PASS' 'PASS  NVMe DMA granted confined' \
             'PASS  DMA outside the window faulted, page intact, controller still usable (differs)' 'PASS  NVMe DMA denied without an SMMU' \
             'PASS  NVMe DMA granted through the TEST-ONLY bypass')" \
@@ -407,6 +409,22 @@ self_test() {
     scenario J "$(fake bootJ 0 'AIENOS_CK_M1: PASS')" "$(fake storeJ 0 'AIENOS_CK_M4_NVME: PASS')" "" \
         "$(fake artJ 1 'FAIL  P25WX' 'AIENOS_CK_P2_ARTIFACT: FAIL')"
     expect P2_ARTIFACT FAIL
+    # O: the crash child (scripts/qemu_ck_store_crash_test.sh) PASS -> M4_STORE_CRASH PASS,
+    # and only that child's line counts (the store child's claim in A was ignored).
+    # P: crash child FAIL -> FAIL. Q: crash child prints PASS but exits 1 with no
+    # FAIL line -> FAIL. S: crash child quiet flag held (exit 3) -> NOT_RUN.
+    scenario O "$(fake bootO 0 'AIENOS_CK_M1: PASS')" "$(fake storeO 0 'AIENOS_CK_M4_NVME: PASS')" "" "" "" \
+        "$(fake crashO 0 'CK_STORE_CRASH_512B_QEMU: PASS' 'AIENOS_CK_M4_STORE_CRASH: PASS')"
+    expect M4_STORE_CRASH PASS; expect M4_CONTINUITY NOT_RUN; expect M4_RECOVERY NOT_RUN
+    scenario P "$(fake bootP 0 'AIENOS_CK_M1: PASS')" "$(fake storeP 0 'AIENOS_CK_M4_STORE_CRASH: PASS')" "" "" "" \
+        "$(fake crashP 1 'bs=4096 settle=3 cp=after_final_flush -> BAD' 'AIENOS_CK_M4_STORE_CRASH: FAIL')"
+    expect M4_STORE_CRASH FAIL
+    scenario Q "$(fake bootQ 0 'AIENOS_CK_M1: PASS')" "$(fake storeQ 0 'AIENOS_CK_M4_NVME: PASS')" "" "" "" \
+        "$(fake crashQ 1 'AIENOS_CK_M4_STORE_CRASH: PASS')"
+    expect M4_STORE_CRASH FAIL
+    scenario S "$(fake bootS 0 'AIENOS_CK_M1: PASS')" "$(fake storeS 0 'AIENOS_CK_M4_NVME: PASS')" "" "" "" \
+        "$(fake crashS 3 'NOT_RUN  quiet flag held' 'AIENOS_CK_M4_STORE_CRASH: NOT_RUN')"
+    expect M4_STORE_CRASH NOT_RUN
 
     # K: SMP child FAIL (a core never checked in) -> FAIL; L: quiet flag held
     # (exit 3) -> NOT_RUN; M: PASS line with an unexplained exit 2 -> FAIL;
@@ -441,7 +459,7 @@ self_test() {
         jq -e '.physical == "NOT_RUN" and (.gates | length) == 15 and .verdict == "NOT_ALL_GATES_PASS"
                and ([.gates[] | select(.id == "M1")][0].verdict == "PASS")
                and ([.gates[] | select(.id == "ARGUS1_REVOKE")][0].verdict == "FAIL")
-               and (.children | length) == 5 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
+               and (.children | length) == 6 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
             && ok "receipt is valid JSON (jq) with expected fields" || bad "receipt JSON invalid or fields wrong"
     else
         echo "SKIP  jq not installed; JSON validity not machine-checked"
@@ -460,7 +478,7 @@ self_test() {
         [[ -n "${g}" ]] || continue
         rows=$((rows + 1))
         case "${s}" in
-            boot|store|net|artifact|smp) [[ "${w}" == - ]] || tbad=1 ;;
+            boot|store|net|artifact|smp|crash) [[ "${w}" == - ]] || tbad=1 ;;
             missing) [[ -n "${w}" && "${w}" != - ]] || tbad=1 ;;
             *) tbad=1 ;;
         esac

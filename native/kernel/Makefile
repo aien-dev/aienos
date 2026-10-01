@@ -22,6 +22,11 @@
 #                        purpose: $(OUT)/full-test-xhci-<name>/ (only
 #                        scripts/qemu_ck_keyboard_test.sh --mutation; refused
 #                        with CK_HARDWARE_STAGING=1 or CK_QEMU_UNSAFE_DMA=1)
+#   make full CK_TEST_STORE_CRASH=1 [CK_TEST_STORE_CRASH_MUTANT=<name>]
+#                        TEST-ONLY Store crash hook image
+#                        $(OUT)/full-test-store-crash[-mutant-<name>]/ for
+#                        scripts/qemu_ck_store_crash_test.sh (M4_STORE_CRASH);
+#                        refused with CK_HARDWARE_STAGING / CK_QEMU_UNSAFE_DMA
 #   make owner-gen       host tool $(OUT)/host/ck_owner_gen
 #   make [full] CK_TEST_FWCFG_ARTIFACTS=1
 #                        TEST-ONLY: loader takes candidates from the QEMU fw_cfg
@@ -148,6 +153,41 @@ $(error CK_TEST_XHCI_MUTATION must be one of bm-left-on no-revoke grant-no-smmu 
 endif
 endif
 
+# TEST-ONLY Store crash hook (svc/store_crash.h; only
+# scripts/qemu_ck_store_crash_test.sh sets it): the Store stage reads a crash
+# plan from the scratch unit, runs on a volatile write cache and halts at the
+# planned checkpoint. Own OUT subdirectory; announces itself; never counts
+# toward a PASS of M4_STORE; refused with CK_HARDWARE_STAGING and
+# CK_QEMU_UNSAFE_DMA. CK_TEST_STORE_CRASH_MUTANT (only with it) builds a
+# deliberately broken Store the crash gate must catch:
+#   skip_root_flush      no flush between the commit record and the root write
+#   accept_bad_root_crc  superblock CRC never checked
+CK_TEST_STORE_CRASH ?=
+CK_TEST_STORE_CRASH_MUTANT ?=
+ifneq ($(strip $(CK_TEST_STORE_CRASH)),)
+ifneq ($(strip $(CK_TEST_STORE_CRASH)),1)
+$(error CK_TEST_STORE_CRASH must be empty or 1)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_TEST_STORE_CRASH (TEST-ONLY Store crash hook) cannot be combined with CK_HARDWARE_STAGING)
+endif
+ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),)
+$(error CK_TEST_STORE_CRASH (TEST-ONLY Store crash hook) cannot be combined with CK_QEMU_UNSAFE_DMA)
+endif
+endif
+ifneq ($(strip $(CK_TEST_STORE_CRASH_MUTANT)),)
+ifneq ($(strip $(CK_TEST_STORE_CRASH)),1)
+$(error CK_TEST_STORE_CRASH_MUTANT needs CK_TEST_STORE_CRASH=1 (TEST-ONLY))
+endif
+ifeq ($(strip $(CK_TEST_STORE_CRASH_MUTANT)),skip_root_flush)
+STORE_MUTANT_FLAGS := -DCK_TEST_STORE_MUTANT_SKIP_ROOT_FLUSH=1
+else ifeq ($(strip $(CK_TEST_STORE_CRASH_MUTANT)),accept_bad_root_crc)
+STORE_MUTANT_FLAGS := -DCK_TEST_STORE_MUTANT_ACCEPT_BAD_ROOT_CRC=1
+else
+$(error CK_TEST_STORE_CRASH_MUTANT must be skip_root_flush or accept_bad_root_crc)
+endif
+endif
+
 # Owner provisioning. The hardware staging image never embeds the TEST Store
 # keys, the TEST store uuid or the TEST machine id: it needs owner PUBLIC
 # material and the machine identity as files (format: tools/ck_owner_gen.c;
@@ -255,6 +295,15 @@ STAGE_DMA_FLAGS += -DCK_HARDWARE_STAGING=1 -I$(dir $(OWNER_HDR))
 else
 OWNER_HDR :=
 endif
+ifeq ($(strip $(CK_TEST_STORE_CRASH)),1)
+# Own OUT subdirectory: TEST hook objects never mix with a default image.
+ifneq ($(strip $(CK_TEST_STORE_CRASH_MUTANT)),)
+FULL_NAME := full-test-store-crash-mutant-$(strip $(CK_TEST_STORE_CRASH_MUTANT))
+else
+FULL_NAME := full-test-store-crash
+endif
+STAGE_DMA_FLAGS += -DCK_TEST_STORE_CRASH=1 $(STORE_MUTANT_FLAGS)
+endif
 FULL_OUT := $(OUT)/$(FULL_NAME)
 STAGE_KOBJ := $(OUT)/obj/stage-$(FULL_NAME)
 STAGE_HDRS := $(HDRS) $(wildcard $(NATIVE)/*/*.h $(NATIVE)/argus/bridge/*.h $(KDIR)/svc/compat/*.h)
@@ -358,6 +407,19 @@ define smp_check
 	fi
 endef
 
+# crash_check(elf): a full image built without CK_TEST_STORE_CRASH must carry
+# no Store crash hook code or strings; a TEST crash image must announce itself.
+define crash_check
+	@if [ "$(strip $(CK_TEST_STORE_CRASH))" = 1 ]; then \
+	  grep -aqF "TEST-ONLY Store crash hook image" $(1) || { echo "TEST crash image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
+	else \
+	  s=$$(grep -aoE "store_crash:|AIENCRSH|TEST-ONLY MUTANT" $(1) | sort -u | tr "\n" " "); \
+	  y=$$($(KNM) $(1) | grep -E " ck_store_crash_[a-z_]+$$" | tr "\n" " "); \
+	  if [ -n "$$s$$y" ]; then echo "default image carries the TEST Store crash hook: $$s$$y"; rm -f $(1); exit 1; fi; \
+	  echo "no Store crash hook code in $(1)"; \
+	fi
+endef
+
 # link_image(output elf, objects): refuses undefined symbols (weak stage
 # references excepted) and any relocation other than R_AARCH64_RELATIVE.
 define link_image
@@ -391,6 +453,7 @@ $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	$(call owner_check,$@)
 	$(call xhci_mut_check,$@)
 	$(call smp_check,$@)
+	$(call crash_check,$@)
 
 $(EFI): $(ELF)
 	$(call pe_image,$<,$@)

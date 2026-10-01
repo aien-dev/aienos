@@ -547,10 +547,15 @@ int st_transact(st_store *s, const st_object *objects, size_t n, st_hook hook, v
         return ST_E_IO;
     }
     hook_at(hook, arg, ST_CP_AFTER_COMMIT_RECORD);
+    /* CK_TEST_STORE_MUTANT_SKIP_ROOT_FLUSH: TEST-ONLY mutant of the C kernel
+     * crash gate (native/kernel make full CK_TEST_STORE_CRASH=1
+     * CK_TEST_STORE_CRASH_MUTANT=skip_root_flush); never defined otherwise. */
+#ifndef CK_TEST_STORE_MUTANT_SKIP_ROOT_FLUSH
     if (s->dev.flush(s->dev.ctx)) {
         s->poisoned = 1;
         return ST_E_IO;
     }
+#endif
     hook_at(hook, arg, ST_CP_AFTER_FIRST_FLUSH);
     if (dev_write(&s->dev, p.root.sb.slot_id, ws->plan_sb)) {
         s->poisoned = 1;
