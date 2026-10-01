@@ -12,13 +12,23 @@ const disk_dev *ck_dev_boot_disk(void) { return g_nvme.bound ? &g_nvme.disk : 0;
 
 void ck_dev_nvme_release(void)
 {
-    if (!g_nvme.pf || !g_nvme.bm_on) return;
+    if (!g_nvme.pf) return;
     g_nvme.bound = 0;
-    g_nvme.bm_on = 0;
-    if (pci_bus_master_off(g_nvme.pf) == 0)
-        ck_printf("dma_gate: nvme bus master revoked\n");
-    else
-        ck_printf("dma_gate: nvme bus master revoke FAILED (command register still has BME)\n");
+    if (g_nvme.bm_on) {
+        g_nvme.bm_on = 0;
+        if (pci_bus_master_off(g_nvme.pf) == 0)
+            ck_printf("dma_gate: nvme bus master revoked\n");
+        else
+            ck_printf("dma_gate: nvme bus master revoke FAILED (command register still has BME)\n");
+    }
+    if (g_nvme.confined) {
+        /* Bus mastering is off (or never came on); return the stream to
+         * abort as well, independently of the bus master state. */
+        int urc = ck_dma_unconfine(g_nvme.stream_id);
+        g_nvme.confined = 0;
+        ck_printf("smmu: nvme stream 0x%x %s (rc=%d)\n", g_nvme.stream_id,
+                  urc == 0 ? "returned to abort" : "abort FAILED", urc);
+    }
 }
 
 int ck_stage_devices(void)

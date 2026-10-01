@@ -58,4 +58,25 @@ int ck_spcr_parse(const void *spcr, struct ck_spcr *out);
  * -1 if the FADT is too short to carry the field. */
 int ck_fadt_arm_boot_arch(const void *fadt, uint16_t *flags);
 
+/* IORT (Arm IO Remapping Table): the first SMMUv3 node and the PCI root
+ * complex ID mappings that point at it (ported from the Rust
+ * aienos-kernel acpi::iort_smmuv3). */
+#define CK_IORT_MAX_MAPS 8
+struct ck_iort_map {
+    uint32_t input_base, id_count, output_base; /* id_count = number of IDs - 1 */
+};
+struct ck_iort_smmu {
+    uint64_t base;      /* SMMUv3 register base */
+    uint32_t node_off;  /* offset of the SMMUv3 node in the table */
+    uint32_t nmaps;
+    struct ck_iort_map map[CK_IORT_MAX_MAPS];
+};
+/* 1 found, 0 no SMMUv3 node, -1 malformed (bad signature, truncation, a
+ * node or mapping array outside the table, base 0, more than
+ * CK_IORT_MAX_MAPS mappings to the SMMU). */
+int ck_iort_parse(const void *iort, struct ck_iort_smmu *out);
+/* Stream ID for PCI requester id `rid` (bus<<8 | dev<<3 | fn); 0 ok, -1 if
+ * no mapping covers it. */
+int ck_iort_stream_id(const struct ck_iort_smmu *s, uint32_t rid, uint32_t *sid);
+
 #endif

@@ -19,13 +19,15 @@ Status vocabulary:
 
 C gates (one line each from `ck_gates.sh`): `M1` (from
 `scripts/qemu_ck_boot_test.sh`), `M4_NVME`, `M4_STORE`, `ARGUS1_REVOKE`
-(from `scripts/qemu_ck_store_test.sh`; rows 47-72, 76 and 96-98 were checked
-against its exact grep patterns), and the NOT_RUN gates
-`M3`, `SMMU`, `P2_ARTIFACT`, `M0_ROLLBACK`, `M4_STORE_CRASH`,
+`SMMU` (from `scripts/qemu_ck_store_test.sh`; rows 21-24b, 47-72, 76 and
+96-98 were checked against its exact grep patterns), and the NOT_RUN gates
+`M3`, `P2_ARTIFACT`, `M0_ROLLBACK`, `M4_STORE_CRASH`,
 `M4_CONTINUITY`, `M4_RECOVERY`, `KEYBOARD`.
 
-`M4_NVME` can PASS only through the QEMU-only unsafe DMA bypass build
-(`make full CK_QEMU_UNSAFE_DMA=1`); the SMMU-confined NVMe mode is NOT_RUN.
+`M4_NVME` and `SMMU` PASS in the SMMU-confined mode (default `make full`
+image, QEMU `iommu=smmuv3`). The unconfined bypass build
+(`make full CK_QEMU_UNSAFE_DMA=1`) is TEST-ONLY: one boot per geometry checks
+that it announces itself; it never counts toward a PASS. QEMU only.
 
 ## M1 boot: scripts/qemu_boot_test.sh -> CK `M1` (scripts/qemu_ck_boot_test.sh)
 
@@ -66,12 +68,25 @@ toward `AIENOS_CK_M1`.
 
 ## SMMU: scripts/qemu_smmu_test.sh (= keyboard test, SMMU on, bypass forced off) -> CK `SMMU`
 
+The Rust gate proves the SMMU on the xHCI stream (keyboard). The C kernel has
+no xHCI driver, so the C `SMMU` gate proves the same properties on the NVMe
+stream instead (boots 1-4 of `scripts/qemu_ck_store_test.sh`, default
+`make full` image, QEMU `iommu=smmuv3`, both geometries). Every row below
+therefore DIFFERS in the device named; the property checked is the same.
+The C SMMU service is `core/smmu.c` (port of `crates/aienos-kernel/src/smmu.rs`:
+linear stream table, stage 1 only, global abort set first and never cleared,
+every stream in abort until installed) plus `core/smmu_svc.c` (IORT lookup,
+per-stream page tables, `ck_dma_confine` / `ck_dma_unconfine` /
+`ck_dma_faults` in ck.h); host tests in `tests/test_smmu.c`.
+
 | # | Rust check (pattern) | CK gate | Status |
 | --- | --- | --- | --- |
-| 21 | IORT stream configured (`smmu: enabled`) | SMMU | NOT_RUN (MISSING_IMPLEMENTATION: no IORT/SMMUv3 service in ck.h) |
-| 22 | DMA window translated (`smmu_dma_window: xhci only, translation active`) | SMMU | NOT_RUN (MISSING_IMPLEMENTATION: no SMMU) |
-| 23 | DMA granted only as confined (`dma_gate: xhci granted (Confined), bus master on`) | SMMU | NOT_RUN (MISSING_IMPLEMENTATION: no SMMU; C NVMe DMA exists only via the QEMU-only unsafe bypass) |
-| 24 | no unsafe bypass in the image (`UNSAFE DMA BYPASS` absent) | SMMU | NOT_RUN (MISSING_IMPLEMENTATION: no SMMU gate; the default `make full` image does pass the same absence check, `UNSAFE NVME DMA BYPASS` absent, in boot 5 of qemu_ck_store_test.sh, see row 56) |
+| 21 | IORT stream configured (`smmu: enabled`) | SMMU | DIFFERS (same prefix; C: `smmu: enabled base=.. stream_id=..` for the NVMe stream) |
+| 22 | DMA window translated (`smmu_dma_window: xhci only, translation active`) | SMMU | DIFFERS (C: `smmu_dma_window: nvme only, translation active iova=.. len=.. rid=..`) |
+| 23 | DMA granted only as confined (`dma_gate: xhci granted (Confined), bus master on`) | SMMU | DIFFERS (C: `dma_gate: nvme granted (Confined), bus master on`; absent `dma_gate: nvme granted (UnsafeBypass)`) |
+| 24 | no unsafe bypass in the image (`UNSAFE DMA BYPASS` absent) | SMMU | DIFFERS (C: `UNSAFE NVME DMA BYPASS` absent in boots 1-5) |
+| 24a | (C only) DMA outside the window is faulted | SMMU | C only: the controller is pointed at a page outside its window; `smmu_negative: refused dma outside window ... faults>=1 type=0x10 (F_TRANSLATION) sid=<nvme> addr=<that page> page=intact ... recovery_read=ok` |
+| 24b | (C only) stream returned to abort after use | SMMU | C only: `smmu: nvme stream 0x.. returned to abort (rc=0)` after `dma_gate: nvme bus master revoked` |
 
 ## SEED-0A keyboard: scripts/qemu_keyboard_test.sh (SMMU=1 and SMMU=0) -> CK `KEYBOARD`
 
@@ -112,15 +127,17 @@ toward `AIENOS_CK_M1`.
 
 ## M4 NVMe read: scripts/qemu_nvme_test.sh (SMMU=1 and SMMU=0) -> CK `M4_NVME`
 
-The C NVMe path (native/disk via the stage `devices`) does I/O only in the
-QEMU-only unsafe DMA bypass image (`make full CK_QEMU_UNSAFE_DMA=1`). The
-default `make full` image denies NVMe DMA (no SMMU) and is checked as the
-fail-closed case (boot 5). The Rust gate never runs a bypass build. The C
+The C NVMe path (native/disk via the stage `devices`) does I/O SMMU-confined:
+the default `make full` image with QEMU `iommu=smmuv3` (boots 1-4). The same
+image without an SMMU denies NVMe DMA and is checked as the fail-closed case
+(boot 5). The TEST-ONLY bypass image (`make full CK_QEMU_UNSAFE_DMA=1`) is
+booted once more (boot 6) only to check its warnings; the Rust gate never
+runs a bypass build. The C
 observables are free-form lines, not the Rust `NVME_*_QEMU: PASS` markers.
 qemu_ck_store_test.sh runs every check on a 512 B and a 4096 B namespace.
 
-**M4_NVME note:** a PASS of `M4_NVME` means the QEMU-only unsafe DMA bypass
-build passed. The SMMU-confined NVMe mode is NOT_RUN (row 53). ck_gates.sh
+**M4_NVME note:** a PASS of `M4_NVME` means the SMMU-confined NVMe mode
+passed in QEMU (row 53); an SMMU check failure fails `M4_NVME` too. ck_gates.sh
 prints this on the PASS line and records `nvme_dma_mode` in the receipt.
 
 | # | Rust check (pattern) | CK gate | Status |
@@ -131,11 +148,11 @@ prints this on the PASS line and records `nvme_dma_mode` in the receipt.
 | 50 | sentinel LBA read with exact SHA-256 (`NVME_READ_QEMU: PASS (... sha256=..)`) | M4_NVME | DIFFERS (C: `nvme: read lba=0 blocks=1 ok`; no host-planted sentinel hash, weaker) |
 | 51 | read past namespace end rejected (`NVME_BOUNDS_QEMU: PASS`) | M4_NVME | DIFFERS (C: `nvme: bounds read lba=N -> refused` with N = block_count) |
 | 52 | device-reported command error surfaced (`NVME_ERROR_QEMU: PASS`) | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no C error-injection probe) |
-| 53 | SMMU mode: `smmu: enabled`, `smmu_dma_window: nvme only`, `dma_gate: nvme granted (Confined)` | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no SMMU service in the C core; **the SMMU-confined NVMe mode is NOT_RUN**, M4_NVME passes only through the QEMU-only unsafe bypass build) |
+| 53 | SMMU mode: `smmu: enabled`, `smmu_dma_window: nvme only`, `dma_gate: nvme granted (Confined)` | M4_NVME | IDENTICAL prefixes (C appends base/stream/window values), boots 1-4, both geometries; plus the C-only out-of-window fault check (row 24a) |
 | 54 | fail-closed mode: `dma_gate: nvme denied (NoSmmu)...`, `nvme: unavailable (SMMU DMA isolation not active)`, no grant/identify/read | M4_NVME | DIFFERS (boot 5, default `make full` image: the two lines and absent `dma_gate: nvme granted` are IDENTICAL; "no identify" is absent `nvme: identify`; no explicit no-read check, but Store is refused `proof=io step="no boot disk"` and the image sha256 is unchanged) |
-| 55 | bus master revoked after the phase (`dma_gate: nvme bus master revoked`) | M4_NVME | IDENTICAL (same line, bypass image, both geometries) |
-| 56 | no `UNSAFE NVME DMA BYPASS` in the image | M4_NVME | IDENTICAL for the safe image (boot 5 checks `UNSAFE NVME DMA BYPASS` absent). The bypass image instead must print `WARNING: UNSAFE NVME DMA BYPASS BUILD`, `... ACTIVE` and `dma_gate: nvme granted (UnsafeBypass)` (same text as the Rust bypass build, which verify_all never runs); ck_gates.sh records nvme_dma_mode in the receipt |
-| 57 | no panic or fault | M4_NVME | IDENTICAL (`report_kind: (panic\|fault)` absent, via scripts/lib_ck_m1_checks.sh on every one of the 5 boots per geometry) |
+| 55 | bus master revoked after the phase (`dma_gate: nvme bus master revoked`) | M4_NVME | IDENTICAL (same line, confined boots 1-4 and bypass boot 6, both geometries) |
+| 56 | no `UNSAFE NVME DMA BYPASS` in the image | M4_NVME | IDENTICAL for the default image (boots 1-5 check `UNSAFE NVME DMA BYPASS` absent). The TEST-ONLY bypass image (boot 6) instead must print `WARNING: UNSAFE NVME DMA BYPASS BUILD`, `... ACTIVE` and `dma_gate: nvme granted (UnsafeBypass)` (same text as the Rust bypass build, which verify_all never runs); ck_gates.sh records nvme_dma_mode in the receipt |
+| 57 | no panic or fault | M4_NVME | IDENTICAL (`report_kind: (panic\|fault)` absent, via scripts/lib_ck_m1_checks.sh on every one of the 6 boots per geometry) |
 
 ## M4 NVMe write/flush: scripts/qemu_nvme_rw_test.sh -> CK `M4_NVME` / `M4_STORE`
 
@@ -146,7 +163,7 @@ prints this on the PASS line and records `nvme_dma_mode` in the receipt.
 | 60 | write past namespace end rejected (`NVME_WRITE_BOUNDS_QEMU: PASS`) | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no C write-bounds probe line; host tests cover it) |
 | 61 | write + flush + read-back exact (`NVME_WRITE_QEMU`, `NVME_FLUSH_QEMU`, `NVME_DURABILITY_QEMU` with sha256) | M4_NVME | DIFFERS (C: `nvme: rw probe lba=N bytes=4096 write+flush+readback match` on the scratch unit, restored afterwards; no sha256 printed) |
 | 62 | invalid-namespace write error surfaced (`NVME_WRITE_ERROR_QEMU: PASS`) | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no C error probe) |
-| 63 | SMMU confined grant + revoke | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no SMMU) |
+| 63 | SMMU confined grant + revoke | M4_NVME | DIFFERS (confined grant row 53, `dma_gate: nvme bus master revoked`, then `smmu: nvme stream .. returned to abort`; the rw probe runs inside the confined window) |
 | 64 | host read-back of the image after power off equals written bytes | M4_STORE | DIFFERS (C: durability shown by Store boot_count read back across 3 boots, not a host dd of one LBA) |
 | 65 | boot 2 observes the persisted pattern (`NVME_DURABILITY_QEMU: PASS (persisted lba=..)`) | M4_STORE | DIFFERS (C: `store: opened generation= boot_count=` then `committed boot_count=N+1` on the next boot) |
 | 66 | fail-closed: no write/flush/durability markers without DMA | M4_NVME | DIFFERS (safe image, boot 5: absent `nvme: identify`, Store refused `proof=io`, image sha256 unchanged; no explicit absent rw-probe check) |

@@ -203,3 +203,90 @@ int ck_acpi_spans(uint64_t rsdp, void (*fn)(uint64_t lo, uint64_t hi, void *ctx)
     }
     return n;
 }
+
+/* IORT walk: calls back for every node after checking its header, length
+ * and ID-mapping array bounds. -1 on any malformed node. */
+#define IORT_NODE_HDR 16u
+#define IORT_NODE_ROOT_COMPLEX 2u
+#define IORT_NODE_SMMUV3 4u
+#define IORT_MAP_BYTES 20u
+#define IORT_TABLE_HDR 48u /* SDT header + node count, node array offset, reserved */
+
+static int iort_nodes(const uint8_t *t, uint32_t len, uint32_t *count, uint32_t *first)
+{
+    if (!sig_eq(t, "IORT", 4) || len < IORT_TABLE_HDR)
+        return -1;
+    *count = rd32(t + 36);
+    *first = rd32(t + 40);
+    return 0;
+}
+
+int ck_iort_parse(const void *iort, struct ck_iort_smmu *out)
+{
+    const uint8_t *t = iort;
+    struct ck_iort_smmu s = { 0 };
+    uint32_t len = rd32(t + 4), count, at;
+    if (iort_nodes(t, len, &count, &at))
+        return -1;
+    int found = 0;
+    for (int pass = 0; pass < 2; pass++) {
+        uint32_t off = at;
+        for (uint32_t i = 0; i < count; i++) {
+            if (off < IORT_TABLE_HDR || off > len || len - off < IORT_NODE_HDR)
+                return -1;
+            const uint8_t *n = t + off;
+            uint8_t type = n[0];
+            uint32_t nlen = (uint32_t)n[1] | (uint32_t)n[2] << 8;
+            if (nlen < IORT_NODE_HDR || nlen > len - off)
+                return -1;
+            uint32_t mcount = rd32(n + 8), moff = rd32(n + 12);
+            if (mcount) {
+                if (mcount > nlen / IORT_MAP_BYTES || moff < IORT_NODE_HDR || moff > nlen ||
+                    (uint64_t)mcount * IORT_MAP_BYTES > (uint64_t)(nlen - moff))
+                    return -1;
+            }
+            if (pass == 0 && type == IORT_NODE_SMMUV3 && !found) {
+                if (nlen < 24)
+                    return -1;
+                s.base = rd64(n + 16);
+                if (!s.base)
+                    return -1;
+                s.node_off = off;
+                found = 1;
+            }
+            if (pass == 1 && type == IORT_NODE_ROOT_COMPLEX) {
+                for (uint32_t m = 0; m < mcount; m++) {
+                    const uint8_t *e = n + moff + m * IORT_MAP_BYTES;
+                    if (rd32(e + 12) != s.node_off)
+                        continue;
+                    if (s.nmaps >= CK_IORT_MAX_MAPS)
+                        return -1;
+                    s.map[s.nmaps].input_base = rd32(e);
+                    s.map[s.nmaps].id_count = rd32(e + 4);
+                    s.map[s.nmaps].output_base = rd32(e + 8);
+                    s.nmaps++;
+                }
+            }
+            off += nlen;
+        }
+        if (pass == 0 && !found)
+            return 0;
+    }
+    *out = s;
+    return 1;
+}
+
+int ck_iort_stream_id(const struct ck_iort_smmu *s, uint32_t rid, uint32_t *sid)
+{
+    for (uint32_t i = 0; i < s->nmaps; i++) {
+        const struct ck_iort_map *m = &s->map[i];
+        if (rid < m->input_base)
+            continue;
+        uint32_t rel = rid - m->input_base;
+        if (rel > m->id_count || m->output_base + rel < m->output_base)
+            continue;
+        *sid = m->output_base + rel;
+        return 0;
+    }
+    return -1;
+}
