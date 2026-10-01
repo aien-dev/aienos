@@ -1,0 +1,19 @@
+[package]
+name = "aienos-explain"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Host-side explanation bridge: grounded, bounded paths through explicit evidence graphs (Cortex, agent branches, RSI)"
+
+[dependencies]
+aienos-crypto = { path = "../aienos-crypto" }
+aienos-cortex = { workspace = true }
+aienos-agent-state = { workspace = true }
+serde = { version = "1.0", features = ["derive", "std"] }
+serde_json = { version = "1.0", features = ["std"] }
+
+[[bin]]
+name = "aienos-explain"
+path = "src/main.rs"

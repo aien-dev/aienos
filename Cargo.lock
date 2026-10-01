@@ -98,6 +98,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aienos-explain"
+version = "0.1.0"
+dependencies = [
+ "aienos-agent-state",
+ "aienos-cortex",
+ "aienos-crypto",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "aienos-kernel"
 version = "0.1.0"
 dependencies = [
