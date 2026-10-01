@@ -27,6 +27,7 @@ const char *vnet_err_name(vnet_err e)
     case VNET_E_FULL: return "Full";
     case VNET_E_DEVICE: return "HostileDevice";
     case VNET_E_BROKEN: return "Broken";
+    case VNET_E_NO_ACCESS_PLATFORM: return "NoAccessPlatform";
     }
     return "Unknown";
 }
@@ -193,10 +194,17 @@ static vnet_err setup_queue(vnet_dev *d, uint16_t index, uint32_t want)
 vnet_err vnet_init(vnet_dev *d, const vnet_ops *ops, const virtio_pci_caps *caps,
                    void *mem, uint64_t dma, size_t mem_len, uint16_t qsize)
 {
+    return vnet_init_flags(d, ops, caps, mem, dma, mem_len, qsize, 0);
+}
+
+vnet_err vnet_init_flags(vnet_dev *d, const vnet_ops *ops, const virtio_pci_caps *caps, void *mem, uint64_t dma,
+                         size_t mem_len, uint16_t qsize, uint32_t flags)
+{
     if (!d) return VNET_E_ARG;
     memset(d, 0, sizeof *d);
     d->broken = 1; /* until init succeeds */
-    if (!ops || !ops->read || !ops->write || !ops->notify || !caps || !mem || !pow2_ok(qsize))
+    if ((flags & ~VNET_INIT_REQUIRE_ACCESS_PLATFORM) || !ops || !ops->read || !ops->write || !ops->notify || !caps ||
+        !mem || !pow2_ok(qsize))
         return VNET_E_ARG;
     /* required windows: common (whole structure), notify (+ multiplier), isr, device */
     if (!caps->common_cfg.present || caps->common_cfg.length < VNET_CC_LEN || !caps->notify_cfg.present ||
@@ -229,7 +237,12 @@ vnet_err vnet_init(vnet_dev *d, const vnet_ops *ops, const virtio_pci_caps *caps
     wr(d, VNET_WIN_COMMON, VNET_CC_DFSELECT, 4, 1);
     offered |= (uint64_t)rd(d, VNET_WIN_COMMON, VNET_CC_DF, 4) << 32;
     if (!(offered >> VNET_F_VERSION_1 & 1)) return fail(d, VNET_E_NO_VERSION_1);
-    uint64_t accept = (1ull << VNET_F_VERSION_1) | (offered & (1ull << VNET_F_MAC));
+    /* Fail closed: a caller that confines DMA with an IOMMU must not run a
+     * device that would DMA around it. */
+    if ((flags & VNET_INIT_REQUIRE_ACCESS_PLATFORM) && !(offered >> VNET_F_ACCESS_PLATFORM & 1))
+        return fail(d, VNET_E_NO_ACCESS_PLATFORM);
+    uint64_t accept =
+        (1ull << VNET_F_VERSION_1) | (offered & ((1ull << VNET_F_MAC) | (1ull << VNET_F_ACCESS_PLATFORM)));
     if (accept >> VNET_F_MAC & 1) {
         if (caps->device_cfg.length < 6) return fail(d, VNET_E_CAPS);
     }

@@ -288,7 +288,9 @@ static void test_init(void)
     sim_reset(&s, region, DMA, sizeof region);
     s.dev_features = ~0ull; /* offers everything, incl. packed, indirect, ACCESS_PLATFORM */
     EQ(bring_up(&d, &s, 256), VNET_OK);
-    EQ(s.drv_features, (1ull << VNET_F_VERSION_1) | (1ull << VNET_F_MAC));
+    /* ACCESS_PLATFORM is accepted when offered (virtio 1.x 6.1 SHOULD) */
+    EQ(s.drv_features, (1ull << VNET_F_VERSION_1) | (1ull << VNET_F_MAC) | (1ull << VNET_F_ACCESS_PLATFORM));
+    EQ(d.features, s.drv_features);
     EQ(s.status, VNET_S_ACK | VNET_S_DRIVER | VNET_S_FEATURES_OK | VNET_S_DRIVER_OK);
     CHECK(d.has_mac && d.mac[0] == 0x52 && d.mac[5] == 0x57);
     EQ(d.q[0].size, 256); EQ(d.q[1].size, 256);
@@ -360,9 +362,67 @@ static void test_init(void)
     bad = c; bad.device_cfg.present = 0;      EQ(vnet_init(&d, &o, &bad, region, DMA, sizeof region, 16), VNET_E_CAPS);
     bad = c; bad.device_cfg.length = 4;       EQ(vnet_init(&d, &o, &bad, region, DMA, sizeof region, 16), VNET_E_CAPS);
     EQ(s.notifies[0] + s.notifies[1], 0);
+    EQ(vnet_init_flags(&d, &o, &c, region, DMA, sizeof region, 16, 2), VNET_E_ARG); /* unknown flag */
+    EQ(s.notifies[0] + s.notifies[1], 0);
 }
 
-static void test_datapath(void)
+/* VIRTIO_F_ACCESS_PLATFORM (bit 33): accepted when offered; with
+ * VNET_INIT_REQUIRE_ACCESS_PLATFORM a device that does not offer it is refused
+ * before FEATURES_OK (fail closed: it would DMA around the IOMMU). */
+static void test_access_platform(void)
+{
+    sim s; vnet_dev d;
+    vnet_ops o = sim_ops; o.ctx = &s;
+    virtio_pci_caps c;
+    EQ(virtio_pci_parse_caps(qemu_modern, 256, &c), VIRTIO_PCI_OK);
+    const uint64_t ap = 1ull << VNET_F_ACCESS_PLATFORM, v1 = 1ull << VNET_F_VERSION_1, mac = 1ull << VNET_F_MAC;
+
+    /* not offered, not required: works as before, bit not written */
+    sim_reset(&s, region, DMA, sizeof region);
+    EQ(vnet_init_flags(&d, &o, &c, region, DMA, sizeof region, 16, 0), VNET_OK);
+    EQ(s.drv_features, v1 | mac); CHECK(!(d.features & ap));
+
+    /* offered, not required: accepted */
+    sim_reset(&s, region, DMA, sizeof region);
+    s.dev_features = v1 | mac | ap;
+    EQ(vnet_init(&d, &o, &c, region, DMA, sizeof region, 16), VNET_OK);
+    EQ(s.drv_features, v1 | mac | ap); CHECK(d.features & ap);
+
+    /* offered and required: accepted, device runs */
+    sim_reset(&s, region, DMA, sizeof region);
+    s.dev_features = v1 | mac | ap;
+    EQ(vnet_init_flags(&d, &o, &c, region, DMA, sizeof region, 16, VNET_INIT_REQUIRE_ACCESS_PLATFORM), VNET_OK);
+    EQ(s.drv_features, v1 | mac | ap); EQ(d.features, v1 | mac | ap); CHECK(!d.broken);
+    EQ(s.status, VNET_S_ACK | VNET_S_DRIVER | VNET_S_FEATURES_OK | VNET_S_DRIVER_OK);
+    uint8_t f[60] = {0};
+    EQ(vnet_tx(&d, f, sizeof f), VNET_OK);
+    EQ(sim_tx(&s), 1);
+
+    /* required but not offered (QEMU without iommu_platform=on): refused before
+     * FEATURES_OK, FAILED set, no feature bits written, no queue, no notify */
+    const uint64_t offers[] = {v1 | mac, v1, ~0ull & ~ap};
+    for (size_t i = 0; i < sizeof offers / sizeof offers[0]; i++) {
+        sim_reset(&s, region, DMA, sizeof region);
+        s.dev_features = offers[i];
+        EQ(vnet_init_flags(&d, &o, &c, region, DMA, sizeof region, 16, VNET_INIT_REQUIRE_ACCESS_PLATFORM),
+           VNET_E_NO_ACCESS_PLATFORM);
+        CHECK(d.broken);
+        CHECK(s.status & VNET_S_FAILED);
+        CHECK(!(s.status & (VNET_S_FEATURES_OK | VNET_S_DRIVER_OK)));
+        EQ(s.drv_features, 0);
+        EQ(s.q[0].enable + s.q[1].enable, 0);
+        EQ(s.notifies[0] + s.notifies[1], 0);
+        EQ(vnet_tx(&d, f, sizeof f), VNET_E_BROKEN);
+    }
+    /* a legacy-only device is still refused as NoVersion1 first */
+    sim_reset(&s, region, DMA, sizeof region);
+    s.dev_features = mac | ap;
+    EQ(vnet_init_flags(&d, &o, &c, region, DMA, sizeof region, 16, VNET_INIT_REQUIRE_ACCESS_PLATFORM),
+       VNET_E_NO_VERSION_1);
+    CHECK(strcmp(vnet_err_name(VNET_E_NO_ACCESS_PLATFORM), "NoAccessPlatform") == 0);
+}
+
+static void test_datapath)(void)
 {
     sim s; vnet_dev d;
     sim_reset(&s, region, DMA, sizeof region);
@@ -526,6 +586,10 @@ int main(void)
     printf("VIRTIO_PCI_QEMU822_CAPS: %s (real QEMU 8.2.2 virtio-net-pci config dumps, 0x1000 + 0x1041)\n",
            caps_ok ? "PASS" : "FAIL");
     test_init();
+    int ap_before = failures;
+    test_access_platform();
+    printf("VNET_ACCESS_PLATFORM_SIM: %s (bit 33 accepted when offered; required + not offered refused before FEATURES_OK)\n",
+           failures == ap_before ? "PASS" : "FAIL");
     test_datapath();
     test_hostile();
     test_m6a_udp();

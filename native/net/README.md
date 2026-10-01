@@ -43,7 +43,7 @@ control-transport stub. No Rust, no Python, no heap, no outside library.
 
 ## Not claimed (deferred, with the dependency)
 
-- Physical binding (real NIC, interrupts, enforced DMA): the virtio-net driver is bound in the C kernel by `native/kernel/dev/net_bind.c` (#200 d75a266 attach and split virtqueue driver, #203 9807281 kernel hook, NET gate PASS in QEMU only). It is polled (no IRQs), uses TEST keys, and the SMMU window is programmed but NOT enforced because VIRTIO_F_ACCESS_PLATFORM is not negotiated. No physical NIC driver exists.
+- Physical binding (real NIC, interrupts): the virtio-net driver is bound in the C kernel by `native/kernel/dev/net_bind.c` (#200 d75a266 attach and split virtqueue driver, #203 9807281 kernel hook, NET gate PASS in QEMU only). It is polled (no IRQs) and uses TEST keys. Lane 31 negotiates VIRTIO_F_ACCESS_PLATFORM, so the NIC DMA goes through the SMMU window and the gate shows an out-of-window DMA refused, in QEMU only. No physical NIC driver exists.
 - Production identity and keys: needs M5 (key hierarchy, TRUST-1). The M6-B
   secure transport below exists as hosted code but runs on TEST keys only. The stub refuses every identity kind except TEST, whose key is
   derived from a public label and so protects nothing against an attacker.
@@ -213,7 +213,10 @@ own C-only pin, and `make diff-check` proves the two differ only on records
 the reference refused as `InvalidRegion` (1,622 of 200,000).
 
 **The data path** (`aienos_virtio_net`): reset, ACK, DRIVER; VERSION_1
-required, MAC accepted if offered, every other feature declined; FEATURES_OK
+required, MAC and ACCESS_PLATFORM (bit 33) accepted if offered, every other
+feature declined; `vnet_init_flags(..., VNET_INIT_REQUIRE_ACCESS_PLATFORM)`
+refuses a device that does not offer ACCESS_PLATFORM before FEATURES_OK (the C
+kernel uses it, so a NIC that would DMA around the SMMU never runs); FEATURES_OK
 read back; queue 0 RX and queue 1 TX, power-of-two size up to 256 (downsized to
 what the device offers); notify offset checked against the notify window; all
 RX buffers posted before DRIVER_OK; polled (no MSI-X vector, NO_INTERRUPT).
@@ -234,6 +237,10 @@ device broken (sticky) until re-init.
   queue, queue size 0/1, pre-enabled queue, notify offset outside the window,
   unstable config generation, missing/short caps, small/misaligned/wrapping
   memory. No notify before DRIVER_OK.
+- `VNET_ACCESS_PLATFORM_SIM`: bit 33 accepted when offered (with and without the
+  flag); with the flag and no offer (three offer sets) refused as
+  `NoAccessPlatform` with FAILED set, no feature bits written, no queue enabled
+  and no notify; unknown flags refused.
 - Data path: TX full/reclaim, max-size frames, 70,000 frames each way so the
   16-bit ring indices wrap; the device model checks every descriptor it reads.
 - Hostile device: 9 directed cases plus a 2,000-round seeded fuzz of forged
@@ -248,7 +255,9 @@ DMA or IOMMU/SMMU mapping, no interrupts, no QEMU slirp round trip, no
 cache-coherence or MMIO ordering on real hardware, no physical NIC. The only
 real-QEMU evidence is the static config space. A real QEMU end-to-end needs a
 guest kernel that drives the device; this module is hosted and the kernel
-binding belongs to the native kernel lane.
+binding belongs to the native kernel lane. (Lane 31: the C kernel binding,
+`native/kernel/dev/net_bind.c`, now runs this driver in QEMU behind the smmuv3
+vIOMMU with ACCESS_PLATFORM required; see gate NET, GATES.md rows 102-109.)
 
 **Kernel hook (for the native kernel).** After `ck_virtio_net_probe` accepts
 the caps: add `aienos_virtio_net.c` to the stage sources, enable memory space

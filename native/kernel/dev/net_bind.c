@@ -11,6 +11,8 @@
 #define UDP_TRIES 5u
 #define UDP_WAIT_US 1000000u
 #define RESET_WAIT_US 100000u
+#define PROBE_WAIT_US 3000000u
+#define CANARY_BYTE 0x5au
 
 typedef struct {
     const pci_func *pf;
@@ -150,10 +152,11 @@ static int wait_for(ck_vnet *n, ck_net_peer *p, ck_net_kind want, uint32_t us, s
     return CK_NET_IGNORED;
 }
 
-static int roundtrip(ck_vnet *n)
+static int roundtrip(ck_vnet *n, ck_net_peer *pp)
 {
     ck_net_peer p;
     memset(&p, 0, sizeof p);
+    memset(pp, 0, sizeof *pp);
     memcpy(p.mac.b, n->dev.mac, 6);
     static const net_ipv4 me = {{10, 0, 2, 15}}, gw = {{10, 0, 2, 2}};
     p.ip = me;
@@ -220,7 +223,100 @@ static int roundtrip(ck_vnet *n)
         return CK_NET_E_RX;
     }
     ck_printf("net: udp round trip ok tx_reclaimed=%u rx_frames=%u\n", reclaimed, frames);
+    *pp = p;
     return CK_NET_OK;
+}
+
+/* SMMU negative test (net_bind.h). After a good round trip, every RX
+ * descriptor the device still holds is pointed at a pattern-filled page
+ * that is NOT in the stream's window (and mapped by no other entry of this
+ * stream's stage-1 table), then one datagram is sent (TX buffer inside the
+ * window) so the helper's reply makes the device write an RX frame. Pass:
+ * the SMMU event queue holds an F_TRANSLATION record for this stream at
+ * that page, the page keeps its pattern, and the positive round trip before
+ * it raised no fault at all. How the device model reacts is reported, not
+ * judged: QEMU 8.2 either refuses the descriptor (virtio "bogus descriptor",
+ * NEEDS_RESET) or maps it through its internal bounce buffer and completes
+ * the RX, the write-back of which the SMMU refuses as well (rx_completed,
+ * device_status). recovery() below resets and re-inits the device either way. */
+static int smmu_negative_test(ck_vnet *n, const ck_net_peer *p, uint64_t win_lo, uint64_t win_len)
+{
+    static volatile uint8_t *canary; /* ck_dma_alloc is never freed: once */
+    static uint64_t cphys;
+    if (!canary) canary = ck_dma_alloc(4096, 4096, &cphys);
+    if (!canary) {
+        ck_printf("net_smmu_negative: FAIL (no canary page)\n");
+        return -1;
+    }
+    if (!(cphys + 4096u <= win_lo || cphys >= win_lo + win_len)) {
+        ck_printf("net_smmu_negative: FAIL (canary page 0x%llx inside the window)\n", (unsigned long long)cphys);
+        return -1;
+    }
+    for (uint32_t i = 0; i < 4096u; i++) canary[i] = CANARY_BYTE;
+    struct ck_dma_fault fl = {0, 0, 0, 0};
+    int before = ck_dma_faults(n->stream_id, 0); /* faults raised by the positive round trip (want 0) */
+
+    vnet_queue *q = &n->dev.q[VNET_RX_QUEUE];
+    unsigned redirected = 0;
+    for (uint16_t id = 0; id < q->size; id++) {
+        if (!q->posted[id]) continue;
+        memcpy(n->dev.mem + q->desc_off + 16u * id, &cphys, 8); /* descriptor addr, little-endian */
+        redirected++;
+    }
+    ck_mb(); /* descriptors rewritten before the datagram that draws the reply */
+    uint16_t used0 = *(volatile uint16_t *)(n->dev.mem + q->used_off + 2);
+
+    static char probe[] = "AIENOS-CK-NET ping smmu-probe nonce=00000000";
+    hex8((uint32_t)ck_time_us() ^ 0x0badd0e5u, probe + sizeof probe - 9);
+    size_t w = ck_net_udp_frame(p, 0x4f00u, (const uint8_t *)probe, sizeof probe - 1, frame, sizeof frame);
+    vnet_err e = w ? vnet_tx(&n->dev, frame, w) : VNET_E_ARG;
+    ck_printf("net_smmu_negative: rx descriptors redirected=%u to iova=0x%llx (outside window 0x%llx+0x%llx); "
+              "probe datagram \"%s\" tx=%s\n",
+              redirected, (unsigned long long)cphys, (unsigned long long)win_lo, (unsigned long long)win_len, probe,
+              vnet_err_name(e));
+    uint32_t st = 0;
+    uint64_t t0 = ck_time_us();
+    while (e == VNET_OK && ck_time_us() - t0 < PROBE_WAIT_US) {
+        st = o_read(n, VNET_WIN_COMMON, VNET_CC_STATUS, 1);
+        if (st & VNET_S_NEEDS_RESET) break;
+        ck_udelay(1000);
+    }
+    ck_udelay(20000); /* let any further event records land */
+    st = o_read(n, VNET_WIN_COMMON, VNET_CC_STATUS, 1);
+    n->dev.broken = 1; /* descriptors no longer point into the region: never use them again */
+    int faults = ck_dma_faults(n->stream_id, &fl);
+    int intact = 1;
+    for (uint32_t i = 0; i < 4096u; i++)
+        if (canary[i] != CANARY_BYTE) intact = 0;
+    uint16_t rx_done = (uint16_t)(*(volatile uint16_t *)(n->dev.mem + q->used_off + 2) - used0);
+    int ok = e == VNET_OK && before == 0 && faults >= 1 && fl.type == CK_DMA_FAULT_TRANSLATION &&
+             fl.stream_id == n->stream_id && (fl.addr & ~(uint64_t)4095u) == cphys && intact;
+    ck_printf("net_smmu_negative: %s rx dma outside window iova=0x%llx faults=%d type=0x%x sid=0x%x addr=0x%llx "
+              "page=%s rx_completed=%u device_status=0x%02x needs_reset=%s faults_during_roundtrip=%d overflow=%d\n",
+              ok ? "refused" : "FAIL", (unsigned long long)cphys, faults, fl.type, fl.stream_id,
+              (unsigned long long)fl.addr, intact ? "intact" : "MODIFIED", rx_done, st,
+              (st & VNET_S_NEEDS_RESET) ? "yes" : "no", before, fl.overflow);
+    return ok ? 0 : -1;
+}
+
+/* After the negative test: reset + re-init (vnet_init writes status 0 and
+ * rebuilds every descriptor inside the window) and a second full round
+ * trip, still confined, with no new SMMU fault. */
+static int recovery(ck_vnet *n, const vnet_ops *ops, const virtio_pci_caps *caps, uint8_t *mem, uint64_t phys,
+                    size_t need)
+{
+    vnet_err e =
+        vnet_init_flags(&n->dev, ops, caps, mem, phys, need, CK_NET_QSIZE, VNET_INIT_REQUIRE_ACCESS_PLATFORM);
+    ck_printf("net_smmu_recovery: device reset + reinit %s (%s) access_platform=%s\n", e == VNET_OK ? "ok" : "FAIL",
+              vnet_err_name(e), (n->dev.features >> VNET_F_ACCESS_PLATFORM & 1) ? "yes" : "no");
+    if (e != VNET_OK) return -1;
+    ck_net_peer p;
+    int rc = roundtrip(n, &p);
+    int faults = ck_dma_faults(n->stream_id, 0);
+    int ok = rc == CK_NET_OK && faults == 0;
+    ck_printf("net_smmu_recovery: round trip after the fault %s (rc=%d new_faults=%d)\n", ok ? "ok" : "FAIL", rc,
+              faults);
+    return ok ? 0 : -1;
 }
 
 int ck_net_bind_selftest(const pci_func *f, const virtio_pci_caps *caps)
@@ -270,7 +366,10 @@ int ck_net_bind_selftest(const pci_func *f, const virtio_pci_caps *caps)
     n->bm_on = 1;
     ck_printf("dma_gate: virtio_net granted (Confined), bus master on\n");
     vnet_ops ops = {n, o_read, o_write, o_notify};
-    vnet_err e = vnet_init(&n->dev, &ops, caps, mem, phys, need, CK_NET_QSIZE);
+    /* Fail closed: without VIRTIO_F_ACCESS_PLATFORM QEMU (and a real device
+     * behind a bypassing transport) would DMA around the SMMU window. */
+    vnet_err e =
+        vnet_init_flags(&n->dev, &ops, caps, mem, phys, need, CK_NET_QSIZE, VNET_INIT_REQUIRE_ACCESS_PLATFORM);
     if (e != VNET_OK) {
         ck_printf("virtio_net: init FAIL (%s)\n", vnet_err_name(e));
         ck_net_release();
@@ -278,10 +377,18 @@ int ck_net_bind_selftest(const pci_func *f, const virtio_pci_caps *caps)
     }
     const uint8_t *m = n->dev.mac;
     ck_printf("virtio_net: attached %02x:%02x.%u rid=0x%x qsize=rx%u/tx%u mac=%02x:%02x:%02x:%02x:%02x:%02x "
-              "features=0x%llx access_platform=no\n",
+              "features=0x%llx access_platform=%s\n",
               f->bus, f->dev, f->fn, rid, n->dev.q[VNET_RX_QUEUE].size, n->dev.q[VNET_TX_QUEUE].size, m[0], m[1], m[2],
-              m[3], m[4], m[5], (unsigned long long)n->dev.features);
-    int rc = n->dev.has_mac ? roundtrip(n) : CK_NET_E_INIT;
+              m[3], m[4], m[5], (unsigned long long)n->dev.features,
+              (n->dev.features >> VNET_F_ACCESS_PLATFORM & 1) ? "yes" : "no");
+    ck_net_peer peer;
+    memset(&peer, 0, sizeof peer);
+    int rc = n->dev.has_mac ? roundtrip(n, &peer) : CK_NET_E_INIT;
+    /* Prove the fence: device DMA outside the window is refused by the SMMU,
+     * then the device recovers inside it (net_bind.h). */
+    if (rc == CK_NET_OK &&
+        (smmu_negative_test(n, &peer, phys, win) != 0 || recovery(n, &ops, caps, mem, phys, need) != 0))
+        rc = CK_NET_E_SMMU;
     if (!n->dev.has_mac) ck_printf("net: no MAC offered by the device; round trip not attempted\n");
     ck_printf("net: selftest %s (rc=%d)\n", rc == CK_NET_OK ? "PASS" : "FAIL", rc);
     ck_net_release();
