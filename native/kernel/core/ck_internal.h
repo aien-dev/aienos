@@ -73,5 +73,7 @@ struct ck_timer_window {
 int ck_timer_window(uint32_t ms, struct ck_timer_window *out);
 uint64_t ck_counter_to_us(uint64_t counter, uint64_t freq);
 void ck_timer_tick(void); /* IRQ dispatcher: INTID 30 */
+/* M3 isolation checks: threads, el0, preempt, placement, ipc (core/m3.c). */
+void ck_m3_run(void);
 
 #endif

@@ -180,6 +180,32 @@ int main(void)
     sum_fix(rsdp, 20, 8);
     CHECK(ck_acpi_root(r, &x) == 0x1234 && x == 0);
     CHECK(ck_acpi_root(0, &x) == 0);
+    /* CPU topology (acpi.rs madt_cpu_topology) and placement (thread.rs). */
+    struct ck_cpu_topology tp;
+    uint8_t pc;
+    uint32_t pn;
+    CHECK(ck_madt_cpu_topology(madt, &tp) == 0);
+    CHECK(tp.cores == 1 && tp.distinct_classes == 1 && tp.class_id[0] == 0 &&
+          tp.class_count[0] == 1 && tp.unknown_class == 0 && tp.has_first_mpidr &&
+          tp.first_mpidr == 0);
+    CHECK(ck_place_task(&tp, 1, &pc, &pn) == 0 && pc == 0 && pn == 0);
+    memcpy(m2, madt, sizeof m2);
+    w32(m2 + 44 + 80 + 12, 8); /* second GICC online-capable, class 1 */
+    m2[44 + 80 + 76] = 1;
+    m2[44 + 76] = 2; /* first GICC class 2: sorted after class 1 */
+    CHECK(ck_madt_cpu_topology(m2, &tp) == 0);
+    CHECK(tp.cores == 2 && tp.distinct_classes == 2 && tp.class_id[0] == 1 && tp.class_id[1] == 2);
+    m2[44 + 1] = 0;
+    CHECK(ck_madt_cpu_topology(m2, &tp) == -1);
+    memset(&tp, 0, sizeof tp);
+    CHECK(ck_place_task(&tp, 0, &pc, &pn) == -1); /* empty topology is unplaced */
+    tp.distinct_classes = 2;
+    tp.class_id[0] = 0; tp.class_count[0] = 2;
+    tp.class_id[1] = 1; tp.class_count[1] = 2;
+    static const uint8_t wc[8] = { 0, 0, 1, 1, 0, 0, 1, 1 };
+    static const uint32_t wn[8] = { 0, 1, 0, 1, 0, 1, 0, 1 };
+    for (uint32_t i = 0; i < 8; i++)
+        CHECK(ck_place_task(&tp, i, &pc, &pn) == 0 && pc == wc[i] && pn == wn[i]);
     test_spans();
     return ck_t_verdict("CK_ACPI");
 }

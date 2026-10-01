@@ -45,6 +45,26 @@ struct ck_madt_gic {
 /* 0 on success, -1 on a malformed table (bad entry length, truncation). */
 int ck_madt_parse(const void *madt, struct ck_madt_gic *out);
 
+/* CPU topology from the MADT GICC entries (acpi.rs madt_cpu_topology): enabled
+ * or online-capable cores, (efficiency class, count) pairs sorted by class,
+ * cores whose entry is too short (< 77 bytes) to carry a class. Pure parse;
+ * nothing here starts a core. 0 ok, -1 malformed. */
+#define CK_MAX_CLASSES 8
+struct ck_cpu_topology {
+    uint32_t cores;
+    uint8_t class_id[CK_MAX_CLASSES];
+    uint32_t class_count[CK_MAX_CLASSES];
+    unsigned distinct_classes;
+    uint32_t unknown_class;
+    int has_first_mpidr;
+    uint64_t first_mpidr;
+};
+int ck_madt_cpu_topology(const void *madt, struct ck_cpu_topology *out);
+/* thread.rs place_task: task_index modulo the classified cores, walked class
+ * by class. 0 and (class, index within class), or -1 if no core is classified. */
+int ck_place_task(const struct ck_cpu_topology *t, uint32_t task_index, uint8_t *class_id,
+                  uint32_t *core);
+
 struct ck_spcr {
     uint8_t interface_type; /* 0x03 PL011, 0x0d/0x0e SBSA, 0x00/0x12 16550 */
     uint8_t space;          /* GAS address space: 0 = system memory */

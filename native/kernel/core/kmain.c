@@ -4,8 +4,9 @@
  * vectors, PSCI conduit, own address space, then EL2 -> EL1h (ADR 0009) with
  * the MMU on our tables. ck_el1_main then reports the MMU switch from live
  * registers, proves the guard pages, brings up GICv3 and the EL1 physical
- * timer, runs the linked boot stages and ends with the final report and a
- * PSCI reset. QEMU runs of this path qualify nothing physical. */
+ * timer, runs the M3 isolation checks (core/m3.c) and the linked boot stages,
+ * and ends with the final report and a PSCI reset. QEMU runs of this path
+ * qualify nothing physical. */
 #include "arch.h"
 #include "ck_internal.h"
 
@@ -114,6 +115,9 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     ck_puts("kernel: alive\n");
     ck_printf("kernel_el: EL%u%s\n", el, (spsel & 1) ? "h" : "t");
 
+    /* M3 isolation checks (core/m3.c), before any stage registers an IRQ. */
+    ck_m3_run();
+
     run_stage("devices", ck_stage_devices);
     run_stage("security", ck_stage_security);
     run_stage("store", ck_stage_store);
@@ -127,7 +131,6 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     ck_set_stage("final");
     ck_puts("\n");
     ck_report_header("final");
-    ck_puts("M3 features (threads, el0, preempt, placement, ipc): not implemented in the C kernel yet\n");
     ck_puts("note: QEMU qualifies nothing physical\n");
     ck_reset();
 }

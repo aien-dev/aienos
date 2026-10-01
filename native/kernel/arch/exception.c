@@ -1,5 +1,6 @@
 /* exception.c -- synchronous exceptions, FIQ/SError, and the IRQ dispatcher.
- * Any exception other than an armed probe or an IRQ is fatal: it prints
+ * Any exception other than an armed probe, an IRQ or an M3 EL0 task's
+ * syscall/contained fault (core/m3.c) is fatal: it prints
  * "report_kind: fault" with ESR/FAR/ELR and resets. */
 #include "arch.h"
 #include "ck_internal.h"
@@ -7,7 +8,13 @@
 struct ck_probe ck_probe_state;
 
 void ck_exception(struct ck_frame *f, uint64_t vector);
-void ck_irq_dispatch(struct ck_frame *f);
+struct ck_frame *ck_irq_dispatch(struct ck_frame *f);
+
+/* M3 hooks (core/m3.c), set only while its checks run. ck_tick_switch may
+ * return another frame to resume (timer preemption); ck_lower_sync handles
+ * a synchronous exception from an M3 EL0 task (0) or declines it (-1). */
+struct ck_frame *(*ck_tick_switch)(struct ck_frame *f);
+int (*ck_lower_sync)(struct ck_frame *f, uint64_t esr);
 void ck_el2_fatal(uint64_t vector);
 
 static const char *const vec_names[16] = {
@@ -23,6 +30,9 @@ void ck_exception(struct ck_frame *f, uint64_t vector)
     unsigned el = ck_current_el();
     uint64_t esr = ck_rd(esr_el1), far = ck_rd(far_el1), elr = f->elr;
     uint64_t ec = (esr >> 26) & 0x3f;
+    /* sync_lower64: an EL0 task of the M3 checks (syscall or contained fault). */
+    if (vector == 8 && ck_lower_sync && ck_lower_sync(f, esr) == 0)
+        return;
     /* Armed probe: a data abort at the probing load on the current EL. */
     if (el == 1 && vector == 4 && ec == 0x25 && ck_probe_state.fixup &&
         elr == ck_probe_state.insn) {
@@ -62,13 +72,12 @@ int ck_irq_register(uint32_t intid, void (*fn)(void *arg), void *arg)
 
 static uint64_t spurious, unhandled;
 
-void ck_irq_dispatch(struct ck_frame *f)
+struct ck_frame *ck_irq_dispatch(struct ck_frame *f)
 {
-    (void)f;
     uint32_t id = (uint32_t)ck_rd_s(ICC_IAR1_EL1) & 0xffffff;
     if (id >= 1020) {
         spurious++;
-        return;
+        return f;
     }
     if (id == 30)
         ck_timer_tick(); /* re-arms before EOI */
@@ -78,6 +87,9 @@ void ck_irq_dispatch(struct ck_frame *f)
         unhandled++;
     ck_wr_s(ICC_EOIR1_EL1, id);
     ck_isb();
+    if (id == 30 && ck_tick_switch)
+        return ck_tick_switch(f);
+    return f;
 }
 
 void ck_irq_cpu_enable(int on)

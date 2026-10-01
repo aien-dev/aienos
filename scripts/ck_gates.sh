@@ -41,7 +41,7 @@ set -uo pipefail
 # ===========================================================================
 CK_GATE_TABLE='
 M1|boot|-
-M3|missing|no threads, EL0 tasks, preemption, MADT placement or typed IPC in the C kernel
+M3|boot|-
 SMMU|store|-
 NVME_SHUTDOWN|store|-
 P2_ARTIFACT|missing|no signed artifact loader (EL0, W^X, admission receipts) in the C kernel
@@ -318,7 +318,7 @@ self_test() {
     }
     expect_missing_all() {
         local g
-        for g in M3 P2_ARTIFACT M0_ROLLBACK M4_STORE_CRASH M4_CONTINUITY M4_RECOVERY KEYBOARD; do expect "${g}" NOT_RUN; done
+        for g in P2_ARTIFACT M0_ROLLBACK M4_STORE_CRASH M4_CONTINUITY M4_RECOVERY KEYBOARD; do expect "${g}" NOT_RUN; done
     }
     scenario() { # NAME BOOT_SCRIPT STORE_SCRIPT
         scen="$1"
@@ -329,36 +329,36 @@ self_test() {
 
     # A: all present gates PASS; the store child also claims PASS for gates
     # with no C implementation, which must stay NOT_RUN.
-    scenario A "$(fake bootA 0 'PASS  x' 'AIENOS_CK_M1: PASS')" \
+    scenario A "$(fake bootA 0 'PASS  x' 'AIENOS_CK_M3: PASS' 'AIENOS_CK_M1: PASS')" \
         "$(fake storeA 0 'AIENOS_CK_M4_NVME: PASS' 'AIENOS_CK_M4_STORE: PASS' 'AIENOS_CK_ARGUS1_REVOKE: PASS (narrow)' \
-            'AIENOS_CK_SMMU: PASS' 'AIENOS_CK_NVME_SHUTDOWN: PASS' 'AIENOS_CK_M3: PASS' 'AIENOS_CK_KEYBOARD: PASS' 'PASS  NVMe DMA granted confined' \
+            'AIENOS_CK_SMMU: PASS' 'AIENOS_CK_NVME_SHUTDOWN: PASS' 'AIENOS_CK_KEYBOARD: PASS' 'PASS  NVMe DMA granted confined' \
             'PASS  DMA outside the window faulted, page intact, controller still usable (differs)' 'PASS  NVMe DMA denied without an SMMU' \
             'PASS  NVMe DMA granted through the TEST-ONLY bypass')"
-    expect M1 PASS; expect M4_NVME PASS; expect M4_STORE PASS; expect ARGUS1_REVOKE PASS; expect SMMU PASS; expect NVME_SHUTDOWN PASS; expect_missing_all
+    expect M1 PASS; expect M3 PASS; expect M4_NVME PASS; expect M4_STORE PASS; expect ARGUS1_REVOKE PASS; expect SMMU PASS; expect NVME_SHUTDOWN PASS; expect_missing_all
     count_rows
-    [[ "${n_pass}/${n_fail}/${n_notrun}/${n_total}" == "6/0/7/13" && ${overall} == NOT_ALL_GATES_PASS ]] \
-        && ok "A: counts 6/0/7 of 13, verdict NOT_ALL_GATES_PASS" || bad "A: counts ${n_pass}/${n_fail}/${n_notrun}/${n_total} ${overall}"
+    [[ "${n_pass}/${n_fail}/${n_notrun}/${n_total}" == "7/0/6/13" && ${overall} == NOT_ALL_GATES_PASS ]] \
+        && ok "A: counts 7/0/6 of 13, verdict NOT_ALL_GATES_PASS" || bad "A: counts ${n_pass}/${n_fail}/${n_notrun}/${n_total} ${overall}"
     [[ "$(nvme_dma_mode)" == "Confined (QEMU SMMUv3 stage 1, out-of-window DMA faulted); no-SMMU boot denied (NoSmmu); TEST-ONLY bypass image checked separately" ]] && ok "A: confined DMA mode recorded from the store PASS lines" || bad "A: dma mode '$(nvme_dma_mode)'"
     grep -qxF "AIENOS_CK_M4_NVME: PASS (${M4_NVME_PASS_NOTE})" "${tmp}/A.out" \
         && ok "A: M4_NVME PASS line carries the confined-mode note" || bad "A: M4_NVME PASS line lacks the note"
-    grep -qx 'AIENOS_CK_M3: NOT_RUN (MISSING_IMPLEMENTATION: no threads, EL0 tasks, preemption, MADT placement or typed IPC in the C kernel)' "${tmp}/A.out" \
-        && ok "A: missing gate prints NOT_RUN (MISSING_IMPLEMENTATION: reason)" || bad "A: M3 line wrong"
+    grep -qx 'AIENOS_CK_KEYBOARD: NOT_RUN (MISSING_IMPLEMENTATION: no xHCI/USB HID keyboard driver in the C kernel)' "${tmp}/A.out" \
+        && ok "A: missing gate prints NOT_RUN (MISSING_IMPLEMENTATION: reason)" || bad "A: KEYBOARD line wrong"
     [[ "$(grep -c '^AIENOS_CK_[A-Z0-9_]*: ' "${tmp}/A.out")" == 13 ]] && ok "A: exactly 13 verdict lines" || bad "A: verdict line count"
 
     # B: boot FAIL; store script missing -> its three gates NOT_RUN, never PASS.
-    scenario B "$(fake bootB 1 'FAIL  kernel: alive' 'AIENOS_CK_M1: FAIL')" "${tmp}/kids/does_not_exist.sh"
-    expect M1 FAIL; expect M4_NVME NOT_RUN; expect M4_STORE NOT_RUN; expect ARGUS1_REVOKE NOT_RUN; expect SMMU NOT_RUN; expect NVME_SHUTDOWN NOT_RUN; expect_missing_all
+    scenario B "$(fake bootB 1 'FAIL  kernel: alive' 'AIENOS_CK_M3: FAIL' 'AIENOS_CK_M1: FAIL')" "${tmp}/kids/does_not_exist.sh"
+    expect M1 FAIL; expect M3 FAIL; expect M4_NVME NOT_RUN; expect M4_STORE NOT_RUN; expect ARGUS1_REVOKE NOT_RUN; expect SMMU NOT_RUN; expect NVME_SHUTDOWN NOT_RUN; expect_missing_all
     [[ "$(nvme_dma_mode)" == "not run" ]] && ok "B: dma mode 'not run' when the store script is missing" || bad "B: dma mode"
 
     # C: boot NOT_RUN (quiet flag held, exit 3); store mixed with exit 1.
-    scenario C "$(fake bootC 3 'NOT_RUN  quiet flag held' 'AIENOS_CK_M1: NOT_RUN')" \
+    scenario C "$(fake bootC 3 'NOT_RUN  quiet flag held' 'AIENOS_CK_M3: NOT_RUN' 'AIENOS_CK_M1: NOT_RUN')" \
         "$(fake storeC 1 'AIENOS_CK_M4_NVME: PASS' 'AIENOS_CK_M4_STORE: FAIL' 'AIENOS_CK_ARGUS1_REVOKE: PASS')"
-    expect M1 NOT_RUN; expect M4_NVME PASS; expect M4_STORE FAIL; expect ARGUS1_REVOKE PASS
+    expect M1 NOT_RUN; expect M3 NOT_RUN; expect M4_NVME PASS; expect M4_STORE FAIL; expect ARGUS1_REVOKE PASS
 
     # D: no marker at all (exit 0); PASS lines with an unexplained exit 2.
     scenario D "$(fake bootD 0 'all good, honest')" \
         "$(fake storeD 2 'AIENOS_CK_M4_NVME: PASS' 'AIENOS_CK_M4_STORE: PASS' 'AIENOS_CK_ARGUS1_REVOKE: PASS')"
-    expect M1 FAIL; expect M4_NVME FAIL; expect M4_STORE FAIL; expect ARGUS1_REVOKE FAIL
+    expect M1 FAIL; expect M3 FAIL; expect M4_NVME FAIL; expect M4_STORE FAIL; expect ARGUS1_REVOKE FAIL
 
     # E: contradictory lines; a marker inside a line (echoed serial) does not
     # count; NOT_RUN with exit 3.
@@ -369,6 +369,12 @@ self_test() {
     # F: PASS line but exit 3 (e.g. killed after printing) -> FAIL.
     scenario F "$(fake bootF 3 'AIENOS_CK_M1: PASS')" "$(fake storeF 0 'AIENOS_CK_M4_NVME: PASSED' 'AIENOS_CK_M4_STORE: PASS')"
     expect M1 FAIL; expect M4_NVME FAIL; expect M4_STORE PASS; expect ARGUS1_REVOKE FAIL
+
+    # G: M3 FAIL with M1 PASS in one boot (exit 1 explained by the M3 FAIL
+    # line); an M3 PASS claimed by the store child is ignored (M3 is a boot gate).
+    scenario G "$(fake bootG 1 'FAIL  typed IPC' 'AIENOS_CK_M3: FAIL' 'AIENOS_CK_M1: PASS')" \
+        "$(fake storeG 0 'AIENOS_CK_M3: PASS' 'AIENOS_CK_M4_NVME: PASS')"
+    expect M1 PASS; expect M3 FAIL; expect M4_NVME PASS
 
     # Receipt: named by its content hash, valid JSON, physical NOT_RUN, never overwritten.
     scenario R "$(fake bootR 0 'AIENOS_CK_M1: PASS')" "$(fake storeR 0 'AIENOS_CK_M4_NVME: PASS')"
