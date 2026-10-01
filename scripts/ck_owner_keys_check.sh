@@ -20,6 +20,8 @@
 #      and the BLOCKED_OPERATOR Store refusal line.
 #   4. Control: the default full image still carries the labelled TEST Store
 #      label (the grep is not vacuous).
+#   5. The default image carries the "argus: TEST machine id 0xA1" banner (control); the
+#      Makefile owner_check pattern matches a blob holding it (counterexample).
 # Build-only: nothing is booted. Takes the Spark quiet flag like the qemu_ck_*
 # scripts (NOT_RUN, exit 3, if another run holds it). No Python.
 set -euo pipefail
@@ -126,7 +128,7 @@ if mk full CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS="${own}" CK_MACHINE_ID="${mach
 else
     bad "hardware staging image with fixture owner files did not build: $(tail -c 400 "${tmp}/hw.log")"
 fi
-banned='AIENOS-LANE18-TEST-KVOL-NOT-SECRET|AIEN-TEST-BOOT01|TEST identity, TEST keys|formatted TEST store|TEST-FIXTURE|TEST FIXTURE'
+banned='AIENOS-LANE18-TEST-KVOL-NOT-SECRET|AIEN-TEST-BOOT01|TEST identity, TEST keys|formatted TEST store|TEST machine id 0xA1|TEST-FIXTURE|TEST FIXTURE'
 for f in "${hw}/aienos-ck.elf" "${hw}/BOOTAA64.EFI"; do
     [[ -s "${f}" ]] || { bad "missing ${f}"; continue; }
     s="$(grep -aoE "${banned}" "${f}" | sort -u | tr '\n' ' ' || true)"
@@ -143,10 +145,18 @@ for f in "${hw}/aienos-ck.elf" "${hw}/BOOTAA64.EFI"; do
 done
 if [[ -s "${hw}/aienos-ck.elf" ]]; then
     nmtool="${cross}nm"
-    y="$("${nmtool}" "${hw}/aienos-ck.elf" | grep -E ' (ck_store_test_keys|ck_store_test_uuid)$' || true)"
+    # Capture nm fully first: `nm | grep -q` lets grep exit early, nm can die of SIGPIPE, and
+    # pipefail then turns a real match into a FAIL (CK-4 light log 181624).
+    nmout="$("${nmtool}" "${hw}/aienos-ck.elf")"
+    y="$(grep -E ' (ck_store_test_keys|ck_store_test_uuid)$' <<<"${nmout}" || true)"
     [[ -z "${y}" ]] && ok "no TEST Store key symbols in the hardware staging ELF" || bad "TEST symbols: ${y}"
-    "${nmtool}" "${hw}/aienos-ck.elf" | grep -qE ' ck_store_production_keys$' \
+    grep -qE ' ck_store_production_keys$' <<<"${nmout}" \
         && ok "ck_store_production_keys (BLOCKED_OPERATOR seam) is linked" || bad "ck_store_production_keys not linked"
+    # Control: the same match must FAIL on nm text without the symbol and PASS with it.
+    ctl_absent=$'0000 T ck_main\n0001 D ck_other_keys'
+    ctl_present="${ctl_absent}"$'\n0002 D ck_store_production_keys'
+    if grep -qE ' ck_store_production_keys$' <<<"${ctl_absent}"; then bad "control: absent symbol matched"; else ok "control: symbol check fails when the symbol is absent"; fi
+    if grep -qE ' ck_store_production_keys$' <<<"${ctl_present}"; then ok "control: symbol check passes when the symbol is present"; else bad "control: present symbol not matched"; fi
 fi
 
 # ---- 4. control: the default image keeps the labelled TEST keys -----------
@@ -154,6 +164,32 @@ if mk full >"${tmp}/def.log" 2>&1 && grep -aqF 'AIENOS-LANE18-TEST-KVOL-NOT-SECR
     ok "control: default full image still carries the labelled TEST Store label"
 else
     bad "control: default full image lacks the TEST Store label or did not build"
+fi
+
+# ---- 5. TEST machine id banner: control + counterexample ------------------
+if grep -aqF 'argus: TEST machine id 0xA1' "${out}/full/aienos-ck.elf" 2>/dev/null; then
+    ok "control: default full image carries the 'argus: TEST machine id 0xA1' banner"
+else
+    bad "control: default full image lacks the 'argus: TEST machine id 0xA1' banner"
+fi
+# Counterexample: the Makefile owner_check pattern must catch a blob that holds
+# the banner. The pattern is read from the Makefile itself, not copied here.
+oc_pat="$(grep -oE 'grep -aoE "[^"]*TEST machine id 0xA1[^"]*"' "${kdir}/Makefile" | head -1 | sed -e 's/^grep -aoE "//' -e 's/"$//' || true)"
+if [[ -z "${oc_pat}" ]]; then
+    bad "Makefile owner_check pattern for the TEST machine id banner not found"
+else
+    printf 'padding\0argus: TEST machine id 0xA1 (fixed label)\n\0padding' > "${tmp}/bad-blob.bin"
+    printf 'padding\0argus: ok narrow_revoke=1\n\0padding' > "${tmp}/clean-blob.bin"
+    if [[ -n "$(grep -aoE "${oc_pat}" "${tmp}/bad-blob.bin" || true)" ]]; then
+        ok "counterexample: owner_check pattern refuses a blob carrying the TEST machine id banner"
+    else
+        bad "counterexample: owner_check pattern did NOT match a blob carrying the TEST machine id banner"
+    fi
+    if [[ -z "$(grep -aoE "${oc_pat}" "${tmp}/clean-blob.bin" || true)" ]]; then
+        ok "owner_check pattern passes a clean blob"
+    else
+        bad "owner_check pattern matched a clean blob"
+    fi
 fi
 
 if [[ "${fails}" == 0 ]]; then

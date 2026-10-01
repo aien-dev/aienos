@@ -280,6 +280,9 @@ int ck_stage_security(void)
     ck_sec_report r;
     int rc = ck_security_run(&r);
     int ent = ck_compat_entropy_source();
+#ifndef CK_HARDWARE_STAGING
+    ck_printf("argus: TEST machine id 0xA1 (fixed label, not a real machine identity, not production)\n");
+#endif
     ck_printf("caps: %s granted=%s attenuated=%s amplify=%s forged=%s revoked=%s office_token=%s\n",
               pick(r.caps_ok, "ok", "failed"), pick(r.caps_granted, "yes", "no"), pick(r.caps_attenuated, "yes", "no"),
               pick(r.caps_amplify_denied, "denied", "ALLOWED"), pick(r.caps_forged_denied, "denied", "ALLOWED"),

@@ -276,7 +276,7 @@ endef
 # TEST store uuid, TEST Store print lines or TEST key symbols.
 define owner_check
 	@if [ "$(strip $(CK_HARDWARE_STAGING))" = 1 ]; then \
-	  s=$$(grep -aoE "AIENOS-LANE18-TEST-KVOL-NOT-SECRET|AIEN-TEST-BOOT01|TEST identity, TEST keys|formatted TEST store" $(1) | sort -u | tr "\n" " "); \
+	  s=$$(grep -aoE "AIENOS-LANE18-TEST-KVOL-NOT-SECRET|AIEN-TEST-BOOT01|TEST identity, TEST keys|formatted TEST store|TEST machine id 0xA1" $(1) | sort -u | tr "\n" " "); \
 	  y=$$($(KNM) $(1) | grep -E " (ck_store_test_keys|ck_store_test_uuid)$$" | tr "\n" " "); \
 	  if [ -n "$$s$$y" ]; then echo "hardware staging image carries the TEST Store identity: $$s$$y"; rm -f $(1); exit 1; fi; \
 	  echo "no TEST Store label, uuid or key code in $(1)"; \
