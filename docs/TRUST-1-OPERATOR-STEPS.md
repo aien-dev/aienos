@@ -102,7 +102,9 @@ Why: the stick in use today was built before the Gate 1 fixes. It lacks the
 tools that open the encrypted storage, read the startup measurements through
 the TPM, and check loader signatures. Rebuilding replaces the recovery files on
 the stick (it is not reformatted); it does not
-touch the Spark's internal drive.
+touch the Spark's internal drive. (What the stick contains, and how it was
+first proven, is recorded in
+[RECOVERY_MEDIA_MACHINE1.md](RECOVERY_MEDIA_MACHINE1.md).)
 
 1. Plug in the recovery stick (label `AIENOSRECOV`). Run `lsblk -f` and find
    the line with that label. Note its name, for example `sdb1`. If Ubuntu
@@ -164,6 +166,12 @@ second copy somewhere physically separate from the Spark.)*
 **Question: Option A (second USB stick), or do you prefer B or C?**
 
 ## Step 6. Boot the recovery stick with Secure Boot ON and prove the unlock (Gate 1, attended)
+
+The recovery prompt is a small, separate system on the stick. It has only
+the tools listed in
+[RECOVERY_MEDIA_MACHINE1.md, "What ships"](RECOVERY_MEDIA_MACHINE1.md#what-ships).
+`aien-proof` is not one of them, so type the commands below exactly as shown,
+with nothing in front.
 
 1. Both sticks plugged in (Option A). In the terminal:
 
@@ -295,6 +303,23 @@ live):
   the current one. Gets its own written steps and approval.
 - **Gate 7** (you): the single attended hardware boot with Secure Boot on.
   Gets its own written checklist and approval; nothing above prepares it
-  silently.
+  silently. Before that checklist, an agent or you can run the pre-flight
+  check in a normal terminal:
+
+  ```bash
+  bash scripts/trust1_gate7_preflight.sh
+  ```
+
+  *What it does:* checks the things that can be checked before any restart:
+  the TPM and Secure Boot state can be read, every tool the stick and the
+  snapshot steps need is present, the locked spare and the encrypted storage
+  folder are where this page says, no secret key sits next to the spare, and
+  the recovery image (on the stick if it is plugged in and open, otherwise a
+  private test copy) has every tool. *Changes:* nothing; it needs no
+  password and cleans up its own temporary folder. Takes about 5 seconds.
+  *You should see:* a list of `PASS` lines, a `NOT CHECKED` list (things only
+  your restarts or later gates can prove), and last
+  `GATE7_PREFLIGHT: PASS`. Any `FAIL` line: stop and hand the output to the
+  orchestrator.
 - **Gates 8-9**: observation period, then retiring the old rules only with
   your approval.
