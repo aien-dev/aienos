@@ -30,7 +30,7 @@ SMMU configuration.
 
 1. The operator approves the run. It runs under
    `aien-proof hold --resource machine-1`.
-2. Secure Boot stays on. TPM state is untouched.
+2. Secure Boot is OFF for development (owner decision, 2026-10-01); its state is recorded, not required. TPM state is untouched.
 3. Linux storage is untouched. The procedure writes only to a temporary
    directory and to the evidence output paths the operator names.
 4. BootOrder is untouched. No boot entry is created, removed, or reordered.

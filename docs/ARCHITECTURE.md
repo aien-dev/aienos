@@ -72,7 +72,7 @@ Accepted exception: silicon that physically requires vendor-signed firmware (for
 
 ## 4. Security
 
-- **Boot trust:** Secure Boot off during early development. Before daily use: firmware verifies the operator's key, the operator's key verifies AIENOS boot artifacts, AIENOS verifies kernel and runtime components. An offline recovery key and recovery media are designed before enforcement.
+- **Boot trust:** Secure Boot off during early development (confirmed OFF as of 2026-10-01, owner decision). Before daily use: firmware verifies the operator's key, the operator's key verifies AIENOS boot artifacts, AIENOS verifies kernel and runtime components. An offline recovery key and recovery media are designed before enforcement.
 - **Encryption at rest:** conversations, Cortex, projects, World state, credentials, agent memories, model-private data, configuration, caches, and swap-equivalents. Unlock at startup; later hardware sealing plus an operator secret. Credentials receive extra protection after unlock.
 - **Identities from day one:** operator, agent identities, system services, remote Machines, future household users; each with separate capabilities, memory visibility, authority, and provenance. No login screens or profiles in version one.
 
