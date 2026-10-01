@@ -55,8 +55,10 @@ m5_kernel_crypto_security|cargo|run_cargo_kernel|-|^test result: ok\.|cargo test
 t1_gate5_policy_sim|auto|run_gate5_sim|-|^TRUST1_GATE5_POLICY_SIM: PASS$|TRUST-1 Gate 5 policy simulator self-test
 m5_native_test|auto|run_native_m5|-|^M5_NATIVE: PASS$|make -C native/m5 test
 crypto_native_test|auto|run_native_crypto|-|^AIENOS_CRYPTO_NATIVE: PASS$|make -C native/crypto test
+disk_native_test|auto|run_native_disk|-|^AIENOS_DISK_NATIVE: PASS$|make -C native/disk test (block layer + C NVMe driver vs a software controller model, host only)
 qemu_secureboot_signing|qemu|run_qemu_sb|-|^TRUST-1 Gate 4 Secure Boot signing test: ALL PASS$|QEMU Secure Boot signing test (TRUST-1 Gate 4)
 qemu_store_512b_crash|qemu|run_qemu_store512|-|^STORE_512B_CRASH_RECOVERY_QEMU: PASS$|QEMU Store crash recovery on 512-byte blocks
+qemu_native_nvme|qemu|run_qemu_native_nvme|-|^AIENOS_STORE_NVME_QEMU: PASS$|C NVMe driver write/flush/reset/read-back on QEMU virtual NVMe (emulator only)
 t1_gate0_second_offline_location|operator|-|-|-|Gate 0: second offline backup location
 t1_gate0_cold_boot_pcr_stability|hardware|-|-|-|Gate 0: cold-boot PCR stability on Machine 1
 t1_gate0_firmware_refresh_pause|operator|-|-|-|Gate 0: firmware refresh paused
@@ -119,6 +121,8 @@ run_gate5_sim()      { bash "${repo_root}/scripts/trust1_gate5_policy_sim.sh" se
 run_native_m5()     { native_make_test m5; }
 run_native_crypto() { native_make_test crypto; }
 run_native_m5_migsig() { native_make_test m5; }
+run_native_disk()   { native_make_test disk; }
+run_qemu_native_nvme() { bash "${repo_root}/scripts/qemu_native_nvme_test.sh"; }
 run_qemu_sb()       { bash "${repo_root}/scripts/qemu_secureboot_signing_test.sh"; }
 run_qemu_store512() { bash "${repo_root}/scripts/qemu_store_512b_crash_test.sh"; }
 
@@ -129,6 +133,7 @@ auto_present() {
         run_native_m5) [[ -f "${repo_root}/native/m5/Makefile" ]] ;;
         run_native_crypto) [[ -f "${repo_root}/native/crypto/Makefile" ]] ;;
         run_native_m5_migsig) [[ -f "${repo_root}/native/m5/m5_owner_sig.c" ]] ;;
+        run_native_disk) [[ -f "${repo_root}/native/disk/Makefile" ]] ;;
         *) declare -F "$1" >/dev/null ;;
     esac
 }
