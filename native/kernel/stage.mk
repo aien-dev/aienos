@@ -37,9 +37,9 @@ STAGE_INC := -I$(STAGE_DIR)/include -I$(STAGE_DIR)/dev -I$(STAGE_DIR)/svc \
              -I$(STAGE_NATIVE)/disk -I$(STAGE_NATIVE)/store -I$(STAGE_NATIVE)/m5 -I$(STAGE_NATIVE)/crypto \
              -I$(STAGE_NATIVE)/argus -I$(STAGE_NATIVE)/capability -I$(STAGE_NATIVE)/net
 # compat first: <pthread.h> <stdlib.h> <stdio.h> <time.h> resolve to the stand-ins.
-# NVMe DMA: refused by default (ck.h has no SMMU service). The kernel Makefile
-# adds -DCK_QEMU_UNSAFE_DMA=1 only for "make full CK_QEMU_UNSAFE_DMA=1" (the QEMU
-# store gate); dev/nvme_bind.c refuses it together with CK_HARDWARE_STAGING.
+# NVMe DMA: SMMU-confined (ck_dma_confine) or refused. The kernel Makefile
+# adds -DCK_QEMU_UNSAFE_DMA=1 only for "make full CK_QEMU_UNSAFE_DMA=1" (TEST-ONLY,
+# one boot of the QEMU store gate); dev/nvme_bind.c refuses it together with CK_HARDWARE_STAGING.
 STAGE_CFLAGS := -I$(STAGE_DIR)/svc/compat $(STAGE_INC)
 
 # ---- freestanding check --------------------------------------------------
@@ -51,6 +51,7 @@ STAGE_FREE_FLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -nostdli
   -fno-pic -fno-pie -fstack-usage -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
 # The only undefined symbols the stages may leave for the core: ck.h services.
 STAGE_ALLOWED_U := ck_puts ck_printf ck_vprintf ck_panic ck_alloc ck_free ck_dma_alloc ck_mmio_map \
+  ck_dma_confine ck_dma_unconfine ck_dma_faults \
   ck_mb ck_acpi_find ck_time_us ck_udelay ck_commit
 
 STAGE_FREE_OBJS := $(foreach s,$(STAGE_SRCS),$(STAGE_OUT)/free/$(subst /,_,$(subst $(STAGE_NATIVE)/,,$(s:.c=.o))))

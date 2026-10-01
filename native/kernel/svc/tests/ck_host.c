@@ -75,3 +75,16 @@ uint32_t ck_boot_count_hint(void) { return 0; }
 
 /* Host: the capability library reads the real /dev/urandom. */
 int ck_compat_entropy_source(void) { return CK_ENTROPY_HOST; }
+
+/* Host: no IORT, so no SMMU (the NVMe gate stays fail-closed). */
+int ck_dma_confine(uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
+{
+    (void)rid; (void)phys; (void)len; (void)out;
+    return CK_SMMU_ABSENT;
+}
+int ck_dma_unconfine(uint32_t stream_id) { (void)stream_id; return CK_SMMU_EARG; }
+int ck_dma_faults(uint32_t stream_id, struct ck_dma_fault *first)
+{
+    (void)stream_id; (void)first;
+    return -1;
+}

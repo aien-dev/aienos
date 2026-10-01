@@ -19,6 +19,13 @@ void ck_dev_nvme_release(void)
         ck_printf("dma_gate: nvme bus master revoked\n");
     else
         ck_printf("dma_gate: nvme bus master revoke FAILED (command register still has BME)\n");
+    if (g_nvme.confined) {
+        /* Bus mastering is off; return the stream to abort as well. */
+        int urc = ck_dma_unconfine(g_nvme.stream_id);
+        g_nvme.confined = 0;
+        ck_printf("smmu: nvme stream 0x%x %s (rc=%d)\n", g_nvme.stream_id,
+                  urc == 0 ? "returned to abort" : "abort FAILED", urc);
+    }
 }
 
 int ck_stage_devices(void)

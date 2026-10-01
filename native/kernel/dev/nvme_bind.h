@@ -16,6 +16,8 @@ typedef struct {
     const pci_func *pf;
     int bound;
     int bm_on; /* bus mastering was enabled for this function */
+    int confined;      /* DMA confined by the SMMU (ck_dma_confine) */
+    uint32_t stream_id; /* SMMU stream when confined */
 } ck_nvme;
 
 /* Find the first class 01/08/02 function, gate DMA, map BAR0, init the

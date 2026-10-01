@@ -70,6 +70,45 @@ int ck_irq_register(uint32_t intid, void (*fn)(void *arg), void *arg);
 int ck_irq_enable(uint32_t intid);
 void ck_irq_cpu_enable(int on);
 
+/* DMA isolation (IORT + SMMUv3, core/smmu_svc.c; added by Lane 25). The
+ * first call brings the SMMU up with GBPA.ABORT set and every stream in
+ * abort, then gives PCI requester `rid` (bus<<8 | dev<<3 | fn, segment 0)
+ * a stage-1 table that maps only [phys, phys+len) at the same bus address
+ * (identity IOVA, Normal Non-cacheable, read/write). Any DMA outside the
+ * window faults and is aborted. phys and len must be 4 KiB aligned. At most
+ * CK_DMA_MAX_STREAMS confinements, one per stream.
+ * Returns 0 and fills *out, or:
+ *   CK_SMMU_ABSENT    no SMMUv3 in the IORT (or no IORT): no confinement
+ *   CK_SMMU_FAILED    SMMU present but bring-up or this stream failed;
+ *                     the SMMU stays off behind ABORT or the stream aborts
+ *   CK_SMMU_NOSTREAM  the IORT maps no stream for this requester
+ *   CK_SMMU_EARG      bad window, stream already confined, or table full
+ * Device DMA may be enabled only after a 0 return. */
+#define CK_SMMU_ABSENT (-1)
+#define CK_SMMU_FAILED (-2)
+#define CK_SMMU_NOSTREAM (-3)
+#define CK_SMMU_EARG (-4)
+#define CK_DMA_MAX_STREAMS 8
+struct ck_dma_confinement {
+    uint64_t smmu_base;
+    uint32_t stream_id;
+    uint64_t iova, len;
+};
+int ck_dma_confine(uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out);
+/* Return a confined stream to abort (after the device's bus mastering is
+ * off). 0 ok, CK_SMMU_EARG if not confined, CK_SMMU_FAILED on a command
+ * timeout. */
+int ck_dma_unconfine(uint32_t stream_id);
+/* Drain the SMMU event queue. Returns how many records named `stream_id`
+ * (others are dropped); *first gets the first of them. -1 if no SMMU. */
+#define CK_DMA_FAULT_TRANSLATION 0x10u /* SMMUv3 F_TRANSLATION event */
+struct ck_dma_fault {
+    uint32_t type, stream_id;
+    uint64_t addr;
+    int overflow;
+};
+int ck_dma_faults(uint32_t stream_id, struct ck_dma_fault *first);
+
 /* ---- boot stages (implemented by the stage worker, all optional) -------- */
 /* Each returns 0 on success, negative on failure; core prints the result.
  * Declared weak so the core links and boots without them. */

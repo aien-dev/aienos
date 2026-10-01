@@ -3,10 +3,12 @@
 #include "ck.h"
 #include "disk_layout.h"
 
-/* NVMe DMA rule: no SMMU confinement means no DMA. ck.h has no SMMU service,
- * so the default build refuses NVMe DMA (fail-closed). The unconfined bypass
- * exists only for QEMU and only when the QEMU gate script asks for it with
- * CK_QEMU_UNSAFE_DMA=1; it can never be combined with a hardware-staging
+/* NVMe DMA rule: no SMMU confinement means no DMA. The default build asks
+ * the core for SMMU confinement (ck_dma_confine) and refuses NVMe DMA when
+ * there is no SMMU or it did not come up (fail-closed). The unconfined
+ * bypass is TEST-ONLY: it exists only for QEMU without an SMMU, only when a
+ * QEMU gate script asks for it with CK_QEMU_UNSAFE_DMA=1, and is never used
+ * when an SMMU is present; it can never be combined with a hardware-staging
  * build (same rule as the compile_error! in crates/aienos-boot/src/lib.rs). */
 #if defined(CK_NVME_DMA_BYPASS)
 #error "CK_NVME_DMA_BYPASS is retired: the unconfined NVMe DMA bypass is CK_QEMU_UNSAFE_DMA=1 (QEMU only)"
@@ -46,6 +48,46 @@ static void m_delay(void *ctx, uint32_t us)
 static uint8_t probe_buf[CK_LAYOUT_UNIT];
 static uint8_t probe_rd[CK_LAYOUT_UNIT];
 static uint8_t probe_orig[CK_LAYOUT_UNIT];
+
+/* SMMU negative test (confined mode only). The driver's bounce-buffer bus
+ * address is pointed at a pattern-filled page that is NOT in the stream's
+ * window and a one-block read of LBA 0 is issued, so the controller tries
+ * to DMA into that page. Pass: the SMMU records a translation fault for this
+ * stream at that page, the page keeps its pattern (the write never landed),
+ * and after restoring the bounce address a normal read works again. The
+ * read's own status is reported but not judged (QEMU may complete it). */
+static int smmu_negative_test(ck_nvme *n)
+{
+    uint64_t cphys = 0;
+    volatile uint8_t *canary = ck_dma_alloc(NVME_PAGE, NVME_PAGE, &cphys);
+    if (!canary) {
+        ck_printf("smmu_negative: FAIL (no canary page)\n");
+        return -1;
+    }
+    for (uint32_t i = 0; i < NVME_PAGE; i++)
+        canary[i] = 0x5a;
+    (void)ck_dma_faults(n->stream_id, 0); /* drain anything older */
+    nvme_ctrl *c = &n->ctrl;
+    uint64_t saved = c->bounce_phys;
+    c->bounce_phys = cphys;
+    ck_mb();
+    int rc = disk_read(&n->disk, 0, 1, probe_rd);
+    c->bounce_phys = saved;
+    ck_mb();
+    struct ck_dma_fault fl = { 0, 0, 0, 0 };
+    int faults = ck_dma_faults(n->stream_id, &fl);
+    int intact = 1;
+    for (uint32_t i = 0; i < NVME_PAGE; i++)
+        if (canary[i] != 0x5a) intact = 0;
+    int rc2 = disk_read(&n->disk, 0, 1, probe_rd);
+    int ok = faults >= 1 && fl.type == CK_DMA_FAULT_TRANSLATION && fl.stream_id == n->stream_id &&
+             (fl.addr & ~(uint64_t)(NVME_PAGE - 1u)) == cphys && intact && rc2 == 0;
+    ck_printf("smmu_negative: %s dma outside window iova=0x%llx faults=%d type=0x%x sid=0x%x addr=0x%llx "
+              "page=%s cmd_rc=%d recovery_read=%s\n",
+              ok ? "refused" : "FAIL", (unsigned long long)cphys, faults, fl.type, fl.stream_id,
+              (unsigned long long)fl.addr, intact ? "intact" : "MODIFIED", rc, rc2 ? "FAIL" : "ok");
+    return ok ? 0 : -1;
+}
 
 int ck_disk_rw_probe(const disk_dev *d, uint32_t seed, uint64_t *lba_out)
 {
@@ -89,8 +131,10 @@ int ck_nvme_bind(ck_nvme *n, const pci_system *pci)
 {
     n->bound = 0;
     n->bm_on = 0;
+    n->confined = 0;
+    n->stream_id = 0;
 #if CK_NVME_UNSAFE_BYPASS
-    ck_printf("WARNING: UNSAFE NVME DMA BYPASS BUILD (CK_QEMU_UNSAFE_DMA=1, QEMU debug only)\n");
+    ck_printf("WARNING: UNSAFE NVME DMA BYPASS BUILD (CK_QEMU_UNSAFE_DMA=1, QEMU debug only, TEST-ONLY)\n");
 #endif
     const pci_func *f = pci_find_class(pci, 0x010802u, 0xffffffu);
     if (!f) {
@@ -106,27 +150,45 @@ int ck_nvme_bind(ck_nvme *n, const pci_system *pci)
         ck_printf("nvme: unavailable (BAR0 unusable)\n");
         return NVME_EARG;
     }
-    /* DMA gate. The ck core has no SMMU service, so DMA cannot be confined
-     * to a window. The Rust kernel denies NVMe DMA without an SMMU unless
-     * built with its unsafe bypass; this stage mirrors that choice at build
-     * time (CK_QEMU_UNSAFE_DMA=1, QEMU gate only). */
-#if CK_NVME_UNSAFE_BYPASS
-    ck_printf("WARNING: UNSAFE NVME DMA BYPASS ACTIVE (ck core has no SMMU service; device can DMA anywhere)\n");
-    ck_printf("dma_gate: nvme granted (UnsafeBypass), bus master on\n");
-#else
-    ck_printf("dma_gate: nvme denied (NoSmmu), bus master stays off\n");
-    ck_printf("nvme: unavailable (SMMU DMA isolation not active)\n");
-    return NVME_ESTATE;
-#endif
-    n->bar0 = (volatile uint8_t *)ck_mmio_map(b->addr, (size_t)b->size);
-    pci_enable(f, 1);
-    n->bm_on = 1;
+    /* DMA gate (same policy as the Rust dma_gate::dma_grant): SMMU
+     * confinement first; with no SMMU at all, only the QEMU-only unsafe
+     * bypass build may enable DMA; an SMMU that is present but did not come
+     * up never falls back to the bypass. The DMA region is allocated first
+     * so the confinement window is exactly the region the driver uses. */
     uint64_t phys = 0;
     uint8_t *dma = ck_dma_alloc(CK_NVME_DMA_BYTES, NVME_PAGE, &phys);
     if (!dma) {
         ck_printf("nvme: unavailable (DMA allocation of %u bytes failed)\n", (unsigned)CK_NVME_DMA_BYTES);
         return NVME_EARG;
     }
+    uint32_t rid = ((uint32_t)f->bus << 8) | ((uint32_t)f->dev << 3) | (uint32_t)f->fn;
+    uint64_t win = ((uint64_t)CK_NVME_DMA_BYTES + NVME_PAGE - 1u) & ~(uint64_t)(NVME_PAGE - 1u);
+    struct ck_dma_confinement cf;
+    int src = ck_dma_confine(rid, phys, win, &cf);
+    if (src == 0) {
+        n->confined = 1;
+        n->stream_id = cf.stream_id;
+        ck_printf("smmu: enabled base=0x%llx stream_id=0x%x\n", (unsigned long long)cf.smmu_base, cf.stream_id);
+        ck_printf("smmu_dma_window: nvme only, translation active iova=0x%llx len=0x%llx rid=0x%x\n",
+                  (unsigned long long)cf.iova, (unsigned long long)cf.len, rid);
+        ck_printf("dma_gate: nvme granted (Confined), bus master on\n");
+    } else if (src == CK_SMMU_ABSENT) {
+#if CK_NVME_UNSAFE_BYPASS
+        ck_printf("WARNING: UNSAFE NVME DMA BYPASS ACTIVE (no SMMU on this machine; device can DMA anywhere; TEST-ONLY build)\n");
+        ck_printf("dma_gate: nvme granted (UnsafeBypass), bus master on\n");
+#else
+        ck_printf("dma_gate: nvme denied (NoSmmu), bus master stays off\n");
+        ck_printf("nvme: unavailable (SMMU DMA isolation not active)\n");
+        return NVME_ESTATE;
+#endif
+    } else {
+        ck_printf("dma_gate: nvme denied (SmmuNotReady rc=%d), bus master stays off\n", src);
+        ck_printf("nvme: unavailable (SMMU DMA isolation not active)\n");
+        return NVME_ESTATE;
+    }
+    n->bar0 = (volatile uint8_t *)ck_mmio_map(b->addr, (size_t)b->size);
+    pci_enable(f, 1);
+    n->bm_on = 1;
     nvme_ops ops = {n, m_r32, m_w32, 0, 0, m_barrier, m_delay};
     nvme_dma region = {dma, phys, CK_NVME_DMA_BYTES};
     nvme_config cfg = {0, 0};
@@ -161,6 +223,10 @@ int ck_nvme_bind(ck_nvme *n, const pci_system *pci)
     ck_printf("nvme: rw probe lba=%llu bytes=%u write+flush+readback %s (rc=%d)\n", (unsigned long long)lba,
               CK_LAYOUT_UNIT, rc ? "FAIL" : "match", rc);
     if (rc) return rc;
+    if (n->confined) {
+        rc = smmu_negative_test(n);
+        if (rc) return DISK_EIO;
+    }
     n->bound = 1;
     return 0;
 }

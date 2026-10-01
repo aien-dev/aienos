@@ -5,9 +5,9 @@
 #                        "not linked"; the M1 gate boots this one)
 #   make full            full image with the boot stages (devices, security,
 #                        Store) from stage.mk: $(OUT)/full/BOOTAA64.EFI,
-#                        NVMe DMA refused (no SMMU service in ck.h)
+#                        NVMe DMA SMMU-confined, refused without an SMMU
 #   make full CK_QEMU_UNSAFE_DMA=1
-#                        QEMU-only image with the unconfined NVMe DMA bypass:
+#                        TEST-ONLY QEMU image with the unconfined NVMe DMA bypass:
 #                        $(OUT)/full-qemu-unsafe-dma/BOOTAA64.EFI (only
 #                        scripts/qemu_ck_store_test.sh sets this; refused
 #                        together with CK_HARDWARE_STAGING=1)
@@ -48,7 +48,8 @@ AIENOS_COMMIT ?= $(shell git -C $(REPO) rev-parse HEAD 2>/dev/null || echo unkno
 
 CK_EXTRA_CFLAGS ?=
 # Build-time DMA policy for the full image (see dev/nvme_bind.c):
-# default refuse; 1 = QEMU-only unconfined bypass. Never with hardware staging.
+# default SMMU-confined or refuse; 1 = TEST-ONLY QEMU unconfined bypass when
+# no SMMU exists. Never with hardware staging.
 CK_QEMU_UNSAFE_DMA ?=
 CK_HARDWARE_STAGING ?=
 ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),)
@@ -74,6 +75,7 @@ CORE_C := $(BOOT)/efi_main.c \
 	$(KDIR)/arch/exception.c $(KDIR)/arch/gic.c $(KDIR)/arch/timer.c \
 	$(KDIR)/core/acpi.c $(KDIR)/core/console.c $(KDIR)/core/fmt.c \
 	$(KDIR)/core/kmain.c $(KDIR)/core/libc_min.c $(KDIR)/core/report.c \
+	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c \
 	$(KDIR)/mm/frames.c $(KDIR)/mm/heap.c $(KDIR)/mm/mmu.c $(KDIR)/mm/pt.c
 CORE_S := $(BOOT)/efi_entry.S $(KDIR)/arch/vectors.S
 HDRS := $(wildcard $(KDIR)/include/*.h $(KDIR)/*/*.h $(BOOT)/*.h)
@@ -172,9 +174,9 @@ $(FULL_EFI): $(FULL_ELF)
 	$(call pe_image,$<,$@)
 
 # ---- host unit tests ----
-HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/mm/frames.c \
+HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c
-TESTS := test_fmt test_frames test_pt test_acpi test_heap
+TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 

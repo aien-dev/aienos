@@ -83,9 +83,13 @@ low-water free bytes.
   `STAGE_CFLAGS` first, then the kernel flags and `-U_FORTIFY_SOURCE`. The
   core defines no `ck_stage_*` defaults; the core-only image is checked to
   contain none and the full image to contain all three.
-- NVMe DMA is refused by default (no SMMU service). `CK_QEMU_UNSAFE_DMA=1`
-  (QEMU only, refused with `CK_HARDWARE_STAGING`) builds the unconfined bypass
-  and prints the `WARNING: UNSAFE NVME DMA BYPASS` lines.
+- NVMe DMA is granted only SMMU-confined: the core SMMUv3 service
+  (`core/smmu.c`, `core/smmu_svc.c`; ck.h `ck_dma_confine` /
+  `ck_dma_unconfine` / `ck_dma_faults`) finds the SMMU through the ACPI IORT
+  and maps only the NVMe DMA region for the NVMe stream. With no SMMU, NVMe
+  DMA is refused. `CK_QEMU_UNSAFE_DMA=1` (TEST-ONLY, QEMU only, refused with
+  `CK_HARDWARE_STAGING`) builds the unconfined bypass used only when no SMMU
+  exists, and prints the `WARNING: UNSAFE NVME DMA BYPASS` lines.
 
 ## Differences from the Rust kernel
 

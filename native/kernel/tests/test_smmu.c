@@ -1,0 +1,391 @@
+/* test_smmu.c -- core/smmu.c against a model SMMUv3, and the IORT parser
+ * (core/acpi.c) on a crafted table shaped like QEMU virt's with
+ * iommu=smmuv3. Ported in spirit from the Rust smmu.rs unit tests: bring-up
+ * keeps GBPA.ABORT through SMMUEN, every failure fails closed (CR0 = 0),
+ * STE install/abort invalidate the stream, queues wrap, events decode. */
+#include <stdint.h>
+#include <string.h>
+#include "ck_test.h"
+#include "acpi.h"
+#include "smmu.h"
+
+/* ---- model SMMU ---------------------------------------------------------- */
+#define LOGN 256
+struct model {
+    uint32_t idr0, idr1, cr0, gbpa, cmdq_prod, cmdq_cons, evtq_prod, evtq_cons, strtab_cfg, cr1;
+    uint64_t strtab, cmdq_base, evtq_base;
+    int gbpa_stuck;      /* UPDATE never clears */
+    int abort_ignored;   /* ABORT never latches */
+    int ack_stuck_en;    /* CR0ACK never shows SMMUEN */
+    int cmdq_stuck;      /* CONS never advances */
+    int cmdq_err;        /* CONS reports an error */
+    uint32_t wlog_off[LOGN], wlog_val[LOGN];
+    int wn;
+    uint64_t cmds[64][2];
+    int ncmd;
+    int barriers;
+};
+static struct model M;
+
+static uint32_t m_rd(void *ctx, uint32_t off)
+{
+    struct model *m = ctx;
+    switch (off) {
+    case CK_SMMU_IDR0: return m->idr0;
+    case CK_SMMU_IDR1: return m->idr1;
+    case CK_SMMU_CR0ACK: return m->ack_stuck_en ? (m->cr0 & ~CK_SMMU_CR0_SMMUEN) : m->cr0;
+    case CK_SMMU_GBPA: return m->gbpa;
+    case CK_SMMU_CMDQ_PROD: return m->cmdq_prod;
+    case CK_SMMU_CMDQ_CONS: return m->cmdq_cons | (m->cmdq_err ? (1u << 24) : 0);
+    case CK_SMMU_EVENTQ_PROD: return m->evtq_prod;
+    case CK_SMMU_EVENTQ_CONS: return m->evtq_cons;
+    }
+    return 0;
+}
+static void m_consume(struct model *m)
+{
+    uint32_t n = 1u << (m->cmdq_base & 0x1f);
+    uint64_t *q = (uint64_t *)(uintptr_t)(m->cmdq_base & ~0x1full);
+    while (m->cmdq_cons != m->cmdq_prod) {
+        uint32_t idx = m->cmdq_cons & (n - 1);
+        if (m->ncmd < 64) {
+            m->cmds[m->ncmd][0] = q[idx * 2];
+            m->cmds[m->ncmd][1] = q[idx * 2 + 1];
+            m->ncmd++;
+        }
+        uint32_t wrap = m->cmdq_cons & n;
+        idx++;
+        if (idx == n) { idx = 0; wrap ^= n; }
+        m->cmdq_cons = idx | wrap;
+    }
+}
+static void m_wr(void *ctx, uint32_t off, uint32_t v)
+{
+    struct model *m = ctx;
+    if (m->wn < LOGN) { m->wlog_off[m->wn] = off; m->wlog_val[m->wn] = v; m->wn++; }
+    switch (off) {
+    case CK_SMMU_CR0: m->cr0 = v; break;
+    case CK_SMMU_CR1: m->cr1 = v; break;
+    case CK_SMMU_GBPA:
+        if (m->gbpa_stuck) { m->gbpa = v; break; }
+        m->gbpa = v & ~CK_SMMU_GBPA_UPDATE;
+        if (m->abort_ignored) m->gbpa &= ~CK_SMMU_GBPA_ABORT;
+        break;
+    case CK_SMMU_CMDQ_PROD:
+        m->cmdq_prod = v;
+        if (!m->cmdq_stuck && !m->cmdq_err) m_consume(m);
+        break;
+    case CK_SMMU_CMDQ_CONS: m->cmdq_cons = v; break;
+    case CK_SMMU_EVENTQ_PROD: m->evtq_prod = v; break;
+    case CK_SMMU_EVENTQ_CONS: m->evtq_cons = v; break;
+    case CK_SMMU_STRTAB_BASE_CFG: m->strtab_cfg = v; break;
+    }
+}
+static void m_wr64(void *ctx, uint32_t off, uint64_t v)
+{
+    struct model *m = ctx;
+    if (m->wn < LOGN) { m->wlog_off[m->wn] = off; m->wlog_val[m->wn] = (uint32_t)v; m->wn++; }
+    if (off == CK_SMMU_CMDQ_BASE) m->cmdq_base = v;
+    if (off == CK_SMMU_EVENTQ_BASE) m->evtq_base = v;
+    if (off == CK_SMMU_STRTAB_BASE) m->strtab = v;
+}
+static void m_bar(void *ctx) { ((struct model *)ctx)->barriers++; }
+static const struct ck_smmu_regs R = { &M, m_rd, m_wr, m_wr64, m_bar };
+
+#define SIDS 16u
+#define QN 16u
+static struct {
+    uint64_t ste[SIDS * 8] __attribute__((aligned(1024)));
+    uint64_t cmd[QN * 2] __attribute__((aligned(256)));
+    uint64_t evt[QN * 4] __attribute__((aligned(512)));
+} mem;
+static struct ck_smmu_tables T;
+
+static void reset(void)
+{
+    memset(&M, 0, sizeof M);
+    memset(&mem, 0xee, sizeof mem);
+    M.idr0 = CK_SMMU_IDR0_S1P;
+    M.idr1 = 16u | (19u << 16) | (19u << 21);
+    T.strtab = mem.ste; T.ste_n = SIDS;
+    T.cmdq = mem.cmd; T.cmd_n = QN;
+    T.evtq = mem.evt; T.evt_n = QN;
+}
+static int first_write(uint32_t off, uint32_t mask, uint32_t val)
+{
+    for (int i = 0; i < M.wn; i++)
+        if (M.wlog_off[i] == off && (M.wlog_val[i] & mask) == val) return i;
+    return -1;
+}
+static uint32_t last_cr0(void)
+{
+    uint32_t v = 0xffffffffu;
+    for (int i = 0; i < M.wn; i++)
+        if (M.wlog_off[i] == CK_SMMU_CR0) v = M.wlog_val[i];
+    return v;
+}
+
+static void test_layouts(void)
+{
+    uint64_t s[8], cd[8], c[2];
+    ck_smmu_ste_abort(s);
+    CHECK(s[0] == 1 && s[1] == 0 && s[7] == 0);
+    ck_smmu_ste_stage1(s, 0x40001040ull);
+    CHECK(s[0] == (1ull | (5ull << 1) | 0x40001040ull));
+    ck_smmu_ste_stage1(s, 0x40001047ull); /* low bits never leak into control bits */
+    CHECK((s[0] & 0x3f) == 0xb);
+    CHECK(ck_smmu_cd_stage1(cd, 0x80000000ull, 3, 0x4404ff, 16) == 0);
+    CHECK((cd[0] & 0x3f) == 16);                 /* T0SZ */
+    CHECK(((cd[0] >> 6) & 3) == 0);              /* TG0 4 KiB */
+    CHECK(((cd[0] >> 8) & 0x3f) == 0);           /* IRGN0/ORGN0/SH0: Non-cacheable */
+    CHECK(((cd[0] >> 14) & 1) == 0);             /* EPD0 clear: TTBR0 walks */
+    CHECK((cd[0] >> 30) & 1);                    /* EPD1 */
+    CHECK((cd[0] >> 31) & 1);                    /* V */
+    CHECK(((cd[0] >> 32) & 7) == 5);             /* IPS 48-bit */
+    CHECK((cd[0] >> 41) & 1);                    /* AA64 */
+    CHECK(((cd[0] >> 45) & 3) == 3);             /* R and A */
+    CHECK((cd[0] >> 48) == 3);                   /* ASID */
+    CHECK(cd[1] == 0x80000000ull && cd[2] == 0 && cd[3] == 0x4404ff);
+    CHECK(ck_smmu_cd_stage1(cd, 0x80000800ull, 1, 0, 16) == CK_SMMU_EINVAL);
+    CHECK(ck_smmu_cd_stage1(cd, 0x80000000ull, 1, 0, 40) == CK_SMMU_EINVAL);
+    ck_smmu_cmd(c, CK_SMMU_CMD_CFGI_ALL, 0, 0);
+    CHECK(c[0] == 0x04 && c[1] == 31);
+    ck_smmu_cmd(c, CK_SMMU_CMD_CFGI_STE, 0x10, 1);
+    CHECK(c[0] == (0x03ull | (0x10ull << 32)) && c[1] == 1);
+    CHECK(ck_smmu_q_encode(3, 0, 16) == 3 && ck_smmu_q_encode(3, 1, 16) == 0x13 && ck_smmu_q_encode(17, 0, 16) == 1);
+}
+
+static void test_tables_check(void)
+{
+    reset();
+    CHECK(ck_smmu_tables_check(&T) == 0);
+    struct ck_smmu_tables b = T;
+    b.ste_n = 12;
+    CHECK(ck_smmu_tables_check(&b) == CK_SMMU_EINVAL);
+    b = T;
+    b.cmd_n = 1;
+    CHECK(ck_smmu_tables_check(&b) == CK_SMMU_EINVAL);
+    b = T;
+    b.strtab = mem.ste + 8; /* 64-byte aligned, not 1 KiB */
+    CHECK(ck_smmu_tables_check(&b) == CK_SMMU_EINVAL);
+    b = T;
+    b.evtq = 0;
+    CHECK(ck_smmu_tables_check(&b) == CK_SMMU_EINVAL);
+    reset();
+    T.strtab = mem.ste + 8;
+    CHECK(ck_smmu_enable(&R, &T, 100) == CK_SMMU_EINVAL);
+    CHECK(M.wn == 0); /* nothing touched */
+}
+
+static void test_enable_ok(void)
+{
+    reset();
+    CHECK(ck_smmu_enable(&R, &T, 100) == 0);
+    int abort_at = first_write(CK_SMMU_GBPA, CK_SMMU_GBPA_ABORT, CK_SMMU_GBPA_ABORT);
+    int en_at = first_write(CK_SMMU_CR0, CK_SMMU_CR0_SMMUEN, CK_SMMU_CR0_SMMUEN);
+    CHECK(abort_at >= 0 && en_at > abort_at);
+    CHECK(M.wlog_off[0] == CK_SMMU_GBPA);       /* abort is the very first write */
+    CHECK(M.gbpa & CK_SMMU_GBPA_ABORT);          /* and never cleared */
+    CHECK(M.cr0 == (CK_SMMU_CR0_SMMUEN | CK_SMMU_CR0_CMDQEN | CK_SMMU_CR0_EVENTQEN));
+    CHECK(M.cr1 == 0);
+    CHECK(M.strtab_cfg == 4 && M.strtab == (uint64_t)(uintptr_t)mem.ste);
+    CHECK(M.cmdq_base == ((uint64_t)(uintptr_t)mem.cmd | 4) && M.evtq_base == ((uint64_t)(uintptr_t)mem.evt | 4));
+    int all_abort = 1;
+    for (unsigned i = 0; i < SIDS; i++)
+        for (unsigned w = 0; w < 8; w++)
+            if (mem.ste[i * 8 + w] != (w == 0 ? 1u : 0u)) all_abort = 0;
+    CHECK(all_abort);
+    CHECK(M.ncmd == 3 && (M.cmds[0][0] & 0xff) == CK_SMMU_CMD_CFGI_ALL &&
+          (M.cmds[1][0] & 0xff) == CK_SMMU_CMD_TLBI_NSNH_ALL && (M.cmds[2][0] & 0xff) == CK_SMMU_CMD_SYNC);
+    /* SMMUEN only after the invalidation commands were consumed. */
+    CHECK(first_write(CK_SMMU_CMDQ_PROD, 0xffffffffu, 3) < en_at);
+    CHECK(M.barriers > 0);
+}
+
+static void test_enable_fail_closed(void)
+{
+    reset();
+    M.gbpa = CK_SMMU_GBPA_UPDATE;
+    M.gbpa_stuck = 1;
+    CHECK(ck_smmu_enable(&R, &T, 50) == CK_SMMU_ETIMEOUT);
+    CHECK(first_write(CK_SMMU_CR0, 0, 0) < 0); /* CR0 never touched */
+
+    reset();
+    M.abort_ignored = 1;
+    CHECK(ck_smmu_enable(&R, &T, 50) == CK_SMMU_ENOABORT);
+    CHECK(first_write(CK_SMMU_CR0, 0, 0) < 0);
+
+    reset();
+    M.ack_stuck_en = 1;
+    CHECK(ck_smmu_enable(&R, &T, 50) == CK_SMMU_ETIMEOUT);
+    CHECK(last_cr0() == 0 && (M.gbpa & CK_SMMU_GBPA_ABORT));
+
+    reset();
+    M.cmdq_err = 1;
+    CHECK(ck_smmu_enable(&R, &T, 50) == CK_SMMU_ECMDQ);
+    CHECK(last_cr0() == 0);
+    CHECK(first_write(CK_SMMU_CR0, CK_SMMU_CR0_SMMUEN, CK_SMMU_CR0_SMMUEN) < 0);
+
+    reset();
+    M.cmdq_stuck = 1;
+    CHECK(ck_smmu_enable(&R, &T, 50) == CK_SMMU_ETIMEOUT);
+    CHECK(last_cr0() == 0);
+
+    reset();
+    M.idr0 = 0; /* no stage 1 */
+    CHECK(ck_smmu_enable(&R, &T, 50) == CK_SMMU_EUNSUP);
+    CHECK(last_cr0() == 0);
+
+    reset();
+    M.idr1 = 3u | (19u << 16) | (19u << 21); /* 8 stream ids < 16 */
+    CHECK(ck_smmu_enable(&R, &T, 50) == CK_SMMU_EUNSUP);
+    reset();
+    M.idr1 = 16u | (19u << 16) | (3u << 21); /* command queue too small */
+    CHECK(ck_smmu_enable(&R, &T, 50) == CK_SMMU_EUNSUP);
+}
+
+static void test_install_abort(void)
+{
+    reset();
+    CHECK(ck_smmu_enable(&R, &T, 100) == 0);
+    M.ncmd = 0;
+    uint64_t ste[8];
+    ck_smmu_ste_stage1(ste, 0x12345640ull);
+    CHECK(ck_smmu_install_ste(&R, &T, 5, ste, 100) == 0);
+    CHECK(mem.ste[5 * 8] == ste[0] && mem.ste[4 * 8] == 1 && mem.ste[6 * 8] == 1);
+    /* abort+invalidate, then install+invalidate: two CFGI_STE(5) batches */
+    CHECK(M.ncmd == 6 && (M.cmds[0][0] & 0xff) == CK_SMMU_CMD_CFGI_STE && (M.cmds[0][0] >> 32) == 5 &&
+          M.cmds[0][1] == 1 && (M.cmds[3][0] & 0xff) == CK_SMMU_CMD_CFGI_STE &&
+          (M.cmds[4][0] & 0xff) == CK_SMMU_CMD_TLBI_NSNH_ALL && (M.cmds[5][0] & 0xff) == CK_SMMU_CMD_SYNC);
+    CHECK(ck_smmu_install_ste(&R, &T, SIDS, ste, 100) == CK_SMMU_EINVAL);
+    CHECK(ck_smmu_abort_ste(&R, &T, SIDS, 100) == CK_SMMU_EINVAL);
+    M.ncmd = 0;
+    CHECK(ck_smmu_abort_ste(&R, &T, 5, 100) == 0);
+    CHECK(mem.ste[5 * 8] == 1 && mem.ste[5 * 8 + 1] == 0);
+    CHECK(M.ncmd == 3 && (M.cmds[0][0] >> 32) == 5);
+    /* A stuck queue on install leaves the stream in abort. */
+    M.cmdq_stuck = 1;
+    CHECK(ck_smmu_install_ste(&R, &T, 7, ste, 50) == CK_SMMU_ETIMEOUT);
+    CHECK(mem.ste[7 * 8] == 1);
+}
+
+static void test_queue_wrap(void)
+{
+    reset();
+    CHECK(ck_smmu_enable(&R, &T, 100) == 0);
+    M.ncmd = 0;
+    uint64_t c[20][2];
+    for (int i = 0; i < 20; i++)
+        ck_smmu_cmd(c[i], CK_SMMU_CMD_SYNC, (uint32_t)i, 0);
+    CHECK(ck_smmu_submit(&R, &T, (const uint64_t (*)[2])c, 20, 100) == 0);
+    CHECK(M.ncmd == 20 && (M.cmds[19][0] >> 32) == 19);
+    /* 3 (enable) + 20 = 23 = one wrap of 16 + index 7 */
+    CHECK(M.cmdq_prod == (7u | 16u) && M.cmdq_cons == M.cmdq_prod);
+    /* A full queue that never drains times out. */
+    M.cmdq_stuck = 1;
+    CHECK(ck_smmu_submit(&R, &T, (const uint64_t (*)[2])c, 20, 50) == CK_SMMU_ETIMEOUT);
+}
+
+static void test_events(void)
+{
+    reset();
+    CHECK(ck_smmu_enable(&R, &T, 100) == 0);
+    mem.evt[0] = 0x10 | (0x10ull << 32);
+    mem.evt[2] = 0x7000;
+    mem.evt[4] = 0x06 | (0x20ull << 32);
+    mem.evt[6] = 0;
+    M.evtq_prod = 2;
+    struct ck_smmu_event ev[4];
+    int ovf = -1;
+    CHECK(ck_smmu_read_events(&R, &T, ev, 4, &ovf) == 2);
+    CHECK(ev[0].type == 0x10 && ev[0].sid == 0x10 && ev[0].addr == 0x7000 && ev[1].type == 0x06 && ev[1].sid == 0x20);
+    CHECK(ovf == 0 && M.evtq_cons == 2);
+    CHECK(ck_smmu_read_events(&R, &T, ev, 4, &ovf) == 0);
+    /* Wrapped producer with overflow flag: acknowledged once. */
+    M.evtq_prod = 1u | 16u | (1u << 31);
+    M.evtq_cons = 15;
+    CHECK(ck_smmu_read_events(&R, &T, ev, 1, &ovf) == 1 && ovf == 1);
+    CHECK(M.evtq_cons == (0u | 16u | (1u << 31)));
+    CHECK(ck_smmu_read_events(&R, &T, ev, 4, &ovf) == 1 && ovf == 0);
+}
+
+/* ---- IORT -------------------------------------------------------------- */
+static void w16(uint8_t *p, uint16_t v) { memcpy(p, &v, 2); }
+static void w32(uint8_t *p, uint32_t v) { memcpy(p, &v, 4); }
+static void w64(uint8_t *p, uint64_t v) { memcpy(p, &v, 8); }
+
+/* header(48) | ITS group (24 bytes, type 0) | SMMUv3 node (68 bytes, one
+ * mapping to the ITS) | root complex (36 + 20*2 bytes, mappings to SMMU
+ * and to the ITS) */
+static uint32_t build_iort(uint8_t *t, int smmu_present)
+{
+    memset(t, 0, 512);
+    memcpy(t, "IORT", 4);
+    uint32_t at = 48, its = at, smmu, rc;
+    t[at] = 0; w16(t + at + 1, 24); w32(t + at + 16, 1); at += 24;
+    smmu = at;
+    t[at] = smmu_present ? 4 : 1; w16(t + at + 1, 88);
+    w32(t + at + 8, 1); w32(t + at + 12, 68);
+    w64(t + at + 16, 0x09050000ull);
+    w32(t + at + 68 + 4, 0xffff); w32(t + at + 68 + 12, its);
+    at += 88;
+    rc = at;
+    t[at] = 2; w16(t + at + 1, 36 + 40);
+    w32(t + at + 8, 2); w32(t + at + 12, 36);
+    w32(t + at + 36 + 0, 0); w32(t + at + 36 + 4, 0xffff); w32(t + at + 36 + 8, 0); w32(t + at + 36 + 12, smmu);
+    w32(t + at + 56 + 0, 0x10000); w32(t + at + 56 + 4, 0xff); w32(t + at + 56 + 8, 0); w32(t + at + 56 + 12, its);
+    at += 76;
+    w32(t + 4, at);
+    w32(t + 36, 3);
+    w32(t + 40, 48);
+    (void)rc;
+    return at;
+}
+
+static void test_iort(void)
+{
+    static uint8_t t[512];
+    struct ck_iort_smmu s;
+    uint32_t sid = 0;
+    build_iort(t, 1);
+    CHECK(ck_iort_parse(t, &s) == 1);
+    CHECK(s.base == 0x09050000ull && s.nmaps == 1 && s.map[0].id_count == 0xffff);
+    CHECK(ck_iort_stream_id(&s, 0x0010, &sid) == 0 && sid == 0x10);
+    CHECK(ck_iort_stream_id(&s, 0xffff, &sid) == 0 && sid == 0xffff);
+    CHECK(ck_iort_stream_id(&s, 0x10000, &sid) == -1); /* the ITS-only mapping is not an SMMU stream */
+    build_iort(t, 0);
+    CHECK(ck_iort_parse(t, &s) == 0);
+    /* Malformed: node length past the table, mapping array past the node,
+     * SMMU base 0, bad signature. */
+    build_iort(t, 1);
+    w16(t + 48 + 24 + 1, 400);
+    CHECK(ck_iort_parse(t, &s) == -1);
+    build_iort(t, 1);
+    w32(t + 48 + 24 + 88 + 8, 9);
+    CHECK(ck_iort_parse(t, &s) == -1);
+    build_iort(t, 1);
+    w64(t + 48 + 24 + 16, 0);
+    CHECK(ck_iort_parse(t, &s) == -1);
+    build_iort(t, 1);
+    t[0] = 'X';
+    CHECK(ck_iort_parse(t, &s) == -1);
+    build_iort(t, 1);
+    w32(t + 36, 9); /* more nodes than fit */
+    CHECK(ck_iort_parse(t, &s) == -1);
+    /* A mapping whose output would wrap is never a stream. */
+    struct ck_iort_smmu w = { 1, 0, 1, { { 0, 0xffff, 0xfffffff0u } } };
+    CHECK(ck_iort_stream_id(&w, 0x20, &sid) == -1);
+}
+
+int main(void)
+{
+    test_layouts();
+    test_tables_check();
+    test_enable_ok();
+    test_enable_fail_closed();
+    test_install_abort();
+    test_queue_wrap();
+    test_events();
+    test_iort();
+    return ck_t_verdict("test_smmu");
+}

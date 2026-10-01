@@ -6,9 +6,11 @@
 # hardware: a PASS here qualifies nothing physical.
 #
 # Images (native/kernel/Makefile):
-#  - make full CK_QEMU_UNSAFE_DMA=1: QEMU-only build with the unconfined NVMe
-#    DMA bypass (the C core has no SMMU service yet); used for boots 1-4;
-#  - make full: the default build; NVMe DMA must be refused (fail-closed boot).
+#  - make full: the default build. With an SMMUv3 (QEMU iommu=smmuv3, found
+#    through the ACPI IORT) the NVMe stream is confined to its DMA window
+#    (boots 1-4); without one NVMe DMA must be refused (boot 5).
+#  - make full CK_QEMU_UNSAFE_DMA=1: TEST-ONLY build with the unconfined NVMe
+#    DMA bypass, kept so the bypass path stays honest (boot 6 only).
 #
 # Per NVMe geometry (512 B blocks like qemu_nvme_test.sh, 4 KiB blocks like
 # qemu_store_crash_test.sh / qemu_continuity_test.sh), on one fresh 64 MiB
@@ -24,8 +26,19 @@
 #             (the Store superblock; same corruption as svc/tests/stage_test.c):
 #             must be refused as proof=structural with nothing committed, and
 #             the image sha256 must be the same before and after the boot.
-#  boot 5     default (safe) image on the same disk: NVMe DMA denied, no
+#  boot 5     default image, no SMMU, same disk: NVMe DMA denied, no
 #             unsafe-bypass text, Store refused (no disk), image unchanged.
+#  boot 6     TEST-ONLY bypass image, no SMMU, same (corrupt) disk: the bypass
+#             warnings and grant are printed, the Store is still refused as
+#             structural and the image is unchanged.
+# SMMU observables (boots 1-4; patterns of qemu_nvme_test.sh where the Rust
+# kernel has them): "smmu: enabled", "smmu_dma_window: nvme only, translation
+# active", "dma_gate: nvme granted (Confined), bus master on", absent
+# "UNSAFE NVME DMA BYPASS"; C only (differs): "smmu_negative: refused dma
+# outside window ... page=intact ... recovery_read=ok" (the controller is
+# pointed at a page outside the window, the SMMU must report a translation
+# fault for exactly that page and the page must be unchanged) and "smmu: nvme
+# stream 0x.. returned to abort" after the bus master is revoked.
 #
 # Patterns copied verbatim from the Rust scripts (qemu_nvme_test.sh):
 #   "WARNING: UNSAFE NVME DMA BYPASS BUILD", "WARNING: UNSAFE NVME DMA BYPASS
@@ -45,14 +58,14 @@
 #   nvme=bound", "stage <name>: ok|FAIL", "store: ..." lines, "caps: ok ..."
 #   and "argus: ok narrow_revoke=1 ...". The Rust NVME_ERROR_QEMU check (a
 #   device-reported command error) has no C counterpart and is not run.
-# The Rust Store scripts add iommu=smmuv3; this gate omits it because the C
-# core has no SMMU service (hence the QEMU-only bypass image).
+# Boots 1-4 add iommu=smmuv3 to the machine like the Rust Store scripts.
 #
 # Takes the machine quiet flag itself like qemu_ck_boot_test.sh
 # (AIENOS_QUIET_FLAG / AIENOS_QUIET_TAG; released at most once, only if it
 # still holds exactly this run's text). Any QEMU exit status other than 0 fails.
 # Final lines: AIENOS_CK_M4_NVME, AIENOS_CK_M4_STORE, AIENOS_CK_ARGUS1_REVOKE,
-# each PASS|FAIL|NOT_RUN. A boot that fails an M1 check fails all three.
+# AIENOS_CK_SMMU, each PASS|FAIL|NOT_RUN. A boot that fails an M1 check fails
+# all four.
 # Needs qemu-system-aarch64 and AAVMF (Ubuntu: qemu-system-arm qemu-efi-aarch64).
 set -euo pipefail
 
@@ -63,6 +76,7 @@ verdicts() { # one value for all three
     echo "AIENOS_CK_M4_NVME: $1"
     echo "AIENOS_CK_M4_STORE: $1"
     echo "AIENOS_CK_ARGUS1_REVOKE: $1"
+    echo "AIENOS_CK_SMMU: $1"
 }
 code_fd="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}"
 vars_fd="${AAVMF_VARS:-/usr/share/AAVMF/AAVMF_VARS.fd}"
@@ -103,14 +117,15 @@ trap cleanup EXIT
 # shellcheck source=scripts/lib_ck_m1_checks.sh
 source "${repo_root}/scripts/lib_ck_m1_checks.sh"
 img_bytes=67108864
-m1_fail=0; nvme_fail=0; store_fail=0; argus_fail=0
+m1_fail=0; nvme_fail=0; store_fail=0; argus_fail=0; smmu_fail=0
 fail_into() { # bucket variable name: move the current failed flag into it
     if [[ "${failed}" != 0 ]]; then printf -v "$1" 1; fi
     failed=0
 }
 sha() { sha256sum "$1" | cut -d' ' -f1; }
 
-# boot <name> <efi> <disk image> <block bytes> <serial>: one QEMU boot; leaves
+# boot <name> <efi> <disk image> <block bytes> <serial> [smmu]: one QEMU boot
+# (with "smmu" the machine gets an SMMUv3); leaves
 # the serial text in ${work}/serial.txt and the exit status in qemu_status.
 boot() {
     work="${top}/$1"
@@ -120,10 +135,12 @@ boot() {
     cp "${vars_fd}" "${work}/vars.fd"
     local nvme_dev="nvme,drive=nvme0,serial=$5"
     [[ "$4" == 512 ]] || nvme_dev="${nvme_dev},logical_block_size=$4,physical_block_size=$4"
+    local machine="virt,virtualization=on,gic-version=3"
+    [[ "${6:-}" != smmu ]] || machine+=",iommu=smmuv3"
     set +e
     # Issue #61: single-threaded TCG (see qemu_boot_test.sh).
     timeout "${AIENOS_QEMU_TIMEOUT:-180}" qemu-system-aarch64 \
-        -M virt,virtualization=on,gic-version=3 -accel tcg,thread=single -cpu max -smp 4 -m 2048 \
+        -M "${machine}" -accel tcg,thread=single -cpu max -smp 4 -m 2048 \
         -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
         -drive if=pflash,format=raw,file="${work}/vars.fd" \
         -drive if=none,id=esp,format=raw,file=fat:rw:"${work}/esp" \
@@ -147,11 +164,24 @@ field() {
     line=$(grep -E "$1" "${work}/serial.txt" | tail -1 || true)
     [[ "${line}" =~ $1 ]] && echo "${BASH_REMATCH[1]}" || echo ""
 }
-nvme_checks() { # block bytes: the bound NVMe path of the unsafe image
+nvme_checks() { # block bytes, confined|bypass: the bound NVMe path
     local bs="$1" count=$(( img_bytes / $1 ))
-    check "unsafe bypass build announced on serial" "WARNING: UNSAFE NVME DMA BYPASS BUILD"
-    check "unsafe bypass grant announced on serial" "WARNING: UNSAFE NVME DMA BYPASS ACTIVE"
-    check "NVMe DMA granted through the unsafe bypass" "dma_gate: nvme granted (UnsafeBypass)"
+    if [[ "$2" == confined ]]; then
+        check "SMMUv3 enabled from the IORT" "smmu: enabled"
+        check "NVMe DMA window mapped through the SMMU" "smmu_dma_window: nvme only, translation active"
+        check "NVMe DMA granted confined" "dma_gate: nvme granted (Confined), bus master on"
+        check_absent "no unsafe DMA bypass in this image" "UNSAFE NVME DMA BYPASS"
+        check_absent "no unconfined grant" "dma_gate: nvme granted (UnsafeBypass)"
+        check "DMA outside the window faulted, page intact, controller still usable (differs)" \
+            "smmu_negative: refused dma outside window iova=0x[0-9a-f]* faults=[1-9][0-9]* type=0x10 sid=0x[0-9a-f]* addr=0x[0-9a-f]* page=intact cmd_rc=-\?[0-9]* recovery_read=ok$"
+        check "NVMe stream returned to abort after the revoke (differs)" "smmu: nvme stream 0x[0-9a-f]* returned to abort (rc=0)"
+        fail_into smmu_fail
+    else
+        check "TEST-ONLY bypass build announced on serial" "WARNING: UNSAFE NVME DMA BYPASS BUILD"
+        check "TEST-ONLY bypass grant announced on serial" "WARNING: UNSAFE NVME DMA BYPASS ACTIVE"
+        check "NVMe DMA granted through the TEST-ONLY bypass" "dma_gate: nvme granted (UnsafeBypass)"
+        check_absent "no SMMU window claimed by the bypass" "smmu_dma_window:"
+    fi
     check "ECAM discovery found the NVMe class device (differs)" "nvme: discovery "
     check "controller and namespace identify completed (differs)" "nvme: identify ok "
     check "namespace geometry matches the image (differs)" \
@@ -182,8 +212,8 @@ for bs in 512 4096; do
     truncate -s "${img_bytes}" "${image}"
     prev_gen=""
     for k in 1 2 3; do
-        boot "${bs}-boot${k}" "${unsafe_efi}" "${image}" "${bs}" "${serial}"
-        nvme_checks "${bs}"
+        boot "${bs}-boot${k}" "${safe_efi}" "${image}" "${bs}" "${serial}" smmu
+        nvme_checks "${bs}" confined
         argus_checks
         check "stage store ok (differs)" "stage store: ok"
         check_absent "Store not refused (differs)" "store: REFUSED"
@@ -244,8 +274,8 @@ for bs in 512 4096; do
     [[ "${sha_corrupt}" != "${sha_clean}" && $(stat -c %s "${image}") == "${img_bytes}" ]] \
         && echo "PASS  host corrupted the Store superblock (8192 bytes at ${soff})" \
         || store_fail_msg "host corruption did not change the image"
-    boot "${bs}-boot4-corrupt" "${unsafe_efi}" "${image}" "${bs}" "${serial}"
-    nvme_checks "${bs}"
+    boot "${bs}-boot4-corrupt" "${safe_efi}" "${image}" "${bs}" "${serial}" smmu
+    nvme_checks "${bs}" confined
     argus_checks
     check "corrupt Store refused as structural (differs)" "store: REFUSED proof=structural "
     check "corrupt Store left as found, not reformatted (differs)" "disk left as found, not reformatted"
@@ -273,18 +303,32 @@ for bs in 512 4096; do
     sha_safe=$(sha "${image}")
     [[ "${sha_safe}" == "${sha_corrupt}" ]] && echo "PASS  image sha256 unchanged by the fail-closed boot" \
         || store_fail_msg "image changed by the fail-closed boot"
+
+    # Boot 6: TEST-ONLY bypass image, no SMMU. Kept so the bypass path stays
+    # honest: it must announce itself, and the corrupt Store is still refused.
+    boot "${bs}-boot6-bypass" "${unsafe_efi}" "${image}" "${bs}" "${serial}"
+    nvme_checks "${bs}" bypass
+    argus_checks
+    check "corrupt Store refused under the bypass image too (differs)" "store: REFUSED proof=structural "
+    check_absent "nothing committed under the bypass image (differs)" "store: committed"
+    fail_into store_fail
+    sha_bypass=$(sha "${image}")
+    [[ "${sha_bypass}" == "${sha_corrupt}" ]] && echo "PASS  image sha256 unchanged by the bypass boot" \
+        || store_fail_msg "image changed by the bypass boot"
 done
 release_flag
 
-if [[ "${m1_fail}${nvme_fail}${store_fail}${argus_fail}" != 0000 || -n "${AIENOS_QEMU_VERBOSE:-}" ]]; then
+if [[ "${m1_fail}${nvme_fail}${store_fail}${argus_fail}${smmu_fail}" != 00000 || -n "${AIENOS_QEMU_VERBOSE:-}" ]]; then
     for s in "${top}"/*/serial.txt; do
         echo "---- serial console $(basename "$(dirname "${s}")") (stage lines) ----"
-        grep -E '^(stage |nvme:|dma_gate:|WARNING|devices:|store:|caps:|argus:|report_kind:)' "${s}" | head -60 || true
+        grep -E '^(stage |smmu|nvme:|dma_gate:|WARNING|devices:|store:|caps:|argus:|report_kind:)' "${s}" | head -60 || true
     done
 fi
 [[ "${m1_fail}" != 0 ]] && echo "M1 checks failed on at least one boot: no verdict can pass"
 v() { [[ "${m1_fail}" == 0 && "$1" == 0 ]] && echo PASS || echo FAIL; }
-echo "AIENOS_CK_M4_NVME: $(v "${nvme_fail}")"
+# Confined mode is part of the NVMe gate: an SMMU failure fails it too.
+echo "AIENOS_CK_M4_NVME: $(v "$(( nvme_fail | smmu_fail ))")"
 echo "AIENOS_CK_M4_STORE: $(v "${store_fail}")"
 echo "AIENOS_CK_ARGUS1_REVOKE: $(v "${argus_fail}")"
-[[ "${m1_fail}${nvme_fail}${store_fail}${argus_fail}" == 0000 ]] || exit 1
+echo "AIENOS_CK_SMMU: $(v "${smmu_fail}")"
+[[ "${m1_fail}${nvme_fail}${store_fail}${argus_fail}${smmu_fail}" == 00000 ]] || exit 1
