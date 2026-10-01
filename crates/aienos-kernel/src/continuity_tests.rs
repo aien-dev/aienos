@@ -415,3 +415,27 @@ fn branch_table_at_the_maximum_legal_fork_sum_is_accepted() {
         Err(ContinuityError::Limit("too many branches"))
     );
 }
+
+#[test]
+fn huge_fork_count_with_underivable_child_is_refused_without_spinning() {
+    // Root forks = 2^64-1 and a child whose id is no derived index: an
+    // uncapped `0..forks` scan would run ~2^64 hashes. Capped at MAX_BRANCHES
+    // like C (continuity_codec.c:468), it is refused after <= 256 hashes with
+    // C's class and text (continuity_codec.c:474-479).
+    let root = root_branch_id(&AGENT);
+    let rogue = [0x77u8; 32];
+    assert!((0..MAX_BRANCHES as u64).all(|i| child_branch_id(&root, i) != rogue));
+    let mut t = AgentState::genesis(AGENT, 1);
+    t.branches[0].forks = u64::MAX;
+    t.branches.push(Branch {
+        id: rogue,
+        parent: Some(root),
+        depth: 1,
+        forks: 0,
+    });
+    t.branches.sort_by(|a, b| a.id.cmp(&b.id));
+    assert_eq!(
+        t.validate(),
+        Err(ContinuityError::Corrupt("branch lineage is inconsistent"))
+    );
+}

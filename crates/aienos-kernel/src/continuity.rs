@@ -465,7 +465,15 @@ impl AgentState {
                 }
                 Some(p) => {
                     let parent = self.branch(&p).ok_or(bad("parent branch is absent"))?;
-                    let index_ok = (0..parent.forks).any(|i| child_branch_id(&p, i) == b.id);
+                    // Scan capped at MAX_BRANCHES, as in the C codec
+                    // (continuity_codec.c:463-475): `forks` is input-controlled,
+                    // so an uncapped scan lets a hostile table spin for up to
+                    // 2^64 hashes. A table that passes the fork-sum check below
+                    // has every forks <= 255, so the cap changes no outcome for
+                    // a valid table; an id past the cap is refused here as
+                    // Corrupt("branch lineage is inconsistent"), same as C.
+                    let lim = parent.forks.min(MAX_BRANCHES as u64);
+                    let index_ok = (0..lim).any(|i| child_branch_id(&p, i) == b.id);
                     if !index_ok || Some(b.depth) != parent.depth.checked_add(1) {
                         return Err(bad("branch lineage is inconsistent"));
                     }
