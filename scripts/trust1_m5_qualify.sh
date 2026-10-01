@@ -52,9 +52,9 @@ t1_recovery_tools|software|run_recovery_tools|-|^RECOVERY_TOOLS: PASS|recovery i
 store_torn_slot_c|software|run_store_c|-|^TORN_SLOT_HOST_EMULATION: PASS|Store C reference torn-write test (host block-device emulation)
 m5_crypto_crate|cargo|run_cargo_crypto|-|^test result: ok\.|cargo test -p aienos-crypto
 m5_kernel_crypto_security|cargo|run_cargo_kernel|-|^test result: ok\.|cargo test -p aienos-kernel --lib (crypto:: security::)
-t1_gate5_policy_sim|auto|run_gate5_sim|-|-|TRUST-1 Gate 5 policy simulator self-test
-m5_native_test|auto|run_native_m5|-|-|make -C native/m5 test
-crypto_native_test|auto|run_native_crypto|-|-|make -C native/crypto test
+t1_gate5_policy_sim|auto|run_gate5_sim|-|^TRUST1_GATE5_POLICY_SIM: PASS$|TRUST-1 Gate 5 policy simulator self-test
+m5_native_test|auto|run_native_m5|-|^M5_NATIVE: PASS$|make -C native/m5 test
+crypto_native_test|auto|run_native_crypto|-|^AIENOS_CRYPTO_NATIVE: PASS$|make -C native/crypto test
 qemu_secureboot_signing|qemu|run_qemu_sb|-|^TRUST-1 Gate 4 Secure Boot signing test: ALL PASS$|QEMU Secure Boot signing test (TRUST-1 Gate 4)
 qemu_store_512b_crash|qemu|run_qemu_store512|-|^STORE_512B_CRASH_RECOVERY_QEMU: PASS$|QEMU Store crash recovery on 512-byte blocks
 t1_gate0_second_offline_location|operator|-|-|-|Gate 0: second offline backup location
@@ -112,13 +112,7 @@ native_make_test() {
 run_store_c()           { native_make_test store; }
 run_cargo_crypto()      { (cd "${repo_root}" && cargo test -p aienos-crypto); }
 run_cargo_kernel()      { (cd "${repo_root}" && cargo test -p aienos-kernel --lib -- crypto:: security::); }
-run_gate5_sim() {
-    if [[ -f "${repo_root}/scripts/trust1_gate5_policy_sim.sh" ]]; then
-        bash "${repo_root}/scripts/trust1_gate5_policy_sim.sh" selftest
-    else
-        bash "${repo_root}/scripts/test_trust1_gate5_policy_sim.sh"
-    fi
-}
+run_gate5_sim()      { bash "${repo_root}/scripts/trust1_gate5_policy_sim.sh" selftest; }
 run_native_m5()     { native_make_test m5; }
 run_native_crypto() { native_make_test crypto; }
 run_qemu_sb()       { bash "${repo_root}/scripts/qemu_secureboot_signing_test.sh"; }
@@ -127,7 +121,7 @@ run_qemu_store512() { bash "${repo_root}/scripts/qemu_store_512b_crash_test.sh";
 # Is the implementation of an 'auto' gate present?
 auto_present() {
     case "$1" in
-        run_gate5_sim) [[ -f "${repo_root}/scripts/trust1_gate5_policy_sim.sh" || -f "${repo_root}/scripts/test_trust1_gate5_policy_sim.sh" ]] ;;
+        run_gate5_sim) [[ -f "${repo_root}/scripts/trust1_gate5_policy_sim.sh" ]] ;;
         run_native_m5) [[ -f "${repo_root}/native/m5/Makefile" ]] ;;
         run_native_crypto) [[ -f "${repo_root}/native/crypto/Makefile" ]] ;;
         *) declare -F "$1" >/dev/null ;;
