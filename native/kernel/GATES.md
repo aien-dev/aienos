@@ -312,6 +312,8 @@ complete.
 
 ## Summary counts
 
+**C kernel receipt tally (QEMU only, no physical run):** 9 of 14 CK gates PASS, 5 NOT_RUN (M0_ROLLBACK, M4_STORE_CRASH, M4_CONTINUITY, M4_RECOVERY, KEYBOARD), 0 FAIL, matching `evidence/ck_gates_bb4040322b026f5f561733fdcaf900770070f2281800b0e3603c2aa2c670b7ff.json` (run at 4f56a96). The row counts below are per Rust-parity row, not per gate.
+
 Rows 1-106: IDENTICAL 28, DIFFERS 37, NOT_RUN 41, counted from the table (the previous summary, 20/30/56, was miscounted: the table on main had 21/35/50; rows 33-41 then moved from NOT_RUN to 7 IDENTICAL + 2 DIFFERS with the C artifact loader; rows 92-95 have no CK gate at all; rows 96-106 are C-only). Rows 33-41 were checked against scripts/qemu_ck_artifact_test.sh. Rows 102-106 were checked against scripts/qemu_ck_net_test.sh. Rows 13, 24, 47-72, 76 and 96-101 were re-verified against scripts/qemu_ck_store_test.sh and scripts/lib_ck_m1_checks.sh at the commit that adds this line.
 
 `scripts/trust1_m5_qualify.sh --with-qemu` also runs three of these gates as

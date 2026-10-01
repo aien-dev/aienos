@@ -43,8 +43,7 @@ control-transport stub. No Rust, no Python, no heap, no outside library.
 
 ## Not claimed (deferred, with the dependency)
 
-- Native binding (real NIC, interrupts, real DMA): the virtio-net queue code now
-  exists as hosted code (Lane 26, below) but nothing in the C kernel calls it yet.
+- Physical binding (real NIC, interrupts, enforced DMA): the virtio-net driver is bound in the C kernel by `native/kernel/dev/net_bind.c` (#200 d75a266 attach and split virtqueue driver, #203 9807281 kernel hook, NET gate PASS in QEMU only). It is polled (no IRQs), uses TEST keys, and the SMMU window is programmed but NOT enforced because VIRTIO_F_ACCESS_PLATFORM is not negotiated. No physical NIC driver exists.
 - Production identity and keys: needs M5 (key hierarchy, TRUST-1). The M6-B
   secure transport below exists as hosted code but runs on TEST keys only. The stub refuses every identity kind except TEST, whose key is
   derived from a public label and so protects nothing against an attacker.
@@ -141,8 +140,7 @@ two in-process machines over real M6-A Ethernet/IPv4/UDP frames):
 
 **Not proven:**
 
-- **No native binding.** Nothing runs on a NIC or in a kernel; the code is
-  hosted C only.
+- **No physical binding.** This transport is hosted C only; the C kernel binds the M6-A UDP path and virtio-net driver (#203), not this secure transport.
 - **No real keys.** Identities come from `sec_test_identity` (a public label,
   marked NOT-FOR-PRODUCTION), and the "entropy" is a seeded generator. Real
   identities wait for the M5 owner-key hierarchy (TRUST-1), and a real
@@ -188,15 +186,14 @@ verify}`, which carries a 32-byte tag. The two connect like this:
 - **`recv`.** It drains UDP and calls `sec_receive`. Only `SEC_DATA`
   payloads reach the Fabric, so it sees only authenticated bytes from the
   configured peer.
-- **Tag size.** An Ed25519 signature is 64 bytes, but `FAB_TAG_BYTES` is 32,
-  so the identity key cannot sign Fabric messages directly. While
-  `FabAuth` stays at 32 bytes, the adapter can set the tag to an HMAC under
-  a per-session key exported from the secure session. A real per-machine
-  signature means widening the Fabric tag to 64 bytes (an omega change).
+- **Tag size.** An Ed25519 signature is 64 bytes, but `FAB_TAG_BYTES` was 32,
+  so the identity key could not sign Fabric messages directly. omega #137 (1299b19) has since widened the Fabric signature field to 64 bytes; no adapter uses it yet.
 - **Nothing is built yet.** No adapter exists in either repository. This
   section is the interface plan only.
 
 ## Lane 26: virtio-net PCI fix and virtqueue data path (hosted)
+
+> Update 2026-10-01: the text of this section is the hosted-lane record. The driver is now bound in the C kernel (#200 d75a266, #203 9807281, `native/kernel/dev/net_bind.c`) and the NET gate passes in QEMU only (slirp UDP round trip; SMMU window programmed but not enforced because VIRTIO_F_ACCESS_PLATFORM is not negotiated; polled, no IRQs; no physical NIC; TEST keys). The "not proven" list below still holds for real hardware.
 
 **The attach bug.** The capability walk refused any vendor capability whose
 region had length 0, before looking at its type. Real QEMU virtio-net-pci
