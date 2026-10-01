@@ -1,0 +1,74 @@
+AIENOS M6-A hosted C network stack + M6-B secure transport receipt
+commit: 62a182c230a703aedc85b1be75ef6eb46f8893e3
+host: Linux 7.0.0-1019-nvidia aarch64
+cc: cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+scope: host tests only (no QEMU, no hardware, no native binding, TEST identity only)
+scope M6-B: hosted protocol code only; no real keys, no timing measurement, no formal protocol analysis
+sources:
+  9fe48c2a25f7872089d7495cc31860203647e109c097e708ec21f6d7f7a2a19a  native/net/aienos_net.c
+  61d3843a95a143ef546f00f2f6e460abc3e337bc8fb15d88d28df6bd644c9d4b  native/net/aienos_net.h
+  e6bf8b039b7db1e0a17078e85313046dc68fd01d0ea1f00571ef1fb0ec24e529  native/net/aienos_virtio_pci.c
+  93cad17472829580c121777e574f1993ee7acd9ce45138f50dde33f92e55136b  native/net/aienos_virtio_pci.h
+  de7eef9b96a125fe7e7d61beb4a73a41a861adc1c2430416f9753aaa67cfa47e  native/net/aienos_ctl.c
+  beee2793530c03019ad5bb43fa7aaf632d1c5ca147b9ddc0215440d797983ed6  native/net/aienos_ctl.h
+  5e0e002018b4a4fd696a5d2a23302a2019dd74b72ad47b7adfd1236c3c5c5282  native/net/x25519.c
+  213335960f2f1cc365a66d7981c0075b993b132139eea5396c113662951ff445  native/net/x25519.h
+  ba38d7f9d2ca670e3b903b355775e80362da3e1133a49bd936c09841e8999ab4  native/net/aienos_sec.c
+  ff92be9bec46e03f58013c7877b3a11d915704dc9579992ad6e3a820c56f1898  native/net/aienos_sec.h
+  716b6d0e4e15a1c5696252d831f7e2cf2a287f2e64f7a2417f6f4908eefc56bd  native/net/../argus/sha256.c
+  4600b408ea501f3b5cb0a9f833c9300ffd970e359c2bee2e60f93e1ce244d973  native/net/../crypto/aes.c
+  f4b4f71c40687a4bfa5a00e61c5eb06d46edb5b526e041c920a4bfbd616d9c35  native/net/../crypto/polyval.c
+  394bc53984b516c3567ecaf2c108ed2a98b143ac658bc47a87b04787aa25c7be  native/net/../crypto/gcm_siv.c
+  3f774149c3e734dc85911431cb21e40e4e4ed65caea66536795ed5327fef563f  native/net/../crypto/hmac.c
+  3c72a3ac1e00550cba4c91339ea670520884e21fd3edaa34008535c768fbc75f  native/net/../crypto/ct.c
+  33714a7d8605cda4b13c13d7d2f75e6116bafebe95af4c30a11b8e04d82f3026  native/net/../sig/ed25519.c
+  110c6322c699ce77011906486aa5ff3cb8becdede12534d20efb92711b90ba22  native/net/../sig/sha512.c
+  59b7d18636e7acfc4f5f78d7c6abd7f7dd52cc45a342fb4888be6b4c83413035  native/net/../sig/ct.c
+  151bc87ef10b31cb69f8493c30258cccdc7a37011ce662f782c95bacadfe8dea  native/net/tests/net_test.c
+  ded1e16b91eafd9a382537e2c429c8a66396c62a4dd5a8d6ab7a94238954d654  native/net/tests/ctl_test.c
+  eecd1179afe1c907c6d1d53aa01dd750a705938dc88e8a3ad176568bf8e4b1e3  native/net/tests/net_diff.c
+  f8bd1c4cfdfcb96e03316dd0535f5d021ce013c3a3e864fb43cb627ba0dc9c5b  native/net/tests/x25519_test.c
+  cfaf77d93c30242228c7722068da83cbe0395bcb2fee444aede64e1007c362a3  native/net/tests/sec_test.c
+  e91d245e0904825166065c761409e49c084ec1c764a70aabeae807b0b76b7da9  native/net/Makefile
+  bf3ffcc4fa830c700b0fe3e80e3676818f4d5b4c0415c7510f549390b9a704ec  native/net/receipt.sh
+rust reference (spec, unmodified):
+  4fa8265a900fb62d78d0a35bed9420dfc449e2aa20e74f5f5f3cd884c17cd449  crates/aienos-kernel/src/net.rs
+  b66117d6dd7b4fc534d9943559c96cd5297da337e07ac2699aad87ae76acd264  crates/aienos-kernel/src/virtio_net.rs
+differential corpus: 88e88c492ed54d87e3f458cd7e2f0dd0d063a853357dc5a49fcd0d942ddb8134
+results:
+  lib-checks PASS (no heap, clock, I/O or ambient randomness; TEST identity only)
+  NET_RUST_DIFFERENTIAL_PINNED: PASS (200000 records)
+  net_test seed=0x6a5e11 iters=200000 checks=398624 failures=0
+  NET_PROTOCOL_HOST: PASS
+    clean                  done=1 ticks=63 retx=0/0 dup=0/0 gap=0/0 badtag=0/0 malformed=0/0 transcript=0365b2fe4b2ccc0a
+    loss30                 done=1 ticks=149 retx=68/87 dup=2/2 gap=35/27 badtag=0/0 malformed=0/0 transcript=0d9dbd871b3a18e1
+    loss+dup+reorder       done=1 ticks=433 retx=162/177 dup=36/44 gap=128/101 badtag=0/0 malformed=0/0 transcript=a92c9e06b71c0eb4
+    corrupt20              done=1 ticks=185 retx=126/152 dup=34/34 gap=74/50 badtag=38/41 malformed=8/5 transcript=b4a84098949f31a5
+    everything             done=1 ticks=470 retx=167/196 dup=27/31 gap=108/84 badtag=18/22 malformed=3/3 transcript=033f75b79aeee8b1
+    blackout-recover       done=1 ticks=449 retx=147/142 dup=1/0 gap=97/96 badtag=0/0 malformed=0/0 transcript=0117bf3ef89bca9f
+    blackout-dead          link_down at tick 20 after 3 retransmissions
+  ctl_test checks=8628 failures=0
+  CTL_TRANSPORT_LOSS_RECOVERY: PASS
+  X25519_RFC7748: PASS (149 checks, 0 failures, 1000 iterations)
+  AIENOS_NET_SECURE_TESTS: PASS (45849 checks, 0 failures)
+  net_test seed=0x6a5e11 iters=50000 checks=99821 failures=0
+  NET_PROTOCOL_HOST: PASS
+    clean                  done=1 ticks=63 retx=0/0 dup=0/0 gap=0/0 badtag=0/0 malformed=0/0 transcript=0365b2fe4b2ccc0a
+    loss30                 done=1 ticks=149 retx=68/87 dup=2/2 gap=35/27 badtag=0/0 malformed=0/0 transcript=0d9dbd871b3a18e1
+    loss+dup+reorder       done=1 ticks=433 retx=162/177 dup=36/44 gap=128/101 badtag=0/0 malformed=0/0 transcript=a92c9e06b71c0eb4
+    corrupt20              done=1 ticks=185 retx=126/152 dup=34/34 gap=74/50 badtag=38/41 malformed=8/5 transcript=b4a84098949f31a5
+    everything             done=1 ticks=470 retx=167/196 dup=27/31 gap=108/84 badtag=18/22 malformed=3/3 transcript=033f75b79aeee8b1
+    blackout-recover       done=1 ticks=449 retx=147/142 dup=1/0 gap=97/96 badtag=0/0 malformed=0/0 transcript=0117bf3ef89bca9f
+    blackout-dead          link_down at tick 20 after 3 retransmissions
+  ctl_test checks=8628 failures=0
+  CTL_TRANSPORT_LOSS_RECOVERY: PASS
+  X25519_RFC7748: PASS (149 checks, 0 failures, 1000 iterations)
+  AIENOS_NET_SECURE_TESTS: PASS (45849 checks, 0 failures)
+  NET_SANITIZE: PASS
+  NET_SECURE_MUTANTS: 24/24 killed
+  NET_RUST_DIFFERENTIAL_LIVE: NOT_RUN (no RUSTDIFF driver given; pinned digest checked)
+deferred (not claimed): native binding -> needs a C kernel (no-Rust rule; port order open);
+  production identity and keys -> needs M5 key hierarchy (TRUST-1); M6-B runs on TEST keys only;
+  physical NIC qualification -> needs Machine 1 wave after TRUST-1 Gate 7.
+M6A_NET_HOST: PASS
+AIENOS_NET_SECURE: PASS
