@@ -10,6 +10,7 @@
 #include "arch.h"
 #include "ck_internal.h"
 #include "entropy.h"
+#include "handoff_check.h"
 
 #define TTBR_BADDR_MASK 0x0000fffffffffffeull
 
@@ -171,8 +172,9 @@ void ck_kernel_entry(struct ck_handoff *h)
     if (el == 2)
         __asm__ volatile("brk #0x2");
 #endif
-    if (h->magic != CK_HANDOFF_MAGIC)
-        ck_panic("handoff: bad magic");
+    const char *why;
+    if (ck_handoff_check(h, &why) != 0)
+        ck_panic("handoff: %s", why);
     ck_psci_configure(ck_acpi_find("FACP"));
     ck_set_stage("mm_build");
     uint64_t sp = ck_mm_build(h);
