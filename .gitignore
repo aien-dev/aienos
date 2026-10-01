@@ -8,3 +8,4 @@ native/argus/out/
 native/argus/out-d/
 native/argus/out-*/
 native/store/out/
+.crumb.local

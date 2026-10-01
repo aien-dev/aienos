@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-artifact-tool/src",
+  "layer": "crates/aienos-artifact-tool/src",
+  "purpose": "Directory crates/aienos-artifact-tool/src. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-artifact-tool",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-artifact-tool/src. Purpose not yet described by a human.",
+      "files": [
+        "corpus.rs",
+        "main.rs",
+        "receipt_cmd.rs"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 5,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "2276906",
+          "timestamp": "2026-09-25T17:13:08-05:00",
+          "author": "aien-dev",
+          "subject": "fix(seed0b): prove NX and Machine 1 claims instead of assuming them (#128 review) (#138)",
+          "pr": 138
+        },
+        {
+          "source": "backfill-git",
+          "sha": "ff5de9c",
+          "timestamp": "2026-09-25T07:46:07-05:00",
+          "author": "aien-dev",
+          "subject": "P2-7: negative matrix + canonical SEED-0B QEMU qualification (SEED_0B_QEMU: PASS) (#128)",
+          "pr": 128
+        },
+        {
+          "source": "backfill-git",
+          "sha": "4dd5726",
+          "timestamp": "2026-09-25T07:02:01-05:00",
+          "author": "aien-dev",
+          "subject": "P2-6A: Admission Receipt v0 (canonical encoding, strict decode, TEST-ONLY signing, CLI) (#124)",
+          "pr": 124
+        },
+        {
+          "source": "backfill-git",
+          "sha": "1a62ca3",
+          "timestamp": "2026-09-24T21:20:14-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #121 from aien-dev/phase2/binary-artifact-v0",
+          "pr": 121
+        },
+        {
+          "source": "backfill-git",
+          "sha": "952e53e",
+          "timestamp": "2026-09-24T21:05:20-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #120 from aien-dev/phase2/binary-artifact-v0",
+          "pr": 120
+        }
+      ]
+    }
+  }
+}

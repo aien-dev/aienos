@@ -1,0 +1,94 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-kernel/src/crypto",
+  "layer": "crates/aienos-kernel/src/crypto",
+  "purpose": "Directory crates/aienos-kernel/src/crypto. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-kernel/src",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-kernel/src/crypto. Purpose not yet described by a human.",
+      "files": [
+        "envelope.rs",
+        "hkdf.rs",
+        "hmac.rs",
+        "mod.rs",
+        "sha256.rs"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 8,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "f0facc7",
+          "timestamp": "2026-09-29T15:22:43-05:00",
+          "author": "dhgmonkey",
+          "subject": "Close key and plaintext cleanup gaps with in-house crypto (#174)",
+          "pr": 174
+        },
+        {
+          "source": "backfill-git",
+          "sha": "f854586",
+          "timestamp": "2026-09-29T07:41:53-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #153: test(m5): reject tampered late envelope chunks",
+          "pr": 153
+        },
+        {
+          "source": "backfill-git",
+          "sha": "8706fb8",
+          "timestamp": "2026-09-28T21:00:21-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #159 from aien-dev/fix/envelope-preauth-alloc",
+          "pr": 159
+        },
+        {
+          "source": "backfill-git",
+          "sha": "06164a4",
+          "timestamp": "2026-09-25T19:40:30-05:00",
+          "author": "aien-dev",
+          "subject": "feat(crypto,security): implement M5 AES-256-GCM-SIV, chunked envelopes, and security manifests (#150)",
+          "pr": 150
+        },
+        {
+          "source": "backfill-git",
+          "sha": "7604b6e",
+          "timestamp": "2026-09-24T20:41:08-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #119 from aien-dev/phase2/binary-artifact-v0",
+          "pr": 119
+        },
+        {
+          "source": "backfill-git",
+          "sha": "75f6720",
+          "timestamp": "2026-09-24T10:52:25-05:00",
+          "author": "aien-dev",
+          "subject": "feat(crypto): add HMAC and HKDF-SHA256 primitives (#91)",
+          "pr": 91
+        },
+        {
+          "source": "backfill-git",
+          "sha": "b900485",
+          "timestamp": "2026-09-23T18:35:52-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #6 from aien-dev/fix/aienos-aegis-boundaries",
+          "pr": 6
+        },
+        {
+          "source": "backfill-git",
+          "sha": "bc25e73",
+          "timestamp": "2026-09-23T18:21:24-05:00",
+          "author": "aien-dev",
+          "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
+          "pr": 2
+        }
+      ]
+    }
+  }
+}

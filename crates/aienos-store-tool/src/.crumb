@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-store-tool/src",
+  "layer": "crates/aienos-store-tool/src",
+  "purpose": "Directory crates/aienos-store-tool/src. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-store-tool",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-store-tool/src. Purpose not yet described by a human.",
+      "files": [
+        "main.rs"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 3,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "761e63d",
+          "timestamp": "2026-09-25T18:27:34-05:00",
+          "author": "aien-dev",
+          "subject": "feat(recovery): Recovery Core inspection, operator actions, and QEMU qualification (ADR 0006) (#144)",
+          "pr": 144
+        },
+        {
+          "source": "backfill-git",
+          "sha": "a2a0382",
+          "timestamp": "2026-09-25T17:56:21-05:00",
+          "author": "aien-dev",
+          "subject": "M4: continuity objects over Store v1; same identity and memory across cold restarts (CONTINUITY_QEMU) (#142)",
+          "pr": 142
+        },
+        {
+          "source": "backfill-git",
+          "sha": "23f61e4",
+          "timestamp": "2026-09-25T16:37:26-05:00",
+          "author": "aien-dev",
+          "subject": "P3: 512-byte NVMe crash qualification campaign (STORE_512B_CRASH_RECOVERY_QEMU) (#136)",
+          "pr": 136
+        }
+      ]
+    }
+  }
+}

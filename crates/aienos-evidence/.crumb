@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-evidence",
+  "layer": "crates/aienos-evidence",
+  "purpose": "Directory crates/aienos-evidence. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates",
+    "path": ".."
+  },
+  "below": [
+    {
+      "name": "src",
+      "role": ""
+    }
+  ],
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-evidence. Purpose not yet described by a human.",
+      "files": [
+        "Cargo.toml"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 2,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "4372a8d",
+          "timestamp": "2026-09-25T17:37:36-05:00",
+          "author": "aien-dev",
+          "subject": "chore(rollback): port native-boot rollback verifier to Rust, drop python3 (#140)",
+          "pr": 140
+        },
+        {
+          "source": "backfill-git",
+          "sha": "9bd233d",
+          "timestamp": "2026-09-23T19:30:29-05:00",
+          "author": "aien-dev",
+          "subject": "Replace Python evidence tooling with Rust and recapture a clean Config A (#12)",
+          "pr": 12
+        }
+      ]
+    }
+  }
+}

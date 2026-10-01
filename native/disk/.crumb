@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.0.0",
+  "name": "native/disk",
+  "layer": "native/disk",
+  "purpose": "Directory native/disk. Purpose not yet described by a human.",
+  "above": {
+    "name": "native",
+    "path": ".."
+  },
+  "below": [
+    {
+      "name": "qemu",
+      "role": ""
+    },
+    {
+      "name": "tests",
+      "role": ""
+    }
+  ],
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory native/disk. Purpose not yet described by a human.",
+      "files": [
+        "Makefile",
+        "README.md",
+        "disk.c",
+        "disk.h",
+        "disk_file.c",
+        "disk_file.h",
+        "disk_nvme.c",
+        "disk_nvme.h"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 1,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "811bbc0",
+          "timestamp": "2026-10-01T00:06:23-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #190 from aien-dev/lane11/native-disk",
+          "pr": 190
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane11",
+          "sha": "811bbc0",
+          "pr": 190,
+          "note": "#190 native/disk + NVMe driver + QEMU test: merged 811bbc0894c7510ab6c0c70fc356c5797b3e1832",
+          "ref": "2026-10-01-push-lane11-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane23",
+          "sha": "811bbc0",
+          "pr": 190,
+          "note": "§2 new \"later merges\" addendum: aienos #189 6bcef8a, #190 811bbc0, #191 697391f, #192 08cb905, #193 8d511d6; omega #128 ee89461, #129 d78fd11, #130 7fb59d3, #131 f7b22f1, #132 ff2af05, #133 c6cf052,",
+          "ref": "2026-10-01-push-lane23-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane12",
+          "sha": "811bbc0",
+          "pr": 190,
+          "note": "~09:20Z Lane 12 DONE: aienos#189 6bcef8a (M5 migration sig, TEST keys; receipt f21f2c03… NOT_QUALIFIED pass15 blocked11 missing5 not_run0; QEMU checks ran), omega#130 7fb59d3 (G3 commitment signing",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane11",
+          "sha": "811bbc0",
+          "pr": 190,
+          "note": "~11:20Z Lane 11 DONE: aienos#190 811bbc0 (disk+NVMe), #191 697391f (C Store engine, Rust-compatible bytes, 1097 power-cut checks). Receipt 6fd36c30… not_run=3 (QEMU off) coexists with Lane 12's f21",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        }
+      ]
+    }
+  }
+}

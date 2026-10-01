@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-kernel/src/sync",
+  "layer": "crates/aienos-kernel/src/sync",
+  "purpose": "Directory crates/aienos-kernel/src/sync. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-kernel/src",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-kernel/src/sync. Purpose not yet described by a human.",
+      "files": [
+        "mod.rs",
+        "spinlock.rs"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 1,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "bc25e73",
+          "timestamp": "2026-09-23T18:21:24-05:00",
+          "author": "aien-dev",
+          "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
+          "pr": 2
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-kernel/src/mem",
+  "layer": "crates/aienos-kernel/src/mem",
+  "purpose": "Directory crates/aienos-kernel/src/mem. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-kernel/src",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-kernel/src/mem. Purpose not yet described by a human.",
+      "files": [
+        "frame_allocator.rs",
+        "map_plan.rs",
+        "mod.rs",
+        "pagetable.rs"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 7,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "3a6174a",
+          "timestamp": "2026-09-25T06:23:20-05:00",
+          "author": "aien-dev",
+          "subject": "P2-5: Binary Artifact loader — exact-byte W^X EL0 execution with full rollback (#122)",
+          "pr": 122
+        },
+        {
+          "source": "backfill-git",
+          "sha": "6b4290f",
+          "timestamp": "2026-09-24T10:25:36-05:00",
+          "author": "aien-dev",
+          "subject": "boot: enter EL1h with AIENOS page tables and caches on (#66, ADR 0009) (#80)",
+          "pr": 80
+        },
+        {
+          "source": "backfill-git",
+          "sha": "deafa82",
+          "timestamp": "2026-09-24T09:58:06-05:00",
+          "author": "aien-dev",
+          "subject": "kernel: PE section and UEFI Memory Attributes Table parsers (part of #66) (#78)",
+          "pr": 78
+        },
+        {
+          "source": "backfill-git",
+          "sha": "6af6e01",
+          "timestamp": "2026-09-24T09:47:17-05:00",
+          "author": "aien-dev",
+          "subject": "kernel(mem): EL1 identity map plan and MAIR/TCR/SCTLR values (part of #66) (#69)",
+          "pr": 69
+        },
+        {
+          "source": "backfill-git",
+          "sha": "1d723bf",
+          "timestamp": "2026-09-24T09:33:16-05:00",
+          "author": "aien-dev",
+          "subject": "kernel(mem): AArch64 stage-1 page-table builder (host-tested) (#63)",
+          "pr": 63
+        },
+        {
+          "source": "backfill-git",
+          "sha": "7b1f0c4",
+          "timestamp": "2026-09-23T18:39:54-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #8 from aien-dev/fix/aienos-frame-allocator-bounds",
+          "pr": 8
+        },
+        {
+          "source": "backfill-git",
+          "sha": "bc25e73",
+          "timestamp": "2026-09-23T18:21:24-05:00",
+          "author": "aien-dev",
+          "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
+          "pr": 2
+        }
+      ]
+    }
+  }
+}

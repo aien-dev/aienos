@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-accel/tests",
+  "layer": "crates/aienos-accel/tests",
+  "purpose": "Directory crates/aienos-accel/tests. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-accel",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-accel/tests. Purpose not yet described by a human.",
+      "files": [
+        "gb10_fixtures.rs"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 1,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "3e71759",
+          "timestamp": "2026-09-25T07:34:53-05:00",
+          "author": "aien-dev",
+          "subject": "GB10 read-only hardware characterization and native accelerator contract (#125)",
+          "pr": 125
+        }
+      ]
+    }
+  }
+}

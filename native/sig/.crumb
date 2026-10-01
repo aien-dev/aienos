@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.0.0",
+  "name": "native/sig",
+  "layer": "native/sig",
+  "purpose": "Directory native/sig. Purpose not yet described by a human.",
+  "above": {
+    "name": "native",
+    "path": ".."
+  },
+  "below": [
+    {
+      "name": "tests",
+      "role": ""
+    }
+  ],
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory native/sig. Purpose not yet described by a human.",
+      "files": [
+        "Makefile",
+        "README.md",
+        "aienos_sig.h",
+        "ct.c",
+        "ed25519.c",
+        "sha512.c",
+        "sig_internal.h"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 1,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "913b962",
+          "timestamp": "2026-09-30T23:22:04-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #188 from aien-dev/lane10/native-sig",
+          "pr": 188
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane10",
+          "sha": "913b962",
+          "pr": 188,
+          "note": "Verdict: PASS (software primitive). PR aien-dev/aienos #188 MERGED, merge commit 913b962 (main tree identical to the tested branch cea54be).",
+          "ref": "2026-10-01-push-lane10-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane12",
+          "sha": "913b962",
+          "pr": 188,
+          "note": "native/sig vendored to src/searchtrace/sig/ with PROVENANCE.txt (aienos 913b962, per-file sha256).",
+          "ref": "2026-10-01-push-lane12-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane10",
+          "sha": "913b962",
+          "pr": 188,
+          "note": "~06:40Z Lane 10 DONE: Ed25519 in C merged aienos#188 913b962, 5917 checks, 14 mutants, AIENOS_SIG_NATIVE: PASS; Gemini reviewed (Codex+Grok out of usage). Not yet wired to M5 migration/M23 G3. Launch",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        }
+      ]
+    }
+  }
+}

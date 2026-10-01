@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0.0",
+  "name": "native/kernel/artifact",
+  "layer": "native/kernel/artifact",
+  "purpose": "Directory native/kernel/artifact. Purpose not yet described by a human.",
+  "above": {
+    "name": "native/kernel",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory native/kernel/artifact. Purpose not yet described by a human.",
+      "files": [
+        "admission.c",
+        "ck_artifact.h",
+        "format.c",
+        "receipt.c"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 1,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "c3878bb",
+          "timestamp": "2026-10-01T07:21:10-05:00",
+          "author": "aien-dev",
+          "subject": "ck: P2_ARTIFACT loader and M0_ROLLBACK gates in the C kernel (QEMU) (#204)",
+          "pr": 204
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane29",
+          "sha": "c3878bb",
+          "pr": 204,
+          "note": "Triggers: native/**, scripts/ck_gates.sh, scripts/qemu_ck_*.sh, scripts/lib_ck_m1_checks.sh, the workflow. Green on PR and on main after every merge (last: c3878bb success).",
+          "ref": "2026-10-01-push-lane29-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane29",
+          "sha": "c3878bb",
+          "pr": 204,
+          "note": "PR #204, squash-merged c3878bb. Receipt evidence/ck_gates_bb4040322b026f5f561733fdcaf900770070f2281800b0e3603c2aa2c670b7ff.json: M1, M3, SMMU, NVME_SHUTDOWN, P2_ARTIFACT, M4_NVME, M4_STORE, ARGUS1_RE",
+          "ref": "2026-10-01-push-lane29-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane31",
+          "sha": "c3878bb",
+          "pr": 204,
+          "note": "Start: origin/main c3878bb, ck_gates 9 PASS / 5 NOT_RUN of 14 (receipt bb40403...).",
+          "ref": "2026-10-01-push-lane31-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane33",
+          "sha": "c3878bb",
+          "pr": 204,
+          "note": "12:33Z Review track 1 DONE (track1-repos-drift.md): omega 7e713e3, aienos c3878bb, arch 921797b, physics 006e426, sovereign-core 7011f2b; #152 green, #153 red for stale head, #136 never ran checks; h",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        }
+      ]
+    }
+  }
+}

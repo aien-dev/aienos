@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0.0",
+  "name": "native/argus/tests",
+  "layer": "native/argus/tests",
+  "purpose": "Directory native/argus/tests. Purpose not yet described by a human.",
+  "above": {
+    "name": "native/argus",
+    "path": ".."
+  },
+  "below": [
+    {
+      "name": "fixtures",
+      "role": ""
+    }
+  ],
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory native/argus/tests. Purpose not yet described by a human.",
+      "files": [
+        "bench_argus_contain.c",
+        "bench_argus_ring.c",
+        "check_argus1_symbols.sh",
+        "fuzz_argus_event.c",
+        "run_argus1_bench.sh",
+        "stub_lanes_d.c",
+        "stub_lanes_d.h",
+        "stub_state.c",
+        "stub_state.h",
+        "test_argus_contain.c",
+        "test_argus_contain_hostile.c",
+        "test_argus_containment_e2e.c",
+        "test_argus_core.c",
+        "test_argus_detect.c",
+        "test_argus_determinism.c",
+        "test_argus_event.c",
+        "test_argus_hostile.c",
+        "test_argus_integration.c",
+        "test_argus_ring.c",
+        "test_common_d.h"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 10,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "603c91d",
+          "timestamp": "2026-09-29T10:01:13-05:00",
+          "author": "aien-dev",
+          "subject": "test(argus): close dependency direction check (#172)",
+          "pr": 172
+        },
+        {
+          "source": "backfill-git",
+          "sha": "24795b8",
+          "timestamp": "2026-09-29T09:48:03-05:00",
+          "author": "aien-dev",
+          "subject": "test(argus): add containment stress corpora (#171)",
+          "pr": 171
+        },
+        {
+          "source": "backfill-git",
+          "sha": "efadc17",
+          "timestamp": "2026-09-29T09:40:04-05:00",
+          "author": "aien-dev",
+          "subject": "ARGUS-1 lane F: performance and false-positive gates (#170)",
+          "pr": 170
+        },
+        {
+          "source": "backfill-git",
+          "sha": "08fcbd7",
+          "timestamp": "2026-09-29T09:22:15-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #169 from aien-dev/feat/argus-1-h",
+          "pr": 169
+        },
+        {
+          "source": "backfill-git",
+          "sha": "138acb0",
+          "timestamp": "2026-09-29T09:04:35-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #168 from aien-dev/feat/argus-1-x",
+          "pr": 168
+        },
+        {
+          "source": "backfill-git",
+          "sha": "84f28cf",
+          "timestamp": "2026-09-29T09:03:31-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #167 from aien-dev/feat/argus-1-ce",
+          "pr": 167
+        },
+        {
+          "source": "backfill-git",
+          "sha": "398600a",
+          "timestamp": "2026-09-29T08:15:03-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #165: ARGUS-1 containment event core support",
+          "pr": 165
+        },
+        {
+          "source": "backfill-git",
+          "sha": "622b0f4",
+          "timestamp": "2026-09-29T08:14:37-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #164: ARGUS-1 containment request codec and event kinds",
+          "pr": 164
+        },
+        {
+          "source": "backfill-git",
+          "sha": "e954b0b",
+          "timestamp": "2026-09-29T07:40:45-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #163: ARGUS-1 L0 ABI v1.2 header (additive), Makefile lanes, pre-registered spec",
+          "pr": 163
+        },
+        {
+          "source": "backfill-git",
+          "sha": "7523933",
+          "timestamp": "2026-09-29T07:36:51-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #160: ARGUS-0 defensive-plane substrate (C), complete under documented limits",
+          "pr": 160
+        }
+      ]
+    }
+  }
+}

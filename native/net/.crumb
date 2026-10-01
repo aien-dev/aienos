@@ -1,0 +1,210 @@
+{
+  "schema_version": "1.0.0",
+  "name": "native/net",
+  "layer": "native/net",
+  "purpose": "Directory native/net. Purpose not yet described by a human.",
+  "above": {
+    "name": "native",
+    "path": ".."
+  },
+  "below": [
+    {
+      "name": "receipts",
+      "role": ""
+    },
+    {
+      "name": "tests",
+      "role": ""
+    }
+  ],
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory native/net. Purpose not yet described by a human.",
+      "files": [
+        "Makefile",
+        "README.md",
+        "aienos_ctl.c",
+        "aienos_ctl.h",
+        "aienos_net.c",
+        "aienos_net.h",
+        "aienos_sec.c",
+        "aienos_sec.h",
+        "aienos_virtio_net.c",
+        "aienos_virtio_net.h",
+        "aienos_virtio_pci.c",
+        "aienos_virtio_pci.h",
+        "receipt.sh",
+        "x25519.c",
+        "x25519.h"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 5,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "ace3889",
+          "timestamp": "2026-10-01T07:41:50-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #206 from aien-dev/docs/lane33-reconcile",
+          "pr": 206
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane33",
+          "sha": "ace3889",
+          "pr": 206,
+          "note": "| aienos | #206 (Sonnet worker) | ace3889 | Codex: no findings | QEMU + CodeQL green |",
+          "ref": "2026-10-01-push-lane33-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane33",
+          "sha": "ace3889",
+          "pr": 206,
+          "note": "aienos #206:**",
+          "ref": "2026-10-01-push-lane33-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane33",
+          "sha": "ace3889",
+          "pr": 206,
+          "note": "12:51Z Lane 33 DONE: arch #82, omega #155, aienos #206 MERGED (docs truthful: E1 2/6, kernel 9/14 QEMU, TRUST-1 not qualified, R16 merged-with-failing-check noted; Gate 5 failed receipt added to omeg",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "d75a266",
+          "timestamp": "2026-10-01T05:21:45-05:00",
+          "author": "aien-dev",
+          "subject": "native/net: accept real QEMU virtio-net-pci caps; split-virtqueue RX/TX driver (hosted) (#200)",
+          "pr": 200
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane26",
+          "sha": "d75a266",
+          "pr": 200,
+          "note": "Lane 26 kernel hook for virtio-net: wait for aienos #200 (still OPEN, Lane 26 merges it). Then:",
+          "ref": "2026-10-01-push-lane25-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane26",
+          "sha": "d75a266",
+          "pr": 200,
+          "note": "## 2. native/net virtio-net -- PASS (hosted only), MERGED aienos #200 -> d75a266 (lead reran make -C native/net test independently: all PASS)",
+          "ref": "2026-10-01-push-lane26-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane29",
+          "sha": "d75a266",
+          "pr": 200,
+          "note": "PR #203, squash-merged 9807281 (after #200 merged as d75a266). Receipt evidence/ck_gates_f669110b4f18e37e8318e83efbe544e5eab6214508861aa1523fca084945d710.json: 8 PASS (adds NET), 6 NOT_RUN of 14.",
+          "ref": "2026-10-01-push-lane29-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane26",
+          "sha": "d75a266",
+          "pr": 200,
+          "note": "10:22Z Lane 26 DONE: aienos #199 470c160 (Store nonce v2), #200 d75a266 (virtio-net attach fix, virtqueue driver, sim only). Codex pass still owed after reset. Lane 26 host tests overlapped Lane 15 q",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "8d511d6",
+          "timestamp": "2026-10-01T01:38:03-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #193 from aien-dev/lane19/resend-jitter",
+          "pr": 193
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane19",
+          "sha": "8d511d6",
+          "pr": 193,
+          "note": "Part A, aienos resend jitter: PASS (hosted).** PR aien-dev/aienos #193, merged 8d511d6. native/net only; no public signature, struct field or wire change.",
+          "ref": "2026-10-01-push-lane19-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane23",
+          "sha": "8d511d6",
+          "pr": 193,
+          "note": "§2 new \"later merges\" addendum: aienos #189 6bcef8a, #190 811bbc0, #191 697391f, #192 08cb905, #193 8d511d6; omega #128 ee89461, #129 d78fd11, #130 7fb59d3, #131 f7b22f1, #132 ff2af05, #133 c6cf052,",
+          "ref": "2026-10-01-push-lane23-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane19",
+          "sha": "8d511d6",
+          "pr": 193,
+          "note": "~12:50Z Lane 19 DONE: aienos#193 8d511d6 (resend jitter), omega#137 1299b19 (Fabric sig 64 B, format v2). Gap: omega CI never runs test-fabric for src/fabric-only changes (workflow outside lanes); qu",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "08cb905",
+          "timestamp": "2026-10-01T01:10:14-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #192 from aien-dev/lane16/m6b-secure-transport",
+          "pr": 192
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane16",
+          "sha": "08cb905",
+          "pr": 192,
+          "note": "Pull request:** aien-dev/aienos #192, merged as 08cb905. Clean-tree receipt: native/net/receipts/m6a_net_host_83748f32...txt.",
+          "ref": "2026-10-01-push-lane16-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane23",
+          "sha": "08cb905",
+          "pr": 192,
+          "note": "§2 new \"later merges\" addendum: aienos #189 6bcef8a, #190 811bbc0, #191 697391f, #192 08cb905, #193 8d511d6; omega #128 ee89461, #129 d78fd11, #130 7fb59d3, #131 f7b22f1, #132 ff2af05, #133 c6cf052,",
+          "ref": "2026-10-01-push-lane23-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane16",
+          "sha": "08cb905",
+          "pr": 192,
+          "note": "~12:05Z Lane 16 DONE: aienos#192 08cb905 M6-B secure transport hosted (X25519 RFC vectors incl 1M-step, 45860 checks, 24/24 mutants, Gemini review). Follow-ups: #184 resend timing can lock-step with ",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "999b5aa",
+          "timestamp": "2026-09-30T22:21:26-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #184 from aien-dev/lane5/m6a-net-c",
+          "pr": 184
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane5",
+          "sha": "999b5aa",
+          "pr": 184,
+          "note": "PR: aien-dev/aienos #184, MERGED, merge sha 999b5aac1e5ad4ebee969fbce9ddbe2b71308b69",
+          "ref": "2026-10-01-push-lane5-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane5",
+          "sha": "999b5aa",
+          "pr": 184,
+          "note": "~04:20Z Lane 5 DONE: aienos #184 999b5aa M6-A hosted C net stack PASS (host only; receipt native/net/receipts/m6a_net_host_30de56f0...). Deferred: native NIC binding (needs C kernel, Drake port order",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        }
+      ]
+    }
+  }
+}

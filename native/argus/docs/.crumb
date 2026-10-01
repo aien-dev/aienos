@@ -1,0 +1,78 @@
+{
+  "schema_version": "1.0.0",
+  "name": "native/argus/docs",
+  "layer": "native/argus/docs",
+  "purpose": "Directory native/argus/docs. Purpose not yet described by a human.",
+  "above": {
+    "name": "native/argus",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory native/argus/docs. Purpose not yet described by a human.",
+      "files": [
+        "ARGUS0_GATES.md",
+        "ARGUS1_GATES.md",
+        "ARGUS1_PLAN.md",
+        "ARGUS1_SPEC.md",
+        "HOSTILE_REVIEW.md"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 6,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "603c91d",
+          "timestamp": "2026-09-29T10:01:13-05:00",
+          "author": "aien-dev",
+          "subject": "test(argus): close dependency direction check (#172)",
+          "pr": 172
+        },
+        {
+          "source": "backfill-git",
+          "sha": "efadc17",
+          "timestamp": "2026-09-29T09:40:04-05:00",
+          "author": "aien-dev",
+          "subject": "ARGUS-1 lane F: performance and false-positive gates (#170)",
+          "pr": 170
+        },
+        {
+          "source": "backfill-git",
+          "sha": "08fcbd7",
+          "timestamp": "2026-09-29T09:22:15-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #169 from aien-dev/feat/argus-1-h",
+          "pr": 169
+        },
+        {
+          "source": "backfill-git",
+          "sha": "84f28cf",
+          "timestamp": "2026-09-29T09:03:31-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #167 from aien-dev/feat/argus-1-ce",
+          "pr": 167
+        },
+        {
+          "source": "backfill-git",
+          "sha": "e954b0b",
+          "timestamp": "2026-09-29T07:40:45-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #163: ARGUS-1 L0 ABI v1.2 header (additive), Makefile lanes, pre-registered spec",
+          "pr": 163
+        },
+        {
+          "source": "backfill-git",
+          "sha": "7523933",
+          "timestamp": "2026-09-29T07:36:51-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #160: ARGUS-0 defensive-plane substrate (C), complete under documented limits",
+          "pr": 160
+        }
+      ]
+    }
+  }
+}

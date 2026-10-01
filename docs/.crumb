@@ -1,0 +1,395 @@
+{
+  "schema_version": "1.0.0",
+  "name": "docs",
+  "layer": "docs",
+  "purpose": "Directory docs. Purpose not yet described by a human.",
+  "above": {
+    "name": "cs-aienos",
+    "path": ".."
+  },
+  "below": [
+    {
+      "name": "adr",
+      "role": ""
+    },
+    {
+      "name": "crumbs",
+      "role": ""
+    }
+  ],
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory docs. Purpose not yet described by a human.",
+      "files": [
+        "ARCHITECTURE.md",
+        "BLUEPRINT.md",
+        "CONTINUOUS_EXISTENCE_AMENDMENT.md",
+        "CRYPTO_CONSTANT_TIME.md",
+        "ED25519_DEPENDENCY_REVIEW.md",
+        "GB10_HARDWARE_PROFILE.md",
+        "GB10_HARDWARE_QUALIFICATION.md",
+        "GB10_NATIVE_ACCELERATOR_BOUNDARY.md",
+        "GB10_NATIVE_STATUS.md",
+        "GB10_PLATFORM_TOPOLOGY.md",
+        "GB10_REGISTER_LEDGER.md",
+        "HARDWARE_TEST_RIG.md",
+        "M0_NATIVE_BOOT_ROLLBACK_AUDIT.md",
+        "M5_KEY_HIERARCHY_DESIGN_TREE.md",
+        "MILESTONES.md",
+        "NATIVE_BOOT_ONE_TIME.md",
+        "NATIVE_BOOT_ROLLBACK_CONTRACT.md",
+        "P3_NVME_CONTROLLER_AUDIT.md",
+        "P3_NVME_FLUSH_REVIEW.md",
+        "P3_NVME_READ_SUBSTRATE.md",
+        "P3_NVME_UNSAFE_ASSUMPTIONS.md",
+        "P3_NVME_WRITE_DMA_REVIEW.md",
+        "P3_NVME_WRITE_FLUSH_SUBSTRATE.md",
+        "P3_NVME_WRITE_REVIEW.md",
+        "PHASE_3_TO_5_SPECIFICATION.md",
+        "PLAN_AUTHORITY.md",
+        "RECOVERY_MEDIA_MACHINE1.md",
+        "SEED0B_MACHINE1_QUALIFICATION.md",
+        "SYSTEMS_INTEGRATION_SEQUENCE.md",
+        "TRUST-1-IMPLEMENTATION-PLAN.md",
+        "TRUST-1-M5-GATE-MATRIX.md",
+        "TRUST-1-OPERATOR-STEPS.md"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 59,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "ace3889",
+          "timestamp": "2026-10-01T07:41:50-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #206 from aien-dev/docs/lane33-reconcile",
+          "pr": 206
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane33",
+          "sha": "ace3889",
+          "pr": 206,
+          "note": "| aienos | #206 (Sonnet worker) | ace3889 | Codex: no findings | QEMU + CodeQL green |",
+          "ref": "2026-10-01-push-lane33-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane33",
+          "sha": "ace3889",
+          "pr": 206,
+          "note": "aienos #206:**",
+          "ref": "2026-10-01-push-lane33-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane33",
+          "sha": "ace3889",
+          "pr": 206,
+          "note": "12:51Z Lane 33 DONE: arch #82, omega #155, aienos #206 MERGED (docs truthful: E1 2/6, kernel 9/14 QEMU, TRUST-1 not qualified, R16 merged-with-failing-check noted; Gate 5 failed receipt added to omeg",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "0d0efa5",
+          "timestamp": "2026-10-01T04:58:30-05:00",
+          "author": "aien-dev",
+          "subject": "ck: port M3 isolation (threads, EL0, preemption, placement, typed IPC) to the C kernel (QEMU) (#201)",
+          "pr": 201
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane25",
+          "sha": "0d0efa5",
+          "pr": 201,
+          "note": "PR #201, squash-merged as 0d0efa5. Built by an Opus worker; the lead verified it, fixed the review findings and produced the receipt.",
+          "ref": "2026-10-01-push-lane25-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane25",
+          "sha": "0d0efa5",
+          "pr": 201,
+          "note": "09:59Z Lane 25 DONE: aienos #201 (M3 isolation port: tasks, preempt, EL0 lockout, fault isolation, IPC w/ narrowable caps; single core). ck_gates 7 PASS/6 NOT_RUN of 13, QEMU only. Follow-ups: virtio",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "e9f5b3a",
+          "timestamp": "2026-10-01T03:54:52-05:00",
+          "author": "aien-dev",
+          "subject": "native/kernel: SMMUv3 service; NVMe Store path SMMU-confined in QEMU (#197)",
+          "pr": 197
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane25",
+          "sha": "e9f5b3a",
+          "pr": 197,
+          "note": "PR #197, squash-merged as e9f5b3a.",
+          "ref": "2026-10-01-push-lane25-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane25",
+          "sha": "e9f5b3a",
+          "pr": 197,
+          "note": "09:21Z Lane 25 interim: aienos #197 e9f5b3a (SMMUv3 stage-1 confined NVMe, bypass test-only), #198 ff57d33 (NVMe CC.SHN shutdown gate); ck_gates 6 PASS/7 NOT_RUN of 13; item 3 M3 isolation port conti",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "4d9bdb2",
+          "timestamp": "2026-10-01T03:23:21-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #196 from aien-dev/lane18/native-kernel-gates",
+          "pr": 196
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane18",
+          "sha": "4d9bdb2",
+          "pr": 196,
+          "note": "#196 gate runner scripts/ck_gates.sh, parity table native/kernel/GATES.md, receipts, TRUST-1 QEMU rows, matrix: merge 4d9bdb2ea98ff4fe08f735857cdb8a7b77e7484e",
+          "ref": "2026-10-01-push-lane18-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane18",
+          "sha": "4d9bdb2",
+          "pr": 196,
+          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "697391f",
+          "timestamp": "2026-10-01T00:56:05-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #191 from aien-dev/lane11/native-store-engine",
+          "pr": 191
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane11",
+          "sha": "697391f",
+          "pr": 191,
+          "note": "#191 native/store engine + sealed Store + qualify rows + matrix: merged 697391f64027013ec36bc150b05d0db851b813aa",
+          "ref": "2026-10-01-push-lane11-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane23",
+          "sha": "697391f",
+          "pr": 191,
+          "note": "§2 new \"later merges\" addendum: aienos #189 6bcef8a, #190 811bbc0, #191 697391f, #192 08cb905, #193 8d511d6; omega #128 ee89461, #129 d78fd11, #130 7fb59d3, #131 f7b22f1, #132 ff2af05, #133 c6cf052,",
+          "ref": "2026-10-01-push-lane23-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane11",
+          "sha": "697391f",
+          "pr": 191,
+          "note": "~11:20Z Lane 11 DONE: aienos#190 811bbc0 (disk+NVMe), #191 697391f (C Store engine, Rust-compatible bytes, 1097 power-cut checks). Receipt 6fd36c30… not_run=3 (QEMU off) coexists with Lane 12's f21",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "6bcef8a",
+          "timestamp": "2026-10-01T00:24:04-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #189 from aien-dev/lane12/m5-migration-sig",
+          "pr": 189
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane12",
+          "sha": "6bcef8a",
+          "pr": 189,
+          "note": "PR aienos #189 MERGED, merge commit 6bcef8a. CodeQL checks all pass.",
+          "ref": "2026-10-01-push-lane12-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane23",
+          "sha": "6bcef8a",
+          "pr": 189,
+          "note": "§2 new \"later merges\" addendum: aienos #189 6bcef8a, #190 811bbc0, #191 697391f, #192 08cb905, #193 8d511d6; omega #128 ee89461, #129 d78fd11, #130 7fb59d3, #131 f7b22f1, #132 ff2af05, #133 c6cf052,",
+          "ref": "2026-10-01-push-lane23-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane12",
+          "sha": "6bcef8a",
+          "pr": 189,
+          "note": "~09:20Z Lane 12 DONE: aienos#189 6bcef8a (M5 migration sig, TEST keys; receipt f21f2c03… NOT_QUALIFIED pass15 blocked11 missing5 not_run0; QEMU checks ran), omega#130 7fb59d3 (G3 commitment signing",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "929a720",
+          "timestamp": "2026-09-30T22:57:37-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #187 from aien-dev/lane1/trust1-m5-receipt",
+          "pr": 187
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane1",
+          "sha": "929a720",
+          "pr": 187,
+          "note": "Final receipt (main 929a720): evidence/trust1_m5_qualification_5a5de9c1...json -> NOT_QUALIFIED pass=10 fail=0 not_run=2 blocked=10 missing=6.",
+          "ref": "2026-10-01-push-lane1-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane1",
+          "sha": "929a720",
+          "pr": 187,
+          "note": "Matrix + receipt: #187 merged 929a720 (Grok review; Codex hit usage limit). Grok overclaim findings fixed before merge.",
+          "ref": "2026-10-01-push-lane1-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane14",
+          "sha": "929a720",
+          "pr": 187,
+          "note": "2. TRUST-1 receipt was recorded at aienos commit ddf549f (merged by #187 929a720); \"blocked 10\" = 7 BLOCKED_OPERATOR + 3 BLOCKED_HARDWARE.",
+          "ref": "2026-10-01-push-lane14-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane1",
+          "sha": "929a720",
+          "pr": 187,
+          "note": "~06:05Z Lane 1 DONE. aienos #182 2d9a368 (qualify harness), #183 84de088 (C crypto), #185 513d653 (Gate 5 swTPM sim), #186 4492ca9 (C M5 envelope), #187 929a720 (matrix+receipt NOT_QUALIFIED pass10/b",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "513d653",
+          "timestamp": "2026-09-30T22:22:44-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #185 from aien-dev/lane1/trust1-gate5-swtpm",
+          "pr": 185
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane1",
+          "sha": "513d653",
+          "pr": 185,
+          "note": "Gate 5 swTPM sim: simulation PASS, gate verdict BLOCKED_OPERATOR (needs Gate 2 PCR choice, Gate 3 keys, Gate 4). #185 merged 513d653. selftest pass=31 fail=0, TPM does every refusal. Follow-up: no se",
+          "ref": "2026-10-01-push-lane1-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane1",
+          "sha": "513d653",
+          "pr": 185,
+          "note": "~06:05Z Lane 1 DONE. aienos #182 2d9a368 (qualify harness), #183 84de088 (C crypto), #185 513d653 (Gate 5 swTPM sim), #186 4492ca9 (C M5 envelope), #187 929a720 (matrix+receipt NOT_QUALIFIED pass10/b",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "c77ab0d",
+          "timestamp": "2026-09-30T21:54:19-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #181 from aien-dev/lane1/trust1-phase-b",
+          "pr": 181
+        },
+        {
+          "source": "backfill-git",
+          "sha": "a3be1b0",
+          "timestamp": "2026-09-30T21:35:35-05:00",
+          "author": "aien-dev",
+          "subject": "TRUST-1: fix recovery guide, add Gate 7 pre-flight check (#180)",
+          "pr": 180
+        },
+        {
+          "source": "backfill-git",
+          "sha": "6983a3a",
+          "timestamp": "2026-09-30T21:08:12-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #179 from aien-dev/m20/trust1-gate3-ceremony",
+          "pr": 179
+        },
+        {
+          "source": "backfill-git",
+          "sha": "41f7153",
+          "timestamp": "2026-09-30T20:56:05-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #178 from aien-dev/m20/trust1-gate1-recovery",
+          "pr": 178
+        },
+        {
+          "source": "backfill-git",
+          "sha": "30d98b9",
+          "timestamp": "2026-09-30T20:51:16-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #177 from aien-dev/m20/trust1-gate4-secureboot",
+          "pr": 177
+        },
+        {
+          "source": "backfill-git",
+          "sha": "6093f5c",
+          "timestamp": "2026-09-30T20:35:27-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #176 from aien-dev/m20/trust1-gate0-gate2",
+          "pr": 176
+        },
+        {
+          "source": "backfill-git",
+          "sha": "f0facc7",
+          "timestamp": "2026-09-29T15:22:43-05:00",
+          "author": "dhgmonkey",
+          "subject": "Close key and plaintext cleanup gaps with in-house crypto (#174)",
+          "pr": 174
+        },
+        {
+          "source": "backfill-git",
+          "sha": "7ff5d7c",
+          "timestamp": "2026-09-29T07:34:43-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #152: establish AIENOS plan authority and retire competing execution orders",
+          "pr": 152
+        },
+        {
+          "source": "backfill-git",
+          "sha": "e3d3a10",
+          "timestamp": "2026-09-25T19:09:05-05:00",
+          "author": "aien-dev",
+          "subject": "docs(adr): adopt ADR 0017 (M5 architecture) and amend ADR 0016 migration boundary (#149)",
+          "pr": 149
+        },
+        {
+          "source": "backfill-git",
+          "sha": "b52f307",
+          "timestamp": "2026-09-25T19:02:06-05:00",
+          "author": "aien-dev",
+          "subject": "docs(m5): codify Round 2 verdicts and Round 3 frontier (#148)",
+          "pr": 148
+        },
+        {
+          "source": "backfill-git",
+          "sha": "059a859",
+          "timestamp": "2026-09-25T18:44:04-05:00",
+          "author": "aien-dev",
+          "subject": "docs(m5): record settled Round 1 decisions (C\\x27, B\\x27, AES-256-GCM-SIV, C\\x27) (#147)",
+          "pr": 147
+        },
+        {
+          "source": "backfill-git",
+          "sha": "19e7c0c",
+          "timestamp": "2026-09-25T18:34:33-05:00",
+          "author": "aien-dev",
+          "subject": "docs: add M5 key hierarchy and encrypted store design tree (#146)",
+          "pr": 146
+        }
+      ]
+    }
+  }
+}

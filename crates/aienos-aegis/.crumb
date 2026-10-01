@@ -1,0 +1,60 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-aegis",
+  "layer": "crates/aienos-aegis",
+  "purpose": "Directory crates/aienos-aegis. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates",
+    "path": ".."
+  },
+  "below": [
+    {
+      "name": "src",
+      "role": ""
+    },
+    {
+      "name": "tests",
+      "role": ""
+    }
+  ],
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-aegis. Purpose not yet described by a human.",
+      "files": [
+        "Cargo.toml"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 3,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "4a5d9df",
+          "timestamp": "2026-09-23T18:38:16-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #7 from aien-dev/feat/aienos-world-bound-effects",
+          "pr": 7
+        },
+        {
+          "source": "backfill-git",
+          "sha": "b900485",
+          "timestamp": "2026-09-23T18:35:52-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #6 from aien-dev/fix/aienos-aegis-boundaries",
+          "pr": 6
+        },
+        {
+          "source": "backfill-git",
+          "sha": "bc25e73",
+          "timestamp": "2026-09-23T18:21:24-05:00",
+          "author": "aien-dev",
+          "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
+          "pr": 2
+        }
+      ]
+    }
+  }
+}

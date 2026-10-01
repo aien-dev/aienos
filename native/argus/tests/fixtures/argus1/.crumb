@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0.0",
+  "name": "native/argus/tests/fixtures/argus1",
+  "layer": "native/argus/tests/fixtures/argus1",
+  "purpose": "Directory native/argus/tests/fixtures/argus1. Purpose not yet described by a human.",
+  "above": {
+    "name": "native/argus/tests",
+    "path": "../.."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory native/argus/tests/fixtures/argus1. Purpose not yet described by a human.",
+      "files": [
+        "README.md",
+        "r7-v11.bin",
+        "r8-v11.bin",
+        "r9-v11.bin"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 1,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "efadc17",
+          "timestamp": "2026-09-29T09:40:04-05:00",
+          "author": "aien-dev",
+          "subject": "ARGUS-1 lane F: performance and false-positive gates (#170)",
+          "pr": 170
+        }
+      ]
+    }
+  }
+}

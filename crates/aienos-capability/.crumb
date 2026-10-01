@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-capability",
+  "layer": "crates/aienos-capability",
+  "purpose": "Directory crates/aienos-capability. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates",
+    "path": ".."
+  },
+  "below": [
+    {
+      "name": "src",
+      "role": ""
+    }
+  ],
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-capability. Purpose not yet described by a human.",
+      "files": [
+        "Cargo.toml"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 2,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "18caa07",
+          "timestamp": "2026-09-27T15:55:55-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #155 from aien-dev/feat/r9-generation-barrier",
+          "pr": 155
+        },
+        {
+          "source": "backfill-git",
+          "sha": "24f1593",
+          "timestamp": "2026-09-27T15:50:43-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #154 from aien-dev/feat/r7-native-authority",
+          "pr": 154
+        }
+      ]
+    }
+  }
+}

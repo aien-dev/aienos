@@ -1,0 +1,114 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-kernel/src/usb",
+  "layer": "crates/aienos-kernel/src/usb",
+  "purpose": "Directory crates/aienos-kernel/src/usb. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-kernel/src",
+    "path": ".."
+  },
+  "below": [
+    {
+      "name": "xhci",
+      "role": ""
+    }
+  ],
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-kernel/src/usb. Purpose not yet described by a human.",
+      "files": [
+        "audio.rs",
+        "descriptor.rs",
+        "hid.rs",
+        "mod.rs"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 10,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "35b3086",
+          "timestamp": "2026-09-24T17:24:08-05:00",
+          "author": "aien-dev",
+          "subject": "feat(smmu): fail-closed DMA bring-up and PCI bus master sweep (M3 1C) (#110)",
+          "pr": 110
+        },
+        {
+          "source": "backfill-git",
+          "sha": "b9c656f",
+          "timestamp": "2026-09-24T14:27:49-05:00",
+          "author": "aien-dev",
+          "subject": "feat(smmu): wire SMMUv3 IORT discovery and DMA confinement in QEMU (part of #30, M3) (#103)",
+          "pr": 103
+        },
+        {
+          "source": "backfill-git",
+          "sha": "a51db0b",
+          "timestamp": "2026-09-24T11:27:40-05:00",
+          "author": "aien-dev",
+          "subject": "usb(audio): xHCI isochronous OUT engine for USB audio (part of #85, voice) (#102)",
+          "pr": 102
+        },
+        {
+          "source": "backfill-git",
+          "sha": "48ec82a",
+          "timestamp": "2026-09-24T10:59:11-05:00",
+          "author": "aien-dev",
+          "subject": "kernel(usb): USB Audio Class output discovery and PCM framing (part of #85, voice) (#96)",
+          "pr": 96
+        },
+        {
+          "source": "backfill-git",
+          "sha": "a07d288",
+          "timestamp": "2026-09-24T09:54:44-05:00",
+          "author": "aien-dev",
+          "subject": "kernel(usb): bring up polled xHCI keyboard controller (SEED-0A 2c) (#76)",
+          "pr": 76
+        },
+        {
+          "source": "backfill-git",
+          "sha": "acba849",
+          "timestamp": "2026-09-24T09:54:35-05:00",
+          "author": "aien-dev",
+          "subject": "kernel(usb): add xHCI discovery and keyboard descriptors (SEED-0A 2c) (#75)",
+          "pr": 75
+        },
+        {
+          "source": "backfill-git",
+          "sha": "3a8e3ba",
+          "timestamp": "2026-09-24T09:53:08-05:00",
+          "author": "Drake",
+          "subject": "kernel(usb): xHCI rings and input contexts (SEED-0A input.keyboard.usb, part 2b)"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "968695c",
+          "timestamp": "2026-09-24T09:45:03-05:00",
+          "author": "aien-dev",
+          "subject": "kernel(usb): xHCI TRB layouts and SETUP packets (SEED-0A input.keyboard.usb, part 2a) (#68)",
+          "pr": 68
+        },
+        {
+          "source": "backfill-git",
+          "sha": "1d723bf",
+          "timestamp": "2026-09-24T09:33:16-05:00",
+          "author": "aien-dev",
+          "subject": "kernel(mem): AArch64 stage-1 page-table builder (host-tested) (#63)",
+          "pr": 63
+        },
+        {
+          "source": "backfill-git",
+          "sha": "e0d4789",
+          "timestamp": "2026-09-24T09:10:37-05:00",
+          "author": "Copilot",
+          "subject": "kernel(usb): HID boot-protocol keyboard decoder (SEED-0A input.keyboard.usb, part 1) (#58)",
+          "pr": 58
+        }
+      ]
+    }
+  }
+}

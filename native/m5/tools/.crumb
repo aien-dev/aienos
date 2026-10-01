@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0.0",
+  "name": "native/m5/tools",
+  "layer": "native/m5/tools",
+  "purpose": "Directory native/m5/tools. Purpose not yet described by a human.",
+  "above": {
+    "name": "native/m5",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory native/m5/tools. Purpose not yet described by a human.",
+      "files": [
+        "m5_migsig.c"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 1,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "6bcef8a",
+          "timestamp": "2026-10-01T00:24:04-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #189 from aien-dev/lane12/m5-migration-sig",
+          "pr": 189
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane12",
+          "sha": "6bcef8a",
+          "pr": 189,
+          "note": "PR aienos #189 MERGED, merge commit 6bcef8a. CodeQL checks all pass.",
+          "ref": "2026-10-01-push-lane12-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane23",
+          "sha": "6bcef8a",
+          "pr": 189,
+          "note": "§2 new \"later merges\" addendum: aienos #189 6bcef8a, #190 811bbc0, #191 697391f, #192 08cb905, #193 8d511d6; omega #128 ee89461, #129 d78fd11, #130 7fb59d3, #131 f7b22f1, #132 ff2af05, #133 c6cf052,",
+          "ref": "2026-10-01-push-lane23-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane12",
+          "sha": "6bcef8a",
+          "pr": 189,
+          "note": "~09:20Z Lane 12 DONE: aienos#189 6bcef8a (M5 migration sig, TEST keys; receipt f21f2c03… NOT_QUALIFIED pass15 blocked11 missing5 not_run0; QEMU checks ran), omega#130 7fb59d3 (G3 commitment signing",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        }
+      ]
+    }
+  }
+}

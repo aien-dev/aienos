@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0.0",
+  "name": "crates/aienos-kernel/src/display",
+  "layer": "crates/aienos-kernel/src/display",
+  "purpose": "Directory crates/aienos-kernel/src/display. Purpose not yet described by a human.",
+  "above": {
+    "name": "crates/aienos-kernel/src",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory crates/aienos-kernel/src/display. Purpose not yet described by a human.",
+      "files": [
+        "font.rs",
+        "mod.rs"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 1,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "a22b1d8",
+          "timestamp": "2026-09-23T19:38:27-05:00",
+          "author": "aien-dev",
+          "subject": "Make the native boot report visible without serial and self-returning (#13)",
+          "pr": 13
+        }
+      ]
+    }
+  }
+}

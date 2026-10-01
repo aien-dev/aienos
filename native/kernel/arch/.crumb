@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0.0",
+  "name": "native/kernel/arch",
+  "layer": "native/kernel/arch",
+  "purpose": "Directory native/kernel/arch. Purpose not yet described by a human.",
+  "above": {
+    "name": "native/kernel",
+    "path": ".."
+  },
+  "extensions": {
+    "seed": {
+      "purpose_auto": "Directory native/kernel/arch. Purpose not yet described by a human.",
+      "files": [
+        "arch.h",
+        "exception.c",
+        "gic.c",
+        "m3.S",
+        "timer.c",
+        "vectors.S"
+      ]
+    },
+    "owner_lane": "",
+    "provenance": {
+      "source": "backfill",
+      "total_commits": 2,
+      "ledger_cap": 20,
+      "entries": [
+        {
+          "source": "backfill-git",
+          "sha": "0d0efa5",
+          "timestamp": "2026-10-01T04:58:30-05:00",
+          "author": "aien-dev",
+          "subject": "ck: port M3 isolation (threads, EL0, preemption, placement, typed IPC) to the C kernel (QEMU) (#201)",
+          "pr": 201
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane25",
+          "sha": "0d0efa5",
+          "pr": 201,
+          "note": "PR #201, squash-merged as 0d0efa5. Built by an Opus worker; the lead verified it, fixed the review findings and produced the receipt.",
+          "ref": "2026-10-01-push-lane25-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane25",
+          "sha": "0d0efa5",
+          "pr": 201,
+          "note": "09:59Z Lane 25 DONE: aienos #201 (M3 isolation port: tasks, preempt, EL0 lockout, fault isolation, IPC w/ narrowable caps; single core). ck_gates 7 PASS/6 NOT_RUN of 13, QEMU only. Follow-ups: virtio",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        },
+        {
+          "source": "backfill-git",
+          "sha": "34c6053",
+          "timestamp": "2026-10-01T02:17:36-05:00",
+          "author": "aien-dev",
+          "subject": "Merge pull request #194 from aien-dev/lane18/native-kernel-core",
+          "pr": 194
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane18",
+          "sha": "34c6053",
+          "pr": 194,
+          "note": "#194 C kernel core + UEFI entry stub + memory/exceptions + host tests: merge 34c60536da7a95d8b782b13e52495730578c83ba",
+          "ref": "2026-10-01-push-lane18-report.md"
+        },
+        {
+          "source": "backfill-lane-report",
+          "lane": "lane18",
+          "sha": "34c6053",
+          "pr": 194,
+          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
+          "ref": "2026-10-01-next-major-push-orchestrator.md"
+        }
+      ]
+    }
+  }
+}
