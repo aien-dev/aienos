@@ -210,7 +210,7 @@ int nvme_init(nvme_ctrl *c, const nvme_ops *ops, const nvme_dma *dma, const nvme
     uint16_t io_depth = (cfg && cfg->io_depth) ? cfg->io_depth : NVME_IO_DEPTH_DEFAULT;
     if (io_depth < 2 || io_depth > NVME_IO_DEPTH_MAX)
         return NVME_EARG;
-    if (!dma->virt || (dma->phys & (NVME_PAGE - 1)) || dma->bytes < NVME_DMA_MIN_BYTES)
+    if (!dma->virt || ((uintptr_t)dma->virt & (NVME_PAGE - 1)) || (dma->phys & (NVME_PAGE - 1)) || dma->bytes < NVME_DMA_MIN_BYTES)
         return NVME_EARG;
     if (dma->phys + dma->bytes < dma->phys) /* bus address wraps */
         return NVME_EARG;

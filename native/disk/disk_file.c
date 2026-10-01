@@ -86,7 +86,7 @@ int disk_file_open(disk_file *f, disk_dev *dev, const char *path, uint32_t block
     if (f->fd < 0)
         return DISK_EIO;
     if (create) {
-        if (block_count == 0 || ftruncate(f->fd, (off_t)(block_count * block_size))) {
+        if (block_count == 0 || block_count > (uint64_t)INT64_MAX / block_size || ftruncate(f->fd, (off_t)(block_count * block_size))) {
             close(f->fd);
             return DISK_EIO;
         }

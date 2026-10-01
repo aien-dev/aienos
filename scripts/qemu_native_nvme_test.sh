@@ -14,7 +14,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-quiet="${HOME}/workspace/.spark-quiet"
+quiet="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
 qemu_timeout="${AIENOS_QEMU_TIMEOUT:-60}"
 out_rel="out"
 out="${repo}/native/disk/qemu/${out_rel}"
@@ -32,7 +32,13 @@ for tool in qemu-system-aarch64 timeout make; do
     fi
 done
 
-echo "lane11 qemu_native_nvme_test" > "${quiet}"
+# Take the flag atomically (noclobber): if another run created it since the
+# check above, refuse instead of overwriting it, and never delete its flag.
+if ! ( set -C; echo "lane11 qemu_native_nvme_test" > "${quiet}" ) 2>/dev/null; then
+    echo "quiet flag ${quiet} appeared during setup; another heavy run owns the machine"
+    echo "AIENOS_STORE_NVME_QEMU: NOT_RUN"
+    exit 0
+fi
 cleanup() { rm -f "${quiet}"; }
 trap cleanup EXIT
 

@@ -24,6 +24,13 @@ static int range_ok(const disk_dev *d, uint64_t lba, uint32_t count)
     return DISK_OK;
 }
 
+/* Keep the two backend codes a caller must tell apart from a plain I/O error:
+ * a simulated power cut and a controller that failed closed. */
+static int backend_rc(int brc)
+{
+    return (brc == DISK_EPOWER || brc == DISK_ESTATE) ? brc : DISK_EIO;
+}
+
 int disk_read(const disk_dev *d, uint64_t lba, uint32_t count, uint8_t *buf)
 {
     int rc = disk_check(d);
@@ -35,8 +42,9 @@ int disk_read(const disk_dev *d, uint64_t lba, uint32_t count, uint8_t *buf)
         return rc;
     while (count) {
         uint32_t n = count < d->max_blocks_per_io ? count : d->max_blocks_per_io;
-        if (d->read(d->ctx, lba, n, buf) != 0)
-            return DISK_EIO;
+        int brc = d->read(d->ctx, lba, n, buf);
+        if (brc != 0)
+            return backend_rc(brc);
         lba += n;
         count -= n;
         buf += (size_t)n * d->block_size;
@@ -57,7 +65,7 @@ int disk_write(const disk_dev *d, uint64_t lba, uint32_t count, const uint8_t *b
         uint32_t n = count < d->max_blocks_per_io ? count : d->max_blocks_per_io;
         int brc = d->write(d->ctx, lba, n, buf);
         if (brc != 0)
-            return brc == DISK_EPOWER ? DISK_EPOWER : DISK_EIO;
+            return backend_rc(brc);
         lba += n;
         count -= n;
         buf += (size_t)n * d->block_size;
@@ -72,7 +80,7 @@ int disk_flush(const disk_dev *d)
         return rc;
     rc = d->flush(d->ctx);
     if (rc != 0)
-        return rc == DISK_EPOWER ? DISK_EPOWER : DISK_EIO;
+        return backend_rc(rc);
     return DISK_OK;
 }
 
