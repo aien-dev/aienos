@@ -79,7 +79,7 @@ if [ "$(uname -m)" != "aarch64" ]; then cross="aarch64-linux-gnu-"; fi
 commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 out="${repo_root}/target/native-kernel"
 make -s -C native/kernel CROSS="${cross}" OUT="${out}" AIENOS_COMMIT="${commit}" full >/dev/null
-make -s -C native/kernel OUT="${out}" udp-echo >/dev/null
+make -s -C native/kernel OUT="${out}" udp-echo gpt-image >/dev/null
 efi="${out}/full/BOOTAA64.EFI"
 echo_bin="${out}/host/ck_udp_echo"
 port="$(sed -nE 's/^#define CK_NET_ECHO_PORT ([0-9]+)u.*/\1/p' native/kernel/dev/net_udp.h)"
@@ -131,7 +131,9 @@ echo "PASS  UDP echo helper listening on 127.0.0.1:${port} (token ${token})"
 source "${repo_root}/scripts/lib_ck_m1_checks.sh"
 img_bytes=67108864
 image="${top}/nvme.img"
-truncate -s "${img_bytes}" "${image}"
+# GPT boot disk with an AIENOS partition (native/kernel/tools/ck_gpt_image.c):
+# the kernel binds NVMe only when it finds one (dev/disk_part.h).
+"${out}/host/ck_gpt_image" create "${image}" 512 $(( img_bytes / 1048576 )) aienos-middle >/dev/null
 net_fail=0; m1_fail=0
 
 # boot <name> [smmu|nosmmu] [nic options]: one QEMU boot; serial text in

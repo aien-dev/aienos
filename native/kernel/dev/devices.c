@@ -9,7 +9,9 @@
 static pci_system g_pci;
 static ck_nvme g_nvme;
 
-const disk_dev *ck_dev_boot_disk(void) { return g_nvme.bound ? &g_nvme.disk : 0; }
+/* Later stages get only the AIENOS partition view (dev/disk_part.h), never the
+ * whole namespace: every access they make goes through ck_part_xlate. */
+const disk_dev *ck_dev_boot_disk(void) { return g_nvme.bound && g_nvme.part.valid ? &g_nvme.part.dev : 0; }
 
 void ck_dev_nvme_release(void)
 {

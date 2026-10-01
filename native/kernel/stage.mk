@@ -3,6 +3,10 @@
 #   make -C native/kernel -f stage.mk stage-test       host tests (libc, pthreads)
 #   make -C native/kernel -f stage.mk stage-sanitize   same under ASan + UBSan
 #   make -C native/kernel -f stage.mk stage-free       freestanding compile + nm -u check
+#   make -C native/kernel -f stage.mk disk-part-test   GPT parser + LBA translation host test
+#        (dev/tests/disk_part_test.c), built normally (must PASS) and as the
+#        TEST-ONLY translation-bypass mutant (must FAIL); stage-test and
+#        stage-sanitize run it too
 # Exports for the kernel image build:
 #   STAGE_SRCS    every .c the stages need (own files + unmodified native/*)
 #   STAGE_CFLAGS  include paths and defines; add to the kernel's freestanding CFLAGS
@@ -13,7 +17,7 @@ STAGE_NATIVE := $(STAGE_DIR)/..
 STAGE_OUT ?= /tmp/aienos-ck-stage-$(shell id -u)
 
 # Own sources (image).
-STAGE_OWN_SRCS := $(STAGE_DIR)/dev/pci.c $(STAGE_DIR)/dev/nvme_bind.c $(STAGE_DIR)/dev/nvme_shutdown.c $(STAGE_DIR)/dev/virtio_net.c \
+STAGE_OWN_SRCS := $(STAGE_DIR)/dev/pci.c $(STAGE_DIR)/dev/disk_part.c $(STAGE_DIR)/dev/nvme_bind.c $(STAGE_DIR)/dev/nvme_shutdown.c $(STAGE_DIR)/dev/virtio_net.c \
                   $(STAGE_DIR)/dev/net_bind.c $(STAGE_DIR)/dev/net_udp.c \
                   $(STAGE_DIR)/dev/devices.c $(STAGE_DIR)/svc/security.c $(STAGE_DIR)/svc/store_boot.c \
                   $(STAGE_DIR)/svc/artifact_store.c
@@ -69,7 +73,7 @@ $(foreach s,$(STAGE_SRCS),$(eval $(call stage_free_rule,$(s))))
 $(STAGE_OUT)/stage_all.o: $(STAGE_FREE_OBJS)
 	$(STAGE_LD) -r -o $@ $^
 
-.PHONY: stage-free stage-test stage-sanitize stage-clean
+.PHONY: stage-free stage-test stage-sanitize stage-clean disk-part-test disk-part-sanitize
 stage-free: $(STAGE_OUT)/stage_all.o
 	@bad=$$($(STAGE_NM) -u $< | awk '{print $$2}' | grep -vxF $(foreach a,$(STAGE_ALLOWED_U),-e $(a)) || true); \
 	if [ -n "$$bad" ]; then echo "CK_STAGE_FREE: FAIL undefined: $$bad"; exit 1; fi; \
@@ -100,3 +104,39 @@ stage-sanitize: $(STAGE_OUT)/stage_test_san
 
 stage-clean:
 	rm -rf $(STAGE_OUT)
+
+# ---- GPT parser / translation layer host test (dev/tests/disk_part_test.c) ----
+# Linked with the same stage sources as stage_test (a whole Store boot runs on
+# the partition view) plus the hosted GPT writer tools/gpt_write.c. The mutant
+# is the same test built with -DCK_TEST_DISK_XLATE_BYPASS (translation layer
+# adds no partition offset): it must FAIL, so the checks are shown to catch a
+# bypass.
+DISK_PART_TEST_SRCS := $(STAGE_OWN_SRCS) $(STAGE_NATIVE_SRCS) $(STAGE_NATIVE)/disk/disk_file.c \
+  $(STAGE_DIR)/svc/tests/ck_host.c $(STAGE_DIR)/tools/gpt_write.c $(STAGE_DIR)/dev/tests/disk_part_test.c
+DISK_PART_TEST_DEPS := $(DISK_PART_TEST_SRCS) $(wildcard $(STAGE_DIR)/dev/*.h $(STAGE_DIR)/svc/*.h \
+  $(STAGE_DIR)/include/*.h $(STAGE_DIR)/tools/*.h)
+DISK_PART_INC := $(STAGE_INC) -I$(STAGE_DIR)/tools -I$(STAGE_DIR)/svc/tests
+
+$(STAGE_OUT)/disk_part_test: $(DISK_PART_TEST_DEPS)
+	@mkdir -p $(@D)
+	$(STAGE_CC) $(STAGE_HOST_FLAGS) $(DISK_PART_INC) -o $@ $(DISK_PART_TEST_SRCS)
+$(STAGE_OUT)/disk_part_test_mutant: $(DISK_PART_TEST_DEPS)
+	@mkdir -p $(@D)
+	$(STAGE_CC) $(STAGE_HOST_FLAGS) -DCK_TEST_DISK_XLATE_BYPASS=1 $(DISK_PART_INC) -o $@ $(DISK_PART_TEST_SRCS)
+$(STAGE_OUT)/disk_part_test_san: $(DISK_PART_TEST_DEPS)
+	@mkdir -p $(@D)
+	$(STAGE_CC) $(STAGE_HOST_FLAGS) $(STAGE_SAN_FLAGS) $(DISK_PART_INC) -o $@ $(DISK_PART_TEST_SRCS)
+
+disk-part-test: $(STAGE_OUT)/disk_part_test $(STAGE_OUT)/disk_part_test_mutant
+	$(STAGE_OUT)/disk_part_test
+	@if $(STAGE_OUT)/disk_part_test_mutant >$(STAGE_OUT)/disk_part_test_mutant.log 2>&1; then \
+	  echo "CK_DISK_PART_MUTANT: FAIL (translation bypass mutant passed the host checks)"; exit 1; fi; \
+	n=$$(grep -c "^  FAIL " $(STAGE_OUT)/disk_part_test_mutant.log || true); \
+	if [ "$$n" -lt 1 ]; then echo "CK_DISK_PART_MUTANT: FAIL (mutant exited non-zero without a failing check: crash?)"; exit 1; fi; \
+	echo "CK_DISK_PART_MUTANT: PASS (translation bypass mutant caught by $$n failing checks)"
+
+disk-part-sanitize: $(STAGE_OUT)/disk_part_test_san
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 $<
+
+stage-test: disk-part-test
+stage-sanitize: disk-part-sanitize

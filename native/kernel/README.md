@@ -26,6 +26,7 @@ QEMU qualifies nothing physical: a PASS here says nothing about real hardware.
     scripts/qemu_ck_store_test.sh    # QEMU NVMe + Store gate (full image, QEMU-only
                                      # CK_QEMU_UNSAFE_DMA=1 build), ends AIENOS_CK_M4_NVME,
                                      # AIENOS_CK_M4_STORE, AIENOS_CK_ARGUS1_REVOKE
+    scripts/qemu_ck_disk_layout_test.sh # QEMU GPT / AIENOS partition gate, ends AIENOS_CK_DISK_LAYOUT
 
 Toolchain: gcc, binutils (ld, objcopy, nm, readelf), make, shell. On a
 non-aarch64 host the Makefile uses the `aarch64-linux-gnu-` prefix.
@@ -152,6 +153,23 @@ low-water free bytes.
   DMA is refused. `CK_QEMU_UNSAFE_DMA=1` (TEST-ONLY, QEMU only, refused with
   `CK_HARDWARE_STAGING`) builds the unconfined bypass used only when no SMMU
   exists, and prints the `WARNING: UNSAFE NVME DMA BYPASS` lines.
+
+- The kernel writes only inside the AIENOS partition of the boot disk
+  (`dev/disk_part.h`, gate `DISK_LAYOUT`). The GPT is parsed read-only:
+  protective MBR, primary and backup headers and entry arrays, all CRC32
+  checked and required to agree. Exactly one partition must carry the AIENOS
+  type GUID `38DAAC89-5EAD-4B40-8B1E-3687A7418061` (on-disk bytes
+  `89 AC DA 38 AD 5E 40 4B 8B 1E 36 87 A7 41 80 61`), inside the usable range
+  and overlapping no other partition. The Store, torn-slot device and rw probe
+  get only that partition's `disk_dev` view, whose every read, write and
+  flush goes through `ck_part_xlate` (bounds-checked partition LBA -> disk
+  LBA). Otherwise the kernel prints `disk: no AIENOS partition, refusing
+  writes` and the Store reports `no boot disk`; there is no whole-disk mode.
+  `CK_TEST_DISK_XLATE_BYPASS=1` (TEST-ONLY mutation, refused with
+  `CK_HARDWARE_STAGING`) drops the partition offset so the gate can prove it
+  catches that. QEMU disk images come from `make gpt-image`
+  (`tools/ck_gpt_image.c`); `ck_store_image` also opens only the AIENOS
+  partition.
 
 ## Differences from the Rust kernel
 

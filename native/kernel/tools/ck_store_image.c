@@ -1,16 +1,17 @@
 /* ck_store_image -- host tool: put signed P2 artifacts into the sealed C Store
- * on a raw boot disk image, at image build time, so the C kernel's loader
+ * inside the AIENOS GPT partition of a boot disk image (made by
+ * tools/ck_gpt_image.c), at image build time, so the C kernel's loader
  * reads them from NVMe (svc/artifact_store.h). It reuses the kernel's own
  * Store code (store_boot.c formats and commits the boot record exactly as a
  * first boot would; artifact_store.c writes and reads the artifact objects),
  * so there is no second disk format. TEST identity and TEST keys only.
  *
- *   ck_store_image build IMG BLOCK_SIZE ENTRY...   IMG must exist and be blank
+ *   ck_store_image build IMG BLOCK_SIZE ENTRY...   IMG must hold a GPT whose AIENOS partition is blank
  *        ENTRY = path to a file (Store name = its basename, 1..32 bytes)
  *              | missing:NAME:LEN (index entry, no chunks: hostile case)
  *   ck_store_image list IMG BLOCK_SIZE             read back with the kernel reader
- *   ck_store_image locate IMG BLOCK_SIZE NAME      "offset=B length=L" of the
- *        sealed envelope holding chunk 0 of NAME (for the corrupt-disk case)
+ *   ck_store_image locate IMG BLOCK_SIZE NAME      "offset=B length=L" (B: byte offset in the
+ *        whole image file) of the sealed envelope holding chunk 0 of NAME (for the corrupt-disk case)
  * list and locate only read the image. Hosted C; test tooling, never in an
  * image. No Python, no outside libraries. */
 #include <stdio.h>
@@ -19,6 +20,7 @@
 #include "artifact_store.h"
 #include "disk_file.h"
 #include "disk_layout.h"
+#include "disk_part.h"
 #include "store_boot.h"
 
 static int usage(void)
@@ -45,7 +47,9 @@ static uint8_t *slurp(const char *path, size_t *len)
 
 typedef struct {
     disk_file f;
-    disk_dev d;
+    disk_dev raw;   /* the whole image: read for the GPT only */
+    ck_part part;   /* the AIENOS partition view (dev/disk_part.h) */
+    const disk_dev *d; /* == &part.dev: every Store access goes through ck_part_xlate */
     st_disk sd;
     st_dev sdev;
     ts_device tdev;
@@ -60,12 +64,23 @@ static int img_open(image *im, const char *path, const char *bs_s)
         return -1;
     }
     memset(im, 0, sizeof *im);
-    if (disk_file_open(&im->f, &im->d, path, bs, 0, 0)) {
+    if (disk_file_open(&im->f, &im->raw, path, bs, 0, 0)) {
         fprintf(stderr, "cannot open %s\n", path);
         return -1;
     }
+    /* Same rule as the kernel: the Store lives only inside the AIENOS GPT
+     * partition; no valid GPT or no AIENOS partition is refused. Images come
+     * from tools/ck_gpt_image.c. */
+    ck_gpt_info gi;
+    int grc = ck_gpt_find_aienos(&im->raw, &im->part, &gi);
+    if (grc) {
+        fprintf(stderr, "%s: no AIENOS partition, refusing writes (gpt: %s, rc=%d)\n", path, ck_gpt_strerror(grc), grc);
+        disk_file_close(&im->f);
+        return -1;
+    }
+    im->d = &im->part.dev;
     uint32_t bpu = CK_LAYOUT_UNIT / bs;
-    uint64_t units = im->d.block_count / bpu;
+    uint64_t units = im->d->block_count / bpu;
     if (units < CK_LAYOUT_ANCHOR_UNITS + CK_LAYOUT_MIN_STORE_UNITS + CK_LAYOUT_PROBE_UNITS) {
         fprintf(stderr, "image too small\n");
         disk_file_close(&im->f);
@@ -81,9 +96,9 @@ static int img_mount(image *im, ss_store *s, ss_workspace *ws)
 {
     ss_keys keys;
     ck_store_test_keys(&keys);
-    int rc = st_disk_bind(&im->sd, &im->d, im->base_lba, im->units, &im->sdev);
+    int rc = st_disk_bind(&im->sd, im->d, im->base_lba, im->units, &im->sdev);
     if (!rc) {
-        ss_ts_device(&im->d, &im->tdev);
+        ss_ts_device(im->d, &im->tdev);
         memset(s, 0, sizeof *s);
         rc = ss_open(s, &im->sdev, &im->tdev, 0, &keys, ws);
     }
@@ -131,7 +146,7 @@ static int cmd_build(int argc, char **argv)
     ss_keys keys;
     ck_store_report r;
     ck_store_test_keys(&keys);
-    int rc = store_boot_run(&im.d, &keys, ck_store_test_uuid, "ck_store_image", &r);
+    int rc = store_boot_run(im.d, &keys, ck_store_test_uuid, "ck_store_image", &r);
     memset(&keys, 0, sizeof keys);
     if (rc || !r.formatted) {
         fprintf(stderr, "%s: %s (the image must be blank: all zero)\n", argv[2],
@@ -140,7 +155,7 @@ static int cmd_build(int argc, char **argv)
         return 1;
     }
     rc = ck_art_write(store_boot_store(), in, n);
-    if (!rc) rc = disk_flush(&im.d);
+    if (!rc) rc = disk_flush(im.d);
     uint64_t gen = ss_generation(store_boot_store());
     disk_file_close(&im.f);
     if (rc) {
@@ -220,7 +235,7 @@ static int cmd_locate(int argc, char **argv)
             const sv1_entry *e = &st->ws->cat[st->root.cat_index][i];
             if (memcmp(e->object_id, sid, 32)) continue;
             printf("offset=%llu length=%llu\n",
-                   (unsigned long long)(im.base_lba * im.d.block_size + e->first_unit * CK_LAYOUT_UNIT),
+                   (unsigned long long)((im.part.first_lba + im.base_lba) * im.d->block_size + e->first_unit * CK_LAYOUT_UNIT),
                    (unsigned long long)e->byte_length);
             found = 1;
             break;

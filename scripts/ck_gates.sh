@@ -4,11 +4,12 @@
 #
 # It refuses a dirty tree, runs the C kernel QEMU scripts that exist
 # (scripts/qemu_ck_boot_test.sh, scripts/qemu_ck_store_test.sh,
-# scripts/qemu_ck_net_test.sh, scripts/qemu_ck_artifact_test.sh), and prints
+# scripts/qemu_ck_net_test.sh, scripts/qemu_ck_artifact_test.sh,
+# scripts/qemu_ck_disk_layout_test.sh), and prints
 # one line per gate:
 #     AIENOS_CK_<gate>: PASS|FAIL|NOT_RUN [(reason)]
 # for M1 M3 SMMU NVME_SHUTDOWN P2_ARTIFACT M0_ROLLBACK M4_NVME M4_STORE M4_STORE_CRASH
-# M4_CONTINUITY M4_RECOVERY ARGUS1_REVOKE KEYBOARD NET. Gates with no C
+# M4_CONTINUITY M4_RECOVERY ARGUS1_REVOKE KEYBOARD NET DISK_LAYOUT. Gates with no C
 # implementation print NOT_RUN (MISSING_IMPLEMENTATION: <reason>) and never
 # run anything. A missing child script, a child that reports NOT_RUN, a child
 # that prints no verdict line, or a PASS line contradicted by the child's exit
@@ -40,6 +41,7 @@ set -uo pipefail
 #         store -> verdict line from scripts/qemu_ck_store_test.sh
 #         net   -> verdict line from scripts/qemu_ck_net_test.sh
 #         artifact -> verdict line from scripts/qemu_ck_artifact_test.sh
+#         disk  -> verdict line from scripts/qemu_ck_disk_layout_test.sh
 #         missing -> NOT_RUN (MISSING_IMPLEMENTATION), never run, never PASS
 # ===========================================================================
 CK_GATE_TABLE='
@@ -57,8 +59,9 @@ M4_RECOVERY|missing|no Recovery Core (ADR 0006) in the C kernel
 ARGUS1_REVOKE|store|-
 KEYBOARD|missing|no xHCI/USB HID keyboard driver in the C kernel
 NET|net|-
+DISK_LAYOUT|disk|-
 '
-CHILDREN=(boot store net artifact)
+CHILDREN=(boot store net artifact disk)
 # ===========================================================================
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -100,6 +103,7 @@ set_default_children() {
         [store]="${repo_root}/scripts/qemu_ck_store_test.sh"
         [net]="${repo_root}/scripts/qemu_ck_net_test.sh"
         [artifact]="${repo_root}/scripts/qemu_ck_artifact_test.sh"
+        [disk]="${repo_root}/scripts/qemu_ck_disk_layout_test.sh"
     )
 }
 
@@ -329,11 +333,11 @@ self_test() {
     }
     expect_missing_all() {
         local g
-        for g in P2_ARTIFACT M0_ROLLBACK M4_STORE_CRASH M4_CONTINUITY M4_RECOVERY KEYBOARD; do expect "${g}" NOT_RUN; done  # P2_ARTIFACT: no artifact child in A..G
+        for g in P2_ARTIFACT M0_ROLLBACK M4_STORE_CRASH M4_CONTINUITY M4_RECOVERY KEYBOARD DISK_LAYOUT; do expect "${g}" NOT_RUN; done  # P2_ARTIFACT, DISK_LAYOUT: no artifact or disk child in A..G
     }
-    scenario() { # NAME BOOT_SCRIPT STORE_SCRIPT [NET_SCRIPT] [ARTIFACT_SCRIPT] (absent: missing)
+    scenario() { # NAME BOOT_SCRIPT STORE_SCRIPT [NET_SCRIPT] [ARTIFACT_SCRIPT] [DISK_SCRIPT] (absent: missing)
         scen="$1"
-        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}")
+        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}" [disk]="${6:-${tmp}/kids/no_disk_child.sh}")
         run_children 2>/dev/null
         evaluate_table >"${tmp}/${scen}.out"
     }
@@ -348,8 +352,8 @@ self_test() {
         "$(fake netA 0 'PASS  UDP reply received' 'AIENOS_CK_NET: PASS')"
     expect M1 PASS; expect M3 PASS; expect M4_NVME PASS; expect M4_STORE PASS; expect ARGUS1_REVOKE PASS; expect SMMU PASS; expect NVME_SHUTDOWN PASS; expect NET PASS; expect_missing_all
     count_rows
-    [[ "${n_pass}/${n_fail}/${n_notrun}/${n_total}" == "8/0/6/14" && ${overall} == NOT_ALL_GATES_PASS ]] \
-        && ok "A: counts 8/0/6 of 14, verdict NOT_ALL_GATES_PASS" || bad "A: counts ${n_pass}/${n_fail}/${n_notrun}/${n_total} ${overall}"
+    [[ "${n_pass}/${n_fail}/${n_notrun}/${n_total}" == "8/0/7/15" && ${overall} == NOT_ALL_GATES_PASS ]] \
+        && ok "A: counts 8/0/7 of 15, verdict NOT_ALL_GATES_PASS" || bad "A: counts ${n_pass}/${n_fail}/${n_notrun}/${n_total} ${overall}"
     [[ "$(nvme_dma_mode)" == "Confined (QEMU SMMUv3 stage 1, out-of-window DMA faulted); no-SMMU boot denied (NoSmmu); TEST-ONLY bypass image checked separately" ]] && ok "A: confined DMA mode recorded from the store PASS lines" || bad "A: dma mode '$(nvme_dma_mode)'"
     grep -qxF "AIENOS_CK_M4_NVME: PASS (${M4_NVME_PASS_NOTE})" "${tmp}/A.out" \
         && ok "A: M4_NVME PASS line carries the confined-mode note" || bad "A: M4_NVME PASS line lacks the note"
@@ -357,7 +361,7 @@ self_test() {
         && ok "A: NET PASS line carries the QEMU slirp / SMMU fence note" || bad "A: NET PASS line lacks the note"
     grep -qx 'AIENOS_CK_KEYBOARD: NOT_RUN (MISSING_IMPLEMENTATION: no xHCI/USB HID keyboard driver in the C kernel)' "${tmp}/A.out" \
         && ok "A: missing gate prints NOT_RUN (MISSING_IMPLEMENTATION: reason)" || bad "A: KEYBOARD line wrong"
-    [[ "$(grep -c '^AIENOS_CK_[A-Z0-9_]*: ' "${tmp}/A.out")" == 14 ]] && ok "A: exactly 14 verdict lines" || bad "A: verdict line count"
+    [[ "$(grep -c '^AIENOS_CK_[A-Z0-9_]*: ' "${tmp}/A.out")" == 15 ]] && ok "A: exactly 15 verdict lines" || bad "A: verdict line count"
 
     # B: boot FAIL; store script missing -> its three gates NOT_RUN, never PASS.
     scenario B "$(fake bootB 1 'FAIL  kernel: alive' 'AIENOS_CK_M3: FAIL' 'AIENOS_CK_M1: FAIL')" "${tmp}/kids/does_not_exist.sh"
@@ -402,6 +406,17 @@ self_test() {
     scenario J "$(fake bootJ 0 'AIENOS_CK_M1: PASS')" "$(fake storeJ 0 'AIENOS_CK_M4_NVME: PASS')" "" \
         "$(fake artJ 1 'FAIL  P25WX' 'AIENOS_CK_P2_ARTIFACT: FAIL')"
     expect P2_ARTIFACT FAIL
+    # K: disk child PASS -> DISK_LAYOUT PASS; a store gate it claims is ignored.
+    # L: disk child FAIL (mutant survived) -> FAIL; M: PASS line, exit 1 -> FAIL.
+    scenario K "$(fake bootK 0 'AIENOS_CK_M1: PASS')" "$(fake storeK 3 'AIENOS_CK_M4_STORE: NOT_RUN')" "" "" \
+        "$(fake diskK 0 'PASS  translation bypass makes DISK_LAYOUT fail (mutant killed)' 'AIENOS_CK_M4_STORE: PASS' 'AIENOS_CK_DISK_LAYOUT: PASS')"
+    expect DISK_LAYOUT PASS; expect M4_STORE NOT_RUN
+    scenario L "$(fake bootL 0 'AIENOS_CK_M1: PASS')" "$(fake storeL 0 'AIENOS_CK_M4_NVME: PASS')" "" "" \
+        "$(fake diskL 1 'FAIL  translation bypass mutant survived' 'AIENOS_CK_DISK_LAYOUT: FAIL')"
+    expect DISK_LAYOUT FAIL
+    scenario M "$(fake bootM 0 'AIENOS_CK_M1: PASS')" "$(fake storeM 0 'AIENOS_CK_M4_NVME: PASS')" "" "" \
+        "$(fake diskM 1 'AIENOS_CK_DISK_LAYOUT: PASS')"
+    expect DISK_LAYOUT FAIL
 
     # Receipt: named by its content hash, valid JSON, physical NOT_RUN, never overwritten.
     scenario R "$(fake bootR 0 'AIENOS_CK_M1: PASS')" "$(fake storeR 0 'AIENOS_CK_M4_NVME: PASS')"
@@ -416,10 +431,10 @@ self_test() {
         bad "receipt name does not match its content hash"
     fi
     if command -v jq >/dev/null; then
-        jq -e '.physical == "NOT_RUN" and (.gates | length) == 14 and .verdict == "NOT_ALL_GATES_PASS"
+        jq -e '.physical == "NOT_RUN" and (.gates | length) == 15 and .verdict == "NOT_ALL_GATES_PASS"
                and ([.gates[] | select(.id == "M1")][0].verdict == "PASS")
                and ([.gates[] | select(.id == "ARGUS1_REVOKE")][0].verdict == "FAIL")
-               and (.children | length) == 4 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
+               and (.children | length) == 5 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
             && ok "receipt is valid JSON (jq) with expected fields" || bad "receipt JSON invalid or fields wrong"
     else
         echo "SKIP  jq not installed; JSON validity not machine-checked"
@@ -432,18 +447,18 @@ self_test() {
         bad "an existing receipt was overwritten or the clash was not refused"
     fi
 
-    # The gate table parses: 14 rows, known sources, reasons only on missing rows.
+    # The gate table parses: 15 rows, known sources, reasons only on missing rows.
     local g s w rows=0 tbad=0
     while IFS='|' read -r g s w; do
         [[ -n "${g}" ]] || continue
         rows=$((rows + 1))
         case "${s}" in
-            boot|store|net|artifact) [[ "${w}" == - ]] || tbad=1 ;;
+            boot|store|net|artifact|disk) [[ "${w}" == - ]] || tbad=1 ;;
             missing) [[ -n "${w}" && "${w}" != - ]] || tbad=1 ;;
             *) tbad=1 ;;
         esac
     done <<<"${CK_GATE_TABLE}"
-    [[ ${tbad} == 0 && ${rows} == 14 ]] && ok "gate table: 14 rows well-formed" || bad "gate table malformed (${rows} rows)"
+    [[ ${tbad} == 0 && ${rows} == 15 ]] && ok "gate table: 15 rows well-formed" || bad "gate table malformed (${rows} rows)"
 
     # Dirty-tree refusal, end to end, on a private clone (never this tree).
     # Both runs stop before any child script (no QEMU).

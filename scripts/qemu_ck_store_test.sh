@@ -13,8 +13,13 @@
 #    DMA bypass, kept so the bypass path stays honest (boot 6 only).
 #
 # Per NVMe geometry (512 B blocks like qemu_nvme_test.sh, 4 KiB blocks like
-# qemu_store_crash_test.sh / qemu_continuity_test.sh), on one fresh 64 MiB
-# all-zero disk image:
+# qemu_store_crash_test.sh / qemu_continuity_test.sh), on one fresh 64 MiB GPT
+# disk image from native/kernel/tools/ck_gpt_image.c (protective MBR, primary
+# and backup GPT, sentinel-a [1,9) MiB filled, AIENOS partition [9,57) MiB all
+# zero, sentinel-b [57,63) MiB filled). The kernel works only inside the AIENOS
+# partition (dev/disk_part.h); boots 1-3 also check the GPT line, the
+# translation-layer lines and that every byte outside the partition is
+# unchanged (sha256 of the image with the partition cut out):
 #  boots 1-3  same image each time. Every boot must pass all M1 checks
 #             (scripts/lib_ck_m1_checks.sh, the same checks as
 #             qemu_ck_boot_test.sh), stage devices/security/store ok, the NVMe
@@ -107,6 +112,8 @@ commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 out="${repo_root}/target/native-kernel"
 make -s -C native/kernel CROSS="${cross}" OUT="${out}" AIENOS_COMMIT="${commit}" full CK_QEMU_UNSAFE_DMA=1 >/dev/null
 make -s -C native/kernel CROSS="${cross}" OUT="${out}" AIENOS_COMMIT="${commit}" full >/dev/null
+make -s -C native/kernel OUT="${out}" gpt-image >/dev/null
+gpt_tool="${out}/host/ck_gpt_image"
 unsafe_efi="${out}/full-qemu-unsafe-dma/BOOTAA64.EFI"
 safe_efi="${out}/full/BOOTAA64.EFI"
 
@@ -142,6 +149,34 @@ fail_into() { # bucket variable name: move the current failed flag into it
     failed=0
 }
 sha() { sha256sum "$1" | cut -d' ' -f1; }
+# GPT boot disk (tools/ck_gpt_image.c): sentinel-a, AIENOS (all zero), sentinel-b.
+# new_disk IMG BS: create it, set part_first/part_last (as WRITTEN by the tool)
+# and outside_ref (sha256 of every byte outside the AIENOS partition: MBR,
+# primary + backup GPT and both sentinels).
+new_disk() {
+    local l re='^gpt_image bs=[0-9]+ blocks=[0-9]+ aienos_first_lba=([0-9]+) aienos_last_lba=([0-9]+)$'
+    l=$("${gpt_tool}" create "$1" "$2" $(( img_bytes / 1048576 )) aienos-middle) || l=""
+    if [[ "${l}" =~ ${re} ]]; then part_first="${BASH_REMATCH[1]}"; part_last="${BASH_REMATCH[2]}"
+    else echo "FAIL  GPT boot disk image not created (${l})"; part_first=0; part_last=0; m1_fail=1; fi
+    outside_ref=$(outside_sha "$1" "$2")
+}
+# outside_sha IMG BS: sha256 of the image with the AIENOS partition cut out.
+outside_sha() {
+    { head -c $(( part_first * $2 )) "$1"; tail -c +$(( (part_last + 1) * $2 + 1 )) "$1"; } | sha256sum | cut -d' ' -f1
+}
+# layout_checks BS: the kernel found the AIENOS partition where the tool wrote
+# it, its translation refuses past the end, and nothing outside it changed.
+layout_checks() {
+    check "GPT parsed, AIENOS partition found where the image tool wrote it (C only)" \
+        "^disk: gpt ok primary+backup crc32 entries=128 used=3 aienos_index=1 first_lba=${part_first} last_lba=${part_last} "
+    check "partition LBA 0 translates to the partition start (C only)" "^disk: xlate part_lba=0 -> disk_lba=${part_first} (rc=0)$"
+    check "write past the partition end refused by the translation layer (C only)" \
+        "^disk: write past partition end part_lba=[0-9]* -> refused "
+    check_absent "no AIENOS-partition refusal on the good disk (C only)" "disk: no AIENOS partition"
+    local now; now=$(outside_sha "$2" "$1")
+    [[ "${now}" == "${outside_ref}" ]] && echo "PASS  MBR, primary+backup GPT and both sentinel partitions byte-identical (C only)" \
+        || { echo "FAIL  bytes outside the AIENOS partition changed (${outside_ref:0:16} -> ${now:0:16})"; failed=1; }
+}
 
 qemu_cpu="${AIENOS_QEMU_CPU:-max}"
 boot_cpu="${qemu_cpu}"
@@ -211,7 +246,8 @@ nvme_checks() { # block bytes, confined|bypass: the bound NVMe path
     check "read past the namespace end is rejected before any command (differs)" \
         "nvme: bounds read lba=${count} -> refused"
     check "LBA 0 read (differs)" "nvme: read lba=0 blocks=1 ok"
-    check "scratch unit write+flush+readback matched (differs)" "nvme: rw probe lba=[0-9]* bytes=4096 write+flush+readback match"
+    check "scratch unit (last unit of the AIENOS partition) write+flush+readback matched (differs)" \
+        "nvme: rw probe part_lba=[0-9]* disk_lba=[0-9]* bytes=4096 write+flush+readback match"
     check "NVMe bound by the devices stage (differs)" "devices: pci=ok nvme=bound"
     check "stage devices ok (differs)" "stage devices: ok"
     check "NVMe bus master revoked after the read phase" "dma_gate: nvme bus master revoked"
@@ -270,11 +306,13 @@ store_fail_msg() { echo "FAIL  $1"; store_fail=1; }
 for bs in 512 4096; do
     if [[ "${bs}" == 512 ]]; then serial=aienos-nvme-test; else serial=aienos-continuity; fi
     image="${top}/nvme-${bs}.img"
-    truncate -s "${img_bytes}" "${image}"
+    new_disk "${image}" "${bs}"
     prev_gen=""
     for k in 1 2 3; do
         boot "${bs}-boot${k}" "${safe_efi}" "${image}" "${bs}" "${serial}" smmu
         nvme_checks "${bs}" confined
+        layout_checks "${bs}" "${image}"
+        fail_into nvme_fail
         shutdown_checks
         argus_checks
         check "stage store ok (differs)" "stage store: ok"
@@ -322,11 +360,13 @@ for bs in 512 4096; do
 
     # Boot 4: corrupt the Store superblock on the host image.
     store_lba=$(field '^store: TEST identity.* store lba=([0-9]+) ')
+    # store lba is relative to the AIENOS partition (dev/disk_layout.h).
     soff=$(( ${store_lba:-0} * bs ))
     if [[ -z "${store_lba}" || "${soff}" != 16384 ]]; then
-        store_fail_msg "Store region offset ${soff} (lba ${store_lba:-?}), expected byte 16384 (4 anchor units)"
+        store_fail_msg "Store region offset ${soff} in the partition (lba ${store_lba:-?}), expected byte 16384 (4 anchor units)"
         soff=16384
     fi
+    soff=$(( part_first * bs + soff ))
     sha_clean=$(sha "${image}")
     # XOR 0xa5 over 2 x 4096 bytes, as svc/tests/stage_test.c does (shell only).
     fmt=""
@@ -387,7 +427,7 @@ done
 # fallback entropy source, so the office token must be refused and the
 # security stage must fail closed; the Store still opens (keyed nonces).
 image="${top}/nvme-nornd.img"
-truncate -s "${img_bytes}" "${image}"
+new_disk "${image}" 512
 boot_cpu=neoverse-n1
 ck_m1_entropy=absent
 boot "boot7-no-rndr" "${safe_efi}" "${image}" 512 aienos-nvme-test smmu
