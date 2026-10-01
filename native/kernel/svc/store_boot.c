@@ -6,6 +6,7 @@
 #include "disk_layout.h"
 #include "m5.h"
 #include "sha256.h"
+#include "store_crash.h"
 
 #ifdef CK_HARDWARE_STAGING
 /* Hardware staging image: owner provisioning generated at build time by
@@ -22,6 +23,14 @@
 #else
 #define CK_STORE_TEST_KEYS 1
 #define CK_SB_HW 0
+#endif
+
+/* TEST-ONLY Store crash hook (svc/store_crash.h), only in the image built
+ * with CK_TEST_STORE_CRASH=1; never with CK_HARDWARE_STAGING. */
+#ifdef CK_TEST_STORE_CRASH
+#define CK_SB_HOOK ck_store_crash_hook
+#else
+#define CK_SB_HOOK 0
 #endif
 
 #ifdef CK_STORE_TEST_KEYS
@@ -235,7 +244,10 @@ int store_boot_run_policy(const disk_dev *d, const ss_keys *keys, const uint8_t 
     put64(rec + 16, r->boot_count_new);
     for (size_t i = 0; i < CK_BOOT_COMMIT_MAX && commit[i]; i++) rec[24 + i] = (uint8_t)commit[i];
     ss_object obj = {CK_BOOT_KIND, CK_BOOT_VERSION, rec, sizeof rec};
-    rc = ss_transact(g_ss, &obj, 1, 0, 0, 0);
+#ifdef CK_TEST_STORE_CRASH
+    ck_store_crash_opened(r->gen_open);
+#endif
+    rc = ss_transact(g_ss, &obj, 1, CK_SB_HOOK, 0, 0);
     if (rc) return fail(r, "commit", "ss_transact", rc);
     rc = disk_flush(d);
     if (rc) return fail(r, "io", "flush", rc);
@@ -332,6 +344,9 @@ int ck_stage_store(void)
     }
     rc = store_boot_run(d, &keys, ck_owner_store_uuid, commit ? commit : "unknown", &r);
 #else
+#ifdef CK_TEST_STORE_CRASH
+    d = ck_store_crash_setup(d);
+#endif
     ck_store_test_keys(&keys);
     rc = store_boot_run(d, &keys, ck_store_test_uuid, commit ? commit : "unknown", &r);
 #endif
