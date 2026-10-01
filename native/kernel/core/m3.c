@@ -46,6 +46,8 @@ static struct ck_sched sched;
 static uint8_t thread_stack[2][8192] __attribute__((aligned(16)));
 static char trace[10];
 static unsigned trace_len;
+static uint64_t thread_floor[TMAX]; /* stack base per thread, for the vector stack guard */
+static uint64_t kernel_floor;
 
 static void yield_now(void)
 {
@@ -60,6 +62,8 @@ static void yield_now(void)
     if (target == from)
         return;
     current = target;
+    /* keep the vector stack guard on the stack that will run */
+    ck_stack_floor = target == TMAX ? kernel_floor : thread_floor[target];
     ck_ctx_switch(from == TMAX ? &main_ctx : &contexts[from],
                   target == TMAX ? &main_ctx : &contexts[target]);
 }
@@ -79,6 +83,7 @@ static int spawn(uint8_t *stack, size_t len, void (*entry)(uint64_t), uint64_t a
             continue;
         uint64_t sp = (((uint64_t)(uintptr_t)stack + len) & ~15ull) - 16;
         contexts[slot] = (struct ck_ctx){ .sp = sp };
+        thread_floor[slot] = (uint64_t)(uintptr_t)stack;
         contexts[slot].x19_x30[0] = arg;
         contexts[slot].x19_x30[1] = (uint64_t)(uintptr_t)entry;
         contexts[slot].x19_x30[11] = (uint64_t)(uintptr_t)ck_thread_start;
@@ -123,7 +128,6 @@ static volatile int preempt_active, preempt_done;
 static uint64_t preempt_switches;
 static struct ck_frame *worker_frame[2], *main_frame;
 static unsigned preempt_cur;
-static uint64_t kernel_floor;
 
 static void preempt_worker(uint64_t which)
 {
@@ -360,6 +364,8 @@ static uint64_t run_el0(uint64_t root, uint64_t base, const struct el0_window *w
 static struct ck_cap_table user_caps;
 static uint64_t authorized_raw;
 static int write_granted, forged_denied, fault_contained;
+static uint64_t el0_probe_addr; /* the one kernel address the demo task is expected to fault on */
+#define EL0_FAULT_KILLED 0xfa17ull /* exit code of a task killed by an unexpected fault */
 
 static int user_bytes(uint64_t addr, uint64_t len, const uint8_t **out)
 {
@@ -413,6 +419,7 @@ static void check_el0(uint64_t kroot)
     uint64_t regs[31] = { 0 };
     regs[0] = authorized_raw;
     regs[3] = (uint64_t)(uintptr_t)ck_el0_enter; /* kernel text: EL1-only */
+    el0_probe_addr = regs[3];
     uint64_t code = run_el0((uint64_t)(uintptr_t)demo_window.l0, base, &demo_window, EL0_DEMO, regs);
     int ok = write_granted && forged_denied && fault_contained && code == 0;
     ck_printf("el0: %s write=%s forged=%s fault=%s exit=%llu\n", ok ? "ok" : "failed",
@@ -538,9 +545,18 @@ static int lower_sync(struct ck_frame *f, uint64_t esr)
             el0_to_kernel(f, f->x[0]);
         else
             f->x[0] = DENIED;
-    } else if (ec == 0x24) { /* data abort from EL0: contained, skip the load */
-        fault_contained = 1;
-        f->elr += 4;
+    } else if (ec == 0x24) { /* data abort from EL0 */
+        uint64_t far;
+        __asm__ volatile("mrs %0, far_el1" : "=r"(far));
+        if (el0_mode == EL0_DEMO && !fault_contained && far == el0_probe_addr) {
+            /* the demo's one expected probe of kernel memory: contained,
+             * the load is skipped and the task continues to its exit */
+            fault_contained = 1;
+            f->elr += 4;
+        } else {
+            /* any other EL0 fault kills the task; the kernel keeps running */
+            el0_to_kernel(f, EL0_FAULT_KILLED);
+        }
     } else {
         el0_to_kernel(f, DENIED);
     }
