@@ -229,19 +229,20 @@ How the C gate differs from the Rust gate (all apply to rows 33-41):
 
 ## M0 rollback: scripts/qemu_native_rollback_test.sh -> CK `M0_ROLLBACK`
 
-Every M0 rollback check is about the UEFI boot loader (BootNext consumed
-before ExitBootServices, A/B slot choice, fallback to Default), which lives in
-native/boot. Nothing in it is kernel scope, so the C kernel has no part of it
-to port; `M0_ROLLBACK` stays MISSING_IMPLEMENTATION until the C loader work
-(parked) is done.
+Every M0 rollback check is about UEFI one-time boot: BootNext dispatch of
+the candidate, fallback to Default after a fault, hang, malformed or absent
+candidate, BootNext consumed and Default unchanged. No A/B slot logic exists
+in the script or in crates/aienos-boot. ADR 0024 Q3 (aien-architecture) freezes loader expansion: no A/B
+slots will be added. Rollback is the one-time BootNext rule; under
+`docs/BOOT_HANDOFF_CONTRACT.md` section 7.1 these rows run the script with the C kernel image as the candidate, after the script and TEST-build changes listed there. Until a forge receipt covers them they stay NOT_RUN.
 
 | # | Rust check (marker) | CK gate | Status |
 | --- | --- | --- | --- |
-| 42 | `AAVMF_BOOTNEXT_NVRAM` / `NATIVE_ROLLBACK_NORMAL` | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: C loader BootNext/A-B/rollback parked, native/boot/README.md) |
-| 43 | `NATIVE_ROLLBACK_FAULT` (faulted candidate returns to Default) | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: parked) |
-| 44 | `NATIVE_ROLLBACK_TIMEOUT` (hung candidate) | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: parked) |
-| 45 | `NATIVE_ROLLBACK_REJECTED` (malformed image) and absent-image fallback | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: parked) |
-| 46 | `NATIVE_ROLLBACK_BOOTNEXT_CONSUMED` / `_DEFAULT_UNCHANGED` | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: parked) |
+| 42 | `AAVMF_BOOTNEXT_NVRAM` / `NATIVE_ROLLBACK_NORMAL` | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: C image not yet wired as the BootNext candidate, docs/BOOT_HANDOFF_CONTRACT.md 7.1) |
+| 43 | `NATIVE_ROLLBACK_FAULT` (faulted candidate returns to Default) | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: needs TEST-only bad-magic C image, contract 7.1) |
+| 44 | `NATIVE_ROLLBACK_TIMEOUT` (hung candidate) | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: needs TEST-only hang C image, contract 7.1) |
+| 45 | `NATIVE_ROLLBACK_REJECTED` (malformed image) and absent-image fallback | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: C image as candidate path, contract 7.1) |
+| 46 | `NATIVE_ROLLBACK_BOOTNEXT_CONSUMED` / `_DEFAULT_UNCHANGED` | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: C image as candidate, contract 7.1) |
 
 ## M4 NVMe read: scripts/qemu_nvme_test.sh (SMMU=1 and SMMU=0) -> CK `M4_NVME`
 
@@ -317,24 +318,76 @@ prints this on the PASS line and records `nvme_dma_mode` in the receipt.
 
 ## M4 continuity: scripts/qemu_continuity_test.sh -> CK `M4_CONTINUITY`
 
+Contract: `native/kernel/CONTINUITY_RECOVERY_CONTRACT.md` (SPEC, NOT_RUN). One row per Rust check: rows 81-87 are the
+QEMU PASS lines of `scripts/qemu_continuity_test.sh` (receipt `evidence/continuity_qemu_2026-09-25.md`), rows
+87a-87i are the host tests `cargo test -p aienos-kernel --lib continuity`
+(`crates/aienos-kernel/src/continuity_tests.rs`). No C continuity code exists, so every row is NOT_RUN.
+
 | # | Rust check | CK gate | Status |
 | --- | --- | --- | --- |
-| 81 | resume on blank media stops, writes nothing | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION: no continuity core (ADR 0016 agent identity/memory) in the C kernel) |
-| 82 | unprovisioned store stops UNPROVISIONED | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 83 | provision agent; second provisioning refused; RNDR gives a different identity | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 84 | resume + remember (incarnation 2, Cortex fact, forked branch) | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 85 | cold restarts keep agent/memory/lineage | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 86 | kill at each checkpoint keeps agent and memory | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 87 | malformed peer superblock: read-only, nothing written | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 81 | resume on blank media: `CONTINUITY: STOP (store Unformatted)`, image unchanged (script :92-98) | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION: no continuity core (ADR 0016 agent identity/memory) in the C kernel) |
+| 82 | formatted store, no agent root: `CONTINUITY: UNPROVISIONED`, image unchanged (:100-108) | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 83 | provision: `CONTINUITY: PROVISIONED agent=<64 hex> incarnation=1 sequence=1 cortex=0 branches=1` (:111-119) | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 83a | second provisioning: `CONTINUITY: STOP (AlreadyProvisioned)`, image unchanged (:122-127) | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 83b | independent provisioning draws a different agent from RNDR (:129-136) | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 84 | resume + remember: `RESUMED .. incarnation=2 sequence=2 cortex=0 branches=1`, `REMEMBERED .. incarnation=2 sequence=3 cortex=1 branches=2` (:139-147) | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 85 | cold restart 1: same agent, same `memory=`, `incarnation=3 sequence=4 cortex=1 branches=2` (:149-160) | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 85a | cold restart 2: same agent and memory, `incarnation=4 sequence=5` (:149-160) | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 86 | SIGKILL at `CHECKPOINT: before_first_write`: same agent, old memory (:163-194) | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 86a | SIGKILL at `after_payloads`: same agent, old memory | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION; C name `after_payload_objects`) |
+| 86b | SIGKILL at `after_catalog`: same agent, old memory | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 86c | SIGKILL at `after_commit_record`: same agent, old memory | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 86d | SIGKILL at `after_first_flush`: same agent, old memory | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 86e | SIGKILL at `after_superblock_write`: same agent, old or new memory | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION; C name `after_inactive_superblock`; the sealed Store adds two anchor checkpoints, contract section 6.1) |
+| 86f | SIGKILL at `after_final_flush`: same agent, new memory | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87 | malformed peer superblock: `CONTINUITY: RESUMED_READONLY`, same agent and memory, image unchanged (:196-205) | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87a | host `unprovisioned_store_never_mints_an_identity` (continuity_tests.rs:84) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87b | host `provision_then_cold_restart_returns_the_same_identity_and_memory` (:97) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87c | host `provisioning_twice_is_refused` (:142) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87d | host `two_roots_stop_with_conflict` (:152) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87e | host `forked_or_gapped_manifest_chains_are_corrupt` (:178) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87f | host `degraded_mount_resumes_read_only` (:221) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87g | host `a_crash_at_every_write_of_a_commit_leaves_old_or_new_never_a_third_state` (:242) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87h | host `encodings_round_trip_and_reject_tampering` (:286) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87i | host `branch_table_validation_rejects_broken_lineage` (:328) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
 
 ## M4 recovery: scripts/qemu_recovery_test.sh -> CK `M4_RECOVERY`
 
+Contract: `native/kernel/CONTINUITY_RECOVERY_CONTRACT.md` (SPEC, NOT_RUN). Rows 88-91c are the QEMU PASS lines of
+`scripts/qemu_recovery_test.sh` (receipt `evidence/recovery_core_qemu_2026-09-25.md`), rows 91d-91k the host tests
+`cargo test -p aienos-kernel --lib recovery_core` (`crates/aienos-kernel/src/recovery_core_tests.rs`), rows
+91l-91p the operator-auth tests in `crates/aienos-kernel/src/recovery.rs`. No C Recovery Core exists, so every
+row is NOT_RUN. Operator key is TEST-ONLY in the oracle.
+
 | # | Rust check | CK gate | Status |
 | --- | --- | --- | --- |
-| 88 | inspection enters the Recovery Core (Degraded(Malformed)), writes nothing | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION: no Recovery Core (ADR 0006) in the C kernel) |
-| 89 | repair with bad responses refused; authorised repair; resume after repair; replay is a no-op | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 90 | unprovisioned: only provisioning offered; wrong key refused; operator provisioning resumes | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 91 | identity loss: no action offered, all modes refused, normal boot neither resumes nor mints | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 88 | inspection: `RECOVERY_OPERATOR_KEY: TEST-ONLY`, `RECOVERY_CORE: ENTERED reason=Degraded(Malformed)`, same agent in `RECOVERY_RECORD:`, image unchanged, repair challenge offered (script :94-103) | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION: no Recovery Core (ADR 0006) in the C kernel) |
+| 88a | repair with zero response: `RECOVERY_REFUSED (Unauthorised)`, image unchanged (:105-117) | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 88b | repair with wrong-key response: `RECOVERY_REFUSED (Unauthorised)`, image unchanged | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 88c | repair with a response to another challenge: `RECOVERY_REFUSED (Unauthorised)`, image unchanged | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 89 | authorised repair: `RECOVERY_ACTION: repair-degraded-peer DONE`, image changed (:119-125) | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 89a | after repair a cold boot `CONTINUITY: RESUMED` writable, same agent and memory (:126-132) | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 89b | replaying the repair response: `RECOVERY_REFUSED (NotApplicable)`, image unchanged (:133-138) | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 90 | unprovisioned store: `ENTERED reason=Unprovisioned`, only the provision challenge, image unchanged (:141-149) | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 90a | provisioning with a wrong key: `RECOVERY_REFUSED (Unauthorised)`, image unchanged (:150-155) | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 90b | authorised provisioning: `RECOVERY_ACTION: provision-identity DONE agent=..`, a cold boot resumes that agent (:156-163) | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91 | corrupted agent root: `RECOVERY_CORE: ENTERED`, no `RECOVERY_CHALLENGE`, image unchanged (:166-174) | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION; in the sealed C Store the flip is expected to be refused at the keyed proof instead, UNVERIFIED, contract K-3) |
+| 91a | mode 10 (repair) after identity loss with a forged response: refused, no action, image unchanged (:175-183) | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91b | mode 11 (provision) after identity loss with a forged response: refused, no action, image unchanged (:175-183) | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91c | normal boot after identity loss neither resumes nor mints, image unchanged (:184-189) | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91d | host `inspection_never_writes_and_names_the_reason` (recovery_core_tests.rs:89) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91e | host `degraded_repair_needs_the_operator_and_restores_a_writable_store` (:111) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91f | host `provisioning_is_operator_only_and_only_on_an_unprovisioned_store` (:154) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91g | host `identity_lost_in_the_newest_root_never_looks_unprovisioned` (:178) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91h | host `malformed_peer_without_a_resolvable_identity_is_not_repaired` (:222) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91i | host `orphaned_continuity_objects_are_corrupt_not_unprovisioned` (:236) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91j | host `identity_loss_through_corruption_offers_no_action_that_mints` (:267) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91k | host `challenges_bind_state_and_action` (:300) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91l | host `hmac_primitive_rfc4231_case_2` (recovery.rs:238) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION: no C operator-auth wrapper; the C HMAC primitive itself is `aienos_hmac_sha256` in native/crypto) |
+| 91m | host `operator_auth_known_answer_accepted` (recovery.rs:251) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91n | host `operator_auth_rejects_any_single_bit_flip` (recovery.rs:269) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91o | host `operator_auth_rejects_legacy_bare_sha256_response` (recovery.rs:299) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91p | host `operator_auth_rejects_undomained_hmac_and_zero_response` (recovery.rs:311) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
 
 ## TRUST-1 Gate 4: scripts/qemu_security_suite.sh, scripts/qemu_secureboot_signing_test.sh
 
@@ -375,7 +428,7 @@ complete.
 
 **C kernel receipt tally (QEMU only, no physical run):** 9 of 14 CK gates PASS, 5 NOT_RUN (M0_ROLLBACK, M4_STORE_CRASH, M4_CONTINUITY, M4_RECOVERY, KEYBOARD), 0 FAIL, matching `evidence/ck_gates_929f287e9c950c45c7dcd569c7caa03709ea62ecfe393635b435058afa969c54.json` (run at 41aa0e6, which adds the kernel entropy rows 107-109; that commit was then rebased onto #210, which changed only README.md and CONTRIBUTING.md). The row counts below are per Rust-parity row, not per gate.
 
-Rows 1-112: IDENTICAL 28, DIFFERS 39, NOT_RUN 45, counted from the table (recounted on the KEYBOARD DMA-fence branch: 28 IDENTICAL, 39 DIFFERS, 41 NOT_RUN and 4 QEMU PASS rows (102, 110-112) counted as NOT_RUN as below, so unchanged; rows 25-28, 31 and 32 now have a C implementation and a child script, scripts/qemu_ck_keyboard_test.sh, but stay NOT_RUN (pending forge receipt), rows 29-30 stay NOT_RUN (MISSING_IMPLEMENTATION: no USB HID driver, no console shell), and the KEYBOARD gate stays NOT_RUN; rows 107-109, kernel entropy, are C-only and DIFFERS; row 102, virtio-net attach with ACCESS_PLATFORM, and rows 110-112, virtio-net SMMU fence, recovery and ACCESS_PLATFORM fail-closed, are C-only and NOT_RUN on this branch until a forge receipt covers them; the CK gate tally above and its receipt `ck_gates_929f...` predate them; no full `ck_gates.sh` run happened on this branch, only `scripts/qemu_ck_net_test.sh` alone, so rows 102 and 110-112 are shown as QEMU PASS (receipt `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`, hardware NOT_RUN) and the NOT_RUN count of 45 still includes them as originally counted, not recounted); rows 34 and 39 now also cover the NVMe boot-disk source and its hostile disk cases (statuses unchanged) (the previous summary, 20/30/56, was miscounted: the table on main had 21/35/50; rows 33-41 then moved from NOT_RUN to 7 IDENTICAL + 2 DIFFERS with the C artifact loader; rows 92-95 have no CK gate at all; rows 96-112 are C-only). Rows 33-41 were checked against scripts/qemu_ck_artifact_test.sh. Rows 102-106 and 110-112 were checked against scripts/qemu_ck_net_test.sh (text only; rows 102 and 110-112 then run by the forge, see their rows). Rows 13, 24, 47-72, 76 and 96-101 were re-verified against scripts/qemu_ck_store_test.sh and scripts/lib_ck_m1_checks.sh at the commit that adds this line.
+Rows 1-112 plus the M4 continuity/recovery sub-rows 83a-87i and 88a-91p: IDENTICAL 28, DIFFERS 39, NOT_RUN 86, counted from the table (the CK-5 contract branch split rows 81-91, 11 NOT_RUN rows, into 52 NOT_RUN rows, one per Rust QEMU check and host test, see `native/kernel/CONTINUITY_RECOVERY_CONTRACT.md`; that adds 41 NOT_RUN rows and changes no other row or gate; the CK gate tally is unchanged; recounted again after merging the KEYBOARD DMA-fence branch: 28 IDENTICAL, 39 DIFFERS, 82 NOT_RUN and 4 QEMU PASS rows (102, 110-112) counted as NOT_RUN as below, so 86, unchanged, with sub-rows 24a and 24b (C only) not counted; rows 25-28, 31 and 32 now have a C implementation and a child script, scripts/qemu_ck_keyboard_test.sh, but stay NOT_RUN (pending forge receipt), rows 29-30 stay NOT_RUN (MISSING_IMPLEMENTATION: no USB HID driver, no console shell), and the KEYBOARD gate stays NOT_RUN; rows 107-109, kernel entropy, are C-only and DIFFERS; row 102, virtio-net attach with ACCESS_PLATFORM, and rows 110-112, virtio-net SMMU fence, recovery and ACCESS_PLATFORM fail-closed, are C-only and NOT_RUN on this branch until a forge receipt covers them; the CK gate tally above and its receipt `ck_gates_929f...` predate them; no full `ck_gates.sh` run happened on this branch, only `scripts/qemu_ck_net_test.sh` alone, so rows 102 and 110-112 are shown as QEMU PASS (receipt `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`, hardware NOT_RUN) and the NOT_RUN count still includes them as originally counted, not recounted); rows 34 and 39 now also cover the NVMe boot-disk source and its hostile disk cases (statuses unchanged) (the previous summary, 20/30/56, was miscounted: the table on main had 21/35/50; rows 33-41 then moved from NOT_RUN to 7 IDENTICAL + 2 DIFFERS with the C artifact loader; rows 92-95 have no CK gate at all; rows 96-112 are C-only). Rows 33-41 were checked against scripts/qemu_ck_artifact_test.sh. Rows 102-106 and 110-112 were checked against scripts/qemu_ck_net_test.sh (text only; rows 102 and 110-112 then run by the forge, see their rows). Rows 13, 24, 47-72, 76 and 96-101 were re-verified against scripts/qemu_ck_store_test.sh and scripts/lib_ck_m1_checks.sh at the commit that adds this line.
 
 `scripts/trust1_m5_qualify.sh --with-qemu` also runs three of these gates as
 qemu rows: `ck_m1_boot_qemu` (M1), `ck_store_kernel_qemu` (M4_STORE) and
