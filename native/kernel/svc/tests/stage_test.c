@@ -20,6 +20,7 @@
 #include "sha256.h"
 #include "net_bind.h"
 #include "net_udp.h"
+#include "xhci_fence.h"
 
 static int checks, failures;
 #define CHECK(c)                                                                 \
@@ -622,6 +623,80 @@ static void test_net_udp(void)
 }
 
 
+/* ---------------- post-exit bus-master sweep + xHCI DMA fence ---------------- */
+
+static void test_xhci_fence(void)
+{
+    /* Sweep on a fake ECAM: endpoints with BME are cleared and read back,
+     * bridges are counted and left untouched, functions 1-7 are walked only
+     * when function 0 is marked multi-function (Rust dma_gate tests). */
+    const size_t buses = 2;
+    uint8_t *ecam = aligned_alloc(1u << 20, buses << 20);
+    CHECK(ecam != NULL);
+    if (!ecam) return;
+    memset(ecam, 0xff, buses << 20);
+    uint8_t *c;
+    memset(c = cfgp(ecam, 0, 0, 0), 0, 4096); mkfn(c, 0x1b36, 0x0008, 0x060000, 0); put16(c + 4, 0x0002);
+    memset(c = cfgp(ecam, 0, 1, 0), 0, 4096); mkfn(c, 0x1b36, 0x000c, 0x060400, 1); put16(c + 4, 0x0007);
+    memset(c = cfgp(ecam, 0, 2, 0), 0, 4096); mkfn(c, 0x1b36, 0x000d, 0x0c0330, 0x80); put16(c + 4, 0x0006);
+    memset(c = cfgp(ecam, 0, 2, 3), 0, 4096); mkfn(c, 0x8086, 0x10d3, 0x020000, 0); put16(c + 4, 0x0004);
+    memset(c = cfgp(ecam, 0, 3, 0), 0, 4096); mkfn(c, 0x1af4, 0x1041, 0x020000, 0); put16(c + 4, 0x0006);
+    /* function 3 of a single-function device: never walked, BME stays */
+    memset(c = cfgp(ecam, 0, 3, 3), 0, 4096); mkfn(c, 0x1af4, 0x1041, 0x020000, 0); put16(c + 4, 0x0004);
+    memset(c = cfgp(ecam, 1, 0, 0), 0, 4096); mkfn(c, 0x144d, 0xa808, 0x010802, 0); put16(c + 4, 0x0006);
+    pci_bus_access acc = {ecam, 0, (uint8_t)(buses - 1)};
+    pci_sweep sw;
+    pci_sweep_bus_master(&acc, &sw);
+    CHECK(sw.functions == 6);
+    CHECK(sw.bridges == 1 && sw.bridges_bme == 1);
+    CHECK(sw.endpoints_bme == 4 && sw.still_enabled == 0);
+    CHECK(sw.f[0].bus == 0 && sw.f[0].dev == 2 && sw.f[0].fn == 0 && sw.f[0].command_before == 0x0006 &&
+          sw.f[0].command_after == 0x0002);
+    CHECK(pci_r16(cfgp(ecam, 0, 1, 0), 4) == 0x0007);           /* bridge untouched */
+    CHECK((pci_r16(cfgp(ecam, 0, 2, 3), 4) & 0x4u) == 0);       /* multi-function walked */
+    CHECK((pci_r16(cfgp(ecam, 1, 0, 0), 4) & 0x4u) == 0);       /* every bus in the window */
+    CHECK((pci_r16(cfgp(ecam, 0, 3, 3), 4) & 0x4u) == 0x4u);    /* not walked: single-function */
+    CHECK(pci_r16(cfgp(ecam, 0, 0, 0), 4) == 0x0002);           /* no BME: untouched */
+    pci_ecam e = {0, 0, 0, (uint8_t)(buses - 1)};
+    pci_sweep_report(&e, &sw);
+    /* Counter-example: a sweep that skipped bus 1 would leave its BME set. */
+    put16(cfgp(ecam, 1, 0, 0) + 4, 0x0006);
+    pci_bus_access bus0 = {ecam, 0, 0};
+    pci_sweep_bus_master(&bus0, &sw);
+    CHECK((pci_r16(cfgp(ecam, 1, 0, 0), 4) & 0x4u) == 0x4u && sw.endpoints_bme == 0);
+
+    /* xHCI fence on the host shim (no IORT: CK_SMMU_ABSENT): fail closed,
+     * the command register never gets memory decode or bus master. */
+    static pci_system s;
+    memset(&s, 0, sizeof s);
+    printf("  [xHCI fence, no xHCI, host, not hardware]\n");
+    CHECK(ck_xhci_fence(&s) == CK_XHCI_ABSENT && strcmp(ck_xhci_state(), "absent") == 0);
+    static uint8_t cfg[4096];
+    memset(cfg, 0, sizeof cfg);
+    s.n = 1;
+    s.f[0].vendor = 0x1b36;
+    s.f[0].device = 0x000d;
+    s.f[0].class_code = 0x0c0330;
+    s.f[0].cfg = cfg;
+    s.f[0].bar[0].addr = 0x10000000u;
+    s.f[0].bar[0].size = 0x4000u;
+    s.f[0].bar[0].is64 = 1;
+    printf("  [xHCI fence without SMMU, host, not hardware]\n");
+    CHECK(ck_xhci_fence(&s) == CK_XHCI_E_DENIED);
+    CHECK((pci_r16(cfg, 4) & 0x6u) == 0); /* no MEM, no BM */
+    CHECK(ck_xhci_live() == 0 && strcmp(ck_xhci_state(), "denied") == 0);
+    ck_xhci_release(); /* idempotent */
+    CHECK((pci_r16(cfg, 4) & 0x6u) == 0);
+    /* Bus master still on before the gate: no gate at all. */
+    put16(cfg + 4, 0x0004);
+    printf("  [xHCI fence with BME left on, host, not hardware]\n");
+    CHECK(ck_xhci_fence(&s) == CK_XHCI_E_BME && strcmp(ck_xhci_state(), "bme-stuck") == 0);
+    CHECK(ck_xhci_live() == 0 && (pci_r16(cfg, 4) & 0x2u) == 0);
+    put16(cfg + 4, 0);
+    free(ecam);
+}
+
+
 /* ---------------- signed-artifact objects in the boot disk Store ---------------- */
 
 #define A_UNITS 2048u
@@ -782,6 +857,7 @@ int main(void)
     test_security();
     test_nvme_shutdown();
     test_net_udp();
+    test_xhci_fence();
     printf("CK_STAGE_HOST: %s checks=%d failures=%d\n", failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;
 }
