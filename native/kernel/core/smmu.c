@@ -194,12 +194,15 @@ static void write_ste_word(const struct ck_smmu_tables *t, uint32_t sid, int wor
 static int invalidate_ste(const struct ck_smmu_regs *r, const struct ck_smmu_tables *t, uint32_t sid,
                           uint32_t spins)
 {
-    uint64_t c[3][2];
+    /* STE, every cached CD of this stream (the CD page is reused when a
+     * stream is re-confined), then the TLBs. */
+    uint64_t c[4][2];
     ck_smmu_cmd(c[0], CK_SMMU_CMD_CFGI_STE, sid, 1);
-    ck_smmu_cmd(c[1], CK_SMMU_CMD_TLBI_NSNH_ALL, 0, 0);
-    ck_smmu_cmd(c[2], CK_SMMU_CMD_SYNC, 0, 0);
+    ck_smmu_cmd(c[1], CK_SMMU_CMD_CFGI_CD_ALL, sid, 0);
+    ck_smmu_cmd(c[2], CK_SMMU_CMD_TLBI_NSNH_ALL, 0, 0);
+    ck_smmu_cmd(c[3], CK_SMMU_CMD_SYNC, 0, 0);
     bar(r);
-    return ck_smmu_submit(r, t, (const uint64_t (*)[2])c, 3, spins);
+    return ck_smmu_submit(r, t, (const uint64_t (*)[2])c, 4, spins);
 }
 
 static int program(const struct ck_smmu_regs *r, const struct ck_smmu_tables *t, uint32_t spins)

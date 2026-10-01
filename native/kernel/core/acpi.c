@@ -210,10 +210,11 @@ int ck_acpi_spans(uint64_t rsdp, void (*fn)(uint64_t lo, uint64_t hi, void *ctx)
 #define IORT_NODE_ROOT_COMPLEX 2u
 #define IORT_NODE_SMMUV3 4u
 #define IORT_MAP_BYTES 20u
+#define IORT_TABLE_HDR 48u /* SDT header + node count, node array offset, reserved */
 
 static int iort_nodes(const uint8_t *t, uint32_t len, uint32_t *count, uint32_t *first)
 {
-    if (!sig_eq(t, "IORT", 4) || len < 48)
+    if (!sig_eq(t, "IORT", 4) || len < IORT_TABLE_HDR)
         return -1;
     *count = rd32(t + 36);
     *first = rd32(t + 40);
@@ -231,7 +232,7 @@ int ck_iort_parse(const void *iort, struct ck_iort_smmu *out)
     for (int pass = 0; pass < 2; pass++) {
         uint32_t off = at;
         for (uint32_t i = 0; i < count; i++) {
-            if (off < CK_ACPI_SDT_HEADER || off > len || len - off < IORT_NODE_HDR)
+            if (off < IORT_TABLE_HDR || off > len || len - off < IORT_NODE_HDR)
                 return -1;
             const uint8_t *n = t + off;
             uint8_t type = n[0];

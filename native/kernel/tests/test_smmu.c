@@ -254,15 +254,16 @@ static void test_install_abort(void)
     CHECK(ck_smmu_install_ste(&R, &T, 5, ste, 100) == 0);
     CHECK(mem.ste[5 * 8] == ste[0] && mem.ste[4 * 8] == 1 && mem.ste[6 * 8] == 1);
     /* abort+invalidate, then install+invalidate: two CFGI_STE(5) batches */
-    CHECK(M.ncmd == 6 && (M.cmds[0][0] & 0xff) == CK_SMMU_CMD_CFGI_STE && (M.cmds[0][0] >> 32) == 5 &&
-          M.cmds[0][1] == 1 && (M.cmds[3][0] & 0xff) == CK_SMMU_CMD_CFGI_STE &&
-          (M.cmds[4][0] & 0xff) == CK_SMMU_CMD_TLBI_NSNH_ALL && (M.cmds[5][0] & 0xff) == CK_SMMU_CMD_SYNC);
+    CHECK(M.ncmd == 8 && (M.cmds[0][0] & 0xff) == CK_SMMU_CMD_CFGI_STE && (M.cmds[0][0] >> 32) == 5 &&
+          M.cmds[0][1] == 1 && (M.cmds[1][0] & 0xff) == CK_SMMU_CMD_CFGI_CD_ALL && (M.cmds[1][0] >> 32) == 5 &&
+          (M.cmds[4][0] & 0xff) == CK_SMMU_CMD_CFGI_STE && (M.cmds[5][0] & 0xff) == CK_SMMU_CMD_CFGI_CD_ALL &&
+          (M.cmds[6][0] & 0xff) == CK_SMMU_CMD_TLBI_NSNH_ALL && (M.cmds[7][0] & 0xff) == CK_SMMU_CMD_SYNC);
     CHECK(ck_smmu_install_ste(&R, &T, SIDS, ste, 100) == CK_SMMU_EINVAL);
     CHECK(ck_smmu_abort_ste(&R, &T, SIDS, 100) == CK_SMMU_EINVAL);
     M.ncmd = 0;
     CHECK(ck_smmu_abort_ste(&R, &T, 5, 100) == 0);
     CHECK(mem.ste[5 * 8] == 1 && mem.ste[5 * 8 + 1] == 0);
-    CHECK(M.ncmd == 3 && (M.cmds[0][0] >> 32) == 5);
+    CHECK(M.ncmd == 4 && (M.cmds[0][0] >> 32) == 5 && (M.cmds[1][0] >> 32) == 5);
     /* A stuck queue on install leaves the stream in abort. */
     M.cmdq_stuck = 1;
     CHECK(ck_smmu_install_ste(&R, &T, 7, ste, 50) == CK_SMMU_ETIMEOUT);
@@ -371,6 +372,9 @@ static void test_iort(void)
     CHECK(ck_iort_parse(t, &s) == -1);
     build_iort(t, 1);
     w32(t + 36, 9); /* more nodes than fit */
+    CHECK(ck_iort_parse(t, &s) == -1);
+    build_iort(t, 1);
+    w32(t + 40, 40); /* node array inside the 48-byte IORT header */
     CHECK(ck_iort_parse(t, &s) == -1);
     /* A mapping whose output would wrap is never a stream. */
     struct ck_iort_smmu w = { 1, 0, 1, { { 0, 0xffff, 0xfffffff0u } } };
