@@ -309,10 +309,10 @@ sec_status sec_close(sec_endpoint *ep, uint64_t now, uint8_t *out, size_t cap, s
     if (!ep || !out || !written) return SEC_ERR_ARG;
     *written = 0;
     if (ep->state != SEC_ST_ESTABLISHED) return SEC_ERR_STATE;
+    if (cap < SEC_REC_OVERHEAD) return SEC_ERR_CAPACITY; /* before anything changes */
     size_t n = 0;
     sec_status s = build_record(ep, SEC_INNER_CLOSE, NULL, 0, ep->flight, sizeof ep->flight, &n);
     if (s != SEC_OK) return s;
-    if (cap < n) return SEC_ERR_CAPACITY;
     ep->flight_len = (uint16_t)n;
     wipe_secrets(ep); /* GUARD:close-wipe */
     ep->state = SEC_ST_CLOSED;

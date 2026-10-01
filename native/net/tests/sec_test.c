@@ -822,6 +822,24 @@ static void test_close(void)
     uint8_t d[SEC_MAX_DATAGRAM], d2[SEC_MAX_DATAGRAM], got[SEC_MAX_PAYLOAD];
     size_t n, n2, gl;
     seal_n(&a, 1);
+    /* too small an output buffer: refused before anything changes (Gemini review finding) */
+    uint64_t seq0 = a.tx_seq;
+    EQ(sec_close(&a, 10, d, SEC_REC_OVERHEAD - 1, &n), SEC_ERR_CAPACITY);
+    CHECK(a.tx_seq == seq0 && a.state == SEC_ST_ESTABLISHED && !all_zero(a.tx_key, 32));
+    {   /* unconfirmed initiator: its stored HS3 resend must survive a refused close */
+        sec_endpoint u, v;
+        uint8_t h[SEC_MAX_DATAGRAM], h3[SEC_HS3_LEN];
+        size_t hn, ml;
+        make_pair(&u, &v, 1u << 16, 3);
+        CHECK(sec_poll_tx(&u, 0, h, sizeof h, &hn) == SEC_OK);
+        CHECK(sec_receive(&v, 0, h, hn, got, sizeof got, &ml) == SEC_OK);
+        CHECK(sec_poll_tx(&v, 0, h, sizeof h, &hn) == SEC_OK);
+        CHECK(sec_receive(&u, 0, h, hn, got, sizeof got, &ml) == SEC_OK);
+        memcpy(h3, u.hs3, SEC_HS3_LEN);
+        EQ(sec_close(&u, 0, h, 20, &hn), SEC_ERR_CAPACITY);
+        CHECK(sec_poll_tx(&u, 0, h, sizeof h, &hn) == SEC_OK && hn == SEC_HS3_LEN && memcmp(h, h3, SEC_HS3_LEN) == 0);
+        EQ(u.tx_seq, 0);
+    }
     CHECK(sec_close(&a, 10, d, sizeof d, &n) == SEC_OK && n == SEC_REC_OVERHEAD);
     EQ(a.state, SEC_ST_CLOSED);
     CHECK(all_zero(a.tx_key, 32) && all_zero(a.rx_key, 32) && all_zero(a.rx_prev_key, 32));
