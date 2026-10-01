@@ -17,8 +17,11 @@
  *   20 payload_len u16   22 reserved u16 (0)
  *   24 payload           .. tag: HMAC-SHA256(key, frame[0..24+len])[0..16]
  * ACK frames carry seq 0 and no payload. DATA frames piggyback ack.
- * Sender: up to CT_WINDOW unacknowledged messages, per-message retransmit
- * after rto ticks, link declared down after max_retries retransmissions.
+ * Sender: up to CT_WINDOW unacknowledged messages, per-message retransmit:
+ * the first after exactly rto ticks, each later one after rto plus a
+ * deterministic jitter in [0, rto] (from session, role, seq, try count) so a
+ * periodic loss pattern cannot lock onto one frame. Link declared down after
+ * max_retries retransmissions.
  * Receiver: delivers only the next expected seq (in order, exactly once);
  * duplicates and gaps are not delivered and trigger a cumulative ACK.
  */

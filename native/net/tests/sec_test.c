@@ -163,7 +163,6 @@ typedef struct {
     machine m[2];
     wire w;
     uint64_t now;
-    uint64_t jitter; /* seeded sender-timing jitter (0 = none); deterministic */
 } sys_t;
 
 static void ct_msg(int from, uint32_t i, uint8_t *m, size_t *n)
@@ -209,12 +208,6 @@ static void sys_tick(sys_t *S)
         }
         if (!x->use_ct || x->s.state != SEC_ST_ESTABLISHED) continue;
         int cap_frames = 16;
-        if (S->jitter) { /* seeded sender timing: skip 1 tick in 3, else 1..3 frames, so resend
-                          * rounds do not stay in lockstep with a periodic dropper */
-            S->jitter ^= S->jitter << 13; S->jitter ^= S->jitter >> 7; S->jitter ^= S->jitter << 17;
-            if (S->jitter % 3 == 0) continue;
-            cap_frames = 1 + (int)((S->jitter >> 8) % 3);
-        }
         while (x->next_send < NMSG && ct_in_flight(&x->ct) < CT_WINDOW) {
             size_t ml;
             ct_msg(i, x->next_send, msg, &ml);
@@ -339,13 +332,12 @@ static void test_handshake_and_data(void)
 }
 
 /* ct over sec, with a loss pattern. Returns 1 when both sides got all messages. */
-static int run_ct(uint64_t drop_every, uint64_t rekey, int jitter, uint64_t *digest_out)
+static int run_ct(uint64_t drop_every, uint64_t rekey, uint64_t *digest_out)
 {
     sys_t S;
     prng_s = 0x10ad + drop_every;
     sys_init(&S, rekey, 40, 1, 3);
     S.w.drop_every = drop_every;
-    S.jitter = jitter ? 0x9e3779b97f4a7c15ull ^ drop_every : 0;
     for (int t = 0; t < 20000 && !(S.m[0].delivered == NMSG && S.m[1].delivered == NMSG); t++) sys_tick(&S);
     int ok = S.m[0].delivered == NMSG && S.m[1].delivered == NMSG && !S.m[0].misordered &&
              !S.m[1].misordered && S.m[0].ct.c.rx_bad_tag == 0 && S.m[1].ct.c.rx_bad_tag == 0;
@@ -369,13 +361,13 @@ static void test_loss(void)
     static const uint64_t N[] = {0, 2, 3, 4, 5, 7, 11, 16};
     for (size_t i = 0; i < sizeof N / sizeof N[0]; i++) {
         uint64_t d1 = 0, d2 = 0;
-        CHECK(run_ct(N[i], 1u << 16, 1, &d1));
-        CHECK(run_ct(N[i], 1u << 16, 1, &d2));
+        CHECK(run_ct(N[i], 1u << 16, &d1));
+        CHECK(run_ct(N[i], 1u << 16, &d2));
         EQ(d1, d2); /* deterministic: bit-identical rerun */
     }
     /* loss plus frequent rekeys: records cross many epochs and get reordered by resends */
-    CHECK(run_ct(3, SEC_MIN_REKEY_INTERVAL, 1, NULL));
-    CHECK(run_ct(5, SEC_MIN_REKEY_INTERVAL, 1, NULL));
+    CHECK(run_ct(3, SEC_MIN_REKEY_INTERVAL, NULL));
+    CHECK(run_ct(5, SEC_MIN_REKEY_INTERVAL, NULL));
     /* total blackout: the initiator gives up after max_retries */
     sys_t S;
     sys_init(&S, 1u << 16, 3, 0, 4);
