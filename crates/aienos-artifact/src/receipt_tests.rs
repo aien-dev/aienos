@@ -582,3 +582,47 @@ const GOLDEN_ADMITTED_DIGEST: &str =
 const GOLDEN_ADMITTED_RECORD: &str = "4149454e52435000000060000002000000000000010001000100000000000000e28b2fcc80dd4e973fbc3d13dc62801b000000000000000000000000000000000100000000000000ff000000000000000800000002000000050000000a000000101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 const GOLDEN_REJECTED_DIGEST: &str =
     "f12ebace5ec0f2a8f06c415d58d936389dcc2fed64dbed4bc91efd01a734a6a3";
+
+#[test]
+fn canary_failed_decision_and_status_must_agree() {
+    let base = admitted();
+    // Decision CanaryFailed with a non-CanaryFailed status.
+    for status in [
+        ExecutionStatusCode::NotRun,
+        ExecutionStatusCode::Exited,
+        ExecutionStatusCode::Timeout,
+        ExecutionStatusCode::Fault,
+    ] {
+        let r = Receipt {
+            decision: ReceiptDecision::CanaryFailed,
+            execution_status: status,
+            ..base
+        };
+        assert_eq!(validate(&r), Err(ArtifactError::MalformedReceipt));
+        assert_eq!(decode(&encode(&r)), Err(ArtifactError::MalformedReceipt));
+    }
+    // Status CanaryFailed under every other decision.
+    for decision in [ReceiptDecision::Admitted, ReceiptDecision::Destroyed] {
+        let r = Receipt {
+            decision,
+            execution_status: ExecutionStatusCode::CanaryFailed,
+            ..base
+        };
+        assert_eq!(validate(&r), Err(ArtifactError::MalformedReceipt));
+        assert_eq!(decode(&encode(&r)), Err(ArtifactError::MalformedReceipt));
+    }
+    let rej = Receipt {
+        execution_status: ExecutionStatusCode::CanaryFailed,
+        ..rejected()
+    };
+    assert_eq!(decode(&encode(&rej)), Err(ArtifactError::MalformedReceipt));
+    // The matching pair is accepted.
+    let ok = Receipt {
+        decision: ReceiptDecision::CanaryFailed,
+        execution_status: ExecutionStatusCode::CanaryFailed,
+        result_flags: base.result_flags & !RESULT_CANARY_PASSED,
+        ..base
+    };
+    assert_eq!(validate(&ok), Ok(()));
+    assert_eq!(decode(&encode(&ok)), Ok(ok));
+}
