@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0.0",
+  "receipt_type": "trust1_gate0_addendum",
+  "procedure_id": "TRUST-1-GATE0-ADDENDUM-2026-09-30",
+  "timestamp_utc": "2026-10-01T01:29:00Z",
+  "target_machine": { "hostname": "spark-b87b", "machine": "machine-1" },
+  "amends_receipt": {
+    "path": "evidence/gate0_evidence_receipt_v1.json",
+    "sha256": "8e0513161c5aa327b68cc5280352410a3d8c0d48608ac514ee436360681155b2",
+    "previous_claim": "gate0_status RESOLVED, result PASS",
+    "corrected_claim": "Gate 0 is NOT PASS. The original receipt named an offline recovery key that belongs to no Spark volume, and recorded no independent unlock path for the private storage or the vault."
+  },
+  "operator_agent": {
+    "operator": "drakestapleton",
+    "agents": "Claude Opus 5.5 (inventory, spares, this addendum); spare creation and MacBook checks ran over ssh on operator instruction"
+  },
+  "read_only_capture": {
+    "path": "evidence/trust1_gate0_capture_2026-09-30",
+    "tool": "scripts/tpm_measurement_campaign.sh capture",
+    "capture_digest_sha256_of_SHA256SUMS": "2371bb52736026c4914368c7fb7ca056ddaf9bc61e445feb80c2946174bd78f8",
+    "secure_boot": 1,
+    "setup_mode": 0,
+    "firmware_version": "5.36_0ACUM018",
+    "secure_boot_variable_sha256": {
+      "note": "sha256 of the efivarfs file bytes (4 attribute bytes + EFI_SIGNATURE_LIST data); the bytes are archived in the capture under efivars/",
+      "PK": "652c245b6e93af5d080f35266672bbf964bcb25ad7a5807fc41708cddbf9b522",
+      "KEK": "3ca60c53cfa9b6fc482c17646df378706f46bdfeebd9789ed2f1c5ab525f1bbe",
+      "db": "96fb1609a56fed2e1afd28082888f1d2397d3c9875ce3d18309098ad24c85582",
+      "dbx": "0fdeec63719aef41efe48fa3fa231a6c51fcd4611387daebc31a039b4a83148a"
+    },
+    "event_log_sha256": "f371db8785fff32d8b1b1a3f7f4268b6632527d8b1b6d6e36de9eafb544ed08f",
+    "event_log_parser_check": "tpm2_eventlog 5.6 replay equals the live SHA-256 PCR for every PCR the log covers (0-9, 14)",
+    "active_pcr_banks": "sha256 only (sha1 and sha384 banks return no values)",
+    "boot_order": "0001,0003",
+    "boot_current": "0001",
+    "fwupd_refresh_timer": "enabled"
+  },
+  "tpm_policy_per_secret": {
+    "source": "decoded from the systemd credential headers with scripts/trust1_credential_policy.sh --live; no enrollment config file exists on the machine",
+    "independent_check": "the decoded policy digest equals TPM2 PolicyPCR(sha256, PCR 7) recomputed from the live PCR 7 value, for all three credentials",
+    "policy_digest": "6da48075dd7facbf2f6a78be250807ba2af92cb7b0b21e9dd300ab67bcf82140",
+    "credentials": [
+      { "name": "atlas-storage.key", "path": "/etc/credstore.encrypted/atlas-storage.key", "file_sha256": "447012897eb5a2ee7d182a41fe0d967a8adc066b74d536f015fdb3f627e030c4", "type": "tpm2-only", "pcrs": [7], "bank": "sha256", "primary": "ecc", "unlocks": "gocryptfs password for the private storage (atlas-private-storage.service)" },
+      { "name": "atlas-vault", "path": "~/.config/atlas/vault/vault.cred", "file_sha256": "dfe6d3df54bc85310ba35e993b790fcffe6462fa85457453accaaa2ed6f093e9", "type": "host+tpm2", "pcrs": [7], "bank": "sha256", "primary": "ecc", "unlocks": "atlas-vault named API keys" },
+      { "name": "forgejo-storage.key", "path": "/etc/credstore.encrypted/forgejo-storage.key", "file_sha256": "91189ff1182bd1842b0ba6f86861f60d490d5d9c474fc1733d1265e0b1b5149e", "type": "host+tpm2", "pcrs": [7], "bank": "sha256", "primary": "ecc", "unlocks": "gocryptfs password for the Forgejo storage" }
+    ],
+    "correction": "the original receipt recorded the private storage as host+tpm2; its credential is tpm2-only (no host secret)",
+    "consequence": "any change to PCR 7 (Secure Boot toggle, a db/dbx/KEK update, enrolling an owner certificate) makes all three refuse to unseal; firmware auto-refresh (fwupd-refresh.timer) is still enabled"
+  },
+  "encrypted_items": {
+    "luks_volumes_on_machine": "none (/etc/crypttab empty, no dm-crypt mappers)",
+    "gocryptfs_stores": [
+      { "name": "atlas-private-storage", "cipher_dir": "/home/atlas/atlas-runtime-setup-20260905/private-cipher", "gocryptfs_conf_sha256": "7dbe236b040750226f785a4171a8b8bc52b98834e26bc5f09c51ee313dd3757b", "state_2026_09_30": "mounted" },
+      { "name": "forgejo-storage", "cipher_dir": "~/workspace/atlas-forgejo/cipher", "gocryptfs_conf_sha256": "37e0a5b0c756303c7dfa8a8487ec73906ae31536a218496899794f713c6260c7", "state_2026_09_30": "credential unseals; mount fails because its mountpoint is not empty (restart loop since 2026-09-28, reported, not fixed)" }
+    ]
+  },
+  "offline_spares": {
+    "made_utc": "2026-09-30T18:59:45Z",
+    "method": "each secret piped from systemd-creds decrypt straight into age -r (pipefail); plaintext never written to disk",
+    "recipient": "age182wy9ugn7h4ytwz90d4fuq5rw8a35q6r54zw6tflskvzlvn59p2qqh7gng",
+    "recipient_pub_file_sha256": "82e308ffa5412bfd997894370488ea00caf698f90d8fd1b57fd9831870cf08e0",
+    "identity_location": "operator MacBook only; generated there; never present on the Spark",
+    "manifest_sha256": "093624fd7f27b4aafa788e4d2aa269825b7b89d78b36fcd25f2a159e84c220d4",
+    "files": [
+      { "file": "atlas-private-storage.passfile.age", "size": 265, "sha256": "7843b9b32319ea8fd0f9c2c554e985bfb37a2e95096264f5b2f182193ee402f3", "plaintext_bytes": 65 },
+      { "file": "atlas-private-storage.gocryptfs.conf.age", "size": 585, "sha256": "75adffeb2c8b11a0a84bf77a976ba4dfa05528ea87601a8892f4c2b7aa8f5620", "plaintext_bytes": 385 },
+      { "file": "atlas-vault.plain.age", "size": 841, "sha256": "9eac72787c92d43195c2f5c4c609c4f92e6e73902b823684e525811ecff066e1", "plaintext_bytes": 641 },
+      { "file": "forgejo-storage.passfile.age", "size": 265, "sha256": "ead2f0b5dc8336cbe540cf8306f2132455ead2b3bf5ef406f9e79bc21595e3eb", "plaintext_bytes": 65 },
+      { "file": "forgejo-storage.gocryptfs.conf.age", "size": 585, "sha256": "212bb33d2436d98af9b992879ac470d7faf4aea01c3b489820cda77d04a4cdf4", "plaintext_bytes": 385 }
+    ],
+    "locations": ["Spark ~/.config/atlas/offline-spares (working copy, same disk)", "operator MacBook ~/aienos-offline-recovery"],
+    "decrypt_proof": "on the MacBook (age 1.3.1) each spare decrypted with the new identity into a byte counter and a sha256; byte counts and sha256 equal the TPM-unsealed source for all five files",
+    "volume_correspondence": "the TPM-unsealed bytes open their volumes today (private storage mounted, vault decrypts), so byte-identical spares open the same volumes; a live mount with a spare was not performed"
+  },
+  "retired_claim": {
+    "file": "atlas-forge-state-luks-recovery-key.txt.age",
+    "sha256": "4b2893e5bfc123a9 (prefix)",
+    "disposition": "LUKS key for a Google Cloud disk (atlas-forge-state) from an abandoned early-September project; protects nothing on the Spark; preserved, not deleted, not counted as Spark recovery",
+    "identity_correction": "the ssh-ed25519 identity that opens it (+4nykQ) also exists unprotected on the Spark as ~/.ssh/macbook_pi_key, so it was never offline-only"
+  },
+  "assertions": [
+    { "id": "secure_boot_recorded", "status": "PASS" },
+    { "id": "pk_kek_db_dbx_digests_recorded", "status": "PASS" },
+    { "id": "event_log_digest_and_parser_check", "status": "PASS" },
+    { "id": "boot_entries_and_firmware_version_recorded", "status": "PASS" },
+    { "id": "every_encrypted_item_identified_with_unlock_paths", "status": "PASS" },
+    { "id": "tpm_policy_per_secret_recorded", "status": "PASS", "note": "decoded from headers and recomputed; no enrollment config exists" },
+    { "id": "independent_offline_unlock_path_per_secret", "status": "PASS", "note": "spares verified on the MacBook" },
+    { "id": "offline_material_in_two_independent_places", "status": "OPEN", "note": "spares and identity exist off-Spark only on the MacBook; identity has one copy and no passphrase" },
+    { "id": "pcr_stable_across_cold_boots", "status": "OPEN", "note": "needs operator-attended restarts; tool ready (capture + compare)" },
+    { "id": "firmware_auto_update_paused", "status": "OPEN", "note": "fwupd-refresh.timer enabled; pause needs operator approval" },
+    { "id": "service_baseline_after_cleanup", "status": "OPEN", "note": "Forgejo storage restart loop and missing Forgejo backup script are unresolved" }
+  ],
+  "gate0_status": "OPEN",
+  "result": "NOT_PASS"
+}
