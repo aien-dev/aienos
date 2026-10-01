@@ -101,7 +101,14 @@ run_measurement_tools() { bash "${repo_root}/scripts/test_trust1_measurement_too
 run_key_ceremony()      { bash "${repo_root}/scripts/test_trust1_key_ceremony.sh"; }
 run_gate7_preflight()   { bash "${repo_root}/scripts/trust1_gate7_preflight.sh"; }
 run_recovery_tools()    { bash "${repo_root}/scripts/verify_recovery_tools.sh"; }
-run_store_c()           { make -C "${repo_root}/native/store" OUT="${work_dir}/build/store" test; }
+# The native Makefiles run ./$(TEST), so OUT must be relative to the
+# Makefile folder; it still points outside the tree.
+native_make_test() {
+    local dir="${repo_root}/native/$1" out="${work_dir}/build/$1"
+    mkdir -p "${out}"
+    make -C "${dir}" OUT="$(realpath --relative-to="${dir}" "${out}")" test
+}
+run_store_c()           { native_make_test store; }
 run_cargo_crypto()      { (cd "${repo_root}" && cargo test -p aienos-crypto); }
 run_cargo_kernel()      { (cd "${repo_root}" && cargo test -p aienos-kernel --lib -- crypto:: security::); }
 run_gate5_sim() {
@@ -111,8 +118,8 @@ run_gate5_sim() {
         bash "${repo_root}/scripts/test_trust1_gate5_policy_sim.sh"
     fi
 }
-run_native_m5()     { make -C "${repo_root}/native/m5" OUT="${work_dir}/build/m5" test; }
-run_native_crypto() { make -C "${repo_root}/native/crypto" OUT="${work_dir}/build/crypto" test; }
+run_native_m5()     { native_make_test m5; }
+run_native_crypto() { native_make_test crypto; }
 run_qemu_sb()       { bash "${repo_root}/scripts/qemu_secureboot_signing_test.sh"; }
 run_qemu_store512() { bash "${repo_root}/scripts/qemu_store_512b_crash_test.sh"; }
 
