@@ -319,10 +319,13 @@ passphrase, FIDO key) is undecided (ADR 0006 / M5). PROPOSED: the C port keeps
 the key behind a TEST-only build flag, prints `RECOVERY_OPERATOR_KEY:
 TEST-ONLY` on every boot that uses it, and refuses the TEST key in a
 `CK_HARDWARE_STAGING` build the same way `ck_store_keys_admissible` refuses
-TEST Store keys (native/kernel/svc/store_boot.h:62-64).
+TEST Store keys (native/kernel/svc/store_boot.h:66).
 
-ADR 0006 items with no Rust code (WAL truncation of a corrupt Cortex, A/B slot
-switching, crash records, model-weight hash checks) are out of scope (section 8).
+Other ADR 0006 items are out of scope (section 8). Rust has an A/B `SlotManager`
+and a Cortex `WalRecovery::recover_and_truncate` (crates/aienos-kernel/src/recovery.rs:37-90,
+:144-200; tests :329, :346, :380), but neither is part of the continuity or
+Recovery Core QEMU campaigns this contract ports. Crash records and model-weight
+hash checks have no Rust code.
 
 ---
 
@@ -592,8 +595,10 @@ gate adds one.
 - Freezing format version 0 to 1 (operator decision, ADR 0016:3-7, :89-91).
 - The real operator credential (Argon2id, FIDO), TRUST-1, TPM NV anchor, any
   Machine 1 claim.
-- ADR 0006 items with no Rust code: Cortex WAL truncation, A/B boot slots,
-  crash records, model-weight hash checks.
+- Other ADR 0006 items: the A/B `SlotManager` and Cortex
+  `WalRecovery::recover_and_truncate` exist in Rust (recovery.rs:37-90,
+  :144-200; tests :329, :346, :380) but are outside the continuity and Recovery
+  Core campaigns; crash records and model-weight hash checks have no Rust code.
 - Rolling back to an older root when the newer one is graph-broken (refused
   in-band on purpose).
 - The richer host crates `aienos-agent-state` and `aienos-cortex`; the C port
