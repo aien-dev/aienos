@@ -114,7 +114,9 @@ outside_sha() {
 }
 # inside_sha IMG BS: sha256 of the AIENOS partition bytes only.
 inside_sha() {
-    tail -c +$(( part_first * $2 + 1 )) "$1" | head -c $(( (part_last - part_first + 1) * $2 )) | sha256sum | cut -d' ' -f1
+    # head reads the file itself and tail drains all of head's output, so no
+    # producer is cut off early (a "tail | head" pipe dies of SIGPIPE under pipefail).
+    head -c $(( (part_last + 1) * $2 )) "$1" | tail -c $(( (part_last - part_first + 1) * $2 )) | sha256sum | cut -d' ' -f1
 }
 # zero_sha BS: sha256 of an all-zero AIENOS partition of the current size.
 zero_sha() {
