@@ -138,6 +138,10 @@ int ck_nvme_bind(ck_nvme *n, const pci_system *pci)
 #if CK_NVME_UNSAFE_BYPASS
     ck_printf("WARNING: UNSAFE NVME DMA BYPASS BUILD (CK_QEMU_UNSAFE_DMA=1, QEMU debug only, TEST-ONLY)\n");
 #endif
+#if defined(CK_TEST_DISK_XLATE_BYPASS)
+    ck_printf("WARNING: TEST-ONLY DISK TRANSLATION BYPASS BUILD (CK_TEST_DISK_XLATE_BYPASS=1, DISK_LAYOUT "
+              "mutation; never counts toward a PASS)\n");
+#endif
     const pci_func *f = pci_find_class(pci, 0x010802u, 0xffffffu);
     if (!f) {
         ck_printf("nvme: no class 0x010802 function\n");
@@ -220,11 +224,39 @@ int ck_nvme_bind(ck_nvme *n, const pci_system *pci)
     rc = disk_read(&n->disk, 0, 1, one);
     ck_printf("nvme: read lba=0 blocks=1 %s (rc=%d)\n", rc ? "FAIL" : "ok", rc);
     if (rc) return rc;
-    uint64_t lba = 0;
-    rc = ck_disk_rw_probe(&n->disk, (uint32_t)ck_time_us() ^ 0xa5a5a5a5u, &lba);
-    ck_printf("nvme: rw probe lba=%llu bytes=%u write+flush+readback %s (rc=%d)\n", (unsigned long long)lba,
-              CK_LAYOUT_UNIT, rc ? "FAIL" : "match", rc);
+    /* Partition-aware footprint (dev/disk_part.h, audit R2): the GPT is
+     * parsed read-only; without exactly one valid AIENOS partition nothing is
+     * ever written to this disk and there is no whole-disk fallback. */
+    ck_gpt_info gi;
+    rc = ck_gpt_find_aienos(&n->disk, &n->part, &gi);
+    if (rc) {
+        ck_printf("disk: no AIENOS partition, refusing writes (gpt: %s, rc=%d)\n", ck_gpt_strerror(rc), rc);
+        return rc;
+    }
+    ck_printf("disk: gpt ok primary+backup crc32 entries=%u used=%u aienos_index=%u first_lba=%llu "
+              "last_lba=%llu blocks=%llu\n",
+              gi.entries, gi.used, gi.part_index, (unsigned long long)n->part.first_lba,
+              (unsigned long long)(n->part.first_lba + n->part.blocks - 1u), (unsigned long long)n->part.blocks);
+    /* The translation layer itself (no I/O): partition LBA 0 maps to the
+     * partition start; past the end, straddling the end and an overflowing
+     * LBA are refused. Any of these not refused: stop before any write. */
+    uint64_t a0 = 0, ax = 0;
+    int x0 = ck_part_xlate(&n->part, 0, 1, &a0);
+    int x1 = ck_part_xlate(&n->part, n->part.blocks, 1, &ax);
+    int x2 = ck_part_xlate(&n->part, n->part.blocks - 1u, 2, &ax);
+    int x3 = ck_part_xlate(&n->part, ~(uint64_t)0, 1, &ax);
+    int xok = x0 == DISK_OK && x1 == DISK_ERANGE && x2 == DISK_ERANGE && x3 == DISK_ERANGE;
+    ck_printf("disk: xlate part_lba=0 -> disk_lba=%llu (rc=%d)\n", (unsigned long long)a0, x0);
+    ck_printf("disk: write past partition end part_lba=%llu -> %s (xlate rc=%d,%d,%d)\n", (unsigned long long)n->part.blocks,
+              xok ? "refused" : "NOT REFUSED", x1, x2, x3);
+    if (!xok) return DISK_ERANGE; /* not -1: devices.c reads -1 as "no NVMe present" */
+    uint64_t lba = 0, dlba = 0;
+    rc = ck_disk_rw_probe(&n->part.dev, (uint32_t)ck_time_us() ^ 0xa5a5a5a5u, &lba);
+    int xr = ck_part_xlate(&n->part, lba, CK_LAYOUT_UNIT / n->part.dev.block_size, &dlba);
+    ck_printf("nvme: rw probe part_lba=%llu disk_lba=%llu bytes=%u write+flush+readback %s (rc=%d)\n",
+              (unsigned long long)lba, (unsigned long long)dlba, CK_LAYOUT_UNIT, rc ? "FAIL" : "match", rc);
     if (rc) return rc;
+    if (xr) return DISK_ERANGE;
     if (n->confined) {
         rc = smmu_negative_test(n);
         if (rc) return DISK_EIO;

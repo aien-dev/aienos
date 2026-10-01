@@ -5,6 +5,7 @@
 #include "disk.h"
 #include "disk_nvme.h"
 #include "pci.h"
+#include "disk_part.h"
 
 /* DMA region handed to the driver: 6 fixed pages + 128 KiB bounce. */
 #define CK_NVME_DMA_BYTES ((NVME_FIXED_PAGES * NVME_PAGE) + NVME_MAX_XFER)
@@ -19,13 +20,18 @@ typedef struct {
     int confined;      /* DMA confined by the SMMU (ck_dma_confine) */
     int shut;          /* normal shutdown already attempted (ck_nvme_shutdown_bound) */
     uint32_t stream_id; /* SMMU stream when confined */
+    ck_part part;      /* the AIENOS partition view (dev/disk_part.h): the only writable disk */
 } ck_nvme;
 
 /* Find the first class 01/08/02 function, gate DMA, map BAR0, init the
- * controller, fill n->disk, print identify/geometry/atomicity lines, then
- * run the probe (bounds refusal, read LBA 0, write+flush+read-back of the
- * last 4 KiB unit). Returns 0, or a negative NVME_E* / DISK_E* / -1 when
- * no NVMe function exists. */
+ * controller, fill n->disk, print identify/geometry/atomicity lines, run the
+ * read-only checks (bounds refusal, read LBA 0), parse the GPT read-only and
+ * select the AIENOS partition (n->part; none or an invalid GPT: print
+ * "disk: no AIENOS partition, refusing writes" and return the CK_GPT_* code
+ * with nothing written), check the translation layer refuses past the
+ * partition end, then run the write+flush+read-back probe on the last 4 KiB
+ * unit OF THE PARTITION. Returns 0, or a negative NVME_E* / DISK_E* /
+ * CK_GPT_* / -1 when no NVMe function exists. */
 int ck_nvme_bind(ck_nvme *n, const pci_system *pci);
 
 /* Normal NVMe shutdown (dev/nvme_shutdown.c) on the bound controller, run
@@ -34,8 +40,9 @@ int ck_nvme_bind(ck_nvme *n, const pci_system *pci);
  * Runs at most once per bind; returns the CK_NVME_SHUT_* code. */
 int ck_nvme_shutdown_bound(ck_nvme *n);
 
-/* Run the write/flush/read-back probe on the last whole unit of `d`
- * (shared with the host tests). `seed` varies the pattern per boot.
+/* Run the write/flush/read-back probe on the last whole unit of `d` (the
+ * kernel passes the AIENOS partition view, never the whole namespace;
+ * shared with the host tests). `*lba_out` is relative to `d`. `seed` varies the pattern per boot.
  * The unit's original bytes are read first and written back (flushed and
  * verified) afterwards, so a boot leaves the disk bytes as it found them. */
 int ck_disk_rw_probe(const disk_dev *d, uint32_t seed, uint64_t *lba_out);

@@ -90,7 +90,7 @@ mk OUT="${out_prod}" full
 mk OUT="${out_qual}" CK_SEED0B_TEST_ANCHOR=1
 mk OUT="${out_qual}" CK_SEED0B_TEST_ANCHOR=1 full
 mk OUT="${out_fwcfg}" CK_TEST_FWCFG_ARTIFACTS=1
-make -s -C native/kernel OUT="${out_prod}" tool store-image >/dev/null
+make -s -C native/kernel OUT="${out_prod}" tool store-image gpt-image >/dev/null
 tool="${out_prod}/host/ck_artifact_tool"
 simg="${out_prod}/host/ck_store_image"
 
@@ -133,7 +133,8 @@ id_prefix() { awk -v n="$1" '$1 == n { print substr($2, 1, 16) }' "${work}/ids.t
 
 # ---- boot disk: signed artifacts into the sealed Store (image build time) ----
 disk="${work}/nvme.img"
-truncate -s 64M "${disk}"
+# GPT boot disk: the Store lives only inside its AIENOS partition (dev/disk_part.h).
+"${out_prod}/host/ck_gpt_image" create "${disk}" 512 64 aienos-middle >/dev/null || fail "GPT boot disk image created"
 if "${simg}" build "${disk}" 512 "${files[@]}" "missing:${missing}:${missing_len}" >"${work}/build.txt" 2>&1; then
     pass "boot disk built: $(head -1 "${work}/build.txt")"
 else

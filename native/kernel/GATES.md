@@ -22,7 +22,8 @@ C gates (one line each from `ck_gates.sh`): `M1` and `M3` (from
 `SMMU`, `NVME_SHUTDOWN` (from `scripts/qemu_ck_store_test.sh`; rows 21-24b, 47-72, 76 and
 96-101 were checked against its exact grep patterns), `P2_ARTIFACT` (from
 `scripts/qemu_ck_artifact_test.sh`, rows 33-41), `NET` (C-only, from
-`scripts/qemu_ck_net_test.sh`; rows 102-106 and 110-112; the script now also checks the virtio-net SMMU fence (ACCESS_PLATFORM required, out-of-window device DMA refused), rows 102 and 110-112 are QEMU PASS on this branch from the committed forge log `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`, hardware NOT_RUN), the kernel entropy rows 107-109 (M1 via `scripts/lib_ck_m1_checks.sh`, ARGUS1_REVOKE and M4_STORE via the Store gate boot 7), and the NOT_RUN gates
+`scripts/qemu_ck_net_test.sh`; rows 102-106 and 110-112; the script now also checks the virtio-net SMMU fence (ACCESS_PLATFORM required, out-of-window device DMA refused), rows 102 and 110-112 are QEMU PASS on this branch from the committed forge log `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`, hardware NOT_RUN), the kernel entropy rows 107-109 (M1 via `scripts/lib_ck_m1_checks.sh`, ARGUS1_REVOKE and M4_STORE via the Store gate boot 7),
+`DISK_LAYOUT` (C-only, from `scripts/qemu_ck_disk_layout_test.sh`, rows 118-123: QEMU PASS at 741b2b8 before the merge with main 8555049, rerun pending at the merged head; row 123 host test), and the NOT_RUN gates
 `SMP` (C-only, from `scripts/qemu_ck_smp_test.sh`, rows 113-117, NOT_RUN pending forge receipt), `M0_ROLLBACK`, `M4_STORE_CRASH` (now read from `scripts/qemu_ck_store_crash_test.sh`, rows 73-80; NOT_RUN until a forge receipt exists),
 `M4_CONTINUITY`, `M4_RECOVERY`, `KEYBOARD`.
 
@@ -460,9 +461,45 @@ No PASS without a forge receipt; hardware NOT_RUN (no GB10 core was started).
 | 116 | summary `smp: cpus=N started=N checked_in=N psci_errors=0 distinct_mpidrs=N wait_us=.. result=ok`, no `smp: FAIL`, kernel reaches `report_kind: final`, no panic or fault, QEMU exit 0, image is not the TEST-ONLY mutation | SMP | NOT_RUN (pending forge receipt) |
 | 117 | mutation: `make CK_TEST_SMP_SKIP_CPU=1` (TEST-ONLY, own OUT, announces itself, never calls CPU_ON for the last MADT secondary) must make the gate checks FAIL (`scripts/qemu_ck_smp_test.sh --mutation` ends `AIENOS_CK_SMP_MUTATION: PASS` when they do); the flag is refused with `CK_HARDWARE_STAGING` (Makefile `$(error)` and a `#error` in `core/smp.c`) and default images are checked to carry no trace of it (Makefile `smp_check`); canned-log failure modes in `scripts/qemu_ck_smp_test.sh --self-test` | SMP | NOT_RUN (pending forge receipt) |
 
+## DISK_LAYOUT: partition-aware disk footprint (C-only, audit R2) -> CK `DISK_LAYOUT` (scripts/qemu_ck_disk_layout_test.sh)
+
+No Rust QEMU gate exists for this; the Rust Store writes the whole disk. The C
+kernel parses the GPT read-only (UEFI 2.10 section 5.3: protective MBR,
+primary header at LBA 1, entry array, backup entry array and backup header at
+the end; CRC32 of both headers and both entry arrays) and selects the one
+partition whose type GUID is the AIENOS type
+`38DAAC89-5EAD-4B40-8B1E-3687A7418061` (dev/disk_part.h). The Store,
+torn-slot device and NVMe rw probe receive only that partition's view; every
+read, write and flush goes through the bounds-checked translation
+`ck_part_xlate` (partition LBA -> disk LBA). Without exactly one valid AIENOS
+partition the kernel prints `disk: no AIENOS partition, refusing writes (gpt:
+<reason>, rc=N)` and never writes; there is no whole-disk fallback. The only
+way around the translation is the TEST-ONLY mutation build
+`make full CK_TEST_DISK_XLATE_BYPASS=1` (refused with `CK_HARDWARE_STAGING`
+by the Makefile and by an `#error`). The Store, NET and artifact gates now
+boot GPT images from `native/kernel/tools/ck_gpt_image.c` (AIENOS partition
+[9,57) MiB of 64 MiB, filled sentinel partitions on both sides).
+
+Firmware caveat: EDK2/AAVMF may repair a GPT whose primary or backup copy
+alone is bad, so the QEMU hostile images corrupt both copies; single-copy
+corruption is covered only by the host test `dev/tests/disk_part_test.c`
+(`make -C native/kernel stage-test`, target `disk-part-test`).
+
+| # | C check | CK gate | Status |
+| --- | --- | --- | --- |
+| 118 | GPT parsed with CRC32 on both headers and both entry arrays; the AIENOS partition is found exactly where the image tool wrote it (`disk: gpt ok primary+backup crc32 entries=128 used=3 aienos_index=1 first_lba=F last_lba=L `), 512 B (2 boots) and 4096 B (1 boot) | DISK_LAYOUT | QEMU PASS (receipt `evidence/ck_gates_d80363cc871372963743ae85fc08c6fa4608f9870c4e06e8988f21950c73ace6.json`, full `ck_gates.sh` run at 741b2b8, log CK-4-184524.log; standalone `scripts/qemu_ck_disk_layout_test.sh` PASS with the bypass mutant killed, log CK-4-184423.log; hardware NOT_RUN) |
+| 119 | translation layer: partition LBA 0 -> partition start, past-end / straddling / overflowing LBAs refused (`disk: xlate part_lba=0 -> disk_lba=F (rc=0)`, `disk: write past partition end part_lba=N -> refused `); rw probe disk LBA inside [F,L] | DISK_LAYOUT | QEMU PASS (receipt `evidence/ck_gates_d80363cc871372963743ae85fc08c6fa4608f9870c4e06e8988f21950c73ace6.json`, full `ck_gates.sh` run at 741b2b8, log CK-4-184524.log; standalone `scripts/qemu_ck_disk_layout_test.sh` PASS with the bypass mutant killed, log CK-4-184423.log; hardware NOT_RUN) |
+| 120 | footprint: Store formats and commits inside the partition; every byte outside it (MBR, both GPT copies, both sentinels) unchanged (sha256 with the partition cut out), the partition itself written. Also checked on boots 1-3 of both geometries by `scripts/qemu_ck_store_test.sh` | DISK_LAYOUT (and M4_STORE) | QEMU PASS (receipt `evidence/ck_gates_d80363cc871372963743ae85fc08c6fa4608f9870c4e06e8988f21950c73ace6.json`, full `ck_gates.sh` run at 741b2b8, log CK-4-184524.log; standalone `scripts/qemu_ck_disk_layout_test.sh` PASS with the bypass mutant killed, log CK-4-184423.log; hardware NOT_RUN) |
+| 121 | hostile disks refused, image byte-identical, Store refused `step="no boot disk"`, no rw probe: no GPT, bad CRC32 on both headers, bad entry-array CRC32 on both arrays, AIENOS partition ending past the disk, no AIENOS partition; the host tool's own parser (`ck_gpt_image find`) must give the same reason | DISK_LAYOUT | QEMU PASS (receipt `evidence/ck_gates_d80363cc871372963743ae85fc08c6fa4608f9870c4e06e8988f21950c73ace6.json`, full `ck_gates.sh` run at 741b2b8, log CK-4-184524.log; standalone `scripts/qemu_ck_disk_layout_test.sh` PASS with the bypass mutant killed, log CK-4-184423.log; hardware NOT_RUN) |
+| 122 | mutation: the TEST-ONLY translation-bypass image announces itself and FAILs rows 118-120 (its translation self-check prints `NOT REFUSED`); the default image contains no bypass text | DISK_LAYOUT | QEMU PASS (receipt `evidence/ck_gates_d80363cc871372963743ae85fc08c6fa4608f9870c4e06e8988f21950c73ace6.json`, full `ck_gates.sh` run at 741b2b8, log CK-4-184524.log; standalone `scripts/qemu_ck_disk_layout_test.sh` PASS with the bypass mutant killed, log CK-4-184423.log; hardware NOT_RUN) |
+| 123 | host test: CRC32 known answer, good layouts at 512/4096, writes through the view never change bytes outside the partition, full Store boot on the view, single-copy corruption, header field patches, backup disagreement, overlap, two AIENOS partitions, too many entries; the bypass build of the same test must FAIL (`CK_DISK_PART_MUTANT: PASS`) | DISK_LAYOUT (host, `make stage-test`) | PASS (host test, `CK_DISK_PART_HOST: PASS` and `CK_DISK_PART_MUTANT: PASS`, log CK-4-light-181557.log at 25db390; not rerun at 741b2b8, but no file under native/kernel/dev or native/kernel/tools changed since; the bypass image's QEMU FAIL is row 122, receipt `evidence/ck_gates_d80363cc871372963743ae85fc08c6fa4608f9870c4e06e8988f21950c73ace6.json`; inspector note (non-blocking): since 25db390 the only change near this code is from main, `native/kernel/svc/security.c` +3 lines (#218, a TEST-only `argus: TEST machine id` print under `#ifndef CK_HARDWARE_STAGING`); `native/kernel/svc/security.h` is unchanged, and no file under native/kernel/dev, native/kernel/tools or the disk_part test changed; hardware NOT_RUN) |
+
+
 ## Summary counts
 
-**C kernel receipt tally (QEMU only, no physical run):** 9 of 15 CK gates PASS, 6 NOT_RUN (M0_ROLLBACK, M4_STORE_CRASH, M4_CONTINUITY, M4_RECOVERY, KEYBOARD; and SMP, added after that receipt, NOT_RUN pending forge receipt), 0 FAIL. The 9 PASS match `evidence/ck_gates_929f287e9c950c45c7dcd569c7caa03709ea62ecfe393635b435058afa969c54.json` (run at 41aa0e6, which adds the kernel entropy rows 107-109; that commit was then rebased onto #210, which changed only README.md and CONTRIBUTING.md). The row counts below are per Rust-parity row, not per gate.
+**C kernel receipt tally (QEMU only, no physical run):** 16 CK gates since the merge of main 8555049 (#224 adds `SMP`, #226 moves `M4_STORE_CRASH` to its own child script) into the CK-4 branch. The newest full receipt, `evidence/ck_gates_d80363cc871372963743ae85fc08c6fa4608f9870c4e06e8988f21950c73ace6.json` (full `ck_gates.sh` run at 741b2b8, the CK-4 branch after merging main #221 and #225; log CK-4-184524.log, `AIENOS_CK_GATES: NOT_ALL_GATES_PASS (pass=10 fail=0 not_run=5 of 15; physical NOT_RUN)`), predates that merge: by it, 10 of 16 CK gates PASS (the 9 of the earlier receipt plus `DISK_LAYOUT`), 6 NOT_RUN (M0_ROLLBACK, M4_STORE_CRASH, M4_CONTINUITY, M4_RECOVERY, KEYBOARD; and SMP, not in that receipt, NOT_RUN pending forge receipt), 0 FAIL. No `ck_gates.sh` run exists at the merged head yet; `M4_STORE_CRASH` stays NOT_RUN until a forge receipt. `DISK_LAYOUT` also PASSed alone (log CK-4-184423.log, translation-bypass mutant killed); the Store, NET and artifact gates boot GPT images now and PASS in the same receipt. The receipt before it was 9 of 14 CK gates PASS, 5 NOT_RUN, 0 FAIL (`evidence/ck_gates_929f287e9c950c45c7dcd569c7caa03709ea62ecfe393635b435058afa969c54.json`, run at 41aa0e6, which adds the kernel entropy rows 107-109; that commit was then rebased onto #210, which changed only README.md and CONTRIBUTING.md). The row counts below are per Rust-parity row, not per gate.
+
+Rows 118-123 (DISK_LAYOUT, C-only, CK-4; numbered 113-118 on the CK-4 branch before the merge with main, which gave 113-117 to SMP) are 5 QEMU PASS (118-122, receipt `ck_gates_d80363...` at 741b2b8, before the merge with main 8555049) and 1 host-test PASS (123), none NOT_RUN. With them, rows 1-123 plus the M4 continuity/recovery sub-rows: IDENTICAL 28, DIFFERS 39, NOT_RUN 91, PASS 6 (C-only DISK_LAYOUT, hardware NOT_RUN) (91 from the SMP line next; recounted from the table at the merge commit, status = each row's first status cell, escaped pipes read as text: 28 IDENTICAL, 39 DIFFERS, 87 NOT_RUN (82 + SMP 113-117), 9 QEMU PASS (NET 102, 110-112, counted as NOT_RUN as below, and DISK_LAYOUT 118-122), 1 PASS (123); sub-rows 24a and 24b not counted).
 
 Rows 113-117 (SMP, C-only, new in this change): 5 NOT_RUN (pending forge receipt), so rows 1-117 plus the M4 continuity/recovery sub-rows: IDENTICAL 28, DIFFERS 39, NOT_RUN 91 (86 from the line below plus these 5).
 

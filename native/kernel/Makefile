@@ -40,7 +40,16 @@
 #                        the SMP gate must FAIL on it (scripts/qemu_ck_smp_test.sh
 #                        --mutation); refused with CK_HARDWARE_STAGING
 #   make store-image     host tool $(OUT)/host/ck_store_image: signed artifacts
-#                        into the sealed Store on a raw NVMe disk image
+#                        into the sealed Store inside the AIENOS GPT partition
+#                        of an NVMe disk image
+#   make gpt-image       host tool $(OUT)/host/ck_gpt_image: GPT boot-disk images
+#                        (AIENOS partition between two sentinels, hostile variants)
+#                        for the QEMU gates; "find" runs the kernel GPT parser
+#   make full CK_TEST_DISK_XLATE_BYPASS=1
+#                        TEST-ONLY mutation image for the DISK_LAYOUT gate: the
+#                        LBA translation layer (dev/disk_part.c) adds no partition
+#                        offset; $(OUT)/full-test-xlate-bypass/ (refused with
+#                        CK_HARDWARE_STAGING; never counted toward a PASS)
 #   make test            host unit tests            -> CK_CORE_HOST: PASS
 #                        (also builds the handoff_check reserved0 mutant
 #                        and requires test_handoff to FAIL against it)
@@ -221,6 +230,18 @@ $(error CK_OWNER_PUBKEYS and CK_MACHINE_ID are only used with CK_HARDWARE_STAGIN
 endif
 endif
 
+# TEST-ONLY DISK_LAYOUT mutation (dev/disk_part.h): the partition translation
+# layer is bypassed. Its own FULL_NAME; never with hardware staging.
+CK_TEST_DISK_XLATE_BYPASS ?=
+ifneq ($(strip $(CK_TEST_DISK_XLATE_BYPASS)),)
+ifneq ($(strip $(CK_TEST_DISK_XLATE_BYPASS)),1)
+$(error CK_TEST_DISK_XLATE_BYPASS must be empty or 1)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_TEST_DISK_XLATE_BYPASS (TEST-ONLY translation bypass mutation) cannot be combined with CK_HARDWARE_STAGING)
+endif
+endif
+
 # SEED-0B qualification build: trusts the RFC 8032 TEST 1 public key only.
 # TEST ONLY; never combined with hardware staging. Use its own OUT.
 CK_SEED0B_TEST_ANCHOR ?=
@@ -303,6 +324,10 @@ else
 FULL_NAME := full-test-store-crash
 endif
 STAGE_DMA_FLAGS += -DCK_TEST_STORE_CRASH=1 $(STORE_MUTANT_FLAGS)
+endif
+ifeq ($(strip $(CK_TEST_DISK_XLATE_BYPASS)),1)
+FULL_NAME := $(FULL_NAME)-test-xlate-bypass
+STAGE_DMA_FLAGS += -DCK_TEST_DISK_XLATE_BYPASS=1
 endif
 FULL_OUT := $(OUT)/$(FULL_NAME)
 STAGE_KOBJ := $(OUT)/obj/stage-$(FULL_NAME)
@@ -573,6 +598,15 @@ $(STORE_IMG_TOOL): $(STORE_IMG_SRCS) $(STAGE_HDRS)
 	$(HOSTCC) $(STAGE_HOST_FLAGS) $(STAGE_INC) -o $@ $(STORE_IMG_SRCS)
 store-image: $(STORE_IMG_TOOL)
 
+# GPT boot-disk image tool (QEMU gates; hosted, never part of an image).
+GPT_IMG_TOOL := $(OUT)/host/ck_gpt_image
+GPT_IMG_SRCS := $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \
+	$(KDIR)/tools/gpt_write.c $(KDIR)/tools/ck_gpt_image.c
+$(GPT_IMG_TOOL): $(GPT_IMG_SRCS) $(KDIR)/dev/disk_part.h $(KDIR)/tools/gpt_write.h $(NATIVE)/disk/disk.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -I$(KDIR)/dev -I$(KDIR)/tools -I$(NATIVE)/disk -o $@ $(GPT_IMG_SRCS)
+gpt-image: $(GPT_IMG_TOOL)
+
 # Owner provisioning generator (hosted; never part of an image) and the
 # generated header for the hardware staging image.
 OWNER_GEN := $(OUT)/host/ck_owner_gen
@@ -590,4 +624,4 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize handoff-mutant clean print-kcflags udp-echo tool store-image owner-gen continuity-mutants FORCE
+.PHONY: all full test sanitize handoff-mutant clean print-kcflags udp-echo tool store-image gpt-image owner-gen continuity-mutants FORCE

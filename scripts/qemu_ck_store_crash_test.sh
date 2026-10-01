@@ -13,7 +13,8 @@
 #                                  CK_HARDWARE_STAGING and CK_QEMU_UNSAFE_DMA.
 #
 # Power-cut model. The host writes a crash plan into the last 4096-byte unit
-# of the disk (the rw-probe scratch unit, restored by the devices stage):
+# of the AIENOS partition (the rw-probe scratch unit, restored by the devices
+# stage; the kernel sees only that partition, dev/disk_part.h):
 # "AIENCRSH v1 cp=<checkpoint> policy=<drop|all|newest|torn>". The TEST image
 # then runs the Store on a volatile write cache: nothing reaches the disk until
 # the Store flushes. At the planned checkpoint it lands, per policy, none / all
@@ -33,7 +34,10 @@
 #   after_final_flush, before_anchor            root durable, anchor behind
 #   after_anchor                                commit and anchor durable
 #
-# Campaign, per geometry (512 B and 4096 B namespaces, fresh 64 MiB image) and
+# Campaign, per geometry (512 B and 4096 B namespaces, fresh 64 MiB GPT image
+# from native/kernel/tools/ck_gpt_image.c, AIENOS partition [9,57) MiB, as in
+# scripts/qemu_ck_store_test.sh; all Store offsets below are partition offsets
+# plus the partition start) and
 # per settle (0: the crash boot formats a blank disk; 3: three default boots
 # first, as the Rust settle 3): every checkpoint with policy=all, plus
 # after_commit_record/newest and after_inactive_superblock drop/newest/torn.
@@ -105,6 +109,15 @@ unit=4096
 units=$(( img_bytes / unit ))
 plan_unit=$(( units - 1 ))
 store_off=16384            # 4 anchor units (dev/disk_layout.h; qemu_ck_store_test.sh checks it)
+# set_part BS FIRST_LBA LAST_LBA: the AIENOS partition of a GPT image. Sets
+# sb_base (image byte offset of the Store region: partition start + store_off)
+# and plan_unit (the last 4096-byte unit of the partition). Default: the whole
+# image is the partition (self-test synthetic images).
+sb_base=${store_off}
+set_part() {
+    sb_base=$(( $2 * $1 + store_off ))
+    plan_unit=$(( ($3 + 1) * $1 / unit - 1 ))
+}
 sb_gen_off=56              # superblock generation (native/store/store_engine.c st_open gen_of)
 sb_crc_off=168             # SV1_SB_CRC_OFFSET (native/store/store_v1.h)
 cps=(before_first_write after_payload_objects after_catalog after_commit_record after_first_flush
@@ -233,11 +246,11 @@ u64_at() { od --endian=little -An -tu8 -j "$2" -N 8 "$1" | tr -d ' '; }
 tear_closure() {
     local b="$1" a="$2" n="$3" diffs slots s off
     tc_why=""; tc_slot=""
-    diffs="$(cmp -l "${b}" "${a}" 2>/dev/null | awk -v lo="${store_off}" -v hi="$(( store_off + 2 * unit ))" '$1-1 >= lo && $1-1 < hi {print $1-1}')"
+    diffs="$(cmp -l "${b}" "${a}" 2>/dev/null | awk -v lo="${sb_base}" -v hi="$(( sb_base + 2 * unit ))" '$1-1 >= lo && $1-1 < hi {print $1-1}')"
     [[ -n "${diffs}" ]] || { tc_why="no superblock slot changed"; return 1; }
-    slots="$(awk -v lo="${store_off}" -v u="${unit}" '{print int(($1 - lo) / u)}' <<<"${diffs}" | sort -u)"
+    slots="$(awk -v lo="${sb_base}" -v u="${unit}" '{print int(($1 - lo) / u)}' <<<"${diffs}" | sort -u)"
     [[ "$(grep -c . <<<"${slots}")" == 1 ]] || { tc_why="both superblock slots changed"; return 1; }
-    s="${slots}"; off=$(( store_off + s * unit ))
+    s="${slots}"; off=$(( sb_base + s * unit ))
     awk -v o="${off}" '$1 - o >= 512 {bad=1} END {exit bad}' <<<"${diffs}" \
         || { tc_why="slot ${s} changed beyond its first 512-byte sector"; return 1; }
     [[ "$(u64_at "${a}" $(( off + sb_gen_off )))" == $(( n + 1 )) ]] \
@@ -292,6 +305,11 @@ self_test() {
     cmp -s <(dd if="${t}/img" bs="${unit}" skip="${plan_unit}" count=1 status=none) <(plan_bytes after_anchor all) \
         && [[ "$(stat -c %s "${t}/img")" == "${img_bytes}" ]] && ok "plan written into the last unit only" || bad "plan placement"
     clear_plan "${t}/img"; cmp -s "${t}/img" <(head -c "${img_bytes}" /dev/zero) && ok "plan cleared" || bad "plan clear"
+    # GPT disks: the plan goes into the last unit of the AIENOS partition
+    # [9,57) MiB and the Store region starts store_off into it.
+    ( set_part 512 18432 116735; [[ "${plan_unit}" == 14591 && "${sb_base}" == $(( 9 * 1048576 + store_off )) ]] ) \
+        && ( set_part 4096 2304 14591; [[ "${plan_unit}" == 14591 && "${sb_base}" == $(( 9 * 1048576 + store_off )) ]] ) \
+        && ok "partition plan unit and Store base (512 B and 4096 B GPT layouts)" || bad "set_part offsets"
 
     # crash judge
     n=4; s="${t}/crash.txt"
@@ -403,6 +421,11 @@ else
     mk_full CK_TEST_STORE_CRASH=1 || { echo "TEST crash build failed"; verdict NOT_RUN; exit 2; }
     crash_efi="${out}/full-test-store-crash/BOOTAA64.EFI"
     plain_efi="${out}/full/BOOTAA64.EFI"
+fi
+# GPT boot disk tool (native/kernel/tools/ck_gpt_image.c): the kernel binds
+# NVMe only when it finds exactly one AIENOS partition (dev/disk_part.h).
+if ! make -s -C native/kernel OUT="${out}" gpt-image >/dev/null; then
+    echo "GPT image tool build failed"; verdict NOT_RUN; exit 2
 fi
 
 quiet_flag="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
@@ -518,10 +541,19 @@ run_case() {
     [[ "${ok}" == 1 ]] || { fail=1; geo_ok[${bs}]=0; }
 }
 
+# new_disk BS: the fresh GPT template image for geometry BS (sentinel-a, AIENOS
+# all zero, sentinel-b), and set_part from the range the tool WROTE.
+new_disk() {
+    local l re='^gpt_image bs=[0-9]+ blocks=[0-9]+ aienos_first_lba=([0-9]+) aienos_last_lba=([0-9]+)$'
+    gpt_tmpl="${top}/gpt-$1.img"
+    l=$("${out}/host/ck_gpt_image" create "${gpt_tmpl}" "$1" $(( img_bytes / 1048576 )) aienos-middle) || l=""
+    if [[ "${l}" =~ ${re} ]]; then set_part "$1" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"; return 0; fi
+    echo "FAIL  GPT boot disk image not created (bs $1: ${l})"; fail=1; geo_ok[$1]=0; return 1
+}
 # setup_image BS SETTLE -> path of an image after SETTLE default-image boots
 setup_image() {
     local bs="$1" settle="$2" img="${top}/setup-${1}-${2}.img" k
-    truncate -s "${img_bytes}" "${img}"
+    cp "${gpt_tmpl}" "${img}"
     for (( k = 1; k <= settle; k++ )); do
         if ! boot_full "${bs}-setup${settle}-${k}" "${plain_efi}" "${img}" "${bs}" \
             || ! grep -q "^store: committed generation=$(( k + 1 )) boot_count=${k}$" "${work}/serial.txt"; then
@@ -541,7 +573,7 @@ injected_case() {
         return
     fi
     img="${top}/inject.img"; cp "${crashed}" "${img}"
-    off=$(( store_off + tc_slot * unit + sb_crc_off ))
+    off=$(( sb_base + tc_slot * unit + sb_crc_off ))
     printf "\\$(printf '%03o' $(( $(od -An -tu1 -j "${off}" -N 1 "${img}") ^ 0x01 )))" \
         | dd of="${img}" bs=1 seek="${off}" conv=notrunc status=none
     cmp -s "${img}" "${crashed}" && { echo "FAIL  bs=${bs} CRC byte flip did not change the image"; inject_ok=0; return; }
@@ -572,6 +604,7 @@ fi
 mutant_hit=0; mutant_cases=0
 for bs in "${gate_geos[@]}"; do
     echo "=== ${bs}-byte LBA ==="
+    new_disk "${bs}" || continue
     for settle in "${gate_settles[@]}"; do
         if [[ "${mode}" == mutant && "${mutant}" == accept_bad_root_crc && "${settle}" == 0 ]]; then continue; fi
         base="$(setup_image "${bs}" "${settle}")"
