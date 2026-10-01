@@ -32,7 +32,7 @@ becomes part of `verify_all.sh`.
 
 ## Rules for code
 
-- **Rust.** Small AArch64 assembly is fine where the hardware requires it.
+- **C.** The target language is C, with assembly only where a measurement shows it is faster. No new Rust; the existing Rust in `crates/` is legacy and is being replaced.
 - **No Python, no CUDA, no CUDA-shaped APIs** anywhere in the repository.
 - **Sovereign trusted base.** Boot, kernel, memory management, scheduling,
   storage, cryptography, identity, AEGIS and recovery build from inspectable
