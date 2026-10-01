@@ -160,7 +160,7 @@ rcheck() { # row, description, ERE pattern
 rabsent() { # row, description, ERE pattern
     if grep -qE -- "$3" "${work}/serial.txt"; then rfail "$1" "$2"; else rpass "$1" "$2"; fi
 }
-line_of() { grep -nE -- "$1" "${work}/serial.txt" | head -1 | cut -d: -f1; }
+line_of() { { grep -nE -m1 -- "$1" "${work}/serial.txt" || true; } | cut -d: -f1; }
 before() { # row, description, earlier ERE, later ERE: both present, earlier first
     local a b
     a="$(line_of "$3")"; b="$(line_of "$4")"
