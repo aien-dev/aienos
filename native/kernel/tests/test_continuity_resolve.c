@@ -804,7 +804,7 @@ static void t_fake(void)
 {
     struct fake f;
     memset(&f, 0, sizeof f);
-    struct cr_source src = {&f, fk_count, fk_entry, fk_read, fk_mount};
+    struct cr_source src = {&f, fk_count, fk_entry, fk_read, fk_mount, NULL};
     const char *w = NULL;
     int rc = 0;
     /* oversize (K-1): Limit, never decoded, never truncated */

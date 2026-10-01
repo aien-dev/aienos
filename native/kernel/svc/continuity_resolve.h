@@ -53,6 +53,7 @@ enum {
     CR_ALREADY_PROVISIONED = 6, /* provision only (cut 4); never returned by resolve */
     CR_READ_ONLY = 7,        /* cr_writable on a mount that is not Valid */
     CR_E_ARG = 8,            /* C only: caller bug (NULL); nothing read */
+    CR_NO_ENTROPY = 9,       /* C only: provision found no entropy (no fallback), nothing written */
 };
 const char *cr_outcome_name(int outcome); /* Rust spelling: "Unprovisioned", ... */
 
@@ -74,6 +75,9 @@ struct cr_source {
     int (*read)(void *ctx, uint32_t i, uint8_t *out, size_t cap, size_t *len);
     /* CR_MOUNT_VALID or CR_MOUNT_DEGRADED. */
     int (*mount_state)(void *ctx);
+    /* Store generation (rs `store.generation()`); NULL for a read-only fake. Provision
+     * needs it (provisioned_generation = generation + 1) and refuses CR_E_ARG without. */
+    uint64_t (*generation)(void *ctx);
 };
 
 /* Objects this layer tracks: kinds 16, 17, 18, 20 (kind 19 is ignored, as in Rust). */

@@ -1,13 +1,18 @@
 # C kernel contract: continuity objects and Recovery Core
 
-Status: **SPEC, NOT_RUN.** What has C code (all **host PASS**, QEMU n/a, nothing wired into the kernel):
-the codec (cuts 1-2: `svc/continuity_codec.c`, golden vectors, C/Rust decode agreement) and, new in
-cut 3, boot **resolution** (`svc/continuity_resolve.c`: P-3 lookup, INV-5 orphan/Conflict, INV-6 chain,
-INV-7 references, read-only check), the Recovery Core **challenge**, **state digest** and **operator
-HMAC** (same file), and the sealed-Store binding `svc/continuity_resolve_sealed.c`, all run by
-`make -C native/kernel test`, `sanitize` and `continuity-mutants` against the REAL sealed Store in a file.
-No provision, commit or resume (cut 4), no Recovery Core inspection or actions (cut 5), no wiring. Every C
-gate named here stays `NOT_RUN (MISSING_IMPLEMENTATION)` until a forge receipt covers it.
+Status: **IMPLEMENTED (host PASS), QEMU NOT_RUN, hardware NOT_RUN** for the continuity half (M4_CONTINUITY).
+**Recovery Core (M4_RECOVERY) is NOT implemented beyond the challenge, state digest and operator HMAC of cut 3**:
+no inspection, no repair, no operator provisioning action (cut 5). What has C code (all **host PASS**, QEMU n/a,
+nothing wired into the kernel): the codec (cuts 1-2: `svc/continuity_codec.c`, golden vectors, C/Rust decode
+agreement), boot **resolution** (cut 3: `svc/continuity_resolve.c`: P-3 lookup, INV-5 orphan/Conflict, INV-6 chain,
+INV-7 references, read-only check), the Recovery Core challenge, state digest and operator HMAC (same file), the
+sealed-Store binding `svc/continuity_resolve_sealed.c`, and, new in cut 4, **provision, commit and resume**
+(`svc/continuity_commit.c`: INV-4, INV-8 to INV-11, K-1, markers of section 3), run by
+`make -C native/kernel test`, `sanitize` and `continuity-mutants` against the REAL sealed Store in a file, with
+power cuts at every Store and anchor checkpoint and at every block boundary, for commit AND for provisioning.
+Not done: Recovery Core inspection and actions (cut 5); wiring into the kernel and any QEMU run (the first wiring cut
+needs the K-7 test-mode mechanism and a kernel stage that calls these functions). Every QEMU row (81-87, 88-91)
+stays `NOT_RUN` until a forge receipt covers it. Host rows 87a-87d, 87f, 87g are HOST PASS (see GATES.md).
 QEMU qualifies nothing physical; nothing here says anything about Machine 1.
 
 Authority:
@@ -300,6 +305,7 @@ PROPOSED: the C kernel prints these exact strings (same field order, same
 Debug spellings such as `Degraded(Malformed)`), so the C gate scripts can use
 the Rust scripts' grep patterns and the rows can be IDENTICAL rather than
 DIFFERS.
+**CONTINUITY markers IMPLEMENTED, host PASS (cut 4):** `cr_marker_view` (`PROVISIONED`, `RESUMED`, `RESUMED_READONLY`, `REMEMBERED`, `COMMITTED`) and `cr_marker_outcome` (`UNPROVISIONED`, `CONFLICT`, `CORRUPT (why)`, `NO_ENTROPY`, `STOP (...)`) in `svc/continuity_commit.c` produce the strings above byte for byte (test compares with an independently printf-built line, incl. the 8-byte `memory=` and `e3b0c44298fc1c14` for no records). Only the Store-error spelling differs (9.2). The `CHECKPOINT:`, `RECOVERY_*` markers are not implemented (no wiring; cut 5).
 
 ---
 
@@ -357,7 +363,7 @@ main design point of this contract.
 
 - **P-1 (PROPOSED).** Continuity objects are stored through `ss_transact` as
   `ss_object{kind = 16|17|18|20, version = 1, bytes = canonical plaintext}`.
-  **Read side IMPLEMENTED, host PASS (cut 3); write side (provision, commit) is cut 4.** Evidence:
+  **IMPLEMENTED, host PASS: read side cut 3, write side (provision, commit, resume) cut 4 (`cr_bind_sealed_sink` -> `ss_transact`, one call per transaction, at most 3 objects, order AgentState, WAL, Manifest).** Evidence:
   `test_continuity_resolve.c` writes all four kinds with `ss_transact` at version 1 and `cr_resolve`
   reads them back through the claims (`t_resolved`, `t_orphans`, `t_references`, at 512 and 4096 byte
   blocks).
@@ -423,6 +429,7 @@ main design point of this contract.
   one transaction record, so the Store v1 catalog bound (4096 entries,
   store/v1.rs:12) is reached in fewer continuity commits than in Rust. ADR 0016
   already defers compaction; the C gate must report the count, not hide it.
+  **MEASURED (cut 4, host, `t_catalog_bound`, real sealed Store):** provisioning leaves 4 catalog entries (root, state, manifest, transaction record). Each commit adds its payload objects plus the manifest plus one transaction record: a plain resume 2 entries, a commit with one WAL segment 3. After provisioning and 64 one-record WAL commits the catalog holds **196** entries (4 + 64 x 3), at 4096 and at 512 byte blocks. The 65th WAL segment is refused (`Limit "cortex WAL needs compaction"`, nothing written), so the WAL cap is reached long before the 4096-entry catalog bound. Resumes alone are the fastest way to fill the catalog: (4096 - 4) / 2 = 2046 resumes in theory. **Run to exhaustion (`CK_K2_FULL=1`, slow, about 3 minutes, not part of `make test`):** in a 16384-unit (64 MiB) Store region at 4096 byte blocks, 915 resumes after provisioning succeeded and the 916th returned `Store rc=-205` (`NoSpace`), at 1834 of 4096 catalog entries. So the limit reached first is **Store space (append-only, no reclaim), not the catalog bound**: about 18 units (72 KiB) per resume at that depth. Either refusal arrives as `CR_STORE` with nothing half written (the last transaction failed cleanly). A real boot disk has a larger Store region, so the practical bound there is the catalog (<= 2046 resumes) or space, whichever is smaller; UNVERIFIED for any real partition size. Compaction stays deferred (ADR 0016:96-98), so a long-lived store needs it; this is the number the gate reports.
 - **K-3 Identity loss looks different.** The Rust campaign flips byte 20 of the
   AgentRoot's first unit (crates/aienos-store-tool/src/main.rs:177-201,
   qemu_recovery_test.sh:168). In the sealed Store that byte is ciphertext, so
@@ -601,17 +608,17 @@ M4_CONTINUITY:
 
 | id | mutation | must turn FAIL |
 |---|---|---|
-| MC-1 | resume provisions when Unprovisioned | 82, 87a |
+| MC-1 | resume provisions when Unprovisioned: `CM_MUTANT_RESUME_PROVISIONS`, IMPLEMENTED, killed (cut 4) | 82, 87a |
 | MC-2 | drop the orphan check (INV-5): orphan objects read as Unprovisioned: `CR_MUTANT_NO_ORPHAN_CHECK`, IMPLEMENTED, killed (cut 3) | 91i (and the C twin of 87a with an orphan manifest) |
-| MC-3 | resume skips the commit (no incarnation + 1) | 84, 85, 85a, 87b |
+| MC-3 | resume skips the commit (no incarnation + 1): `CM_MUTANT_RESUME_NO_COMMIT`, IMPLEMENTED, killed (cut 4) | 84, 85, 85a, 87b |
 | MC-4 | manifest chain check ignores `previous`: `CR_MUTANT_IGNORE_PREVIOUS`, IMPLEMENTED, killed (cut 3) | 87e |
 | MC-5 | accept `format_version != 0` or nonzero reserved bytes | 87h, D-2 |
 | MC-6 | `child_branch_id` index little-endian | D-1, 87i |
-| MC-7 | provision allowed when a root exists | 83a, 87c |
-| MC-8 | provision or commit split into two transactions (manifest after payload) | 86-86f, 87g |
-| MC-9 | `writable` check removed (commit on degraded mount) | 87, 87f |
-| MC-10 | agent id from a fixed value instead of RNDR | 83b |
-| MC-11 | WAL segment truncated silently at the size bound (K-1) instead of Limit | C size-bound test (PROPOSED) |
+| MC-7 | provision allowed when a root exists: `CM_MUTANT_PROVISION_WITH_ROOT`, IMPLEMENTED, killed (cut 4) | 83a, 87c |
+| MC-8 | provision or commit split into two transactions (manifest after payload): `CM_MUTANT_SPLIT_TXN`, IMPLEMENTED, killed (cut 4; caught by the provisioning cut sweep: root and state without a manifest is Corrupt, and by the generation check, which sees +2) | 86-86f, 87g |
+| MC-9 | `writable` check removed (commit on degraded mount): `CM_MUTANT_NO_WRITABLE_CHECK`, IMPLEMENTED, killed (cut 4; note the sealed Store itself still refuses with `ST_E_READ_ONLY_DEGRADED`, so the mutant changes the outcome from ReadOnly to Store, which the test requires to be ReadOnly) | 87, 87f |
+| MC-10 | agent id from a fixed value instead of RNDR: `CM_MUTANT_FIXED_AGENT`, IMPLEMENTED, killed (cut 4) | 83b |
+| MC-11 | WAL segment truncated silently at the size bound (K-1) instead of Limit: `CC_MUTANT_TRUNCATE_AT_CAP`, IMPLEMENTED, killed by both `test_continuity_codec` (cut 1) and `test_continuity_commit` (cut 4: a 64 x 1024 byte commit must be Limit with the image unchanged) | C size-bound tests |
 | MC-12 | Conflict check skipped (first root used): `CR_MUTANT_SKIP_CONFLICT`, IMPLEMENTED, killed (cut 3) | 87d |
 | MC-13 | fork-count sum unchecked (wraps): `CC_MUTANT_UNCHECKED_FORK_SUM`, IMPLEMENTED, killed | 87i, `state_forksum_overflow` (D-1, D-2) |
 | MC-14 | golden mismatch only the vectors see (manifest WAL id 63 replaced by id 0): `CC_MUTANT_MANIFEST_LAST_WAL_ZERO`, IMPLEMENTED, killed | D-1 |
@@ -634,8 +641,7 @@ M4_RECOVERY:
 
 Known oracle gap (CODE, not covered by any Rust test): no power-cut campaign
 runs on **provisioning** itself; only commits are cut
-(continuity_tests.rs:242-283, qemu_continuity_test.sh:163-194). PROPOSED: the C
-gate adds one.
+(continuity_tests.rs:242-283, qemu_continuity_test.sh:163-194). **DECIDED and IMPLEMENTED (cut 4, host PASS):** `test_continuity_commit` cuts power during provisioning at all 9 checkpoints (ST_CP_* 0-6, SS_CP_BEFORE_ANCHOR, SS_CP_AFTER_ANCHOR) and at every block boundary of the write sequence (10 at 4096 byte blocks, 73 at 512), for commit and for provisioning: after every cut the store reopens (`ss_open` rc 0) and resolves to exactly the old state (Unprovisioned, generation unchanged) or exactly the full genesis (same agent as the uncut run, sequence 1, incarnation 1, generation + 1); never a root without a manifest. After a cut that left the old state, provisioning again succeeds (no orphans). Checkpoints 0-4 give the old state, 6, before_anchor and after_anchor the new one (before_anchor reopens at `SS_RB_PREPARED_ADVANCE`); checkpoint 5 (`after_inactive_superblock`) gave the NEW state in every run (the test allows either there, as the Rust oracle does). Mutant MC-8 is killed by it.
 
 ---
 
@@ -696,3 +702,24 @@ verdicts (every single-bit flip of 22 vectors, plus the untouched vectors).
 The only known C/Rust difference in the codecs is the C-only K-1 size cap
 (section 5.3), which the flips cannot reach because they keep the length, and
 the C-only `CC_E_ARG` caller-bug class, which no decoder input reaches.
+
+### 9.2 Cut 4 (provision, commit, resume): C versus the Rust code, and what C does on purpose
+
+Where code and contract differ, the safer behaviour (refuse) was chosen. Host evidence:
+`tests/test_continuity_commit.c` (real sealed Store in a file, 4096 and 512 byte blocks).
+
+| item | Rust | C (cut 4) | effect |
+|---|---|---|---|
+| provision over orphans | `provision` checks only that no root exists (continuity.rs:727-730); orphan manifest/state/WAL objects do not stop it | refuses: provision resolves first and returns the resolve outcome (`Corrupt: continuity objects without an agent root`), nothing written | stricter, as the task and ADR 0016 (:50-53) ask; a test (`t_provision_refusals`) writes an orphan manifest and checks the image is byte for byte unchanged |
+| provision with a root that is itself broken | AlreadyProvisioned (a root exists) | the resolve outcome (Corrupt, Limit or Store) | still a refusal; the class differs, the marker says why |
+| provision with two roots | AlreadyProvisioned | AlreadyProvisioned (Conflict counts as "a root exists") | same |
+| provision with no entropy | the caller (nvme_read.rs:1184-1193) prints `NO_ENTROPY` before calling `provision` | `cr_provision` itself returns `CR_NO_ENTROPY` (C-only outcome, marker `CONTINUITY: NO_ENTROPY`) from `ck_rng_fill`, after the writable and Unprovisioned checks, before any write; a never-probed rng also refuses | the refusal is inside the library, so no caller can mint without entropy; order: ReadOnly, AlreadyProvisioned/orphans, NoEntropy |
+| zero agent id | Corrupt("zero agent id") (:731) | same, from the drawn bytes (unreachable with a working rng: `ck_rng_fill` refuses repeated words) | same |
+| `provisioned_generation` | `store.generation() + 1` (:738) | `cr_source.generation(ctx) + 1` (new field, NULL for fakes; provision refuses `CR_E_ARG` without it); the test checks it equals the generation after the commit | same value |
+| resume returns | `(Continuity, committed)` with the full record list | `cr_view` (count + `memory` digest) and `*committed` | as 9.1 |
+| commit sees a stale `current` | not checked (the caller passes a `Continuity`) | not checked either: the new manifest names `cur->manifest_id` as previous, and a stale `cur` therefore gives a manifest the next resolve refuses (sequence gap or fork), never a silent overwrite | UNVERIFIED by a dedicated test; the chain check (INV-6, `t_chain`, cut 3) is what catches it |
+| object limits | AgentState up to 256 branches (20544 bytes), WAL segment up to 64 records (67872 bytes) | K-1 cap: an object over 16384 bytes is `Limit` and nothing is written; 204 branches commit, 205 do not; 64 x 1024 byte records do not; 15 x 1024 byte records do and read back whole | C-only Limit, tested at the bound (`t_size_bound`); a 65-record segment is `Limit "WAL segment record count"` as in Rust |
+| 65th WAL segment | `Limit("cortex WAL needs compaction")` | same text; 64 segments commit, the 65th is refused with nothing written | same |
+| marker text for a Store error | `STOP (<Debug of the Rust error>)` | `STOP (Store(<rc>))` with the C error number; `STOP (ReadOnly)`, `STOP (AlreadyProvisioned)`, `STOP (Limit("..."))`, `UNPROVISIONED`, `CONFLICT`, `CORRUPT (<why>)`, `NO_ENTROPY` match the Rust spelling | the QEMU rows for store-error cases will be DIFFERS |
+| crash campaign | 7 Store checkpoints (kill points) per commit; provisioning not cut | 9 (7 Store + 2 anchor) plus every block boundary, for commit AND provisioning; `after_inactive_superblock` gives the NEW state (Rust "either") | stronger; anchor points reopen at `SS_RB_PREPARED_ADVANCE` and show the new state, as 6.1 predicted |
+| agent id word order | four RNDR words stored little-endian, word 0 first | whatever `ck_rng_fill` writes (it is the C kernel's entropy interface, entropy.h:53) | UNVERIFIED on hardware: the byte order is the rng module's; the test checks the agent equals `ck_rng_fill` output, not the Rust word layout |

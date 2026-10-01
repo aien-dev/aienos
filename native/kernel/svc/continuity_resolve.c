@@ -18,6 +18,7 @@ const char *cr_outcome_name(int o)
     case CR_ALREADY_PROVISIONED: return "AlreadyProvisioned";
     case CR_READ_ONLY: return "ReadOnly";
     case CR_E_ARG: return "Arg";
+    case CR_NO_ENTROPY: return "NoEntropy";
     }
     return "?";
 }

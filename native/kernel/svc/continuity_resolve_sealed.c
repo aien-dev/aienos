@@ -32,6 +32,11 @@ static int sealed_read(void *ctx, uint32_t i, uint8_t *out, size_t cap, size_t *
     return 0;
 }
 
+static uint64_t sealed_generation(void *ctx)
+{
+    return ss_generation(ctx);
+}
+
 static int sealed_mount_state(void *ctx)
 {
     const ss_store *s = ctx;
@@ -45,6 +50,7 @@ void cr_bind_sealed(struct cr_source *out, ss_store *s)
     out->entry = sealed_entry;
     out->read = sealed_read;
     out->mount_state = sealed_mount_state;
+    out->generation = sealed_generation;
 }
 
 void cr_state_digest_dev(const st_dev *dev, uint8_t out[32])
@@ -60,4 +66,24 @@ void cr_state_digest_dev(const st_dev *dev, uint8_t out[32])
     sha256_update(&h, raw[0], SV1_UNIT);
     sha256_update(&h, raw[1], SV1_UNIT);
     sha256_final(&h, out);
+}
+
+static int sealed_transact(void *ctx, const struct cr_wobj *objs, size_t n)
+{
+    struct cr_sealed_sink *k = ctx;
+    ss_object so[SS_MAX_OBJECTS];
+    if (n == 0 || n > SS_MAX_OBJECTS) return SS_E_ARG;
+    for (size_t i = 0; i < n; i++) {
+        so[i].kind = objs[i].kind;
+        so[i].version = objs[i].version;
+        so[i].bytes = objs[i].bytes;
+        so[i].len = objs[i].len;
+    }
+    return ss_transact(k->s, so, n, k->hook, k->hook_arg, NULL);
+}
+
+void cr_bind_sealed_sink(struct cr_sink *out, struct cr_sealed_sink *ctx)
+{
+    out->ctx = ctx;
+    out->transact = sealed_transact;
 }
