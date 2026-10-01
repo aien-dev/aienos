@@ -14,6 +14,7 @@ STAGE_OUT ?= /tmp/aienos-ck-stage-$(shell id -u)
 
 # Own sources (image).
 STAGE_OWN_SRCS := $(STAGE_DIR)/dev/pci.c $(STAGE_DIR)/dev/nvme_bind.c $(STAGE_DIR)/dev/nvme_shutdown.c $(STAGE_DIR)/dev/virtio_net.c \
+                  $(STAGE_DIR)/dev/net_bind.c $(STAGE_DIR)/dev/net_udp.c \
                   $(STAGE_DIR)/dev/devices.c $(STAGE_DIR)/svc/security.c $(STAGE_DIR)/svc/store_boot.c
 # Native modules, compiled unmodified.
 STAGE_NATIVE_SRCS := \
@@ -27,7 +28,7 @@ STAGE_NATIVE_SRCS := \
   $(STAGE_NATIVE)/argus/argus_detect.c $(STAGE_NATIVE)/argus/argus_contain.c \
   $(STAGE_NATIVE)/argus/bridge/argus_aegis_bridge.c \
   $(STAGE_NATIVE)/capability/aienos_capability.c $(STAGE_NATIVE)/capability/aienos_contain.c \
-  $(STAGE_NATIVE)/net/aienos_virtio_pci.c
+  $(STAGE_NATIVE)/net/aienos_virtio_pci.c $(STAGE_NATIVE)/net/aienos_virtio_net.c $(STAGE_NATIVE)/net/aienos_net.c
 # Kernel-only glue: hosted-header stand-ins for capability/ARGUS + weak mem*.
 STAGE_KERNEL_SRCS := $(STAGE_DIR)/svc/ck_compat.c
 

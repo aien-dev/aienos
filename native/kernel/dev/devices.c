@@ -4,6 +4,7 @@
 #include "nvme_bind.h"
 #include "pci.h"
 #include "virtio_net.h"
+#include "net_bind.h"
 
 static pci_system g_pci;
 static ck_nvme g_nvme;
@@ -42,9 +43,14 @@ int ck_stage_devices(void)
     int nrc = ck_nvme_bind(&g_nvme, &g_pci);
     if (nrc) ck_dev_nvme_release(); /* a failed bind never keeps DMA */
     virtio_pci_caps caps;
-    int vrc = ck_virtio_net_probe(&g_pci, &caps);
+    const pci_func *vf = 0;
+    int vrc = ck_virtio_net_probe(&g_pci, &caps, &vf);
+    /* virtio-net: SMMU-confined attach plus one bounded UDP round trip; the
+     * device is always released again before this returns (net_bind.h). A
+     * net failure is reported, never a devices-stage failure. */
+    int netrc = (vrc == 0 && vf) ? ck_net_bind_selftest(vf, &caps) : 1;
     ck_printf("devices: pci=ok nvme=%s virtio_net=%s\n", g_nvme.bound ? "bound" : "unbound",
-              vrc == 0 ? "probed" : "caps-refused");
+              vrc != 0 ? "caps-refused" : !vf ? "absent" : netrc == 0 ? "selftest-ok" : "selftest-failed");
     if (nrc == -1) return 0;  /* no NVMe present: not a devices failure; Store reports it */
     return nrc;
 }
@@ -55,9 +61,12 @@ int ck_stage_devices(void)
  * only reports that; after a panic mid-stage it does the full halt order. */
 void ck_stage_quiesce(void)
 {
+    int net_live = ck_net_live();
+    if (net_live) ck_net_release();
     int was_live = g_nvme.pf && (g_nvme.bm_on || g_nvme.confined);
     if (was_live)
         ck_dev_nvme_release();
     ck_printf("devices: quiesce before reset nvme=%s\n",
               !g_nvme.pf ? "none" : was_live ? "released-now" : "already-released");
+    if (net_live) ck_printf("devices: quiesce before reset virtio_net=released-now\n");
 }

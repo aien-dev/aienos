@@ -4,8 +4,9 @@
 
 static uint8_t cfg_image[4096];
 
-int ck_virtio_net_probe(const pci_system *pci, virtio_pci_caps *caps)
+int ck_virtio_net_probe(const pci_system *pci, virtio_pci_caps *caps, const pci_func **func_out)
 {
+    if (func_out) *func_out = 0;
     const pci_func *f = pci_find_id(pci, 0x1af4u, 0x1041u);
     if (!f) {
         f = pci_find_id(pci, 0x1af4u, 0x1000u); /* transitional: subsystem 1 = net */
@@ -32,6 +33,6 @@ int ck_virtio_net_probe(const pci_system *pci, virtio_pci_caps *caps)
               f->bus, f->dev, f->fn, caps->common_cfg.bar, caps->common_cfg.offset, caps->notify_cfg.bar,
               caps->notify_cfg.offset, caps->notify_off_multiplier, caps->isr_cfg.bar, caps->isr_cfg.offset,
               caps->device_cfg.bar, caps->device_cfg.offset);
-    ck_printf("virtio_net: not bound (native/net has no virtio queue driver yet; capability parse only)\n");
+    if (func_out) *func_out = f;
     return 0;
 }
