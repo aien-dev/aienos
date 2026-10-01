@@ -10,7 +10,9 @@
 
 STAGE_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 STAGE_NATIVE := $(STAGE_DIR)/..
-STAGE_OUT ?= /tmp/aienos-ck-stage-$(shell id -u)
+# Per-tree default (inside this checkout, under the git-ignored /target/), so two
+# clones never share object files. Override with STAGE_OUT=<dir> if needed.
+STAGE_OUT ?= $(abspath $(STAGE_DIR)/../../target/stage)
 
 # Own sources (image).
 STAGE_OWN_SRCS := $(STAGE_DIR)/dev/pci.c $(STAGE_DIR)/dev/nvme_bind.c $(STAGE_DIR)/dev/nvme_shutdown.c $(STAGE_DIR)/dev/virtio_net.c \
