@@ -28,6 +28,9 @@
 #                        into the sealed Store on a raw NVMe disk image
 #   make test            host unit tests            -> CK_CORE_HOST: PASS
 #   make sanitize        same under ASan + UBSan    -> CK_CORE_HOST: PASS
+#   make continuity-mutants
+#                        TEST-only -D mutants of svc/continuity_codec.c must
+#                        each fail test_continuity_codec -> CK_CONTINUITY_CODEC_MUTANTS: PASS
 #   make stage-test | stage-sanitize | stage-free   stage host tests (stage.mk)
 #   make print-kcflags   flags stage code must be built with
 #   make udp-echo        host UDP echo helper for scripts/qemu_ck_net_test.sh:
@@ -318,7 +321,8 @@ $(FULL_EFI): $(FULL_ELF)
 # ---- host unit tests ----
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c
-TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy
+TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy \
+	test_continuity_codec
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -359,6 +363,43 @@ $(OUT)/host-san/test_artifact: $(KDIR)/tests/test_artifact.c $(ART_HOST_DEPS) $(
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(ART_HOST_INC) -o $@ $< $(ART_HOST_SRCS)
 
+# Continuity codec (C port cut 1, contract CONTINUITY_RECOVERY_CONTRACT.md,
+# aienos#222): host test plus TEST-only -D mutants, each of which must make
+# the test print its FAIL verdict. Mutant flags are refused under
+# CK_HARDWARE_STAGING (svc/continuity_codec.h).
+CC_HOST_SRCS := $(KDIR)/svc/continuity_codec.c $(NATIVE)/argus/sha256.c $(NATIVE)/store/store_v1.c
+CC_HOST_INC := -I$(KDIR)/svc -I$(NATIVE)/argus -I$(NATIVE)/store
+CC_HOST_DEPS := $(CC_HOST_SRCS) $(KDIR)/svc/continuity_codec.h $(NATIVE)/argus/sha256.h \
+	$(NATIVE)/store/store_v1.h $(KDIR)/tests/ck_test.h
+CC_MUTANTS := CC_MUTANT_SKIP_TAKE_BOUND CC_MUTANT_ACCEPT_RESERVED CC_MUTANT_CHILD_INDEX_LE \
+	CC_MUTANT_TRUNCATE_AT_CAP
+
+$(OUT)/host/test_continuity_codec: $(KDIR)/tests/test_continuity_codec.c $(CC_HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(CC_HOST_INC) -o $@ $< $(CC_HOST_SRCS)
+
+$(OUT)/host-san/test_continuity_codec: $(KDIR)/tests/test_continuity_codec.c $(CC_HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CC_HOST_INC) -o $@ $< $(CC_HOST_SRCS)
+
+continuity-mutants: $(OUT)/host/test_continuity_codec
+	@mkdir -p $(OUT)/host-mut; fail=0; \
+	$(OUT)/host/test_continuity_codec > $(OUT)/host-mut/base.log 2>&1 || { echo "unmutated test_continuity_codec fails"; fail=1; }; \
+	for m in $(CC_MUTANTS); do \
+	  b=$(OUT)/host-mut/test_continuity_codec_$$m; \
+	  if ! $(HOSTCC) $(HCFLAGS) $(CC_HOST_INC) -D$$m -o $$b $(KDIR)/tests/test_continuity_codec.c $(CC_HOST_SRCS); then \
+	    echo "mutant $$m: does not build (FAIL)"; fail=1; continue; fi; \
+	  if $$b > $$b.log 2>&1; then echo "mutant $$m: SURVIVED (FAIL)"; fail=1; \
+	  elif grep -q "^test_continuity_codec: FAIL" $$b.log; then \
+	    echo "mutant $$m: killed ($$(grep -c '^  FAIL ' $$b.log) checks failed)"; \
+	  else echo "mutant $$m: no FAIL verdict (crashed?) (FAIL)"; fail=1; fi; \
+	done; \
+	if $(HOSTCC) $(HCFLAGS) $(CC_HOST_INC) -DCK_HARDWARE_STAGING=1 -DCC_MUTANT_SKIP_TAKE_BOUND \
+	    -fsyntax-only $(KDIR)/svc/continuity_codec.c 2>/dev/null; then \
+	  echo "mutant flag accepted under CK_HARDWARE_STAGING (FAIL)"; fail=1; \
+	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
+	if [ $$fail = 0 ]; then echo "CK_CONTINUITY_CODEC_MUTANTS: PASS"; else echo "CK_CONTINUITY_CODEC_MUTANTS: FAIL"; exit 1; fi
+
 ART_TOOL := $(OUT)/host/ck_artifact_tool
 $(ART_TOOL): $(KDIR)/tools/ck_artifact_tool.c $(ART_HOST_DEPS)
 	@mkdir -p $(dir $@)
@@ -393,4 +434,4 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize clean print-kcflags udp-echo tool store-image owner-gen FORCE
+.PHONY: all full test sanitize clean print-kcflags udp-echo tool store-image owner-gen continuity-mutants FORCE
