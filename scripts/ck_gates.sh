@@ -70,7 +70,7 @@ AAVMF_CODE_FD="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}"
 AAVMF_VARS_FD="${AAVMF_VARS:-/usr/share/AAVMF/AAVMF_VARS.fd}"
 PHYSICAL_STATEMENT="QEMU emulator runs only. Nothing here was run on Machine 1 or any GB10; no physical qualification is claimed."
 M4_NVME_PASS_NOTE="SMMU-confined NVMe DMA in QEMU (iommu=smmuv3, default build); TEST-ONLY bypass build boot-checked separately"
-NET_PASS_NOTE="QEMU user networking (slirp): attach, UDP TX seen by the host helper, UDP reply RX parsed by M6-A; QEMU does not route virtio-net DMA through the SMMU (no ACCESS_PLATFORM), so confinement is not proven for it"
+NET_PASS_NOTE="QEMU user networking (slirp), virtio-net DMA through the smmuv3 vIOMMU (ACCESS_PLATFORM negotiated, required): attach, UDP TX seen by the host helper, UDP reply RX parsed by M6-A, out-of-window device DMA refused (F_TRANSLATION, page intact) and recovered by reset; QEMU, not hardware"
 
 die() { echo "ck_gates: $*" >&2; exit 2; }
 json_str() {
@@ -354,7 +354,7 @@ self_test() {
     grep -qxF "AIENOS_CK_M4_NVME: PASS (${M4_NVME_PASS_NOTE})" "${tmp}/A.out" \
         && ok "A: M4_NVME PASS line carries the confined-mode note" || bad "A: M4_NVME PASS line lacks the note"
     grep -qxF "AIENOS_CK_NET: PASS (${NET_PASS_NOTE})" "${tmp}/A.out" \
-        && ok "A: NET PASS line carries the QEMU slirp / no-SMMU-enforcement note" || bad "A: NET PASS line lacks the note"
+        && ok "A: NET PASS line carries the QEMU slirp / SMMU fence note" || bad "A: NET PASS line lacks the note"
     grep -qx 'AIENOS_CK_KEYBOARD: NOT_RUN (MISSING_IMPLEMENTATION: no xHCI/USB HID keyboard driver in the C kernel)' "${tmp}/A.out" \
         && ok "A: missing gate prints NOT_RUN (MISSING_IMPLEMENTATION: reason)" || bad "A: KEYBOARD line wrong"
     [[ "$(grep -c '^AIENOS_CK_[A-Z0-9_]*: ' "${tmp}/A.out")" == 14 ]] && ok "A: exactly 14 verdict lines" || bad "A: verdict line count"
