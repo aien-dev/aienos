@@ -18,9 +18,11 @@
  * Fence proof (after the good round trip, net_bind.c smmu_negative_test):
  * the RX descriptors the device holds are pointed at a pattern page outside
  * the window and a datagram draws a reply; the SMMU must log F_TRANSLATION
- * for this stream at that page, the page must stay intact and no RX may
- * complete. QEMU then marks the device broken (NEEDS_RESET); the binding
- * resets and re-inits it and runs a second round trip inside the window. */
+ * for this stream at that page, the page must stay intact. Measured on QEMU
+ * 8.2.2: no NEEDS_RESET; QEMU completes the RX through its internal bounce
+ * buffer (rx_completed=1) while the refused write never reaches the page.
+ * The binding discards the redirected descriptors, resets and re-inits the
+ * device and runs a second round trip inside the window. */
 #ifndef AIENOS_CK_NET_BIND_H
 #define AIENOS_CK_NET_BIND_H
 #include "aienos_virtio_net.h"

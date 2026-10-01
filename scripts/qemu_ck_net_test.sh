@@ -35,8 +35,9 @@
 #       an F_TRANSLATION (0x10) record whose stream id is the NIC's (from the
 #       smmu_dma_window line) and whose address is in that page; this script
 #       re-checks those printed event fields itself (page outside the window,
-#       sid equal, addr in page), the page must read back intact, no RX may
-#       complete, and the positive round trip must have raised no fault;
+#       sid equal, addr in page), the page must read back intact (whether QEMU
+#       completes the RX via its bounce buffer is reported, not judged), and
+#       the positive round trip must have raised no fault;
 #   (e) recovery: device reset + re-init (ACCESS_PLATFORM again) and a second
 #       full ARP + UDP round trip inside the window with no new fault;
 #   plus the release order (device reset, bus master revoked, stream back to
@@ -48,9 +49,10 @@
 #          refuse it before FEATURES_OK ("init FAIL (NoAccessPlatform)"), no
 #          attach, no datagram, helper logs nothing new, device released.
 # Not proven (stated, not hidden): QEMU's smmuv3 and virtio models are not
-# hardware; QEMU marks the NIC broken after the refused DMA (virtio "bogus
-# descriptor", NEEDS_RESET), so the fence test shows recovery by reset +
-# re-init, not a device that keeps running through the fault.
+# hardware; measured on QEMU 8.2.2 the refused DMA does not set NEEDS_RESET (QEMU
+# completes the RX through its bounce buffer, write dropped); the kernel
+# discards the redirected descriptors and shows recovery by reset + re-init,
+# not a device that keeps running through the fault.
 # Netdev: -netdev user,ipv6=off,restrict=off (AIENOS_NET_RESTRICT overrides).
 # Measured 2026-10-01 with QEMU on the Spark: AIENOS_NET_RESTRICT=on makes the
 # gate FAIL (ARP still answers, but the datagram never reaches the helper on
