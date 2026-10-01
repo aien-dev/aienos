@@ -1,10 +1,13 @@
 # C kernel contract: continuity objects and Recovery Core
 
-Status: **SPEC, NOT_RUN.** Only the codec has C code (cuts 1-2: `svc/continuity_codec.c`,
-the golden vectors and the C/Rust decode agreement run by `make -C native/kernel test`
-and `continuity-mutants`: **host PASS**, QEMU n/a, nothing wired into the kernel).
-Resolution, Recovery Core and every C gate named here stay `NOT_RUN
-(MISSING_IMPLEMENTATION)` until a forge receipt covers them.
+Status: **SPEC, NOT_RUN.** What has C code (all **host PASS**, QEMU n/a, nothing wired into the kernel):
+the codec (cuts 1-2: `svc/continuity_codec.c`, golden vectors, C/Rust decode agreement) and, new in
+cut 3, boot **resolution** (`svc/continuity_resolve.c`: P-3 lookup, INV-5 orphan/Conflict, INV-6 chain,
+INV-7 references, read-only check), the Recovery Core **challenge**, **state digest** and **operator
+HMAC** (same file), and the sealed-Store binding `svc/continuity_resolve_sealed.c`, all run by
+`make -C native/kernel test`, `sanitize` and `continuity-mutants` against the REAL sealed Store in a file.
+No provision, commit or resume (cut 4), no Recovery Core inspection or actions (cut 5), no wiring. Every C
+gate named here stays `NOT_RUN (MISSING_IMPLEMENTATION)` until a forge receipt covers it.
 QEMU qualifies nothing physical; nothing here says anything about Machine 1.
 
 Authority:
@@ -354,6 +357,10 @@ main design point of this contract.
 
 - **P-1 (PROPOSED).** Continuity objects are stored through `ss_transact` as
   `ss_object{kind = 16|17|18|20, version = 1, bytes = canonical plaintext}`.
+  **Read side IMPLEMENTED, host PASS (cut 3); write side (provision, commit) is cut 4.** Evidence:
+  `test_continuity_resolve.c` writes all four kinds with `ss_transact` at version 1 and `cr_resolve`
+  reads them back through the claims (`t_resolved`, `t_orphans`, `t_references`, at 512 and 4096 byte
+  blocks).
   The kinds do not collide with existing C application kinds (CODE:
   `CK_BOOT_KIND` 0x0B00, store_boot.h:30; `CK_ART_INDEX_KIND` 0x0A01 and
   `CK_ART_CHUNK_KIND` 0x0A02, native/kernel/svc/artifact_store.h:38-39).
@@ -365,6 +372,10 @@ main design point of this contract.
   compares bytes directly. The sealed envelope's own Store ObjectId (SHA-256
   of the envelope, keyed by the store keys; m5.h:171-181, store_sealed.c:334-345)
   is never written into a continuity object.
+  **IMPLEMENTED on the read side, host PASS (cut 3):** `cr_resolve` computes every logical id with
+  `sv1_object_id` over the decrypted plaintext (`continuity_resolve.c:113`) and follows only logical ids
+  (`read_kind`, :64-82), re-hashing each object it reads so a reference can never reach different
+  bytes (`t_references`, `t_chain`). Bytes stay bit-identical to Rust (D-1).
 - **P-3 (PROPOSED).** Lookup: after `ss_open`, the verified claims
   (`ws->claims[0..nclaims)`, store_sealed.h:92-118) give each envelope's
   application kind and version (`c.obj.object_kind`, `object_version`) without
@@ -375,6 +386,10 @@ main design point of this contract.
   becomes "claim of application kind K". A logical id that maps to two claims is
   Corrupt (PROPOSED: Rust cannot see this because Store v1 dedups identical
   objects; the sealed store gives each write its own envelope).
+  **IMPLEMENTED, host PASS (cut 3):** `continuity_resolve.c:100-130` (`build_table`; duplicate check :115-118,
+  reason `duplicate logical object id`, checked before the root count so it is Corrupt, not Conflict);
+  test `t_duplicate_id` writes the same root bytes twice into the real sealed Store. Kind 19 and every
+  non-continuity kind are never read (`t_unprovisioned`, `t_fake`), as Rust ignores them.
 
 ### 5.2 Calls the continuity and recovery code needs
 
@@ -383,7 +398,7 @@ main design point of this contract.
 | mount without writing | `ss_open` (store_sealed.h:141-143), which runs `st_open` first | CODE |
 | mount state, peer condition | `s->st.state` (`ST_VALID`, `ST_DEGRADED_RECOVERY`), `s->st.peer` (store_engine.h:22-26, :134-141) | CODE |
 | generation, active slot | `ss_generation`, `st_active_slot` (store_sealed.h:151, store_engine.h:153-155) | CODE |
-| list by kind | claims loop (P-3) | PROPOSED |
+| list by kind | claims loop (P-3), `cr_bind_sealed` in `continuity_resolve_sealed.c` | CODE (cut 3, host PASS) |
 | read one object | `ss_read(s, sid, out, cap, &len, &kind)` (store_sealed.h:149-150) | CODE |
 | commit ≤ 3 objects atomically | `ss_transact(s, objs, n, hook, arg, ids_out)` (store_sealed.h:146-147), n ≤ `SS_MAX_OBJECTS` = 8 | CODE |
 | read-only refusal | `ss_prepare` returns `ST_E_READ_ONLY_DEGRADED` when not Valid (store_sealed.c:379) | CODE; continuity still checks first (INV-11) |
@@ -421,11 +436,15 @@ main design point of this contract.
   sealed Store the anchor holds the newer generation, so `ss_open` is expected to
   refuse with `SS_E_ROLLBACK` (store_sealed.h:57). UNVERIFIED (confidence
   medium). Either way no action may be applicable (INV-15).
-- **K-5 Degraded mount through ss_open.** Whether `ss_open` returns 0 on a
-  `DegradedRecovery` mount with a malformed peer (needed for INV-11 and repair)
-  is UNVERIFIED (confidence medium-high: `st_open` sets the state without failing,
-  store_engine.c:308-314, and the anchor generation is unchanged). The first C
-  host test for repair must prove it.
+- **K-5 Degraded mount through ss_open. DECIDED by running it (cut 3, host PASS).** The question was whether
+  `ss_open` returns 0 on a `DegradedRecovery` mount with a malformed peer (needed for INV-11 and repair).
+  **Answer: yes.** `test_continuity_resolve.c` `t_degraded` (:716, printed at :751) commits two generations
+  to the real sealed Store, fills the inactive superblock slot with garbage, reopens: `ss_open` rc=0,
+  `st.state` = `ST_DEGRADED_RECOVERY`, `st.peer` = `ST_PEER_MALFORMED`, generation unchanged (3 -> 3), the
+  anchor accepts it. On that mount `cr_resolve` still returns the verified view (same agent, incarnation and
+  `memory=`), `cr_writable` returns `CR_READ_ONLY` (INV-11), and `cr_state_digest_dev` hashes the garbage
+  unit as it lies. Run at 512 and 4096 byte blocks. Not tested here: a malformed peer combined with
+  other mount or anchor damage, and repair itself (cuts 4-5).
 - **K-6 Region geometry.** The Rust qualification Store region is 256 units at
   LBA 64 with a control block at LBA 32 (crates/aienos-boot/src/store_qual.rs:13-16).
   The C layout is anchor units 0-3, Store region 4..U-2, probe unit U-1
@@ -553,9 +572,12 @@ ADR 0024 Q2 requires differential agreement, not just parallel tests.
   `CC_FIXTURE_DIR`) reproduces every byte and both ObjectIds (`cc_object_id` and `sv1_object_id`),
   decode then encode is the identity, and tampered bytes, ObjectIds and verdicts are refused.
   Added vector: `state_forksum_overflow` (hostile fork counts, refused by both).
-  **DEFERRED to the resolve cut:** the recovery challenges (both actions) and HMAC responses with the TEST key
-  (0x0f x32) are emitted as `deferred` lines but not checked, because the C codec has no challenge or
-  HMAC code yet.
+  **DONE in the resolve cut (cut 3, host PASS):** the recovery challenges (both actions) and HMAC responses
+  with the TEST key (0x0f x32) are the four `deferred` fixture lines. `test_continuity_resolve.c`
+  `test_fixture` reproduces all four byte for byte from `cr_challenge` and `cr_operator_response`
+  (system record: uuid 0x5a x16, generation 7, state digest 0x33 x32). The fixture file header and the
+  emitter text still say "C does not implement these yet": stale wording, left as is because changing it
+  means regenerating the Rust fixtures; the lines themselves are unchanged.
 - **D-2 Decode agreement.** For every single-bit flip of every vector, C and
   Rust agree on accept / refuse and on the error class.
   **DECIDED and IMPLEMENTED (cut 2, host PASS).** `continuity_verdicts.txt` holds the Rust verdict of each
@@ -580,9 +602,9 @@ M4_CONTINUITY:
 | id | mutation | must turn FAIL |
 |---|---|---|
 | MC-1 | resume provisions when Unprovisioned | 82, 87a |
-| MC-2 | drop the orphan check (INV-5): orphan objects read as Unprovisioned | 91i (and the C twin of 87a with an orphan manifest) |
+| MC-2 | drop the orphan check (INV-5): orphan objects read as Unprovisioned: `CR_MUTANT_NO_ORPHAN_CHECK`, IMPLEMENTED, killed (cut 3) | 91i (and the C twin of 87a with an orphan manifest) |
 | MC-3 | resume skips the commit (no incarnation + 1) | 84, 85, 85a, 87b |
-| MC-4 | manifest chain check ignores `previous` | 87e |
+| MC-4 | manifest chain check ignores `previous`: `CR_MUTANT_IGNORE_PREVIOUS`, IMPLEMENTED, killed (cut 3) | 87e |
 | MC-5 | accept `format_version != 0` or nonzero reserved bytes | 87h, D-2 |
 | MC-6 | `child_branch_id` index little-endian | D-1, 87i |
 | MC-7 | provision allowed when a root exists | 83a, 87c |
@@ -590,7 +612,7 @@ M4_CONTINUITY:
 | MC-9 | `writable` check removed (commit on degraded mount) | 87, 87f |
 | MC-10 | agent id from a fixed value instead of RNDR | 83b |
 | MC-11 | WAL segment truncated silently at the size bound (K-1) instead of Limit | C size-bound test (PROPOSED) |
-| MC-12 | Conflict check skipped (first root used) | 87d |
+| MC-12 | Conflict check skipped (first root used): `CR_MUTANT_SKIP_CONFLICT`, IMPLEMENTED, killed (cut 3) | 87d |
 | MC-13 | fork-count sum unchecked (wraps): `CC_MUTANT_UNCHECKED_FORK_SUM`, IMPLEMENTED, killed | 87i, `state_forksum_overflow` (D-1, D-2) |
 | MC-14 | golden mismatch only the vectors see (manifest WAL id 63 replaced by id 0): `CC_MUTANT_MANIFEST_LAST_WAL_ZERO`, IMPLEMENTED, killed | D-1 |
 | MC-15 | golden comparison skipped: `CC_MUTANT_SKIP_D1` (the test counts comparisons), IMPLEMENTED, killed | D-1 |
@@ -601,13 +623,13 @@ M4_RECOVERY:
 | id | mutation | must turn FAIL |
 |---|---|---|
 | MR-1 | inspection writes (for example repairs on inspect) | 88, 90, 91, 91d |
-| MR-2 | challenge omits `state_digest` | 89b, 91k |
-| MR-3 | challenge omits the action byte | 88c, 91k |
-| MR-4 | response compare checks only 16 bytes, or is not constant time | 91n (bit flips in bytes 16-31) |
+| MR-2 | challenge omits `state_digest`: `CR_MUTANT_CHALLENGE_NO_DIGEST`, IMPLEMENTED, killed (cut 3) | 89b, 91k |
+| MR-3 | challenge omits the action byte: `CR_MUTANT_CHALLENGE_NO_ACTION`, IMPLEMENTED, killed (cut 3) | 88c, 91k |
+| MR-4 | response compare checks only 16 bytes (`CR_MUTANT_COMPARE_16`, IMPLEMENTED, killed, cut 3), or is not constant time (not mutated: timing is not observable on the host) | 91n (bit flips in bytes 16-31) |
 | MR-5 | `applicable()` treats a degraded mount with no identity as Unprovisioned (the fe2c2bd bug) | 91g, 91 |
 | MR-6 | repair zeroes the active slot | 89, 89a |
 | MR-7 | repair offered without a resolved identity | 91h |
-| MR-8 | operator auth uses bare SHA-256 or omits the domain | 91o, 91p |
+| MR-8 | operator auth uses bare SHA-256 (`CR_MUTANT_BARE_SHA256`) or omits the domain (`CR_MUTANT_NO_DOMAIN`): both IMPLEMENTED, killed (cut 3) | 91o, 91p |
 | MR-9 | operator provisioning writes source Qualification | 91f |
 
 Known oracle gap (CODE, not covered by any Rust test): no power-cut campaign
@@ -649,6 +671,25 @@ gate adds one.
 | Kinds 19 and 23 listed (:40, :42) | not written or read | out of scope |
 | Provisioning on a store with zero roots (:50-53) | also refused when orphan continuity objects exist (continuity.rs:642-649) | port the code rule |
 | Branch-table validation sums `forks` (not specified in the ADR text; section 1.5 item 4) | Rust #232: the sum is checked, an overflowing sum is refused as Corrupt("fork indexes are not contiguous"); before #232 a release build wrapped and accepted {root forks = 2^64-1, child forks = 2} | DECIDED: C refuses on overflow (`cc_state_validate`), Rust and C agree; vector `state_forksum_overflow`, mutant MC-13 |
+
+
+### 9.1 Cut 3 (resolve): C versus the Rust `resolve`, and what C does on purpose
+
+Where code and contract differ, the safer behaviour (refuse) was chosen. Host evidence:
+`test_continuity_resolve.c`.
+
+| item | Rust | C (cut 3) | effect |
+|---|---|---|---|
+| Cortex records in the view | `Continuity.cortex` keeps every record (continuity.rs:726-736) | `cr_view` keeps `cortex_count` and the streamed `memory` digest only (`continuity_resolve.h`); no record is stored | bounded memory (a view could hold 4 MiB); the QEMU markers and a resume need only count and digest; compare D-3 on resolved values |
+| order of failures | reads objects lazily, root count first (:638-653) | `build_table` reads and hashes every object of kinds 16, 17, 18, 20 first (:100-130) | a Store read error, an oversize object or a duplicate logical id on ANY continuity object is reported before the root count; always a refusal, never a resolve |
+| duplicate logical id | impossible (Store v1 dedups) | Corrupt `duplicate logical object id` (P-3) | C-only reason |
+| oversize object | n/a | Limit `continuity object exceeds the size bound` (K-1), before decode | C-only; a Rust-legal object over 16384 bytes cannot exist in the sealed Store, so the real-Store test refuses at the write (`t_size_bound`) and the resolve Limit is tested with a fake source (`t_fake`) |
+| table bound | catalog bound 4096 over all objects (store/v1.rs:12) | Limit `too many continuity objects` above `CR_TABLE_CAP` = 4096 objects of kinds 16/17/18/20 | untested at the bound (UNVERIFIED), refusal either way |
+| empty or id-less object | n/a | Corrupt `continuity object has no valid id` | C-only; the sealed Store refused a zero-length write in the test run, so this is also unreached through the real Store |
+| re-read check | n/a | `read_kind` re-hashes the plaintext and compares with the logical id (`object changed since lookup`) | C-only defence; unreachable with the real Store |
+| manifest iteration order | catalog order | claim order | when several manifests are broken the first reported reason can differ; the class (Corrupt) is the same |
+| mount state | resolve works on a degraded mount | same (`t_degraded`), `cr_writable` gives `CR_READ_ONLY` | matches INV-11 |
+| outcome set | `Store, Unprovisioned, Conflict, AlreadyProvisioned, ReadOnly, Corrupt, Limit` | same names (`CR_*`), plus C-only `CR_E_ARG`; `CR_ALREADY_PROVISIONED` exists but resolve never returns it (cut 4) | |
 
 D-2 result (cut 2, host PASS): no C/Rust decode divergence was found over 86598
 verdicts (every single-bit flip of 22 vectors, plus the untouched vectors).

@@ -336,7 +336,7 @@ The default `make full` image must carry no crash hook string (Makefile
 Contract: `native/kernel/CONTINUITY_RECOVERY_CONTRACT.md` (SPEC, NOT_RUN). One row per Rust check: rows 81-87 are the
 QEMU PASS lines of `scripts/qemu_continuity_test.sh` (receipt `evidence/continuity_qemu_2026-09-25.md`), rows
 87a-87i are the host tests `cargo test -p aienos-kernel --lib continuity`
-(`crates/aienos-kernel/src/continuity_tests.rs`). The C continuity codec (`svc/continuity_codec.c`, cuts 1-2) has a host test only, with no kernel wiring and no QEMU run: rows 87h, 87i and the codec rows 87j-87k below say HOST PASS for that host test; no gate row is QEMU PASS and `M4_CONTINUITY` stays NOT_RUN. Every other row is NOT_RUN.
+(`crates/aienos-kernel/src/continuity_tests.rs`). The C continuity codec (`svc/continuity_codec.c`, cuts 1-2) and the C resolve + challenge/HMAC code (`svc/continuity_resolve.c`, cut 3, run over the real sealed Store in a file) have host tests only, with no kernel wiring and no QEMU run: rows 87a, 87d-87f, 87h-87k, 91i, 91k and 91m-91p below say HOST PASS (for the half that has code, where stated) for those host tests; no gate row is QEMU PASS and `M4_CONTINUITY` stays NOT_RUN. Every other row is NOT_RUN.
 
 | # | Rust check | CK gate | Status |
 | --- | --- | --- | --- |
@@ -356,16 +356,16 @@ QEMU PASS lines of `scripts/qemu_continuity_test.sh` (receipt `evidence/continui
 | 86e | SIGKILL at `after_superblock_write`: same agent, old or new memory | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION; C name `after_inactive_superblock`; the sealed Store adds two anchor checkpoints, contract section 6.1) |
 | 86f | SIGKILL at `after_final_flush`: same agent, new memory | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
 | 87 | malformed peer superblock: `CONTINUITY: RESUMED_READONLY`, same agent and memory, image unchanged (:196-205) | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 87a | host `unprovisioned_store_never_mints_an_identity` (continuity_tests.rs:84) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87a | host `unprovisioned_store_never_mints_an_identity` (continuity_tests.rs:84) | M4_CONTINUITY (host) | HOST PASS for the resolve half (cut 3, `test_continuity_resolve` (`make -C native/kernel test`, real sealed Store in a file): empty formatted store is Unprovisioned, kind 19 and unrelated kinds ignored, resolve writes no block; the no-mint-on-resume half is cut 4); gate NOT_RUN |
 | 87b | host `provision_then_cold_restart_returns_the_same_identity_and_memory` (:97) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
 | 87c | host `provisioning_twice_is_refused` (:142) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 87d | host `two_roots_stop_with_conflict` (:152) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 87e | host `forked_or_gapped_manifest_chains_are_corrupt` (:178) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 87f | host `degraded_mount_resumes_read_only` (:221) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87d | host `two_roots_stop_with_conflict` (:152) | M4_CONTINUITY (host) | HOST PASS (cut 3, `test_continuity_resolve` (`make -C native/kernel test`, real sealed Store in a file): two roots give Conflict, mutant MC-12 `CR_MUTANT_SKIP_CONFLICT` killed); gate NOT_RUN (no QEMU, no kernel wiring) |
+| 87e | host `forked_or_gapped_manifest_chains_are_corrupt` (:178) | M4_CONTINUITY (host) | HOST PASS (cut 3, `test_continuity_resolve` (`make -C native/kernel test`, real sealed Store in a file): wrong previous, absent previous, sequence gap, fork, foreign root, root without manifest are Corrupt with the Rust reason text; mutant MC-4 `CR_MUTANT_IGNORE_PREVIOUS` killed); gate NOT_RUN |
+| 87f | host `degraded_mount_resumes_read_only` (:221) | M4_CONTINUITY (host) | HOST PASS for the resolve half (cut 3, `test_continuity_resolve` (`make -C native/kernel test`, real sealed Store in a file): K-5 answered, ss_open returns 0 on a malformed-peer mount, resolve returns the same agent and memory, `cr_writable` is read-only; the committed=false resume half is cut 4); gate NOT_RUN |
 | 87g | host `a_crash_at_every_write_of_a_commit_leaves_old_or_new_never_a_third_state` (:242) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
 | 87h | host `encodings_round_trip_and_reject_tampering` (:286) | M4_CONTINUITY (host) | HOST PASS for the C codec twin (`make -C native/kernel test`, `test_continuity_codec`: round trips, one refusal per rule, every single-bit flip of every golden vector decodes as in Rust, D-2); gate NOT_RUN (no QEMU, no kernel wiring) |
 | 87i | host `branch_table_validation_rejects_broken_lineage` (:328) | M4_CONTINUITY (host) | HOST PASS for the C codec twin (`cc_state_validate`, incl. the checked fork-count sum and hostile fork counts); gate NOT_RUN (no QEMU, no kernel wiring) |
-| 87j | D-1 golden vectors (contract 6.3): Rust-emitted canonical bytes and ObjectIds for 22 vectors, reproduced by C from `native/kernel/tests/fixtures/continuity_vectors.txt`; tampered bytes, ObjectId and verdicts are refused (`cargo test -p aienos-kernel --lib continuity_vectors` fails on fixture drift) | M4_CONTINUITY (host) | HOST PASS (`make -C native/kernel test`, `continuity-mutants`: golden and skip-D1 mutants killed); challenges and HMAC responses are emitted but DEFERRED to the resolve cut (no C implementation); gate NOT_RUN |
+| 87j | D-1 golden vectors (contract 6.3): Rust-emitted canonical bytes and ObjectIds for 22 vectors, reproduced by C from `native/kernel/tests/fixtures/continuity_vectors.txt`; tampered bytes, ObjectId and verdicts are refused (`cargo test -p aienos-kernel --lib continuity_vectors` fails on fixture drift) | M4_CONTINUITY (host) | HOST PASS (`make -C native/kernel test`, `continuity-mutants`: golden and skip-D1 mutants killed); challenges and HMAC responses (4 fixture lines) are now reproduced byte for byte by C (cut 3, `test_continuity_resolve`); gate NOT_RUN |
 | 87k | D-2 decode agreement (contract 6.3): every single-bit flip of every vector, C and Rust agree on accept/refuse and error class and text (86598 verdicts, 0 divergences) | M4_CONTINUITY (host) | HOST PASS (`make -C native/kernel test`; skip-D2 mutant killed); gate NOT_RUN |
 
 ## M4 recovery: scripts/qemu_recovery_test.sh -> CK `M4_RECOVERY`
@@ -397,14 +397,14 @@ row is NOT_RUN. Operator key is TEST-ONLY in the oracle.
 | 91f | host `provisioning_is_operator_only_and_only_on_an_unprovisioned_store` (:154) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
 | 91g | host `identity_lost_in_the_newest_root_never_looks_unprovisioned` (:178) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
 | 91h | host `malformed_peer_without_a_resolvable_identity_is_not_repaired` (:222) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 91i | host `orphaned_continuity_objects_are_corrupt_not_unprovisioned` (:236) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91i | host `orphaned_continuity_objects_are_corrupt_not_unprovisioned` (:236) | M4_RECOVERY (host) | HOST PASS for the resolve half (cut 3, `test_continuity_resolve` (`make -C native/kernel test`, real sealed Store in a file): orphan manifest, orphan agent state and orphan WAL are Corrupt `continuity objects without an agent root`; mutant MC-2 `CR_MUTANT_NO_ORPHAN_CHECK` killed); the Recovery Core entry reason is cut 5; gate NOT_RUN |
 | 91j | host `identity_loss_through_corruption_offers_no_action_that_mints` (:267) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 91k | host `challenges_bind_state_and_action` (:300) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91k | host `challenges_bind_state_and_action` (:300) | M4_RECOVERY (host) | HOST PASS for the primitive (cut 3, `test_continuity_resolve` (`make -C native/kernel test`, real sealed Store in a file): `cr_challenge` binds action, state digest, generation and uuid, a response for one action is refused on the other; mutants MR-2 and MR-3 killed); the system record that carries them is cut 5; gate NOT_RUN |
 | 91l | host `hmac_primitive_rfc4231_case_2` (recovery.rs:238) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION: no C operator-auth wrapper; the C HMAC primitive itself is `aienos_hmac_sha256` in native/crypto) |
-| 91m | host `operator_auth_known_answer_accepted` (recovery.rs:251) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 91n | host `operator_auth_rejects_any_single_bit_flip` (recovery.rs:269) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 91o | host `operator_auth_rejects_legacy_bare_sha256_response` (recovery.rs:299) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 91p | host `operator_auth_rejects_undomained_hmac_and_zero_response` (recovery.rs:311) | M4_RECOVERY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91m | host `operator_auth_known_answer_accepted` (recovery.rs:251) | M4_RECOVERY (host) | HOST PASS (cut 3, `test_continuity_resolve` (`make -C native/kernel test`, real sealed Store in a file): `cr_operator_response` reproduces the Rust known answer and the four Rust-emitted fixture lines byte for byte); gate NOT_RUN |
+| 91n | host `operator_auth_rejects_any_single_bit_flip` (recovery.rs:269) | M4_RECOVERY (host) | HOST PASS (cut 3, `test_continuity_resolve` (`make -C native/kernel test`, real sealed Store in a file): every single-bit flip of response, challenge and key is refused; mutant MR-4 `CR_MUTANT_COMPARE_16` killed); gate NOT_RUN |
+| 91o | host `operator_auth_rejects_legacy_bare_sha256_response` (recovery.rs:299) | M4_RECOVERY (host) | HOST PASS (cut 3, `test_continuity_resolve` (`make -C native/kernel test`, real sealed Store in a file): bare SHA-256 response refused; mutant MR-8 `CR_MUTANT_BARE_SHA256` killed); gate NOT_RUN |
+| 91p | host `operator_auth_rejects_undomained_hmac_and_zero_response` (recovery.rs:311) | M4_RECOVERY (host) | HOST PASS (cut 3, `test_continuity_resolve` (`make -C native/kernel test`, real sealed Store in a file): undomained HMAC and zero response refused; mutant MR-8 `CR_MUTANT_NO_DOMAIN` killed); gate NOT_RUN |
 
 ## TRUST-1 Gate 4: scripts/qemu_security_suite.sh, scripts/qemu_secureboot_signing_test.sh
 
