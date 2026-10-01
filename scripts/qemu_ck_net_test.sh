@@ -195,12 +195,12 @@ echo "-- release"
 check "device reset before the revoke" "^virtio_net: device reset status=0x00 (stopped)$"
 check "virtio-net bus master revoked" "^dma_gate: virtio_net bus master revoked$"
 check "virtio-net SMMU stream returned to abort" "^smmu: virtio_net stream 0x[0-9a-f]* returned to abort (rc=0)$"
-lg="$(line_of '^dma_gate: virtio_net granted (Confined)')"; lt="$(line_of '^net: udp round trip ok')"
+lg="$(line_of '^dma_gate: virtio_net granted (Confined)')"; lt="$(line_of '^net: udp round trip ok')"; ld="$(line_of '^virtio_net: device reset status=0x00 (stopped)$')"
 lr="$(line_of '^dma_gate: virtio_net bus master revoked$')"; la="$(line_of '^smmu: virtio_net stream .* returned to abort')"
-if [[ -n "${lg}" && -n "${lt}" && -n "${lr}" && -n "${la}" && "${lg}" -lt "${lt}" && "${lt}" -lt "${lr}" && "${lr}" -lt "${la}" ]]; then
-    echo "PASS  order: grant < round trip < bus master off < stream abort"
+if [[ -n "${lg}" && -n "${lt}" && -n "${ld}" && -n "${lr}" && -n "${la}" && "${lg}" -lt "${lt}" && "${lt}" -lt "${ld}" && "${ld}" -lt "${lr}" && "${lr}" -lt "${la}" ]]; then
+    echo "PASS  order: grant < round trip < device reset < bus master off < stream abort"
 else
-    echo "FAIL  release order (lines ${lg:-none} ${lt:-none} ${lr:-none} ${la:-none})"; failed=1
+    echo "FAIL  release order (lines ${lg:-none} ${lt:-none} ${ld:-none} ${lr:-none} ${la:-none})"; failed=1
 fi
 check "devices stage summary" "^devices: pci=ok nvme=bound virtio_net=selftest-ok$"
 check_absent "no virtio-net failure lines" "^net: .*FAIL\|^virtio_net: .*FAIL\|^virtio_net: not bound"

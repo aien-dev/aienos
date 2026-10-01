@@ -213,7 +213,7 @@ static int roundtrip(ck_vnet *n)
                   "payload=\"%s\"\n",
                   CK_NET_ECHO_PORT, CK_NET_LOCAL_PORT, (unsigned)pn, csum ? "verified" : "absent", mine ? "yes" : "NO",
                   shown);
-        if (!mine) k = CK_NET_IGNORED; /* not the reply to our datagram; keep waiting */
+        if (!mine) k = CK_NET_IGNORED; /* not the reply to our datagram: the next try sends again */
     }
     if (k != CK_NET_UDP_REPLY) {
         ck_printf("net: udp round trip FAIL (no reply after %u tries, frames_seen=%u)\n", UDP_TRIES, frames);
@@ -226,6 +226,12 @@ static int roundtrip(ck_vnet *n)
 int ck_net_bind_selftest(const pci_func *f, const virtio_pci_caps *caps)
 {
     ck_vnet *n = &g_net;
+    /* Never forget a device that may still do DMA: a live earlier bind
+     * (bus master on or stream confined) must be released first. */
+    if (ck_net_live()) {
+        ck_printf("virtio_net: not bound (previous bind still live; release it first)\n");
+        return CK_NET_E_ARG;
+    }
     memset(n, 0, sizeof *n);
     if (!f || !caps) return CK_NET_E_ARG;
     n->pf = f;
