@@ -1,0 +1,222 @@
+# C kernel (CK) gate parity with the Rust QEMU gates
+
+This table maps every check made by the Rust-kernel QEMU gates that
+`scripts/verify_all.sh` runs (M0, M1, M3, SEED-0B/P2-5, SEED-0A keyboard,
+SMMU, M4 NVMe/Store/continuity/recovery, TRUST-1 Gate 4) to the C kernel
+gate that covers it. `scripts/ck_gates.sh` runs the C gates and writes a
+content-addressed receipt `evidence/ck_gates_<sha256>.json`.
+
+QEMU qualifies nothing physical. Every row below is emulator evidence at
+best; no row says anything about Machine 1 or the GB10.
+
+Status vocabulary:
+
+- **IDENTICAL**: the C gate greps the same pattern with the same logic.
+- **DIFFERS**: the C gate checks the same property with a different
+  observable or a weaker/stronger condition (the difference is stated).
+- **NOT_RUN**: no C implementation exists (MISSING_IMPLEMENTATION, reason
+  given). `ck_gates.sh` prints NOT_RUN for these; never PASS.
+
+C gates (one line each from `ck_gates.sh`): `M1` (from
+`scripts/qemu_ck_boot_test.sh`), `M4_NVME`, `M4_STORE`, `ARGUS1_REVOKE`
+(from `scripts/qemu_ck_store_test.sh`, owned by the Lane 18 integrate
+worker; its exact grep patterns live in that script), and the NOT_RUN gates
+`M3`, `SMMU`, `P2_ARTIFACT`, `M0_ROLLBACK`, `M4_STORE_CRASH`,
+`M4_CONTINUITY`, `M4_RECOVERY`, `KEYBOARD`.
+
+## M1 boot: scripts/qemu_boot_test.sh -> CK `M1` (scripts/qemu_ck_boot_test.sh)
+
+Same QEMU command line (virt, EL2, GICv3, single-thread TCG, -smp 4, 2 GiB,
+same AAVMF files, virtio-blk ESP, -no-reboot, 180 s timeout). The C script
+builds with make instead of cargo and takes the machine quiet flag itself.
+
+| # | Rust check (pattern) | CK gate | Status |
+| --- | --- | --- | --- |
+| 1 | pre-exit report (`report_kind: pre_exit`) | M1 | IDENTICAL |
+| 2 | image is this commit (`aienos_commit: <HEAD>`) | M1 | IDENTICAL |
+| 3 | entered the kernel (`kernel: alive`) | M1 | IDENTICAL |
+| 4 | kernel at EL1h (`kernel_el: EL1h`) | M1 | IDENTICAL |
+| 5 | MMU and caches on (`mmu: enabled`) | M1 | IDENTICAL |
+| 6 | GICv3 (`gic: v3`) | M1 | IDENTICAL |
+| 7 | timer IRQ >= 5 ticks (`timer_irq: N ticks`) | M1 | IDENTICAL |
+| 8 | MMU switch re-checked from register values (`mmu_switch: ... switched=yes`, aienos_root == ttbr0_el1 != firmware_ttbr0) | M1 | IDENTICAL |
+| 9 | GIC from MADT (`gic_madt: gicd=... gicr=... arch_rev=3 icc_sre=1`) | M1 | IDENTICAL |
+| 10 | tick statistics consistent (`timer_stats: intid=30 ...`, 2*min >= period, min <= avg <= max) | M1 | IDENTICAL |
+| 11 | final report (`report_kind: final`, checked twice) | M1 | IDENTICAL |
+| 12 | no panic or fault (`report_kind: (panic\|fault)` absent) | M1 | IDENTICAL |
+| 13 | no timeout (QEMU status 124 is FAIL) | M1 | IDENTICAL |
+| 14 | (none in Rust) guard pages fault and are contained (`guard_page: ok fault=contained`) | M1 | DIFFERS (added check, C only; stricter) |
+| 15 | final verdict line `QEMU_BOOT: PASS` | M1 | DIFFERS (`AIENOS_CK_M1: PASS`; quiet flag held -> `AIENOS_CK_M1: NOT_RUN`, exit 3) |
+
+## M3: scripts/qemu_boot_test.sh M3 lines -> CK `M3`
+
+| # | Rust check (pattern) | CK gate | Status |
+| --- | --- | --- | --- |
+| 16 | cooperative threads (`threads: ok`) | M3 | NOT_RUN (MISSING_IMPLEMENTATION: no threads/scheduler in the C kernel) |
+| 17 | EL0 isolation (`el0: ok write=granted forged=denied fault=contained exit=0`) | M3 | NOT_RUN (MISSING_IMPLEMENTATION: no EL0 tasks) |
+| 18 | timer preemption (`preempt: ok`) | M3 | NOT_RUN (MISSING_IMPLEMENTATION: no preemptive scheduler) |
+| 19 | MADT placement (`placement: worker0=class0/core0 worker1=class0/core1`) | M3 | NOT_RUN (MISSING_IMPLEMENTATION: only the boot CPU is brought up) |
+| 20 | typed IPC (`ipc: ok message=delivered cap=delegated rights=attenuated forged=denied revoked=denied`) | M3 | NOT_RUN (MISSING_IMPLEMENTATION: no IPC; the stage `caps:` line mirrors the capability semantics in-kernel but is not IPC) |
+
+`qemu_ck_boot_test.sh` prints these five as `NOT_RUN` and they do not count
+toward `AIENOS_CK_M1`.
+
+## SMMU: scripts/qemu_smmu_test.sh (= keyboard test, SMMU on, bypass forced off) -> CK `SMMU`
+
+| # | Rust check (pattern) | CK gate | Status |
+| --- | --- | --- | --- |
+| 21 | IORT stream configured (`smmu: enabled`) | SMMU | NOT_RUN (MISSING_IMPLEMENTATION: no IORT/SMMUv3 service in ck.h) |
+| 22 | DMA window translated (`smmu_dma_window: xhci only, translation active`) | SMMU | NOT_RUN (MISSING_IMPLEMENTATION: no SMMU) |
+| 23 | DMA granted only as confined (`dma_gate: xhci granted (Confined), bus master on`) | SMMU | NOT_RUN (MISSING_IMPLEMENTATION: no SMMU; C NVMe DMA exists only via the QEMU-only unsafe bypass) |
+| 24 | no unsafe bypass in the image (`UNSAFE DMA BYPASS` absent) | SMMU | NOT_RUN (MISSING_IMPLEMENTATION: the C stage build sets CK_NVME_DMA_BYPASS=1, so this check would FAIL today) |
+
+## SEED-0A keyboard: scripts/qemu_keyboard_test.sh (SMMU=1 and SMMU=0) -> CK `KEYBOARD`
+
+| # | Rust check (pattern) | CK gate | Status |
+| --- | --- | --- | --- |
+| 25 | xHCI found before exit (`keyboard: xhci `) | KEYBOARD | NOT_RUN (MISSING_IMPLEMENTATION: no xHCI/USB HID driver in the C kernel) |
+| 26 | bus-master sweep after exit (`dma_sweep: seg `, no `dma_sweep: bme STUCK`) | KEYBOARD | NOT_RUN (MISSING_IMPLEMENTATION: no post-exit bus-master sweep) |
+| 27 | xHCI bus master off before the DMA gate (`xhci_pci: command=0x.. bus_master=off`) | KEYBOARD | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 28 | fail-closed without SMMU (`dma_gate: xhci denied (NoSmmu)...`, `keyboard: unavailable (...)`, no grant, no `keyboard: ready`) | KEYBOARD | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 29 | keyboard attached and typed line echoed (`keyboard: ready`, `keyboard_echo:`, `keyboard_line:`, `keyboard: done (enter)`) | KEYBOARD | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 30 | shell commands (`commands: help mem el report uptime exit`, `EL1`, `conventional_memory_kb:`, `keyboard: done (exit)`) | KEYBOARD | NOT_RUN (MISSING_IMPLEMENTATION: no console shell) |
+| 31 | xHCI bus master revoked after the phase (`dma_gate: xhci bus master revoked`) | KEYBOARD | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 32 | no panic or fault | KEYBOARD | NOT_RUN (MISSING_IMPLEMENTATION) |
+
+## SEED-0B / P2-5 artifact loader: scripts/qemu_artifact_test.sh -> CK `P2_ARTIFACT`
+
+| # | Rust check (pattern) | CK gate | Status |
+| --- | --- | --- | --- |
+| 33 | common: kernel alive + M3 threads/el0/ipc proofs unchanged | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION: no artifact loader; M3 also missing) |
+| 34 | firmware read all candidates (`^artifact_candidates: N$`), report not truncated, final report | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 35 | frames reclaimed (`artifact_frames_free_before` == `_after`) | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 36 | qualification build labelled TEST ONLY, receipt tier line | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 37 | P26SEED read via grant, write/forged denied, granted subset of requested, exactly one capability, receipt | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 38 | P25EXEC / P25WX (W^X fault) / P25SPIN (time budget) / P25TAMP (BadSignature) outcomes + receipts | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION: no EL0 loader, no signature verify of artifacts) |
+| 39 | hostile set: each refused at its stage or admitted-and-contained, receipts checked by the host tool | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 40 | H29 READ\|WRITE requested -> READ granted | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 41 | production build refuses every candidate, zero admitted | P2_ARTIFACT | NOT_RUN (MISSING_IMPLEMENTATION) |
+
+## M0 rollback: scripts/qemu_native_rollback_test.sh -> CK `M0_ROLLBACK`
+
+| # | Rust check (marker) | CK gate | Status |
+| --- | --- | --- | --- |
+| 42 | `AAVMF_BOOTNEXT_NVRAM` / `NATIVE_ROLLBACK_NORMAL` | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: C loader BootNext/A-B/rollback parked, native/boot/README.md) |
+| 43 | `NATIVE_ROLLBACK_FAULT` (faulted candidate returns to Default) | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: parked) |
+| 44 | `NATIVE_ROLLBACK_TIMEOUT` (hung candidate) | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: parked) |
+| 45 | `NATIVE_ROLLBACK_REJECTED` (malformed image) and absent-image fallback | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: parked) |
+| 46 | `NATIVE_ROLLBACK_BOOTNEXT_CONSUMED` / `_DEFAULT_UNCHANGED` | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: parked) |
+
+## M4 NVMe read: scripts/qemu_nvme_test.sh (SMMU=1 and SMMU=0) -> CK `M4_NVME`
+
+The C NVMe path (native/disk via the stage `devices`) runs only with the
+QEMU-only unsafe DMA bypass (`CK_NVME_DMA_BYPASS=1`). The Rust gate never
+runs a bypass build. The C observables are free-form lines, not the Rust
+`NVME_*_QEMU: PASS` markers.
+
+| # | Rust check (pattern) | CK gate | Status |
+| --- | --- | --- | --- |
+| 47 | ECAM discovery (`NVME_DISCOVERY_QEMU: PASS`) | M4_NVME | DIFFERS (C: `nvme: discovery bb:dd.f vid= did= bar0=`) |
+| 48 | identify (`NVME_IDENTIFY_QEMU: PASS`) | M4_NVME | DIFFERS (C: `nvme: identify ok vs= nn= nsid= ...`) |
+| 49 | geometry matches image (`NVME_GEOMETRY_QEMU: PASS (nsid=1 block_count=.. block_size=..)`) | M4_NVME | DIFFERS (C: `nvme: geometry nsid= block_count= block_size=`) |
+| 50 | sentinel LBA read with exact SHA-256 (`NVME_READ_QEMU: PASS (... sha256=..)`) | M4_NVME | DIFFERS (C: `nvme: read lba=0 blocks=1 ok`; no host-planted sentinel hash) |
+| 51 | read past namespace end rejected (`NVME_BOUNDS_QEMU: PASS`) | M4_NVME | DIFFERS (C: `nvme: bounds read lba=.. -> refused`) |
+| 52 | device-reported command error surfaced (`NVME_ERROR_QEMU: PASS`) | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no C error-injection probe) |
+| 53 | SMMU mode: `smmu: enabled`, `smmu_dma_window: nvme only`, `dma_gate: nvme granted (Confined)` | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no SMMU service) |
+| 54 | fail-closed mode: `dma_gate: nvme denied (NoSmmu)...`, `nvme: unavailable (SMMU DMA isolation not active)`, no grant/identify/read | M4_NVME | DIFFERS (C prints the same two lines when built with CK_NVME_DMA_BYPASS=0; the CK gate runs the bypass build, so this mode is not exercised there) |
+| 55 | bus master revoked after the phase (`dma_gate: nvme bus master revoked`) | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no revoke line in the C path) |
+| 56 | no `UNSAFE NVME DMA BYPASS` in the image | M4_NVME | DIFFERS (inverted: C path prints `WARNING: UNSAFE NVME DMA BYPASS ACTIVE` and `dma_gate: nvme granted (UnsafeBypass)`; ck_gates.sh records dma_mode in the receipt) |
+| 57 | no panic or fault | M4_NVME | DIFFERS (expected same `report_kind: (panic\|fault)` rule; owned by qemu_ck_store_test.sh and not verified at this commit) |
+
+## M4 NVMe write/flush: scripts/qemu_nvme_rw_test.sh -> CK `M4_NVME` / `M4_STORE`
+
+| # | Rust check (pattern) | CK gate | Status |
+| --- | --- | --- | --- |
+| 58 | discovery / identify / geometry (as rows 47-49) | M4_NVME | DIFFERS (same as rows 47-49) |
+| 59 | atomicity Identify fields (`NVME_ATOMICITY_IDENTIFY_QEMU:`) | M4_NVME | DIFFERS (C: `nvme: atomicity block_size= awupf_raw= nawupf_raw= nabspf_raw= nabo_blocks=`, raw fields only) |
+| 60 | write past namespace end rejected (`NVME_WRITE_BOUNDS_QEMU: PASS`) | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no C write-bounds probe line; host tests cover it) |
+| 61 | write + flush + read-back exact (`NVME_WRITE_QEMU`, `NVME_FLUSH_QEMU`, `NVME_DURABILITY_QEMU` with sha256) | M4_NVME | DIFFERS (C: `nvme: rw probe lba= bytes= write+flush+readback ok` on the scratch unit; no sha256 printed) |
+| 62 | invalid-namespace write error surfaced (`NVME_WRITE_ERROR_QEMU: PASS`) | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no C error probe) |
+| 63 | SMMU confined grant + revoke | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no SMMU) |
+| 64 | host read-back of the image after power off equals written bytes | M4_STORE | DIFFERS (C: durability shown by Store boot_count read back across 3 boots, not a host dd of one LBA) |
+| 65 | boot 2 observes the persisted pattern (`NVME_DURABILITY_QEMU: PASS (persisted lba=..)`) | M4_STORE | DIFFERS (C: `store: opened generation= boot_count=` then `committed boot_count=N+1` on the next boot) |
+| 66 | fail-closed: no write/flush/durability markers without DMA | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: CK gate runs the bypass build only) |
+
+## M4 atomicity: scripts/qemu_nvme_atomicity_test.sh -> CK `M4_NVME`
+
+| # | Rust check (pattern) | CK gate | Status |
+| --- | --- | --- | --- |
+| 67 | identify on a 4096-byte LBA namespace | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no 4K-LBA C run) |
+| 68 | geometry is 4096-byte LBA | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no 4K-LBA C run) |
+| 69 | atomicity identify `block_size=4096 lbads=12` | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: C prints raw fields only, no lbads) |
+| 70 | Store root write power-fail atomic (`NVME_STORE_ROOT_ATOMICITY_QEMU: PASS`) | M4_NVME | NOT_RUN (MISSING_IMPLEMENTATION: no C atomic-root predicate verdict) |
+
+## M4 Store crash: scripts/qemu_store_crash_test.sh -> CK `M4_STORE` / `M4_STORE_CRASH`
+
+| # | Rust check (marker) | CK gate | Status |
+| --- | --- | --- | --- |
+| 71 | `STORE_NVME_INTEGRATION_QEMU` + `STORE_CHECKPOINT_QEMU` (Store over the native NVMe driver) | M4_STORE | DIFFERS (C: sealed C Store (native/store + native/m5, TEST keys) over native/disk; blank -> format, `store: committed generation= boot_count=`) |
+| 72 | `STORE_REOPEN_QEMU` (reopen from media) | M4_STORE | DIFFERS (C: reopen across 3 boots, boot_count 1 -> 2 -> 3; plus structural refusal, disk unchanged) |
+| 73 | `STORE_CHECKPOINT_CRASH_QEMU` (kill QEMU at each checkpoint, recover N or N+1) | M4_STORE_CRASH | NOT_RUN (MISSING_IMPLEMENTATION: no C crash/kill campaign) |
+| 74 | `STORE_SLOT_REUSE_QEMU` | M4_STORE_CRASH | NOT_RUN (MISSING_IMPLEMENTATION: C Store is append-only, no reclaim/slot reuse) |
+| 75 | `STORE_V1_QEMU` summary | M4_STORE_CRASH | NOT_RUN (MISSING_IMPLEMENTATION) |
+
+## M4 Store 512 B: scripts/qemu_store_512b_crash_test.sh -> CK `M4_STORE_CRASH`
+
+| # | Rust check (marker) | CK gate | Status |
+| --- | --- | --- | --- |
+| 76 | `STORE_NVME_INTEGRATION_512B_QEMU` | M4_STORE | DIFFERS (C Store runs on the default 512-byte QEMU namespace; integration only, no 512B-named marker) |
+| 77 | `STORE_512B_CRASH_OBSERVED_QEMU` (tier 1 kills) | M4_STORE_CRASH | NOT_RUN (MISSING_IMPLEMENTATION: no 512B crash campaign) |
+| 78 | `STORE_512B_ROOT_TEAR_CLOSURE` (tier 2a) | M4_STORE_CRASH | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 79 | `STORE_512B_INJECTED_ROOT_RECOVERY_QEMU` (tier 2b, degraded read-only / refuse) | M4_STORE_CRASH | NOT_RUN (MISSING_IMPLEMENTATION; nearest: C structural refusal of a corrupt superblock, host + QEMU, which is in M4_STORE) |
+| 80 | `STORE_512B_CRASH_RECOVERY_QEMU` summary | M4_STORE_CRASH | NOT_RUN (MISSING_IMPLEMENTATION) |
+
+## M4 continuity: scripts/qemu_continuity_test.sh -> CK `M4_CONTINUITY`
+
+| # | Rust check | CK gate | Status |
+| --- | --- | --- | --- |
+| 81 | resume on blank media stops, writes nothing | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION: no continuity core (ADR 0016 agent identity/memory) in the C kernel) |
+| 82 | unprovisioned store stops UNPROVISIONED | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 83 | provision agent; second provisioning refused; RNDR gives a different identity | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 84 | resume + remember (incarnation 2, Cortex fact, forked branch) | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 85 | cold restarts keep agent/memory/lineage | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 86 | kill at each checkpoint keeps agent and memory | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87 | malformed peer superblock: read-only, nothing written | M4_CONTINUITY | NOT_RUN (MISSING_IMPLEMENTATION) |
+
+## M4 recovery: scripts/qemu_recovery_test.sh -> CK `M4_RECOVERY`
+
+| # | Rust check | CK gate | Status |
+| --- | --- | --- | --- |
+| 88 | inspection enters the Recovery Core (Degraded(Malformed)), writes nothing | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION: no Recovery Core (ADR 0006) in the C kernel) |
+| 89 | repair with bad responses refused; authorised repair; resume after repair; replay is a no-op | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 90 | unprovisioned: only provisioning offered; wrong key refused; operator provisioning resumes | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 91 | identity loss: no action offered, all modes refused, normal boot neither resumes nor mints | M4_RECOVERY | NOT_RUN (MISSING_IMPLEMENTATION) |
+
+## TRUST-1 Gate 4: scripts/qemu_security_suite.sh, scripts/qemu_secureboot_signing_test.sh
+
+These boot the Rust loader image. No C-kernel wrapper exists and
+`ck_gates.sh` has no gate for them; they are listed so the parity is
+complete.
+
+| # | Rust check | CK gate | Status |
+| --- | --- | --- | --- |
+| 92 | swTPM attached boot reaches `kernel: alive` + `report_kind: final` | (none) | NOT_RUN (MISSING_IMPLEMENTATION: no CK swTPM run; the C kernel has no TPM path) |
+| 93 | soak: N clean boots and resets | (none) | NOT_RUN (MISSING_IMPLEMENTATION: no CK soak harness; M1 ran twice only) |
+| 94 | corrupted binary rejected before `kernel: alive` | (none) | NOT_RUN (MISSING_IMPLEMENTATION: no CK corruption test) |
+| 95 | Secure Boot: signed boots, unsigned / tampered / wrong-key refused (Access Denied) | (none) | NOT_RUN (MISSING_IMPLEMENTATION: CK BOOTAA64.EFI never signed or booted under Secure Boot) |
+
+## C-only gate
+
+| # | C check | CK gate | Status |
+| --- | --- | --- | --- |
+| 96 | ARGUS-1 narrow revoke in-kernel (`argus: ok narrow_revoke=1 revoked=denied unrelated=granted authority=unchanged`) | ARGUS1_REVOKE | DIFFERS (no Rust QEMU gate exists for it; the C check is new) |
+
+## Summary counts
+
+Rows 1-96: IDENTICAL 13, DIFFERS 19, NOT_RUN 64 (rows 92-95 have no CK gate at all).
+
+`scripts/trust1_m5_qualify.sh --with-qemu` also runs three of these gates as
+qemu rows: `ck_m1_boot_qemu` (M1), `ck_store_kernel_qemu` (M4_STORE) and
+`ck_argus1_revoke_qemu` (ARGUS1_REVOKE). Its `m5_store_kernel_binding` row
+stays MISSING_IMPLEMENTATION: it asks for the binding on a real device, which
+QEMU cannot show.

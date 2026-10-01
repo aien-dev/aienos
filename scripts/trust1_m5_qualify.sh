@@ -61,6 +61,9 @@ disk_native_test|auto|run_native_disk|-|^AIENOS_DISK_NATIVE: PASS$|make -C nativ
 qemu_secureboot_signing|qemu|run_qemu_sb|-|^TRUST-1 Gate 4 Secure Boot signing test: ALL PASS$|QEMU Secure Boot signing test (TRUST-1 Gate 4)
 qemu_store_512b_crash|qemu|run_qemu_store512|-|^STORE_512B_CRASH_RECOVERY_QEMU: PASS$|QEMU Store crash recovery on 512-byte blocks
 qemu_native_nvme|qemu|run_qemu_native_nvme|-|^AIENOS_STORE_NVME_QEMU: PASS$|C NVMe driver write/flush/reset/read-back on QEMU virtual NVMe (emulator only)
+ck_m1_boot_qemu|qemu|run_qemu_ck_boot|3|^AIENOS_CK_M1: PASS( .*)?$|C kernel (native/boot + native/kernel, Lane 18) UEFI boot observables on QEMU, scripts/qemu_ck_boot_test.sh (emulator only)
+ck_store_kernel_qemu|qemu|run_qemu_ck_store|3|^AIENOS_CK_M4_STORE: PASS( .*)?$|sealed C Store (native/store + native/m5, TEST keys) in the C kernel boot path on QEMU virtual NVMe with the QEMU-only unsafe DMA bypass, scripts/qemu_ck_store_test.sh (emulator only; not a real device)
+ck_argus1_revoke_qemu|qemu|run_qemu_ck_argus|3|^AIENOS_CK_ARGUS1_REVOKE: PASS( .*)?$|ARGUS-1 narrow revoke inside the C kernel on QEMU, scripts/qemu_ck_store_test.sh (emulator only)
 t1_gate0_second_offline_location|operator|-|-|-|Gate 0: second offline backup location
 t1_gate0_cold_boot_pcr_stability|hardware|-|-|-|Gate 0: cold-boot PCR stability on Machine 1
 t1_gate0_firmware_refresh_pause|operator|-|-|-|Gate 0: firmware refresh paused
@@ -137,6 +140,41 @@ run_native_disk()   { native_make_test disk; }
 run_qemu_native_nvme() { bash "${repo_root}/scripts/qemu_native_nvme_test.sh"; }
 run_qemu_sb()       { bash "${repo_root}/scripts/qemu_secureboot_signing_test.sh"; }
 run_qemu_store512() { bash "${repo_root}/scripts/qemu_store_512b_crash_test.sh"; }
+# C kernel (Lane 18) QEMU scripts take the quiet flag themselves and print
+# "AIENOS_CK_<gate>: PASS|FAIL|NOT_RUN". ck_child_gate SCRIPT GATE runs SCRIPT
+# once per qualification run (the store script serves two rows) and maps:
+# missing script or a NOT_RUN line -> exit 3 (the rows' notrun_rc); two
+# different verdict lines -> 1; exit 3 without a NOT_RUN line -> 1; exit 1
+# with this gate's PASS line and another gate's FAIL line -> 0 (the marker
+# check still needs the PASS line); anything else -> the script's exit.
+ck_scripts_dir="${repo_root}/scripts"
+ck_child_gate() {
+    local script="${ck_scripts_dir}/$1" gate="$2" out rc verdicts
+    if [[ ! -f "${script}" ]]; then
+        echo "$1 not present at this commit"; echo "AIENOS_CK_${gate}: NOT_RUN"; return 3
+    fi
+    mkdir -p "${work_dir}/build"
+    out="${work_dir}/build/ck_${1%.sh}.out"
+    if [[ -f "${out}.rc" ]]; then
+        echo "(reusing this run's earlier $1 output)"
+    else
+        bash "${script}" >"${out}" 2>&1 </dev/null
+        echo "$?" >"${out}.rc"
+    fi
+    cat "${out}"
+    rc="$(cat "${out}.rc")"
+    verdicts="$(sed -nE "s/^AIENOS_CK_${gate}: (PASS|FAIL|NOT_RUN)( .*)?\$/\\1/p" "${out}" | sort -u)"
+    [[ "$(grep -c . <<<"${verdicts}")" -le 1 ]] || { echo "contradictory AIENOS_CK_${gate} lines"; return 1; }
+    [[ "${verdicts}" == NOT_RUN ]] && return 3
+    [[ "${rc}" == 3 ]] && return 1
+    if [[ "${rc}" == 1 && "${verdicts}" == PASS ]] && grep -qE '^AIENOS_CK_[A-Z0-9_]+: FAIL( .*)?$' "${out}"; then
+        return 0
+    fi
+    return "${rc}"
+}
+run_qemu_ck_boot()  { ck_child_gate qemu_ck_boot_test.sh M1; }
+run_qemu_ck_store() { ck_child_gate qemu_ck_store_test.sh M4_STORE; }
+run_qemu_ck_argus() { ck_child_gate qemu_ck_store_test.sh ARGUS1_REVOKE; }
 
 # Is the implementation of an 'auto' gate present?
 auto_present() {
@@ -464,6 +502,47 @@ self_test() {
     summarize >/dev/null
     count_results
     [[ "${overall}" == NOT_QUALIFIED && ${sw_fail} == 0 ]] && ok "PASS + BLOCKED -> NOT_QUALIFIED, exit 0" || bad "PASS + BLOCKED -> ${overall} sw_fail=${sw_fail}"
+
+    # C kernel QEMU rows (ck_*): canned child scripts, no QEMU. Uses the
+    # table's own runner, notrun_rc and marker for each row.
+    ck_case() { # CASE ROW_ID WANTED SCRIPT_NAME RC LINES...
+        local cs="$1" row="$2" want="$3" name="$4" crc="$5" rid rkind rrun rnrc rmark rdesc
+        shift 5
+        ck_scripts_dir="${tmp}/ck_${cs}"; mkdir -p "${ck_scripts_dir}"
+        if [[ "${name}" != - ]]; then
+            { echo '#!/usr/bin/env bash'; echo "echo x >>\"${ck_scripts_dir}/runs\""
+              printf 'printf "%%s\\n"'; printf ' %q' "$@"; echo; echo "exit ${crc}"; } >"${ck_scripts_dir}/${name}"
+        fi
+        while IFS='|' read -r rid rkind rrun rnrc rmark rdesc; do
+            [[ "${rid}" == "${row}" ]] || continue
+            evaluate_gate "${cs}_${row}" "${rkind}" "${rrun}" "${rnrc}" "${rmark}" 2>/dev/null
+        done <<<"${GATE_TABLE}"
+        expect "${cs}_${row}" "${want}"
+    }
+    local saved_results=("${results[@]}")
+    QUIET_FLAG="${tmp}/no_quiet_flag_here"; with_qemu=1; results=()
+    rm -rf "${work_dir}/build"
+    ck_case boot_pass ck_m1_boot_qemu PASS qemu_ck_boot_test.sh 0 'PASS  kernel: alive' 'AIENOS_CK_M1: PASS'
+    rm -rf "${work_dir}/build"
+    ck_case boot_notrun ck_m1_boot_qemu NOT_RUN qemu_ck_boot_test.sh 3 'NOT_RUN  quiet flag held' 'AIENOS_CK_M1: NOT_RUN'
+    rm -rf "${work_dir}/build"
+    ck_case boot_rc3_nomark ck_m1_boot_qemu FAIL qemu_ck_boot_test.sh 3 'killed'
+    rm -rf "${work_dir}/build"
+    ck_case boot_fail ck_m1_boot_qemu FAIL qemu_ck_boot_test.sh 1 'AIENOS_CK_M1: FAIL'
+    rm -rf "${work_dir}/build"
+    ck_case boot_both ck_m1_boot_qemu FAIL qemu_ck_boot_test.sh 0 'AIENOS_CK_M1: PASS' 'AIENOS_CK_M1: FAIL'
+    rm -rf "${work_dir}/build"
+    ck_case store_absent ck_store_kernel_qemu NOT_RUN -  0
+    rm -rf "${work_dir}/build"
+    ck_case mixed ck_store_kernel_qemu FAIL qemu_ck_store_test.sh 1 \
+        'AIENOS_CK_M4_NVME: PASS' 'AIENOS_CK_M4_STORE: FAIL' 'AIENOS_CK_ARGUS1_REVOKE: PASS'
+    ck_case mixed ck_argus1_revoke_qemu PASS qemu_ck_store_test.sh 1 \
+        'AIENOS_CK_M4_NVME: PASS' 'AIENOS_CK_M4_STORE: FAIL' 'AIENOS_CK_ARGUS1_REVOKE: PASS'
+    [[ "$(wc -l <"${tmp}/ck_mixed/runs")" == 1 ]] && ok "store script ran once for its two rows" || bad "store script ran $(wc -l <"${tmp}/ck_mixed/runs") times"
+    rm -rf "${work_dir}/build"
+    ck_case pass_rc2 ck_argus1_revoke_qemu FAIL qemu_ck_store_test.sh 2 'AIENOS_CK_ARGUS1_REVOKE: PASS'
+    QUIET_FLAG="${saved_quiet}"; ck_scripts_dir="${repo_root}/scripts"; rm -rf "${work_dir}/build"
+    results=("${saved_results[@]}")
 
     # The canonical table parses: every row has 6 fields and a known kind,
     # and no blocked/missing row carries a runner.
