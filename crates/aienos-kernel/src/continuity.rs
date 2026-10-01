@@ -473,8 +473,16 @@ impl AgentState {
                 }
             }
         }
-        let forks: u64 = self.branches.iter().map(|b| b.forks).sum();
-        if roots != 1 || forks != children {
+        // Checked sum: kernel images build with --release and no profile turns
+        // overflow checks on, so a plain `.sum()` would wrap and accept e.g.
+        // {root forks = 2^64-1, child forks = 2}. An overflowing sum can never
+        // equal `children` (<= 255), so it is refused with the same class and
+        // text as the C codec (native/kernel/svc/continuity_codec.c:482-491).
+        let forks = self
+            .branches
+            .iter()
+            .try_fold(0u64, |acc, b| acc.checked_add(b.forks));
+        if roots != 1 || forks != Some(children) {
             return Err(bad("fork indexes are not contiguous"));
         }
         Ok(())
