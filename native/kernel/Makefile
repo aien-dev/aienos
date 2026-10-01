@@ -17,6 +17,11 @@
 #                        both files; tools/ck_owner_gen.c checks them); its
 #                        Store stage refuses (production key source is
 #                        BLOCKED_OPERATOR). scripts/ck_owner_keys_check.sh
+#   make full CK_TEST_XHCI_MUTATION=bm-left-on|no-revoke|grant-no-smmu|no-sweep
+#                        TEST-ONLY image that breaks one xHCI DMA fence row on
+#                        purpose: $(OUT)/full-test-xhci-<name>/ (only
+#                        scripts/qemu_ck_keyboard_test.sh --mutation; refused
+#                        with CK_HARDWARE_STAGING=1 or CK_QEMU_UNSAFE_DMA=1)
 #   make owner-gen       host tool $(OUT)/host/ck_owner_gen
 #   make [full] CK_TEST_FWCFG_ARTIFACTS=1
 #                        TEST-ONLY: loader takes candidates from the QEMU fw_cfg
@@ -90,6 +95,23 @@ $(error CK_QEMU_UNSAFE_DMA (unconfined DMA, QEMU debug only) cannot be combined 
 endif
 ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),1)
 $(error CK_QEMU_UNSAFE_DMA must be empty or 1)
+endif
+endif
+
+# TEST-ONLY xHCI DMA fence mutations (dev/xhci_fence.h), for the self-test of
+# scripts/qemu_ck_keyboard_test.sh --mutation only: each one breaks one
+# keyboard DMA-safety row on purpose. Own FULL_NAME, never a hardware image.
+CK_TEST_XHCI_MUTATION ?=
+ifneq ($(strip $(CK_TEST_XHCI_MUTATION)),)
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_TEST_XHCI_MUTATION (TEST-ONLY xHCI DMA fence mutation) cannot be combined with CK_HARDWARE_STAGING)
+endif
+ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),)
+$(error CK_TEST_XHCI_MUTATION cannot be combined with CK_QEMU_UNSAFE_DMA)
+endif
+XHCI_MUT_NUM := $(if $(filter bm-left-on,$(CK_TEST_XHCI_MUTATION)),1,$(if $(filter no-revoke,$(CK_TEST_XHCI_MUTATION)),2,$(if $(filter grant-no-smmu,$(CK_TEST_XHCI_MUTATION)),3,$(if $(filter no-sweep,$(CK_TEST_XHCI_MUTATION)),4,))))
+ifeq ($(XHCI_MUT_NUM),)
+$(error CK_TEST_XHCI_MUTATION must be one of bm-left-on no-revoke grant-no-smmu no-sweep)
 endif
 endif
 
@@ -187,6 +209,10 @@ else
 FULL_NAME := full
 STAGE_DMA_FLAGS :=
 endif
+ifneq ($(strip $(CK_TEST_XHCI_MUTATION)),)
+FULL_NAME := full-test-xhci-$(strip $(CK_TEST_XHCI_MUTATION))
+STAGE_DMA_FLAGS += -DCK_TEST_XHCI_MUTATION=$(XHCI_MUT_NUM)
+endif
 ifneq ($(strip $(CK_HARDWARE_STAGING)),)
 # Own OUT subdirectory: stage objects built with these flags never mix with
 # the default full image's objects.
@@ -267,6 +293,17 @@ define fwcfg_check
 	fi
 endef
 
+# xhci_mut_check(elf): only a CK_TEST_XHCI_MUTATION image may carry the
+# TEST-ONLY xHCI mutation banner (and it must carry it).
+define xhci_mut_check
+	@if [ -n "$(strip $(CK_TEST_XHCI_MUTATION))" ]; then \
+	  grep -aqF "TEST-ONLY xHCI MUTATION BUILD" $(1) || { echo "xHCI mutation image lacks its TEST-ONLY banner"; rm -f $(1); exit 1; }; \
+	else \
+	  if grep -aqF "TEST-ONLY xHCI MUTATION" $(1); then echo "default image carries the TEST-ONLY xHCI mutation"; rm -f $(1); exit 1; fi; \
+	  echo "no xHCI mutation code in $(1)"; \
+	fi
+endef
+
 # owner_check(elf): a hardware staging image must carry no TEST Store label,
 # TEST store uuid, TEST Store print lines or TEST key symbols.
 define owner_check
@@ -308,6 +345,7 @@ $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	  $(KNM) $@ | grep -qE " [TW] $$s$$" || { echo "full image lacks $$s"; rm -f $@; exit 1; }; done
 	$(call fwcfg_check,$@)
 	$(call owner_check,$@)
+	$(call xhci_mut_check,$@)
 
 $(EFI): $(ELF)
 	$(call pe_image,$<,$@)

@@ -14,7 +14,7 @@ STAGE_OUT ?= /tmp/aienos-ck-stage-$(shell id -u)
 
 # Own sources (image).
 STAGE_OWN_SRCS := $(STAGE_DIR)/dev/pci.c $(STAGE_DIR)/dev/nvme_bind.c $(STAGE_DIR)/dev/nvme_shutdown.c $(STAGE_DIR)/dev/virtio_net.c \
-                  $(STAGE_DIR)/dev/net_bind.c $(STAGE_DIR)/dev/net_udp.c \
+                  $(STAGE_DIR)/dev/net_bind.c $(STAGE_DIR)/dev/net_udp.c $(STAGE_DIR)/dev/xhci_fence.c \
                   $(STAGE_DIR)/dev/devices.c $(STAGE_DIR)/svc/security.c $(STAGE_DIR)/svc/store_boot.c \
                   $(STAGE_DIR)/svc/artifact_store.c
 # Native modules, compiled unmodified.

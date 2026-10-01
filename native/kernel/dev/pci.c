@@ -231,6 +231,63 @@ int pci_bus_master_off(const pci_func *f)
     return (pci_r16(f->cfg, CFG_COMMAND) & CMD_BM) ? -1 : 0;
 }
 
+
+void pci_sweep_bus_master(const pci_bus_access *a, pci_sweep *out)
+{
+    pci_sweep s;
+    uint8_t *z = (uint8_t *)&s;
+    for (size_t i = 0; i < sizeof s; i++) z[i] = 0;
+    for (uint32_t bus = a->start_bus; bus <= a->end_bus; bus++) {
+        for (uint8_t dev = 0; dev < 32; dev++) {
+            for (uint8_t fn = 0; fn < 8; fn++) {
+                volatile uint8_t *c = pci_cfg(a, (uint8_t)bus, dev, fn);
+                if (!c) break;
+                if ((pci_r32(c, CFG_VENDOR) & 0xffffu) == 0xffffu) {
+                    if (fn == 0) break;
+                    continue;
+                }
+                s.functions++;
+                uint8_t header = (uint8_t)(pci_r32(c, 0x0c) >> 16);
+                uint16_t cmd = pci_r16(c, CFG_COMMAND);
+                if ((header & 0x7fu) == 1u) {
+                    s.bridges++;
+                    if (cmd & CMD_BM) s.bridges_bme++;
+                } else if (cmd & CMD_BM) {
+                    pci_w16(c, CFG_COMMAND, (uint16_t)(cmd & ~CMD_BM));
+                    uint16_t after = pci_r16(c, CFG_COMMAND);
+                    if (s.endpoints_bme < PCI_SWEEP_FINDINGS) {
+                        pci_bme_finding *f = &s.f[s.endpoints_bme];
+                        f->bus = (uint8_t)bus;
+                        f->dev = dev;
+                        f->fn = fn;
+                        f->command_before = cmd;
+                        f->command_after = after;
+                    }
+                    s.endpoints_bme++;
+                    if (after & CMD_BM) s.still_enabled++;
+                }
+                if (fn == 0 && !(header & 0x80u)) break;
+            }
+        }
+    }
+    *out = s;
+}
+
+void pci_sweep_report(const pci_ecam *e, const pci_sweep *s)
+{
+    ck_printf("dma_sweep: seg %04x bus %02x-%02x functions=%u bridges=%u bridges_bme=%u endpoints_bme_found=%u "
+              "still_enabled=%u\n",
+              e->segment, e->start_bus, e->end_bus, s->functions, s->bridges, s->bridges_bme, s->endpoints_bme,
+              s->still_enabled);
+    uint32_t n = s->endpoints_bme < PCI_SWEEP_FINDINGS ? s->endpoints_bme : PCI_SWEEP_FINDINGS;
+    for (uint32_t i = 0; i < n; i++) {
+        const pci_bme_finding *f = &s->f[i];
+        ck_printf("dma_sweep: bme %s %04x:%02x:%02x.%u command 0x%04x -> 0x%04x\n",
+                  (f->command_after & CMD_BM) ? "STUCK" : "cleared", e->segment, f->bus, f->dev, f->fn,
+                  f->command_before, f->command_after);
+    }
+}
+
 const pci_func *pci_find_class(const pci_system *s, uint32_t cc, uint32_t mask)
 {
     for (uint32_t i = 0; i < s->n; i++)
