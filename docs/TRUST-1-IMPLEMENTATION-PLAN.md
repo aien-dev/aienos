@@ -118,6 +118,8 @@ Acceptance tests: Ceremony record contains tool versions, procedure, public fing
 
 Evidence required: Key ceremony receipt (fingerprints, manifest digest, roles, backup count, verification success).
 
+Status (2026-09-30, software side): `scripts/trust1_key_ceremony.sh` (OpenSSL 3 only, Linux or macOS) implements the ceremony: `preflight` refuses to run with a network route; `generate` creates Owner Root, Release Signer and Operator Approval (Ed25519) and the Boot Signer (RSA-2048 self-signed X.509 with codeSigning, the form UEFI db and sbsign need), each private key encrypted from creation, plus the generation-1 authority manifest signed by Owner Root; `backup` copies to a medium and proves every key decrypts from that copy; `record` writes the ceremony receipt (no private material); `rotate ROLE add|revoke` demonstrates add, verify, revoke as new root-signed generations with the old key quarantined, never deleted; `verify DIR MIN_GEN` refuses an older generation. Owner Root and Boot Signer are not rotatable by this tool (special ceremony, firmware db). `scripts/test_trust1_key_ceremony.sh` (verify_all step 12) exercises all of it with throwaway keys, including tamper, swapped key, wrong passphrase, rollback, and signing the loader with the Boot Signer cert. `scripts/generate_owner_boot_keys.sh` stays a disposable dev key and is not part of this gate. Operator steps: [TRUST-1-OPERATOR-STEPS.md](TRUST-1-OPERATOR-STEPS.md) Step 8. Still physical: the offline ceremony itself and the two backups in separate places.
+
 Rollback: No firmware state changed; destroy or quarantine disputed material per operator direction and re-run ceremony if needed.
 
 ---

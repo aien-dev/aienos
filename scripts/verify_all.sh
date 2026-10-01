@@ -234,3 +234,13 @@ if command -v qemu-system-aarch64 >/dev/null && command -v sbsign >/dev/null && 
 else
     skipped "qemu-system-aarch64, sbsigntool, or snakeoil AAVMF firmware not present on host."
 fi
+
+# Step 12: TRUST-1 Gate 3 key ceremony tool self-test. THROWAWAY keys in a
+# private temp folder only (deleted on exit); never an owner key.
+echo ""
+echo "--- [TRUST-1 Gate 3 Key Ceremony Tool Self-Test] ---"
+if command -v openssl >/dev/null && openssl version | grep -q '^OpenSSL 3\.'; then
+    ./scripts/test_trust1_key_ceremony.sh 2>/dev/null
+else
+    skipped "OpenSSL 3 not present on host."
+fi
