@@ -55,6 +55,20 @@ The C sealed Store (`native/store/store_sealed.c`, lane 11) wires `native/m5` in
 | Protocol for 512-byte tearing | proven twice: Rust engine root-tear closure (#136 Tier 2a: every non-zero superblock byte in sector 0) and the C host reference `native/store/torn_slot.c` (#175, every block subset enumerated); neither is the production path | n/a |
 | Production Store on 512-byte geometry | C disk layer now exists: `native/disk` (block layer + freestanding C NVMe driver, #190, QEMU virtual NVMe only) and `native/store` (byte-identical C twin of the ADR 0015 engine, 89/89 golden-vector rows, plus the sealed Store with the torn_slot anchor); host receipt `evidence/trust1_m5_qualification_6fd36c3012ad792862e6098492ae78d7b091c5fada8af73c7c60e6a8f544a650.json`. QEMU kernel-path evidence: the sealed C Store runs in the C kernel boot path on a 512 B QEMU namespace (`evidence/trust1_m5_qualification_3358bc2585f0982e1dfbcd0f5ed2fe077847332591782edff8974f0da9caeded.json`, row `ck_store_kernel_qemu`; QEMU-only unsafe DMA bypass, no crash campaign). The same C kernel Store path now runs SMMU-confined in QEMU (`iommu=smmuv3`, NVMe stream mapped to its DMA window only, out-of-window DMA faulted; `evidence/ck_gates_23482745517ec1967d2667b24d2a1cd9eafb27cdd91bdb91be7712a3a2968812.json`, gates `SMMU`, `M4_NVME`, `M4_STORE`; QEMU only, physical NOT_RUN). Missing: the binding on a real device (`m5_store_kernel_binding`) and any run on the Machine 1 SSD | MISSING_IMPLEMENTATION |
 
+## Newest receipt (2026-10-01, lane 33): NOT_QUALIFIED and STALE
+
+The newest TRUST-1/M5 receipt is
+`evidence/trust1_m5_qualification_3358bc2585f0982e1dfbcd0f5ed2fe077847332591782edff8974f0da9caeded.json`:
+37 rows, pass 20, fail 0, not_run 1, blocked 11, missing 5, verdict
+**NOT_QUALIFIED**. It is **stale**: it ran at 5a3a05c, before #197 (SMMU), #199
+(Store record v2), #201, #203 and #204, and its `ck_store_kernel_qemu` row ran
+with the QEMU-only unsafe DMA bypass. A rerun on current main is owed. Where
+rows below cite receipt `6fd36c30...` (or `f21f2c03`, `cbdb2fe7`), those are
+older receipts kept as history for that row's evidence, not the latest.
+That receipt marks `t1_gate7` BLOCKED_HARDWARE, while the Gate 7 row in the
+table above says BLOCKED_OPERATOR (Gate 7 needs both operator approval and
+Machine 1); both are blocked and neither is a PASS.
+
 ## Update 2026-10-01 (lane 1)
 
 Qualification entrypoint: `bash scripts/trust1_m5_qualify.sh` (#182) runs every
@@ -62,4 +76,4 @@ software gate above, marks operator / hardware / unimplemented gates without
 running them, and writes a content-addressed receipt (`evidence/trust1_m5_qualification_<sha256>.json`).
 New on main since the snapshot: Gate 5 swTPM simulation (#185), `native/crypto`
 (#183), `native/m5` (#186). Overall is unchanged: **TRUST-1 NOT QUALIFIED. M5
-NOT QUALIFIED.** The receipt committed with this update is the authoritative count.
+NOT QUALIFIED.** The receipt committed with that update was the authoritative count at the time; the newest one is named in the section above.

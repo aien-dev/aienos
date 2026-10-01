@@ -7,7 +7,43 @@ public map: where the project is, what is next, and where you can help.
 **Live progress** is on the GitHub milestone pages linked below: each progress
 bar moves as issues close. This file is updated at every gate.
 
-## Status (updated 2026-09-27)
+## Status (updated 2026-10-01)
+
+This block is newer than the 2026-09-27 block below, which is kept as history.
+Nothing in AIENOS is physically qualified. Verdict vocabulary: PASS, FAIL,
+NOT_RUN, BLOCKED_HARDWARE, BLOCKED_OPERATOR, MISSING_IMPLEMENTATION.
+
+```text
+C kernel series  #194 34c6053 .. #204 c3878bb   IMPLEMENTED / NOT QUALIFIED
+    evidence class: QEMU, plus GitHub ARM64 CI (which is still QEMU).
+    No physical boot of the C kernel has happened ("physical": NOT_RUN).
+    newest ck_gates receipt: evidence/ck_gates_bb4040322b026f5f561733fdcaf900770070f2281800b0e3603c2aa2c670b7ff.json
+        run at 4f56a96; verdict NOT_ALL_GATES_PASS
+        9 PASS / 0 FAIL / 5 NOT_RUN of 14 gates
+        NOT_RUN: M0_ROLLBACK, M4_STORE_CRASH, M4_CONTINUITY, M4_RECOVERY, KEYBOARD
+    M0_ROLLBACK is still MISSING_IMPLEMENTATION in the C kernel (the C loader
+        BootNext / A-B / rollback is parked, native/boot/README.md), despite
+        the title of #204 ("P2_ARTIFACT loader and M0_ROLLBACK gates"). #204
+        added the P2_ARTIFACT loader gate; M0_ROLLBACK reports NOT_RUN.
+
+Native networking  #200 d75a266 (virtio-net attach + split virtqueue driver),
+                   #203 9807281 (kernel hook + NET gate)
+    NET gate PASS in QEMU only. SMMU window programmed but not enforced
+    (VIRTIO_F_ACCESS_PLATFORM not negotiated); polled, no IRQs, no physical
+    NIC; TEST keys.
+
+TRUST-1 / M5   NOT_QUALIFIED, receipt is STALE
+    newest receipt: evidence/trust1_m5_qualification_3358bc2585f0982e1dfbcd0f5ed2fe077847332591782edff8974f0da9caeded.json
+        37 rows: pass 20, fail 0, not_run 1, blocked 11, missing 5
+        verdict NOT_QUALIFIED
+    STALE: it ran at 5a3a05c, before #197 (SMMU), #199 (Store record v2),
+        #201, #203 and #204, and its ck_store_kernel_qemu row used the
+        QEMU-only unsafe DMA bypass. A rerun on current main is owed.
+    Older receipts (6fd36c30, cbdb2fe7, f21f2c03, e916472d, 5a5de9c1) are
+    history; all are NOT_QUALIFIED.
+```
+
+## Status (updated 2026-09-27, history)
 
 ```text
 M0  PARTIAL  Reference freeze

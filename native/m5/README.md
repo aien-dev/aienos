@@ -141,13 +141,13 @@ HMAC-SHA-256 under K_root_auth over `domain || bytes`, compared in constant time
   The signature primitive is `native/sig` (in-house Ed25519, #188). The
   record and the tool exist and are tested, but no record has been signed
   with the real owner key, nothing in the Store or boot path calls
-  `m5_migration_authorize_owner` yet (needs the C disk layer), and no
+  `m5_migration_authorize_owner` yet (it is host-only), and no
   trusted owner public key is provisioned anywhere.
 - **Binding to the Gate 3 Owner Root**: the hierarchy carries an owner
   hierarchy generation, but nothing ties K_vol to the Gate 3 Owner Root yet.
-- **Store integration** needs the C disk layer: recovery here works on a
+- **Store integration** lives outside this library: recovery here works on a
   commit record, an anchor and in-memory candidate envelopes; it does not read
-  or repair a disk and does not touch `native/store`.
+  or repair a disk and does not touch `native/store`. The C disk layer now exists (#190, #191) and the C sealed Store uses this library on the host and in the QEMU C kernel with TEST keys, but the Store kernel binding on a real device (`m5_store_kernel_binding`) is still MISSING_IMPLEMENTATION.
 - Recovery KDF (Argon2id / WebAuthn PRF) and KeySlotManifest lineage are not
   ported.
 
