@@ -1,0 +1,71 @@
+/* ck_internal.h -- declarations shared inside the C kernel core (boot stub,
+ * arch, mm, core). Not part of the stage contract (that is ck.h). */
+#ifndef AIENOS_CK_INTERNAL_H
+#define AIENOS_CK_INTERNAL_H
+
+#include "ck.h"
+#include "handoff.h"
+#include "acpi.h"
+#include "fmt.h"
+
+void *memcpy(void *dst, const void *src, size_t n);
+void *memset(void *dst, int c, size_t n);
+int memcmp(const void *a, const void *b, size_t n);
+size_t strlen(const char *s);
+
+/* ---- console (core/console.c) ---- */
+/* While UEFI boot services live: writer for ConOut (NULL to detach). */
+void ck_console_set_efi(void (*write)(const char *s, size_t n));
+/* SPCR UART: returns 0 if the interface type is supported. */
+int ck_console_set_uart(const struct ck_spcr *spcr);
+/* Name of the active UART driver for the report, e.g. "pl011". */
+const char *ck_console_uart_name(void);
+uint64_t ck_console_uart_base(void);
+
+/* ---- report (core/report.c) ---- */
+void ck_set_stage(const char *name);
+const char *ck_stage_name(void);
+void ck_report_header(const char *kind);
+__attribute__((noreturn)) void ck_reset(void);
+/* PSCI conduit from the FADT; default SMC. */
+void ck_psci_configure(const void *fadt);
+__attribute__((noreturn)) void ck_fault_report(const char *what, uint64_t esr, uint64_t far,
+                                               uint64_t elr, unsigned el);
+
+/* ---- memory (mm/mmu.c) ---- */
+struct ck_mm_report {
+    uint64_t root;
+    uint64_t pt_tables;
+    uint64_t stack_lo, stack_hi, stack_guard;
+    uint64_t heap_lo, heap_hi, heap_guard_lo, heap_guard_hi;
+    uint64_t dma_lo, dma_hi;
+    uint64_t ram_ranges, free_bytes;
+};
+/* EL2/firmware phase: frames from the map, our tables, stack, heap, DMA pool.
+ * Returns the stack top for the EL1 entry. */
+uint64_t ck_mm_build(const struct ck_handoff *h);
+/* EL1 phase: heap ready after the MMU is on. */
+void ck_mm_el1_ready(void);
+const struct ck_mm_report *ck_mm_report(void);
+uint64_t ck_mm_mair(void);
+uint64_t ck_mm_tcr(void);
+uint64_t ck_mm_sctlr(void);
+/* Guard-page self test (EL1). 0 if every guard faulted and was contained. */
+int ck_mm_guard_selftest(char *detail, size_t n);
+
+/* ---- GIC and timer (arch/gic.c, arch/timer.c) ---- */
+struct ck_gic_report {
+    uint64_t gicd, gicr;
+    uint32_t arch_rev;
+    uint64_t icc_sre;
+    uint64_t rd_frame; /* this CPU's redistributor frame */
+};
+int ck_gic_init(const struct ck_madt_gic *madt, struct ck_gic_report *out);
+struct ck_timer_window {
+    uint64_t ticks, ms, freq_hz, min_interval, max_interval, span;
+};
+int ck_timer_window(uint32_t ms, struct ck_timer_window *out);
+uint64_t ck_counter_to_us(uint64_t counter, uint64_t freq);
+void ck_timer_tick(void); /* IRQ dispatcher: INTID 30 */
+
+#endif

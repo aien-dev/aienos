@@ -60,6 +60,16 @@ void ck_udelay(uint32_t us);
 const char *ck_commit(void);  /* git commit the image was built from */
 uint32_t ck_boot_count_hint(void); /* 0; Store keeps the real count */
 
+/* Interrupts (added by core, Lane 18). GICv3, group 1, routed to the boot
+ * CPU. Handlers run in IRQ context with interrupts masked; the core
+ * acknowledges and EOIs around the call. INTID 30 (timer) is reserved.
+ * ck_irq_register: 0 ok, -1 bad/reserved intid, -2 already registered.
+ * ck_irq_enable: 0 ok, -1 before the GIC is up or bad intid.
+ * ck_irq_cpu_enable(1) unmasks IRQs on this CPU, (0) masks them. */
+int ck_irq_register(uint32_t intid, void (*fn)(void *arg), void *arg);
+int ck_irq_enable(uint32_t intid);
+void ck_irq_cpu_enable(int on);
+
 /* ---- boot stages (implemented by the stage worker, all optional) -------- */
 /* Each returns 0 on success, negative on failure; core prints the result.
  * Declared weak so the core links and boots without them. */
