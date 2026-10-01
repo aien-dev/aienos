@@ -61,6 +61,7 @@ QUIET_FLAG="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
 AAVMF_CODE_FD="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}"
 AAVMF_VARS_FD="${AAVMF_VARS:-/usr/share/AAVMF/AAVMF_VARS.fd}"
 PHYSICAL_STATEMENT="QEMU emulator runs only. Nothing here was run on Machine 1 or any GB10; no physical qualification is claimed."
+M4_NVME_PASS_NOTE="QEMU-only unsafe DMA bypass build (make full CK_QEMU_UNSAFE_DMA=1); SMMU-confined NVMe mode NOT_RUN"
 
 die() { echo "ck_gates: $*" >&2; exit 2; }
 json_str() {
@@ -173,8 +174,12 @@ evaluate_table() {
         [[ -n "${gate}" ]] || continue
         out="$(classify_gate "${gate}" "${src}" "${why}")"
         v="${out%%|*}"; r="${out#*|}"
+        # M4_NVME can only pass through the unsafe bypass build: say so.
+        [[ "${v}" == PASS && "${gate}" == M4_NVME ]] && r="${M4_NVME_PASS_NOTE}"
         gate_rows+=("${gate}|${src}|${v}|${r}")
-        if [[ "${v}" == PASS ]]; then
+        if [[ "${v}" == PASS && "${gate}" == M4_NVME ]]; then
+            echo "AIENOS_CK_${gate}: PASS (${r})"
+        elif [[ "${v}" == PASS ]]; then
             echo "AIENOS_CK_${gate}: PASS"
         else
             echo "AIENOS_CK_${gate}: ${v} (${r})"
@@ -317,6 +322,8 @@ self_test() {
     [[ "${n_pass}/${n_fail}/${n_notrun}/${n_total}" == "4/0/8/12" && ${overall} == NOT_ALL_GATES_PASS ]] \
         && ok "A: counts 4/0/8 of 12, verdict NOT_ALL_GATES_PASS" || bad "A: counts ${n_pass}/${n_fail}/${n_notrun}/${n_total} ${overall}"
     [[ "$(nvme_dma_mode)" == UnsafeBypass* ]] && ok "A: unsafe-bypass DMA mode recorded" || bad "A: dma mode '$(nvme_dma_mode)'"
+    grep -qxF "AIENOS_CK_M4_NVME: PASS (${M4_NVME_PASS_NOTE})" "${tmp}/A.out" \
+        && ok "A: M4_NVME PASS line carries the unsafe-bypass / SMMU NOT_RUN note" || bad "A: M4_NVME PASS line lacks the note"
     grep -qx 'AIENOS_CK_M3: NOT_RUN (MISSING_IMPLEMENTATION: no threads, EL0 tasks, preemption, MADT placement or typed IPC in the C kernel)' "${tmp}/A.out" \
         && ok "A: missing gate prints NOT_RUN (MISSING_IMPLEMENTATION: reason)" || bad "A: M3 line wrong"
     [[ "$(grep -c '^AIENOS_CK_[A-Z0-9_]*: ' "${tmp}/A.out")" == 12 ]] && ok "A: exactly 12 verdict lines" || bad "A: verdict line count"
