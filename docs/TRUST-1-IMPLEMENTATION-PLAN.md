@@ -21,6 +21,16 @@ Owners (Q27):
 
 Objective: Record the known-good Spark baseline that all later rollback refers to.
 
+Tooling and status: `scripts/tpm_measurement_campaign.sh capture` records PCR banks,
+the event log (with a replay check against live PCRs), PK/KEK/db/dbx bytes and
+digests, boot entries and versions, read-only. `scripts/trust1_credential_policy.sh
+--live` decodes which TPM policy seals each systemd credential and whether it
+would unseal now. The 2026-09-30 addendum
+[trust1_gate0_addendum_v1.json](../evidence/trust1_gate0_addendum_v1.json)
+corrects the 2026-09-23 receipt: Gate 0 is open until the offline material has
+a second independent location, cold-boot PCR stability is measured, and
+firmware auto-refresh is paused.
+
 Preconditions: Secure Boot enabled; Linux boots normally; TPM-sealed storage unlocks; vault unlocks.
 
 Permitted mutations: Read-only inspection only, plus writing the baseline receipt to `evidence/`. No trust, boot, TPM, or storage mutation.
@@ -71,6 +81,12 @@ Rollback: Remove USB; boot Linux default. If recovery not proven, STOP: no Gate 
 ## Gate 2: TPM measurement campaign (Owner: Agents, Operator for reboots)
 
 Objective: Determine which measurements represent enforceable security properties before choosing any PCR policy.
+
+Tooling: `scripts/tpm_measurement_campaign.sh` `capture` (one snapshot per boot),
+`compare` (item-by-item diff, exit 3 on any change) and `receipt` (per-experiment
+JSON: before, one variable, after, post-rollback, chained to the previous
+receipt; result `STOP_UNEXPECTED_STATE` when rollback does not restore the
+before state). Host self-test: `scripts/test_trust1_measurement_tools.sh`.
 
 Preconditions: Gates 0-1 PASS. System stable. No firmware auto-update during campaign.
 

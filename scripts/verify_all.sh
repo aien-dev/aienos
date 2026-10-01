@@ -212,3 +212,12 @@ if command -v gzip >/dev/null && command -v cpio >/dev/null; then
 else
     skipped "gzip or cpio not present on host."
 fi
+
+# Step 10: TRUST-1 Gate 0/2 measurement tools (software TPM, no hardware).
+echo ""
+echo "--- [TRUST-1 Measurement Tools Self-Test] ---"
+if command -v swtpm >/dev/null && command -v tpm2_pcrread >/dev/null && command -v xxd >/dev/null; then
+    ./scripts/test_trust1_measurement_tools.sh
+else
+    skipped "swtpm, tpm2-tools, or xxd not present on host."
+fi
