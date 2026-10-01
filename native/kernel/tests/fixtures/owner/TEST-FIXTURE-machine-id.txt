@@ -1,0 +1,7 @@
+# TEST FIXTURE. NOT A MACHINE IDENTITY. Never use for a real build.
+# Random bytes generated once for this fixture (2026-10-01). Used only by
+# scripts/ck_owner_keys_check.sh. Distinct from the TEST machine id (0xA1)
+# and the TEST store uuid. A real file names Machine 1's ARGUS machine id and
+# its boot Store uuid and is kept with the owner's provisioning records.
+machine_id 9c72f350f7edfc007c9157a0e74a6367adabff1022dc609c9e0bfbd34f996f67
+store_uuid dd0e837ace4005d3ec804685a3630592

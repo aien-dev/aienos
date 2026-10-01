@@ -73,6 +73,11 @@ jobs:
       - name: Gate runner self-test
         run: bash scripts/ck_gates.sh --self-test
 
+      - name: Hardware staging image refuses TEST keys (build only)
+        env:
+          AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
+        run: bash scripts/ck_owner_keys_check.sh
+
       - name: Check the host tests left the tree clean (the gate runner refuses a dirty tree)
         run: |
           git status --porcelain --untracked-files=normal

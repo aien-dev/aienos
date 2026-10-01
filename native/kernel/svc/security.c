@@ -10,6 +10,13 @@
 #include "aienos_contain.h"
 #include "ck.h"
 #include "ck_compat.h"
+#ifdef CK_HARDWARE_STAGING
+#include "ck_owner_prov.h" /* generated: owner public material + machine id */
+#if !defined(CK_OWNER_PROVISIONED) || CK_OWNER_PROVISIONED != 1
+#error "CK_HARDWARE_STAGING needs the generated owner provisioning header (CK_OWNER_PUBKEYS=, CK_MACHINE_ID=)"
+#endif
+_Static_assert(sizeof ck_owner_machine_id == ARGUS_MACHINE_ID_LEN, "machine id length");
+#endif
 
 /* Rust ipc demo resource ids are irrelevant here; these are local labels. */
 #define SUBJ_A 1u
@@ -88,7 +95,12 @@ static int bring_up(ck_sec_report *r)
     if (argus_core_init(&S.core, S.core_mem, argus_core_footprint()) != ARGUS_OK) return r->fail = "argus_core_init", -1;
     if (argus_contain_init(&S.contain, S.contain_mem, argus_contain_footprint()) != ARGUS_OK)
         return r->fail = "argus_contain_init", -1;
+#ifdef CK_HARDWARE_STAGING
+    /* this machine's ARGUS id: provisioned at build time (CK_MACHINE_ID) */
+    for (uint32_t i = 0; i < ARGUS_MACHINE_ID_LEN; i++) S.machine[i] = ck_owner_machine_id[i];
+#else
     S.machine[0] = 0xA1; /* this machine's ARGUS id: fixed label, TEST */
+#endif
     if (argus_aegis_bridge_init(&S.bridge, S.bridge_mem, argus_aegis_bridge_footprint(), S.core, S.contain, &S.gate,
                                 S.view, S.machine) != ARGUS_OK)
         return r->fail = "bridge_init", -1;

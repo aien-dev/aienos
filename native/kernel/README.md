@@ -31,6 +31,56 @@ Toolchain: gcc, binutils (ld, objcopy, nm, readelf), make, shell. On a
 non-aarch64 host the Makefile uses the `aarch64-linux-gnu-` prefix.
 Output lands in `<repo>/target/native-kernel` (ignored by git).
 
+## Owner provisioning (hardware staging image)
+
+The default and QEMU images use the labelled TEST Store keys
+(`ck_store_test_keys`, public label, `M5_ID_TEST`), the TEST store uuid and
+the TEST ARGUS machine id (0xA1). The hardware staging image never embeds any
+of them:
+
+    make -C native/kernel full CK_HARDWARE_STAGING=1 \
+        CK_OWNER_PUBKEYS=<owner public keys file> CK_MACHINE_ID=<machine id file>
+    # -> target/native-kernel/full-hardware-staging/BOOTAA64.EFI
+
+- Without both files the Makefile stops with `CK_HARDWARE_STAGING refuses the
+  TEST Store keys and TEST machine id`. `svc/store_boot.c` and
+  `svc/security.c` also `#error` in a `CK_HARDWARE_STAGING` build without the
+  generated header, and the linked image is checked (Makefile `owner_check`)
+  to carry no TEST Store label, uuid, TEST print line or TEST key symbol.
+- The files hold PUBLIC material only, as text lines `<name> <hex>` (`#`
+  comments; each name exactly once). Owner file:
+  `owner_root_ed25519 <64 hex>` (the Gate 3 Owner Root public key). Machine
+  file: `machine_id <64 hex>` (ARGUS machine id, 32 bytes) and
+  `store_uuid <32 hex>` (boot Store uuid). `tools/ck_owner_gen.c` checks them
+  and writes `ck_owner_prov.h` into the OUT directory (never committed). It
+  refuses the RFC 8032 TEST 1/2/3 public keys, the TEST machine id, the TEST
+  store uuid, all-equal bytes, wrong lengths, non-hex, duplicates and unknown
+  names. Real owner files are never committed.
+- What the image uses: the machine id becomes the ARGUS machine id, the store
+  uuid the boot Store uuid, and the boot log prints a SHA-256 fingerprint of
+  the owner root key. Nothing in the kernel verifies with the owner root key
+  yet.
+- **Production Store keys are BLOCKED_OPERATOR.** Store keys derive from
+  K_vol (ADR 0017), which is secret and cannot come from public material.
+  `ck_store_production_keys` always refuses (`CK_SB_E_BLOCKED_OPERATOR`), so
+  the hardware staging Store stage prints `store: REFUSED proof=keyed
+  step="production Store key source"` and neither reads nor formats the disk.
+  To unblock it the operator must provide, through the TRUST-1 key ceremony:
+  the Gate 3 Owner Root (offline), and a K_vol source the kernel can unwrap
+  at boot: the Gate 5/6 TPM PolicyAuthorize key with the sealed Slot 0 KEK,
+  or the Slot 1 recovery KEK. The in-kernel keyslot unwrap is also not
+  written yet. `store_boot_run` refuses TEST-identity keys in a hardware
+  staging build before any disk access (host test `stage_test`).
+- Proof: `scripts/ck_owner_keys_check.sh` (build only, takes the quiet flag)
+  checks the refusals, the generator refusals, and builds the hardware staging
+  image from the labelled TEST-fixture files in `tests/fixtures/owner/`
+  (public bytes only, distinct from every old TEST constant), then greps the
+  ELF and EFI. Ends `CK_OWNER_KEYS_CHECK: PASS`. CI runs it.
+- Not covered: the untrusted RFC 8032 TEST 1/2 public key constants
+  (`artifact/format.c`, used only by the `CK_SEED0B_TEST_ANCHOR` build and the
+  host tools) are still present as data in every image, including hardware
+  staging; the ordinary loader trusts no anchor.
+
 ## Boot sequence
 
 1. UEFI stub: pre-exit report on ConOut, memory map, `ExitBootServices`.

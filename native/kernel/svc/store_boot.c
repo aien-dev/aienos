@@ -7,10 +7,29 @@
 #include "m5.h"
 #include "sha256.h"
 
+#ifdef CK_HARDWARE_STAGING
+/* Hardware staging image: owner provisioning generated at build time by
+ * tools/ck_owner_gen.c from CK_OWNER_PUBKEYS= and CK_MACHINE_ID= (public
+ * material only). No TEST label, TEST uuid or TEST key code is compiled. */
+#include "ck_owner_prov.h"
+#if !defined(CK_OWNER_PROVISIONED) || CK_OWNER_PROVISIONED != 1
+#error "CK_HARDWARE_STAGING needs the generated owner provisioning header (make full CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS=<file> CK_MACHINE_ID=<file>)"
+#endif
+#if defined(CK_STORE_TEST_KEYS)
+#error "CK_STORE_TEST_KEYS (TEST Store keys, TEST uuid) cannot be combined with CK_HARDWARE_STAGING"
+#endif
+#define CK_SB_HW 1
+#else
+#define CK_STORE_TEST_KEYS 1
+#define CK_SB_HW 0
+#endif
+
+#ifdef CK_STORE_TEST_KEYS
 #define LABEL_KVOL "AIENOS-LANE18-TEST-KVOL-NOT-SECRET"
 
 const uint8_t ck_store_test_uuid[16] = {'A', 'I', 'E', 'N', '-', 'T', 'E', 'S',
                                         'T', '-', 'B', 'O', 'O', 'T', '0', '1'};
+#endif
 
 static void bz(void *p, size_t n)
 {
@@ -42,6 +61,7 @@ static uint32_t get32(const uint8_t *p)
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
 
+#ifdef CK_STORE_TEST_KEYS
 void ck_store_test_keys(ss_keys *k)
 {
     uint8_t kvol[32];
@@ -55,6 +75,27 @@ void ck_store_test_keys(ss_keys *k)
     bcp(k->k_domain, sk.k_artifact, 32);
     m5_subkeys_wipe(&sk);
     bz(kvol, sizeof kvol);
+}
+#endif
+
+/* BLOCKED_OPERATOR seam. Production Store keys derive from K_vol (ADR 0017),
+ * which is secret: it cannot come from the public owner material injected at
+ * build time, and no in-kernel unwrap of a K_vol keyslot exists yet. The
+ * operator must provide, through the TRUST-1 key ceremony: Gate 3 Owner Root
+ * (offline), Gate 5/6 TPM PolicyAuthorize key + sealed Slot 0 KEK (K_vol
+ * unwrapped at boot), or the Slot 1 recovery KEK. Until then this refuses and
+ * there is no TEST fallback. */
+int ck_store_production_keys(ss_keys *k)
+{
+    if (k) bz(k, sizeof *k);
+    return CK_SB_E_BLOCKED_OPERATOR;
+}
+
+int ck_store_keys_admissible(const ss_keys *k, int hardware_staging)
+{
+    if (!k) return 0;
+    if (k->identity_class == M5_ID_PRODUCTION) return 1;
+    return k->identity_class == M5_ID_TEST && !hardware_staging;
 }
 
 static int fail(ck_store_report *r, const char *proof, const char *step, int rc)
@@ -104,9 +145,21 @@ static ss_store *g_ss;
 int store_boot_run(const disk_dev *d, const ss_keys *keys, const uint8_t uuid[16], const char *commit,
                    ck_store_report *r)
 {
+    return store_boot_run_policy(d, keys, uuid, commit, CK_SB_HW, r);
+}
+
+int store_boot_run_policy(const disk_dev *d, const ss_keys *keys, const uint8_t uuid[16], const char *commit,
+                          int hardware_staging, ck_store_report *r)
+{
     bz(r, sizeof *r);
     bcp(r->prev_commit, "none", 5);
     if (!d || !keys || !uuid || !commit) return fail(r, "geometry", "arguments", -1);
+    r->identity_class = keys->identity_class;
+    /* Before any disk access: a hardware staging build never opens, and
+     * never formats a blank disk, under TEST-identity keys. */
+    if (!ck_store_keys_admissible(keys, hardware_staging))
+        return fail(r, "keyed", "identity class not admissible in this build (TEST keys refused on hardware)",
+                    CK_SB_E_TEST_KEYS);
     if (d->block_size != 512 && d->block_size != 4096) return fail(r, "geometry", "block size", -1);
     uint32_t bpu = CK_LAYOUT_UNIT / d->block_size;
     uint64_t units = d->block_count / bpu;
@@ -202,16 +255,31 @@ static const char *err_name(int rc)
 {
     if (rc <= -301 && rc >= -313) return ss_strerror(rc);
     if (rc <= -101 && rc >= -212) return st_strerror(rc);
+    if (rc == CK_SB_E_TEST_KEYS) return "TestKeysRefused";
+    if (rc == CK_SB_E_BLOCKED_OPERATOR) return "BlockedOperator";
     return "error";
 }
 
 void store_boot_print(const ck_store_report *r)
 {
-    ck_printf("store: TEST identity, TEST keys (public label, not secret, not production); "
-              "anchor lba=%llu store lba=%llu units=%llu\n",
-              (unsigned long long)r->anchor_lba, (unsigned long long)r->store_base_lba,
-              (unsigned long long)r->store_units);
-    if (r->formatted) ck_printf("store: blank disk (all-zero anchor + Store head): formatted TEST store\n");
+    const char *fmt_line;
+#ifdef CK_STORE_TEST_KEYS
+    if (r->identity_class == M5_ID_TEST) {
+        ck_printf("store: TEST identity, TEST keys (public label, not secret, not production); "
+                  "anchor lba=%llu store lba=%llu units=%llu\n",
+                  (unsigned long long)r->anchor_lba, (unsigned long long)r->store_base_lba,
+                  (unsigned long long)r->store_units);
+        fmt_line = "store: blank disk (all-zero anchor + Store head): formatted TEST store\n";
+    } else
+#endif
+    {
+        ck_printf("store: identity class=%u (%s); anchor lba=%llu store lba=%llu units=%llu\n",
+                  (unsigned)r->identity_class, r->identity_class == M5_ID_PRODUCTION ? "production" : "refused",
+                  (unsigned long long)r->anchor_lba, (unsigned long long)r->store_base_lba,
+                  (unsigned long long)r->store_units);
+        fmt_line = "store: blank disk (all-zero anchor + Store head): formatted production store\n";
+    }
+    if (r->formatted) ck_puts(fmt_line);
     if (r->verdict != CK_SB_COMMITTED) {
         ck_printf("store: REFUSED proof=%s step=\"%s\" rc=%d (%s); disk left as found, not reformatted\n",
                   r->proof, r->step, r->rc, err_name(r->rc));
@@ -240,9 +308,33 @@ int ck_stage_store(void)
     }
     ss_keys keys;
     ck_store_report r;
-    ck_store_test_keys(&keys);
     const char *commit = ck_commit();
-    int rc = store_boot_run(d, &keys, ck_store_test_uuid, commit ? commit : "unknown", &r);
+    int rc;
+#ifdef CK_HARDWARE_STAGING
+    {
+        uint8_t fp[32];
+        sha256_hash(ck_owner_root_pk, sizeof ck_owner_root_pk, fp);
+        ck_printf("owner: provisioned at build time (public only): owner_root_ed25519 sha256=%02x%02x%02x%02x%02x%02x%02x%02x "
+                  "store_uuid=%02x%02x%02x%02x...\n",
+                  fp[0], fp[1], fp[2], fp[3], fp[4], fp[5], fp[6], fp[7], ck_owner_store_uuid[0],
+                  ck_owner_store_uuid[1], ck_owner_store_uuid[2], ck_owner_store_uuid[3]);
+    }
+    rc = ck_store_production_keys(&keys);
+    if (rc) {
+        bz(&keys, sizeof keys);
+        ck_printf("store: REFUSED proof=keyed step=\"production Store key source\" rc=%d (BlockedOperator: "
+                  "K_vol needs the TRUST-1 key ceremony, Gate 6 TPM keyslot or the operator recovery keyslot); "
+                  "disk not read, not formatted\n",
+                  rc);
+        ck_art_stage_load(0, "production Store key source BLOCKED_OPERATOR");
+        ck_dev_nvme_release();
+        return rc;
+    }
+    rc = store_boot_run(d, &keys, ck_owner_store_uuid, commit ? commit : "unknown", &r);
+#else
+    ck_store_test_keys(&keys);
+    rc = store_boot_run(d, &keys, ck_store_test_uuid, commit ? commit : "unknown", &r);
+#endif
     bz(&keys, sizeof keys);
     store_boot_print(&r);
     /* Signed artifact candidates live in this Store: read them while the disk
