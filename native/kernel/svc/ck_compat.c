@@ -58,6 +58,7 @@ void ck_compat_free(void *p)
 int ck_compat_clock_gettime(clockid_t id, struct timespec *ts)
 {
     (void)id;
+    if (!ts) return -1;
     uint64_t us = ck_time_us();
     ts->tv_sec = (time_t)(us / 1000000u);
     ts->tv_nsec = (long)((us % 1000000u) * 1000u);
@@ -146,7 +147,7 @@ FILE *ck_compat_fopen(const char *path, const char *mode)
 }
 size_t ck_compat_fread(void *buf, size_t sz, size_t n, FILE *f)
 {
-    if (!f || !f->open || (sz && n > (size_t)-1 / sz)) return 0;
+    if (!f || !f->open || sz == 0 || n == 0 || n > (size_t)-1 / sz) return 0;
     fill_entropy(buf, sz * n);
     return n;
 }
