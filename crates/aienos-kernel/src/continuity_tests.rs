@@ -343,3 +343,99 @@ fn branch_table_validation_rejects_broken_lineage() {
     t.branches.retain(|b| b.id != root);
     assert!(t.validate().is_err(), "no root");
 }
+
+/// Byte offset of branch `i`'s `forks` field in an encoded branch table:
+/// header 16 + agent 32 + written_at 8 + count 4 + reserved 4, then 80-byte
+/// rows of id 32, parent 32, depth 4, reserved 4, forks 8 (continuity.rs:394-407).
+fn forks_offset(i: usize) -> usize {
+    HEADER_BYTES + 32 + 8 + 4 + 4 + i * BRANCH_BYTES + 32 + 32 + 4 + 4
+}
+
+#[test]
+fn wrapping_fork_sum_is_refused_like_the_c_codec() {
+    // {root forks = 2^64-1, child index 0 forks = 2}: the u64 sum wraps to 1,
+    // which equals the one child. With a plain `.sum()` a --release build
+    // (overflow checks off) accepts this table; the C codec refuses it
+    // (continuity_codec.c:482-491). The oracle must refuse as well.
+    let mut state = AgentState::genesis(AGENT, 1);
+    let root = root_branch_id(&AGENT);
+    let child = state.fork(&root).unwrap();
+    let honest = state.encode().unwrap();
+
+    let mut t = state.clone();
+    t.branches.iter_mut().find(|b| b.id == root).unwrap().forks = u64::MAX;
+    t.branches.iter_mut().find(|b| b.id == child).unwrap().forks = 2;
+    assert_eq!(
+        t.validate(),
+        Err(ContinuityError::Corrupt("fork indexes are not contiguous"))
+    );
+
+    // Same table through the decoder, built by patching honest bytes.
+    let ri = state.branches.iter().position(|b| b.id == root).unwrap();
+    let ci = state.branches.iter().position(|b| b.id == child).unwrap();
+    let mut bytes = honest.clone();
+    let (r, c) = (forks_offset(ri), forks_offset(ci));
+    assert_eq!(
+        bytes[r..r + 8],
+        1u64.to_le_bytes(),
+        "layout check: root forks"
+    );
+    assert_eq!(
+        bytes[c..c + 8],
+        0u64.to_le_bytes(),
+        "layout check: child forks"
+    );
+    bytes[r..r + 8].copy_from_slice(&u64::MAX.to_le_bytes());
+    bytes[c..c + 8].copy_from_slice(&2u64.to_le_bytes());
+    assert_eq!(
+        AgentState::decode(&bytes),
+        Err(ContinuityError::Corrupt("fork indexes are not contiguous"))
+    );
+    assert_eq!(AgentState::decode(&honest), Ok(state));
+}
+
+#[test]
+fn branch_table_at_the_maximum_legal_fork_sum_is_accepted() {
+    // MAX_BRANCHES rows = one root + 255 children: fork sum 255, the largest
+    // a valid table can have.
+    let mut state = AgentState::genesis(AGENT, 1);
+    let root = root_branch_id(&AGENT);
+    for _ in 1..MAX_BRANCHES {
+        state.fork(&root).unwrap();
+    }
+    assert_eq!(state.branches.len(), MAX_BRANCHES);
+    let sum: u64 = state.branches.iter().map(|b| b.forks).sum();
+    assert_eq!(sum, (MAX_BRANCHES - 1) as u64);
+    assert_eq!(state.validate(), Ok(()));
+    let bytes = state.encode().unwrap();
+    assert_eq!(AgentState::decode(&bytes), Ok(state.clone()));
+    // One more child is past the format bound, not a wrap.
+    assert_eq!(
+        state.fork(&root),
+        Err(ContinuityError::Limit("too many branches"))
+    );
+}
+
+#[test]
+fn huge_fork_count_with_underivable_child_is_refused_without_spinning() {
+    // Root forks = 2^64-1 and a child whose id is no derived index: an
+    // uncapped `0..forks` scan would run ~2^64 hashes. Capped at MAX_BRANCHES
+    // like C (continuity_codec.c:468), it is refused after <= 256 hashes with
+    // C's class and text (continuity_codec.c:474-479).
+    let root = root_branch_id(&AGENT);
+    let rogue = [0x77u8; 32];
+    assert!((0..MAX_BRANCHES as u64).all(|i| child_branch_id(&root, i) != rogue));
+    let mut t = AgentState::genesis(AGENT, 1);
+    t.branches[0].forks = u64::MAX;
+    t.branches.push(Branch {
+        id: rogue,
+        parent: Some(root),
+        depth: 1,
+        forks: 0,
+    });
+    t.branches.sort_by(|a, b| a.id.cmp(&b.id));
+    assert_eq!(
+        t.validate(),
+        Err(ContinuityError::Corrupt("branch lineage is inconsistent"))
+    );
+}
