@@ -1,0 +1,8 @@
+# TEST FIXTURE. NOT AN OWNER KEY. Never use for a real build.
+# Public Ed25519 key of a throwaway key pair generated once for this fixture
+# (2026-10-01); the private half was never stored, so nothing can sign under
+# it. Used only by scripts/ck_owner_keys_check.sh to prove the hardware
+# staging build path. Deliberately distinct from every old TEST constant
+# (Store label, RFC 8032 vectors). A real owner file holds the Gate 3 Owner
+# Root PUBLIC key from the TRUST-1 key ceremony and is never committed.
+owner_root_ed25519 a980e270f6778c14e7a526ad997aa370b8001d24901042235215277ea7233125

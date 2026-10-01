@@ -11,6 +11,13 @@
 #                        $(OUT)/full-qemu-unsafe-dma/BOOTAA64.EFI (only
 #                        scripts/qemu_ck_store_test.sh sets this; refused
 #                        together with CK_HARDWARE_STAGING=1)
+#   make full CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS=<file> CK_MACHINE_ID=<file>
+#                        hardware staging image $(OUT)/full-hardware-staging/:
+#                        no TEST Store keys/uuid/machine id (refused without
+#                        both files; tools/ck_owner_gen.c checks them); its
+#                        Store stage refuses (production key source is
+#                        BLOCKED_OPERATOR). scripts/ck_owner_keys_check.sh
+#   make owner-gen       host tool $(OUT)/host/ck_owner_gen
 #   make [full] CK_TEST_FWCFG_ARTIFACTS=1
 #                        TEST-ONLY: loader takes candidates from the QEMU fw_cfg
 #                        side channel instead of the boot disk Store; own OUT
@@ -86,6 +93,39 @@ $(error CK_QEMU_UNSAFE_DMA must be empty or 1)
 endif
 endif
 
+# Owner provisioning. The hardware staging image never embeds the TEST Store
+# keys, the TEST store uuid or the TEST machine id: it needs owner PUBLIC
+# material and the machine identity as files (format: tools/ck_owner_gen.c;
+# relative paths are relative to native/kernel), checked and turned into a
+# generated header that refuses every known TEST value. Nothing secret is
+# read: the production Store key source stays BLOCKED_OPERATOR
+# (svc/store_boot.c ck_store_production_keys, TRUST-1 key ceremony).
+CK_OWNER_PUBKEYS ?=
+CK_MACHINE_ID ?=
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+ifneq ($(strip $(CK_HARDWARE_STAGING)),1)
+$(error CK_HARDWARE_STAGING must be empty or 1)
+endif
+ifeq ($(strip $(CK_OWNER_PUBKEYS)),)
+$(error CK_HARDWARE_STAGING refuses the TEST Store keys and TEST machine id: give CK_OWNER_PUBKEYS=<owner public keys file> and CK_MACHINE_ID=<machine id file> (native/kernel/README.md, Owner provisioning))
+endif
+ifeq ($(strip $(CK_MACHINE_ID)),)
+$(error CK_HARDWARE_STAGING refuses the TEST Store keys and TEST machine id: give CK_OWNER_PUBKEYS=<owner public keys file> and CK_MACHINE_ID=<machine id file> (native/kernel/README.md, Owner provisioning))
+endif
+OWNER_PUBKEYS_FILE := $(abspath $(CK_OWNER_PUBKEYS))
+OWNER_MACHINE_FILE := $(abspath $(CK_MACHINE_ID))
+ifeq ($(wildcard $(OWNER_PUBKEYS_FILE)),)
+$(error CK_OWNER_PUBKEYS file not found: $(OWNER_PUBKEYS_FILE))
+endif
+ifeq ($(wildcard $(OWNER_MACHINE_FILE)),)
+$(error CK_MACHINE_ID file not found: $(OWNER_MACHINE_FILE))
+endif
+else
+ifneq ($(strip $(CK_OWNER_PUBKEYS)$(CK_MACHINE_ID)),)
+$(error CK_OWNER_PUBKEYS and CK_MACHINE_ID are only used with CK_HARDWARE_STAGING=1 (the default QEMU build keeps the labelled TEST keys))
+endif
+endif
+
 # SEED-0B qualification build: trusts the RFC 8032 TEST 1 public key only.
 # TEST ONLY; never combined with hardware staging. Use its own OUT.
 CK_SEED0B_TEST_ANCHOR ?=
@@ -148,7 +188,13 @@ FULL_NAME := full
 STAGE_DMA_FLAGS :=
 endif
 ifneq ($(strip $(CK_HARDWARE_STAGING)),)
-STAGE_DMA_FLAGS += -DCK_HARDWARE_STAGING=1
+# Own OUT subdirectory: stage objects built with these flags never mix with
+# the default full image's objects.
+FULL_NAME := full-hardware-staging
+OWNER_HDR := $(OUT)/gen-$(FULL_NAME)/ck_owner_prov.h
+STAGE_DMA_FLAGS += -DCK_HARDWARE_STAGING=1 -I$(dir $(OWNER_HDR))
+else
+OWNER_HDR :=
 endif
 FULL_OUT := $(OUT)/$(FULL_NAME)
 STAGE_KOBJ := $(OUT)/obj/stage-$(FULL_NAME)
@@ -202,7 +248,7 @@ $(KOBJ)/%.o: $(NATIVE)/%.S
 	$(KCC) $(KCFLAGS) -c -o $@ $<
 
 define stage_rule
-$(STAGE_KOBJ)/$(subst /,_,$(patsubst $(REPO)/%,%,$(abspath $(1)))).o: $(1) $(STAGE_HDRS)
+$(STAGE_KOBJ)/$(subst /,_,$(patsubst $(REPO)/%,%,$(abspath $(1)))).o: $(1) $(STAGE_HDRS) $(OWNER_HDR)
 	@mkdir -p $$(dir $$@)
 	$(KCC) $(STAGE_KCFLAGS) -c -o $$@ $(1)
 endef
@@ -218,6 +264,17 @@ define fwcfg_check
 	  y=$$($(KNM) $(1) | grep -E " (fw_select|fw_read|fw_skip|fw_find|fwcfg_from_dsdt|fwcfg_source|fwcfg)$$" | tr "\n" " "); \
 	  if [ -n "$$s$$y" ]; then echo "default image carries fw_cfg artifact code: $$s$$y"; rm -f $(1); exit 1; fi; \
 	  echo "no fw_cfg artifact code in $(1)"; \
+	fi
+endef
+
+# owner_check(elf): a hardware staging image must carry no TEST Store label,
+# TEST store uuid, TEST Store print lines or TEST key symbols.
+define owner_check
+	@if [ "$(strip $(CK_HARDWARE_STAGING))" = 1 ]; then \
+	  s=$$(grep -aoE "AIENOS-LANE18-TEST-KVOL-NOT-SECRET|AIEN-TEST-BOOT01|TEST identity, TEST keys|formatted TEST store" $(1) | sort -u | tr "\n" " "); \
+	  y=$$($(KNM) $(1) | grep -E " (ck_store_test_keys|ck_store_test_uuid)$$" | tr "\n" " "); \
+	  if [ -n "$$s$$y" ]; then echo "hardware staging image carries the TEST Store identity: $$s$$y"; rm -f $(1); exit 1; fi; \
+	  echo "no TEST Store label, uuid or key code in $(1)"; \
 	fi
 endef
 
@@ -250,6 +307,7 @@ $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	@for s in ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce ck_stage_disk_artifacts; do \
 	  $(KNM) $@ | grep -qE " [TW] $$s$$" || { echo "full image lacks $$s"; rm -f $@; exit 1; }; done
 	$(call fwcfg_check,$@)
+	$(call owner_check,$@)
 
 $(EFI): $(ELF)
 	$(call pe_image,$<,$@)
@@ -318,8 +376,21 @@ $(STORE_IMG_TOOL): $(STORE_IMG_SRCS) $(STAGE_HDRS)
 	$(HOSTCC) $(STAGE_HOST_FLAGS) $(STAGE_INC) -o $@ $(STORE_IMG_SRCS)
 store-image: $(STORE_IMG_TOOL)
 
+# Owner provisioning generator (hosted; never part of an image) and the
+# generated header for the hardware staging image.
+OWNER_GEN := $(OUT)/host/ck_owner_gen
+$(OWNER_GEN): $(KDIR)/tools/ck_owner_gen.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -o $@ $<
+owner-gen: $(OWNER_GEN)
+ifneq ($(OWNER_HDR),)
+$(OWNER_HDR): $(OWNER_GEN) $(OWNER_PUBKEYS_FILE) $(OWNER_MACHINE_FILE)
+	@mkdir -p $(dir $@)
+	$(OWNER_GEN) $(OWNER_PUBKEYS_FILE) $(OWNER_MACHINE_FILE) $@
+endif
+
 clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize clean print-kcflags udp-echo tool store-image FORCE
+.PHONY: all full test sanitize clean print-kcflags udp-echo tool store-image owner-gen FORCE

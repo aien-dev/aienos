@@ -228,6 +228,33 @@ static void test_store(void)
         CHECK(nz == 0);
     }
 
+    printf("  [hardware staging policy: TEST keys refused, blank disk not formatted]\n");
+    {
+        ss_keys pk;
+        memset(&pk, 0xEE, sizeof pk);
+        CHECK(ck_store_production_keys(&pk) == CK_SB_E_BLOCKED_OPERATOR);
+        size_t nz = 0;
+        for (size_t i = 0; i < sizeof pk; i++) nz += ((const uint8_t *)&pk)[i] != 0;
+        CHECK(nz == 0); /* BLOCKED_OPERATOR: no key bytes handed out */
+        CHECK(ck_store_keys_admissible(&k, 0) == 1 && ck_store_keys_admissible(&k, 1) == 0);
+        ss_keys prod = k;
+        prod.identity_class = M5_ID_PRODUCTION;
+        CHECK(ck_store_keys_admissible(&prod, 1) == 1 && ck_store_keys_admissible(&prod, 0) == 1);
+        ss_keys odd = k;
+        odd.identity_class = 0;
+        CHECK(ck_store_keys_admissible(&odd, 0) == 0 && ck_store_keys_admissible(0, 0) == 0);
+        CHECK(dopen(0) == 0);
+        int rc = store_boot_run_policy(&g_d, &k, ck_store_test_uuid, "hw-test", 1, &r);
+        store_boot_print(&r);
+        dclose();
+        CHECK(rc == CK_SB_E_TEST_KEYS && r.verdict == CK_SB_REFUSED && r.formatted == 0);
+        CHECK(r.proof && strcmp(r.proof, "keyed") == 0 && r.identity_class == M5_ID_TEST);
+        CHECK(load(now) == 0);
+        nz = 0;
+        for (size_t i = 0; i < T_BYTES; i++) nz += now[i] != 0;
+        CHECK(nz == 0); /* the disk was not touched */
+    }
+
     printf("  [store boot 1: blank disk]\n");
     CHECK(boot(&k, "commit-one", &r) == 0);
     CHECK(r.formatted == 1 && r.verdict == CK_SB_COMMITTED && r.boot_count_prev == 0 && r.boot_count_new == 1);

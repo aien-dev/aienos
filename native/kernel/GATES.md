@@ -31,6 +31,15 @@ image, QEMU `iommu=smmuv3`). The unconfined bypass build
 (`make full CK_QEMU_UNSAFE_DMA=1`) is TEST-ONLY: one boot per geometry checks
 that it announces itself; it never counts toward a PASS. QEMU only.
 
+Store keys: every gate image (default and QEMU builds) uses the labelled TEST
+Store keys, TEST store uuid and TEST machine id. The hardware staging image
+(`make full CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS=... CK_MACHINE_ID=...`)
+embeds none of them and its Store stage refuses (production Store key source
+BLOCKED_OPERATOR on the TRUST-1 key ceremony; native/kernel/README.md "Owner
+provisioning"). That is a build-only property checked by
+`scripts/ck_owner_keys_check.sh` (`CK_OWNER_KEYS_CHECK`), not a gate in this
+table or the receipt; no hardware staging image is booted anywhere.
+
 ## M1 boot: scripts/qemu_boot_test.sh -> CK `M1` (scripts/qemu_ck_boot_test.sh)
 
 Same QEMU command line (virt, EL2, GICv3, single-thread TCG, -smp 4, 2 GiB,
