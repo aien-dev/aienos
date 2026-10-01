@@ -50,6 +50,8 @@ t1_key_ceremony|software|run_key_ceremony|-|^TRUST-1 key ceremony self-test \(th
 t1_gate7_preflight|software|run_gate7_preflight|-|^GATE7_PREFLIGHT: PASS|TRUST-1 Gate 7 read-only pre-flight (depends on operator state)
 t1_recovery_tools|software|run_recovery_tools|-|^RECOVERY_TOOLS: PASS|recovery initrd ships mount, EFI repair and boot-entry restore tools
 store_torn_slot_c|software|run_store_c|-|^TORN_SLOT_HOST_EMULATION: PASS|Store C reference torn-write test (host block-device emulation)
+store_native_c|software|run_store_c|-|^AIENOS_STORE_NATIVE: PASS$|C twin of the System Store v1 engine + sealed Store (host file-backed; golden vectors byte-identical to Rust)
+store_rust_crosscheck|software|run_store_rust_xcheck|2|^STORE_RUST_CROSSCHECK: PASS$|Rust aienos-store-tool opens C-written stores and reads back the same generation and objects (C to Rust direction; NOT_RUN when the Rust tool is not built)
 m5_crypto_crate|cargo|run_cargo_crypto|-|^test result: ok\.|cargo test -p aienos-crypto
 m5_kernel_crypto_security|cargo|run_cargo_kernel|-|^test result: ok\.|cargo test -p aienos-kernel --lib (crypto:: security::)
 t1_gate5_policy_sim|auto|run_gate5_sim|-|^TRUST1_GATE5_POLICY_SIM: PASS$|TRUST-1 Gate 5 policy simulator self-test
@@ -70,9 +72,10 @@ t1_gate7|hardware|-|-|-|Gate 7: attended owner-key enrollment boot, checkpoints 
 t1_gate8|operator|-|-|-|Gate 8 (attended)
 t1_gate9|operator|-|-|-|Gate 9 (attended)
 m5_sealed_volume_keys_real_tpm|missing|-|-|-|M5: sealed volume keys bound to a real TPM
-m5_store_encrypted_objects|missing|-|-|-|M5: Store integration of encrypted objects
+m5_store_encrypted_objects|software|run_store_c|-|^STORE_SEALED: PASS$|M5: encrypted objects in the C sealed Store (host file-backed only; not QEMU, not Machine 1)
+m5_store_kernel_binding|missing|-|-|-|M5: sealed C Store bound into the kernel/boot path on a real device
 m5_owner_signed_chain_machine1|missing|-|-|-|M5: owner-signed trust chain on Machine 1
-m5_production_store_512b|missing|-|-|-|M5: production Store on 512-byte geometry (needs 4K atomic-root predicate, aienos-boot nvme_read.rs; no C disk layer)
+m5_production_store_512b|missing|-|-|-|M5: production Store on 512-byte geometry (C engine native/store + C NVMe driver native/disk exist, host/QEMU tested; not bound into the boot path, not qualified on Machine 1)
 t1_gate4_manifest_ab|missing|-|-|-|Gate 4: signed boot manifest + A/B slot selection in the loader (awaits the C/asm loader)
 m5_migration_sig_test_key|auto|run_native_m5_migsig|-|^AIENOS_M5_MIGRATION_SIG: PASS$|M5: owner-signed migration record (native/m5 + native/sig Ed25519), host test with TEST keys only
 m5_migration_owner_signature|operator|-|-|-|M5: migration signed by the real owner key (needs the Gate 3 offline key ceremony)
@@ -115,6 +118,15 @@ native_make_test() {
     make -C "${dir}" OUT="$(realpath --relative-to="${dir}" "${out}")" test
 }
 run_store_c()           { native_make_test store; }
+# Rust cross-check of C-written stores: needs a built aienos-store-tool
+# (RUST_STORE_TOOL, else target/release/aienos-store-tool); exit 2 = NOT_RUN.
+run_store_rust_xcheck() {
+    local dir="${repo_root}/native/store" out="${work_dir}/build/store-xcheck"
+    mkdir -p "${out}"
+    local rel; rel="$(realpath --relative-to="${dir}" "${out}")"
+    make -C "${dir}" OUT="${rel}" "${rel}/store_xcheck" || return 1
+    (cd "${dir}" && sh tests/rust_crosscheck.sh "./${rel}/store_xcheck" "${rel}")
+}
 run_cargo_crypto()      { (cd "${repo_root}" && cargo test -p aienos-crypto); }
 run_cargo_kernel()      { (cd "${repo_root}" && cargo test -p aienos-kernel --lib -- crypto:: security::); }
 run_gate5_sim()      { bash "${repo_root}/scripts/trust1_gate5_policy_sim.sh" selftest; }
