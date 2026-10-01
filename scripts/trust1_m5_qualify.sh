@@ -89,6 +89,10 @@ m5_migration_owner_signature|operator|-|-|-|M5: migration signed by the real own
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 QUIET_FLAG="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
+# Set when a QEMU gate is evaluated while the quiet flag is up. The receipt
+# header reads this (plus the gate rows and a write-time sample), so a flag
+# that was up during the gates and down at write time still shows as present.
+quiet_flag_seen_at_gates=false
 
 die() { echo "trust1_m5_qualify: $*" >&2; exit 2; }
 json_str() {
@@ -236,6 +240,7 @@ evaluate_gate() {
                 results+=("${id}|${kind}|NOT_RUN|QEMU suites are off (pass --with-qemu)|-|0|0"); return
             fi
             if [[ -e "${QUIET_FLAG}" ]]; then
+                quiet_flag_seen_at_gates=true
                 results+=("${id}|${kind}|NOT_RUN|quiet flag ${QUIET_FLAG} is up; heavy runs refused|-|0|0"); return
             fi ;;
         software|cargo) ;;
@@ -353,6 +358,17 @@ collect_machine() {
 # --------------------------------------------------------------- receipt
 write_receipt() {
     local tmp="${work_dir}/receipt.tmp" i r id kind v reason lsha lines secs first blocker
+    # quiet_flag_present is true if the flag was up at ANY sampled point of
+    # the run: when a QEMU gate was evaluated, in any row refused for it, or
+    # now. It must never read false while a row says NOT_RUN for the flag.
+    local qf_write=false qf_refused=0 qf_any
+    [[ -e "${QUIET_FLAG}" ]] && qf_write=true
+    for r in "${results[@]}"; do
+        IFS='|' read -r _ _ v reason _ <<<"${r}"
+        [[ "${v}" == NOT_RUN && "${reason}" == "quiet flag "* ]] && qf_refused=$((qf_refused + 1))
+    done
+    qf_any=false
+    [[ ${quiet_flag_seen_at_gates} == true || ${qf_refused} -gt 0 || ${qf_write} == true ]] && qf_any=true
     {
         echo "{"
         echo "  \"schema\": \"aienos.trust1_m5_qualification.v2\","
@@ -363,7 +379,9 @@ write_receipt() {
         echo "  \"tree_clean_before\": ${tree_clean_before},"
         echo "  \"tree_clean_after\": ${tree_clean_after},"
         echo "  \"with_qemu_requested\": $([[ ${with_qemu} == 1 ]] && echo true || echo false),"
-        echo "  \"quiet_flag_present\": $([[ -e ${QUIET_FLAG} ]] && echo true || echo false),"
+        echo "  \"quiet_flag_present\": ${qf_any},"
+        echo "  \"quiet_flag_present_at_write\": ${qf_write},"
+        echo "  \"quiet_flag_refused_gates\": ${qf_refused},"
         echo "  \"machine\": {"
         echo "    \"hostname\": $(json_str "${m_host}"),"
         echo "    \"machine_id_sha256\": $(json_str "${m_machine_id_sha}"),"
@@ -601,6 +619,39 @@ self_test() {
     else
         echo "SKIP  jq not installed; JSON validity not machine-checked"
     fi
+
+    # Quiet-flag header must match the rows (TR-02 inspector fix item 3).
+    # Mutation: the flag is up while a QEMU gate is evaluated and down when
+    # the receipt is written. The old header sampled only at write time and
+    # said false next to a NOT_RUN "quiet flag" row; it must now say true.
+    local saved_quiet2="${QUIET_FLAG}" saved_results2=("${results[@]}") qf_hdr qf_w qf_n
+    QUIET_FLAG="${tmp}/quiet_mut"; : >"${QUIET_FLAG}"
+    with_qemu=1; results=(); quiet_flag_seen_at_gates=false
+    evaluate_gate qf_mut_qemu qemu fake_sentinel - - 2>/dev/null
+    rm -f "${QUIET_FLAG}"
+    summarize >/dev/null
+    write_receipt
+    qf_hdr="$(sed -nE 's/^  "quiet_flag_present": (true|false),$/\1/p' "${receipt_path}")"
+    qf_w="$(sed -nE 's/^  "quiet_flag_present_at_write": (true|false),$/\1/p' "${receipt_path}")"
+    qf_n="$(sed -nE 's/^  "quiet_flag_refused_gates": ([0-9]+),$/\1/p' "${receipt_path}")"
+    [[ "${qf_hdr}" == true && "${qf_w}" == false && "${qf_n}" == 1 ]] \
+        && ok "quiet flag up at gates, down at write -> header present=true (at_write=false, refused=1)" \
+        || bad "quiet flag up at gates, down at write -> header present=${qf_hdr} at_write=${qf_w} refused=${qf_n}, expected true/false/1"
+    # Refused row alone (no gate-time sample) still forces the header true.
+    quiet_flag_seen_at_gates=false
+    write_receipt
+    qf_hdr="$(sed -nE 's/^  "quiet_flag_present": (true|false),$/\1/p' "${receipt_path}")"
+    [[ "${qf_hdr}" == true ]] && ok "a NOT_RUN quiet-flag row alone forces header present=true" \
+        || bad "a NOT_RUN quiet-flag row left header present=${qf_hdr}"
+    # Control: flag never up -> header false.
+    results=(); quiet_flag_seen_at_gates=false
+    evaluate_gate qf_ctl_qemu qemu fake_sentinel - - 2>/dev/null
+    summarize >/dev/null
+    write_receipt
+    qf_hdr="$(sed -nE 's/^  "quiet_flag_present": (true|false),$/\1/p' "${receipt_path}")"
+    [[ "${qf_hdr}" == false ]] && ok "quiet flag never up -> header present=false" \
+        || bad "quiet flag never up -> header present=${qf_hdr}, expected false"
+    QUIET_FLAG="${saved_quiet2}"; results=("${saved_results2[@]}"); quiet_flag_seen_at_gates=false
 
     # Dirty-tree refusal, end to end, on a private clone (never this tree).
     local clone="${tmp}/clone" rc
