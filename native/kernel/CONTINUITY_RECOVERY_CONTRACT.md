@@ -462,8 +462,16 @@ main design point of this contract.
   The C layout is anchor units 0-3, Store region 4..U-2, probe unit U-1
   (native/kernel/dev/disk_layout.h). Raw superblock "units 0 and 1" in the
   challenge (section 1.7) mean the first two units of the **Store region** in
-  both. PROPOSED: the C challenge does not also bind the anchor record; adding it
-  would make C challenges differ from Rust ones and needs a decision.
+  both. **Cut 7: host test written (`tests/test_continuity_geometry.c`, `make -C native/kernel test`, binary
+  `$(OUT)/host/test_continuity_geometry`, also in `sanitize`), NOT_RUN until the forge
+  reports.** It shows, on the real sealed Store in a file: `rc state_digest` equals SHA-256 over
+  Store-region units 0 and 1 read from the image and differs from the digest of the anchor units;
+  a flipped byte in Store-region unit 0, and separately unit 1, changes the digest (and the
+  challenge after flipping the inactive slot); a flipped byte in each of the four anchor units
+  leaves the digest unchanged; the `dev/disk_layout.h` constants (anchor 4, probe 1, minimum Store
+  64) give a Store region of units 4..U-2 (U-5 units). DECIDED (kept from the proposal): the C
+  challenge does not also bind the anchor record; adding it would make C challenges differ from
+  Rust ones and needs a decision.
 - **K-7 Mode selection. DECIDED (cut 6).** The Rust qualification picks a mode
   from a control block on the NVMe disk (store_qual.rs:27-48; store-tool `cfg`,
   crates/aienos-store-tool/src/main.rs:108-122; response at bytes 16..48). The C
