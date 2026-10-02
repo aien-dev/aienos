@@ -447,7 +447,7 @@ main design point of this contract.
 - **K-4 GraphBadNewer.** When the newest root is graph-broken, Rust mounts
   degraded on the older generation (recovery_core_tests.rs:178-219). In the
   sealed Store the anchor holds the newer generation, so `ss_open` is expected to
-  refuse with `SS_E_ROLLBACK` (store_sealed.h:57). **Cut 5: CONFIRMED for a flipped byte of the newest AgentRoot (see K-3: `SS_E_ROLLBACK`, reason `SealedRefusal(-303)`, no action applicable); UNVERIFIED for other forms of newest-root graph damage (a CRC-valid but graph-broken root with a fresh anchor), which have no C test.** Either way no action may be applicable (INV-15).
+  refuse with `SS_E_ROLLBACK` (store_sealed.h:57). **Cut 5: CONFIRMED for a flipped byte of the newest AgentRoot (see K-3: `SS_E_ROLLBACK`, reason `SealedRefusal(-303)`, no action applicable); for a sealed-valid newest generation that is graph-broken (fresh anchor): cut 7: host test written (`t_k4`, a validly sealed manifest of the next sequence whose agent_state object was never written), NOT_RUN until the forge reports; predicted outcome: the Store mounts Valid, reason `ContinuityCorrupt("referenced object is absent")` (continuity_recovery.c:102-111, continuity_resolve.c:75), no action applicable. Still unbuilt: a graph-broken newest AgentRoot and a foreign-agent state.** Either way no action may be applicable (INV-15).
 - **K-5 Degraded mount through ss_open. DECIDED by running it (cut 3, host PASS).** The question was whether
   `ss_open` returns 0 on a `DegradedRecovery` mount with a malformed peer (needed for INV-11 and repair).
   **Answer: yes.** `test_continuity_resolve.c` `t_degraded` (:716, printed at :751) commits two generations

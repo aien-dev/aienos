@@ -573,6 +573,42 @@ static void t_91k(void)
     CK_(do_repair(old, NULL) == RC_UNAUTHORISED && unchanged(), "stale authorisation refused");
 }
 
+/* ---- k4: a newest generation that is sealed-valid but graph-broken (contract K-4) ----
+ * Provision and remember one fact, then commit through the real sealed path a validly
+ * encoded manifest (sequence 2, previous = the live manifest, right root) whose agent_state
+ * object was never written. The anchor is fresh, so ss_open succeeds. Predicted from
+ * continuity_recovery.c:51-61,83,102-111 and continuity_resolve.c:75,240-243:
+ * mount Valid, resolve Corrupt "referenced object is absent", reason ContinuityCorrupt,
+ * rc_applicable() none. Unbuilt: a graph-broken newest AgentRoot (needs a second root,
+ * which resolves as Conflict, not graph damage) and a foreign-agent state. */
+static void t_k4(void)
+{
+    char t[200];
+    remembered();
+    struct cc_manifest m;
+    memset(&m, 0, sizeof m);
+    memcpy(m.root, g_v.root_id, 32);
+    memcpy(m.previous, g_v.manifest_id, 32);
+    m.sequence = g_v.manifest.sequence + 1;
+    m.incarnation = g_v.manifest.incarnation;
+    memset(m.agent_state, 0x66, 32); /* never written */
+    static uint8_t b[CC_MAX_OBJECT_BYTES];
+    size_t n = 0;
+    CK_(cc_manifest_encode(&m, b, sizeof b, &n, NULL) == CC_OK && raw_commit(CC_KIND_MANIFEST, b, n) == 0, "broken newer manifest");
+    snapshot();
+    inspect(&R);
+    CK_(unchanged(), "inspect wrote");
+    CK_(R.have_mount && R.mount_state == ST_VALID, "the store mounts (fresh anchor): have_mount %d state %d", R.have_mount, R.mount_state);
+    CK_(R.reason == RC_CONTINUITY_CORRUPT && R.why && !strcmp(R.why, "referenced object is absent"),
+        "K-4 reason %d why %s", R.reason, R.why ? R.why : "-");
+    CK_(!R.have_identity, "no identity resolved");
+    CK_(rc_reason_text(t, sizeof t, &R) > 0 && strncmp(t, "ContinuityCorrupt(", 18) == 0, "reason text '%s'", t);
+    /* INV-15: no action mints. A mutant that returned an action here fails this line and all_actions_refused. */
+    CK_(rc_applicable(&R) == 0, "no action applicable (INV-15)");
+    if (g_bs == 4096) printf("K-4 answer: sealed-valid newest manifest with a missing agent_state: reason=%d (RC_CONTINUITY_CORRUPT=%d) why='%s' mounted=%d state=%d applicable=%d\n", R.reason, RC_CONTINUITY_CORRUPT, R.why ? R.why : "-", R.have_mount, R.mount_state, rc_applicable(&R));
+    all_actions_refused(&R, "k4");
+}
+
 int main(void)
 {
     make_keys();
@@ -590,6 +626,7 @@ int main(void)
         t_91i();
         t_91j();
         t_91k();
+        t_k4();
     }
     dev_close();
     unlink(g_path);
