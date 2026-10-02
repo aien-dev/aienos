@@ -1,19 +1,25 @@
 # C kernel contract: continuity objects and Recovery Core
 
-Status: **IMPLEMENTED (host PASS), QEMU NOT_RUN, hardware NOT_RUN** for the continuity half (M4_CONTINUITY).
-**Recovery Core (M4_RECOVERY) is NOT implemented beyond the challenge, state digest and operator HMAC of cut 3**:
-no inspection, no repair, no operator provisioning action (cut 5). What has C code (all **host PASS**, QEMU n/a,
-nothing wired into the kernel): the codec (cuts 1-2: `svc/continuity_codec.c`, golden vectors, C/Rust decode
-agreement), boot **resolution** (cut 3: `svc/continuity_resolve.c`: P-3 lookup, INV-5 orphan/Conflict, INV-6 chain,
-INV-7 references, read-only check), the Recovery Core challenge, state digest and operator HMAC (same file), the
-sealed-Store binding `svc/continuity_resolve_sealed.c`, and, new in cut 4, **provision, commit and resume**
-(`svc/continuity_commit.c`: INV-4, INV-8 to INV-11, K-1, markers of section 3), run by
-`make -C native/kernel test`, `sanitize` and `continuity-mutants` against the REAL sealed Store in a file, with
-power cuts at every Store and anchor checkpoint and at every block boundary, for commit AND for provisioning.
-Not done: Recovery Core inspection and actions (cut 5); wiring into the kernel and any QEMU run (the first wiring cut
-needs the K-7 test-mode mechanism and a kernel stage that calls these functions). Every QEMU row (81-87, 88-91)
-stays `NOT_RUN` until a forge receipt covers it. Host rows 87a-87d, 87f, 87g are HOST PASS (see GATES.md).
-QEMU qualifies nothing physical; nothing here says anything about Machine 1.
+Status: **IMPLEMENTED (host PASS), QEMU NOT_RUN, hardware NOT_RUN** for the continuity half (M4_CONTINUITY) and for the
+host half of the Recovery Core (M4_RECOVERY, cut 5). **M4_RECOVERY is NOT_RUN: there is no kernel wiring, no QEMU
+receipt and no hardware run.** What has C code (all **host PASS**, QEMU n/a, nothing wired into the kernel): the codec
+(cuts 1-2: `svc/continuity_codec.c`, golden vectors, C/Rust decode agreement), boot **resolution** (cut 3:
+`svc/continuity_resolve.c`: P-3 lookup, INV-5 orphan/Conflict, INV-6 chain, INV-7 references, read-only check), the
+Recovery Core challenge, state digest and operator HMAC (same file), the sealed-Store binding
+`svc/continuity_resolve_sealed.c`, **provision, commit and resume** (cut 4: `svc/continuity_commit.c`: INV-4, INV-8 to
+INV-11, K-1, markers of section 3), and, new in cut 5, the **Recovery Core** (`svc/continuity_recovery.c`: read-only
+inspection INV-13, entry reasons and `applicable()` INV-14/INV-15, the operator-authorised repair of a malformed peer
+INV-16/INV-17 and operator provisioning INV-16/INV-18, the C-only sealed-refusal entry reason of K-3/K-4, and the
+`RECOVERY_CORE`, `RECOVERY_CHALLENGE`, `RECOVERY_ACTION`, `RECOVERY_REFUSED` marker text), run by
+`make -C native/kernel test`, `sanitize` and `continuity-mutants` against the REAL sealed Store in a file (cut 4 also with
+power cuts at every Store and anchor checkpoint and at every block boundary, for commit AND for provisioning).
+Not done: wiring into the kernel and any QEMU run (the first wiring cut needs the K-7 test-mode mechanism, the
+`RECOVERY_OPERATOR_KEY: TEST-ONLY` handling and a kernel stage that calls these functions); the `RECOVERY_RECORD:` marker;
+the full K-3/K-4 tests (cut 5 proves only that a corrupted newest AgentRoot is a sealed refusal with no action; the
+newest-root-graph-broken case with a CRC-valid root is not built separately); power cuts during a repair or a
+recovery-core provisioning (cut 4 cut the underlying provisioning, a repair is one unit write plus a flush). Every QEMU
+row (81-87, 88-91) stays `NOT_RUN` until a forge receipt covers it. Host rows 87a-87d, 87f, 87g and 91d-91k are HOST PASS
+(see GATES.md). QEMU qualifies nothing physical; nothing here says anything about Machine 1.
 
 Authority:
 
@@ -305,7 +311,7 @@ PROPOSED: the C kernel prints these exact strings (same field order, same
 Debug spellings such as `Degraded(Malformed)`), so the C gate scripts can use
 the Rust scripts' grep patterns and the rows can be IDENTICAL rather than
 DIFFERS.
-**CONTINUITY markers IMPLEMENTED, host PASS (cut 4):** `cr_marker_view` (`PROVISIONED`, `RESUMED`, `RESUMED_READONLY`, `REMEMBERED`, `COMMITTED`) and `cr_marker_outcome` (`UNPROVISIONED`, `CONFLICT`, `CORRUPT (why)`, `NO_ENTROPY`, `STOP (...)`) in `svc/continuity_commit.c` produce the strings above byte for byte (test compares with an independently printf-built line, incl. the 8-byte `memory=` and `e3b0c44298fc1c14` for no records). Only the Store-error spelling differs (9.2). The `CHECKPOINT:`, `RECOVERY_*` markers are not implemented (no wiring; cut 5).
+**CONTINUITY markers IMPLEMENTED, host PASS (cut 4):** `cr_marker_view` (`PROVISIONED`, `RESUMED`, `RESUMED_READONLY`, `REMEMBERED`, `COMMITTED`) and `cr_marker_outcome` (`UNPROVISIONED`, `CONFLICT`, `CORRUPT (why)`, `NO_ENTROPY`, `STOP (...)`) in `svc/continuity_commit.c` produce the strings above byte for byte (test compares with an independently printf-built line, incl. the 8-byte `memory=` and `e3b0c44298fc1c14` for no records). Only the Store-error spelling differs (9.2). The `CHECKPOINT:` marker is not implemented (no wiring). **Recovery markers IMPLEMENTED, host PASS (cut 5):** `rc_marker_entry` (`RECOVERY_CORE: ENTERED reason=<text>` / `NOT_NEEDED`), `rc_marker_challenge`, `rc_marker_done`, `rc_marker_refused` in `svc/continuity_recovery.c`, with the Rust Debug spellings (`Degraded(Malformed)`, `Unprovisioned`, `ContinuityCorrupt("why")`); the C-only reason spells `SealedRefusal(<rc>)`, a mount error `StoreMount(<rc>)` (Rust prints the Debug of its own error), and `RECOVERY_REFUSED (Continuity(<outcome>))` names the cut 4 outcome. `RECOVERY_OPERATOR_KEY: TEST-ONLY` and `RECOVERY_RECORD:` are not implemented (the key is a parameter of the actions; the record belongs to the wiring cut).
 
 ---
 
@@ -434,15 +440,14 @@ main design point of this contract.
   AgentRoot's first unit (crates/aienos-store-tool/src/main.rs:177-201,
   qemu_recovery_test.sh:168). In the sealed Store that byte is ciphertext, so
   the C mount is expected to refuse at the keyed proof (`SS_E_ENVELOPE`) before
-  continuity runs. UNVERIFIED (confidence medium: from store_sealed.h:61 and
-  store_boot.h:5-11, not tested). PROPOSED: the C Recovery Core adds an entry
+  continuity runs. That expectation was UNVERIFIED (from store_sealed.h:61 and
+  store_boot.h:5-11) and turned out partly wrong. **Cut 5, DECIDED by running it (host PASS, `test_continuity_recovery` t_91g/t_91j, 4096 and 512 byte blocks):** flipping byte 20 of the first unit of the newest AgentRoot envelope makes `ss_open` refuse with `SS_E_ROLLBACK` (-303, `SealedRollback`), not `SS_E_ENVELOPE`: the damaged generation fails its sealed check and the anchor already holds that generation, so the refusal reads as a rollback. The Store does not mount, so no record, challenge or mount fields exist; the entry reason is the C-only `SealedRefusal(-303)` and `rc_applicable()` is none. A valid operator response cannot be formed (no challenge); forged responses for both actions return `NotApplicable` and the image stays byte for byte unchanged. PROPOSED (now implemented as above): the C Recovery Core adds an entry
   reason for a sealed refusal (keyed / rollback proof) that admits no action,
   and the identity-loss rows stay DIFFERS with that observable stated.
 - **K-4 GraphBadNewer.** When the newest root is graph-broken, Rust mounts
   degraded on the older generation (recovery_core_tests.rs:178-219). In the
   sealed Store the anchor holds the newer generation, so `ss_open` is expected to
-  refuse with `SS_E_ROLLBACK` (store_sealed.h:57). UNVERIFIED (confidence
-  medium). Either way no action may be applicable (INV-15).
+  refuse with `SS_E_ROLLBACK` (store_sealed.h:57). **Cut 5: CONFIRMED for a flipped byte of the newest AgentRoot (see K-3: `SS_E_ROLLBACK`, reason `SealedRefusal(-303)`, no action applicable); UNVERIFIED for other forms of newest-root graph damage (a CRC-valid but graph-broken root with a fresh anchor), which have no C test.** Either way no action may be applicable (INV-15).
 - **K-5 Degraded mount through ss_open. DECIDED by running it (cut 3, host PASS).** The question was whether
   `ss_open` returns 0 on a `DegradedRecovery` mount with a malformed peer (needed for INV-11 and repair).
   **Answer: yes.** `test_continuity_resolve.c` `t_degraded` (:716, printed at :751) commits two generations
@@ -629,15 +634,15 @@ M4_RECOVERY:
 
 | id | mutation | must turn FAIL |
 |---|---|---|
-| MR-1 | inspection writes (for example repairs on inspect) | 88, 90, 91, 91d |
+| MR-1 | inspection writes (for example repairs on inspect): `RC_MUTANT_INSPECT_WRITES`, IMPLEMENTED, killed (cut 5) | 88, 90, 91, 91d |
 | MR-2 | challenge omits `state_digest`: `CR_MUTANT_CHALLENGE_NO_DIGEST`, IMPLEMENTED, killed (cut 3) | 89b, 91k |
 | MR-3 | challenge omits the action byte: `CR_MUTANT_CHALLENGE_NO_ACTION`, IMPLEMENTED, killed (cut 3) | 88c, 91k |
 | MR-4 | response compare checks only 16 bytes (`CR_MUTANT_COMPARE_16`, IMPLEMENTED, killed, cut 3), or is not constant time (not mutated: timing is not observable on the host) | 91n (bit flips in bytes 16-31) |
-| MR-5 | `applicable()` treats a degraded mount with no identity as Unprovisioned (the fe2c2bd bug) | 91g, 91 |
-| MR-6 | repair zeroes the active slot | 89, 89a |
-| MR-7 | repair offered without a resolved identity | 91h |
+| MR-5 | `applicable()` treats a degraded mount with no identity as Unprovisioned (the fe2c2bd bug): `RC_MUTANT_DEGRADED_IS_UNPROVISIONED`, IMPLEMENTED, killed (cut 5) | 91g, 91 |
+| MR-6 | repair zeroes the active slot: `RC_MUTANT_REPAIR_ACTIVE`, IMPLEMENTED, killed (cut 5) | 89, 89a |
+| MR-7 | repair offered without a resolved identity: `RC_MUTANT_REPAIR_NO_IDENTITY`, IMPLEMENTED, killed (cut 5) | 91h |
 | MR-8 | operator auth uses bare SHA-256 (`CR_MUTANT_BARE_SHA256`) or omits the domain (`CR_MUTANT_NO_DOMAIN`): both IMPLEMENTED, killed (cut 3) | 91o, 91p |
-| MR-9 | operator provisioning writes source Qualification | 91f |
+| MR-9 | operator provisioning writes source Qualification: `RC_MUTANT_PROVISION_QUALIFICATION`, IMPLEMENTED, killed (cut 5) | 91f |
 
 Known oracle gap (CODE, not covered by any Rust test): no power-cut campaign
 runs on **provisioning** itself; only commits are cut
@@ -723,3 +728,23 @@ Where code and contract differ, the safer behaviour (refuse) was chosen. Host ev
 | marker text for a Store error | `STOP (<Debug of the Rust error>)` | `STOP (Store(<rc>))` with the C error number; `STOP (ReadOnly)`, `STOP (AlreadyProvisioned)`, `STOP (Limit("..."))`, `UNPROVISIONED`, `CONFLICT`, `CORRUPT (<why>)`, `NO_ENTROPY` match the Rust spelling | the QEMU rows for store-error cases will be DIFFERS |
 | crash campaign | 7 Store checkpoints (kill points) per commit; provisioning not cut | 9 (7 Store + 2 anchor) plus every block boundary, for commit AND provisioning; `after_inactive_superblock` gives the NEW state (Rust "either") | stronger; anchor points reopen at `SS_RB_PREPARED_ADVANCE` and show the new state, as 6.1 predicted |
 | agent id word order | four RNDR words stored little-endian, word 0 first | whatever `ck_rng_fill` writes (it is the C kernel's entropy interface, entropy.h:53) | UNVERIFIED on hardware: the byte order is the rng module's; the test checks the agent equals `ck_rng_fill` output, not the Rust word layout |
+
+### 9.3 Cut 5 (Recovery Core): C versus the Rust code, and what C does on purpose
+
+Where code and contract differ, the safer behaviour (refuse) was chosen. Host evidence:
+`tests/test_continuity_recovery.c` (real sealed Store in a file, 4096 and 512 byte blocks; one test per Rust
+recovery_core test row 91d-91k; rows 91l-91p are `test_continuity_resolve`, cut 3). Every inspection and every refused
+action is checked to leave the image byte for byte unchanged.
+
+| item | Rust | C (cut 5) | effect |
+|---|---|---|---|
+| entry reasons | `EntryReason` (recovery_core.rs:25-33) | same, plus C-only `RC_SEALED_REFUSAL` for a sealed mount refusal (`SS_E_*`, -301..-314); `ST_M_UNFORMATTED` is `StoreUnformatted`, any other `ST_M_*` is `StoreMount(rc)` | a sealed refusal admits no action (INV-15); the Store does not mount, so the record has no mount, challenge or catalog |
+| flipped byte of the newest AgentRoot (rows 91, 91g, 91j) | mounts degraded on the older generation (`Degraded(GraphBadNewer)`), or a mount error | `ss_open` refuses with `SS_E_ROLLBACK` (-303): entry reason `SealedRefusal(-303)`, no challenge, no action | identity-loss rows stay DIFFERS: the observable is a sealed refusal, not `Degraded(GraphBadNewer)` (K-3, K-4) |
+| catalog counts in the record | roots, manifests, other over the Store catalog | counts of verified application objects (sealed claims): roots, manifests, other; the Store's own envelope and transaction-record entries are not counted | `other` differs from Rust for the same history |
+| MR-5 killing test | 91g (a degraded mount whose valid root has no identity) | 91h (garbage in the inactive slot of a formatted store). In C row 91g never mounts (see above), so it cannot show a Degraded-without-identity mount | the mutant `RC_MUTANT_DEGRADED_IS_UNPROVISIONED` is killed by 91h; the 91g C test checks the refusal and that nothing is offered |
+| agent id in provisioning | the caller passes `agent_id` | the id is drawn from the kernel entropy interface inside `cr_provision` (cut 4: no fallback); `rc_provision_identity` takes the rng | the test checks the stored root (source Operator, Store uuid from the inspection, generation), not a pinned id |
+| provisioning without entropy | not reachable (caller supplies the id) | authorised, then `RC_CONTINUITY` with `CR_NO_ENTROPY`, nothing written (`RECOVERY_REFUSED (Continuity(NoEntropy))`) | C-only refusal, tested |
+| operator key | `TEST_ONLY_OPERATOR_KEY` in the boot crate | a parameter; this file holds no key and prints no `RECOVERY_OPERATOR_KEY: TEST-ONLY` | the key handling and its `CK_HARDWARE_STAGING` refusal belong to the wiring cut (section 4 PROPOSED) |
+| repair after a failed unit write | `RecoveryError::Io` | `RC_IO`; the repair writes the single inactive unit then flushes, no power cut test | UNVERIFIED for a cut during the repair write; the inactive slot is zero, malformed or half written either way and the active root is untouched |
+| inspection mount | `Store::open` borrows the device | `ss_open` into a caller-owned `ss_store`; it stays open after `rc_inspect` and an action reuses it for provisioning, with nothing written between the authorisation and the write | same ordering (inspect, applicable, verify, write) |
+| marker `RECOVERY_RECORD:` | printed on entry | not implemented | wiring cut |
