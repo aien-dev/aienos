@@ -336,7 +336,7 @@ The default `make full` image must carry no crash hook string (Makefile
 Contract: `native/kernel/CONTINUITY_RECOVERY_CONTRACT.md` (SPEC, NOT_RUN). One row per Rust check: rows 81-87 are the
 QEMU PASS lines of `scripts/qemu_continuity_test.sh` (receipt `evidence/continuity_qemu_2026-09-25.md`), rows
 87a-87i are the host tests `cargo test -p aienos-kernel --lib continuity`
-(`crates/aienos-kernel/src/continuity_tests.rs`). No C continuity code exists, so every row is NOT_RUN.
+(`crates/aienos-kernel/src/continuity_tests.rs`). The C continuity codec (`svc/continuity_codec.c`, cuts 1-2) has a host test only, with no kernel wiring and no QEMU run: rows 87h, 87i and the codec rows 87j-87k below say HOST PASS for that host test; no gate row is QEMU PASS and `M4_CONTINUITY` stays NOT_RUN. Every other row is NOT_RUN.
 
 | # | Rust check | CK gate | Status |
 | --- | --- | --- | --- |
@@ -363,8 +363,10 @@ QEMU PASS lines of `scripts/qemu_continuity_test.sh` (receipt `evidence/continui
 | 87e | host `forked_or_gapped_manifest_chains_are_corrupt` (:178) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
 | 87f | host `degraded_mount_resumes_read_only` (:221) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
 | 87g | host `a_crash_at_every_write_of_a_commit_leaves_old_or_new_never_a_third_state` (:242) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 87h | host `encodings_round_trip_and_reject_tampering` (:286) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
-| 87i | host `branch_table_validation_rejects_broken_lineage` (:328) | M4_CONTINUITY (host) | NOT_RUN (MISSING_IMPLEMENTATION) |
+| 87h | host `encodings_round_trip_and_reject_tampering` (:286) | M4_CONTINUITY (host) | HOST PASS for the C codec twin (`make -C native/kernel test`, `test_continuity_codec`: round trips, one refusal per rule, every single-bit flip of every golden vector decodes as in Rust, D-2); gate NOT_RUN (no QEMU, no kernel wiring) |
+| 87i | host `branch_table_validation_rejects_broken_lineage` (:328) | M4_CONTINUITY (host) | HOST PASS for the C codec twin (`cc_state_validate`, incl. the checked fork-count sum and hostile fork counts); gate NOT_RUN (no QEMU, no kernel wiring) |
+| 87j | D-1 golden vectors (contract 6.3): Rust-emitted canonical bytes and ObjectIds for 22 vectors, reproduced by C from `native/kernel/tests/fixtures/continuity_vectors.txt`; tampered bytes, ObjectId and verdicts are refused (`cargo test -p aienos-kernel --lib continuity_vectors` fails on fixture drift) | M4_CONTINUITY (host) | HOST PASS (`make -C native/kernel test`, `continuity-mutants`: golden and skip-D1 mutants killed); challenges and HMAC responses are emitted but DEFERRED to the resolve cut (no C implementation); gate NOT_RUN |
+| 87k | D-2 decode agreement (contract 6.3): every single-bit flip of every vector, C and Rust agree on accept/refuse and error class and text (86598 verdicts, 0 divergences) | M4_CONTINUITY (host) | HOST PASS (`make -C native/kernel test`; skip-D2 mutant killed); gate NOT_RUN |
 
 ## M4 recovery: scripts/qemu_recovery_test.sh -> CK `M4_RECOVERY`
 

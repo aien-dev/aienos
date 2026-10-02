@@ -7,13 +7,15 @@
  *    encoders, each piece citing the Rust line that emits it. Hash values
  *    (root/child branch ids, logical ObjectIds) were computed outside this
  *    code with coreutils sha256sum over printf-built inputs, not with the C
- *    code under test. A Rust-generated vector emitter is a later cut (D-1).
+ *    code under test. Cut 2 adds Rust-emitted golden vectors (D-1, section 6).
  * 2. Round trips (twin of rs tests continuity_tests.rs:286, 87h).
  * 3. One refusal per rule, with the Rust error class and reason text.
  * 4. Branch-table lineage (twin of continuity_tests.rs:328, 87i).
  * 5. K-1 (PROPOSED): 16384-byte cap on encode and decode.
  * Mutants (make continuity-mutants) must each turn this test FAIL. */
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "ck_test.h"
 #include "continuity_codec.h"
@@ -537,7 +539,310 @@ static void test_decode_cap(void)
     CHECK(cc_wal_decode(buf, CC_MAX_OBJECT_BYTES, &wal2, &why) == CC_E_CORRUPT);
 }
 
-int main(void)
+/* ---- D-1 golden vectors and D-2 decode agreement (cut 2) ----
+ * Fixtures are emitted by the Rust oracle (crates/aienos-kernel/src/
+ * continuity_vectors.rs) and read here at run time: the directory is argv[1],
+ * else the CC_FIXTURE_DIR compile-time define (set by the Makefile).
+ *   continuity_vectors.txt  bid / vec / deferred lines (D-1)
+ *   continuity_verdicts.txt reason table + one verdict string per vector (D-2) */
+#define V_MAX 64
+#define V_BYTES_MAX 2300 /* largest vector: manifest with 64 WAL ids, 2184 */
+#define R_MAX 32
+static char fbuf_v[1 << 17], fbuf_d[1 << 18];
+static struct vec {
+    char name[48];
+    uint16_t kind;
+    uint8_t oid[32];
+    uint8_t bytes[V_BYTES_MAX];
+    size_t n;
+    const char *verdict; /* into fbuf_d, 8n+1 chars, not NUL terminated */
+    size_t verdict_len;
+} vecs[V_MAX];
+static int n_vecs, n_deferred, n_bids;
+static struct { char c; char cls[8]; char why[64]; } reasons[R_MAX];
+static int n_reasons;
+/* Comparison counters: the gate asserts the work was actually done, so a
+ * skipped comparison is a FAIL, not a silent pass (mutants SKIP_D1/SKIP_D2). */
+static unsigned long d1_compared, d2_compared, d2_expected;
+static int quiet; /* silence expected divergences in the tamper test */
+
+static int read_file(const char *dir, const char *name, char *dst, size_t cap)
+{
+    char path[512];
+    if (snprintf(path, sizeof path, "%s/%s", dir, name) >= (int)sizeof path)
+        return 0;
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        printf("  cannot open %s\n", path);
+        return 0;
+    }
+    size_t n = fread(dst, 1, cap - 1, f);
+    int big = fgetc(f) != EOF;
+    fclose(f);
+    dst[n] = 0;
+    return n > 0 && !big;
+}
+/* Strict hex: exactly 2*n lowercase digits, then end of token. */
+static int hex_n(const char *s, size_t n, uint8_t *o)
+{
+    for (size_t i = 0; i < 2 * n; i++)
+        if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f')))
+            return 0;
+    for (size_t i = 0; i < n; i++)
+        o[i] = (uint8_t)(hexv(s[2 * i]) << 4 | hexv(s[2 * i + 1]));
+    return 1;
+}
+/* Next line of a NUL-terminated buffer: returns its start, NUL-terminates it,
+ * advances *p. NULL at end. */
+static char *next_line(char **p)
+{
+    char *s = *p, *e;
+    if (!*s)
+        return 0;
+    for (e = s; *e && *e != '\n'; e++)
+        ;
+    if (*e)
+        *e++ = 0;
+    *p = e;
+    return s;
+}
+/* Split off the next space-separated token of *l (in place). */
+static char *tok(char **l)
+{
+    char *s = *l, *e;
+    if (!s || !*s)
+        return 0;
+    for (e = s; *e && *e != ' '; e++)
+        ;
+    if (*e)
+        *e++ = 0;
+    *l = e;
+    return s;
+}
+
+static int load_fixtures(const char *dir)
+{
+    char *p, *l;
+    if (!read_file(dir, "continuity_vectors.txt", fbuf_v, sizeof fbuf_v) ||
+        !read_file(dir, "continuity_verdicts.txt", fbuf_d, sizeof fbuf_d))
+        return 0;
+    for (p = fbuf_v; (l = next_line(&p));) {
+        char *kw = tok(&l), *name = tok(&l);
+        if (!kw || kw[0] == '#')
+            continue;
+        if (!name)
+            return 0;
+        if (!strcmp(kw, "bid")) {
+            n_bids++;
+        } else if (!strcmp(kw, "deferred")) {
+            n_deferred++;
+        } else if (!strcmp(kw, "vec")) {
+            char *kind = tok(&l), *oid = tok(&l), *bytes = l;
+            if (!kind || !oid || !bytes || n_vecs >= V_MAX || strlen(name) >= sizeof vecs[0].name)
+                return 0;
+            struct vec *v = &vecs[n_vecs++];
+            strcpy(v->name, name);
+            v->kind = (uint16_t)strtoul(kind, 0, 10);
+            size_t hl = strlen(bytes);
+            if (!hex_n(oid, 32, v->oid) || hl % 2 || hl / 2 > V_BYTES_MAX || strlen(oid) != 64)
+                return 0;
+            v->n = hl / 2;
+            if (!hex_n(bytes, v->n, v->bytes))
+                return 0;
+        } else {
+            return 0;
+        }
+    }
+    for (p = fbuf_d; (l = next_line(&p));) {
+        char *kw = tok(&l), *name = tok(&l);
+        if (!kw || kw[0] == '#')
+            continue;
+        if (!name)
+            return 0;
+        if (!strcmp(kw, "reason")) {
+            char *cls = tok(&l);
+            if (!cls || n_reasons >= R_MAX || strlen(name) != 1 || strlen(cls) >= 8 || strlen(l) >= 64)
+                return 0;
+            reasons[n_reasons].c = name[0];
+            strcpy(reasons[n_reasons].cls, cls);
+            strcpy(reasons[n_reasons].why, l);
+            n_reasons++;
+        } else if (!strcmp(kw, "verdict")) {
+            int found = 0;
+            for (int i = 0; i < n_vecs; i++)
+                if (!strcmp(vecs[i].name, name) && !vecs[i].verdict) {
+                    vecs[i].verdict = l;
+                    vecs[i].verdict_len = strlen(l);
+                    found = 1;
+                }
+            if (!found)
+                return 0;
+        } else {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* C verdict of one byte string, in the fixture alphabet: '.' accept, else the
+ * reason code whose (class, why) the C decoder returned; '?' if C returned a
+ * class or text the Rust oracle never does (itself a divergence). */
+static char c_verdict(uint16_t kind, const uint8_t *b, size_t n)
+{
+    struct cc_root r;
+    int e;
+    memmove(buf, b, n);
+    why = 0;
+    switch (kind) {
+    case CC_KIND_AGENT_ROOT: e = cc_root_decode(buf, n, &r, &why); break;
+    case CC_KIND_MANIFEST: e = cc_manifest_decode(buf, n, &man2, &why); break;
+    case CC_KIND_AGENT_STATE: e = cc_state_decode(buf, n, &st2, &why); break;
+    case CC_KIND_CORTEX_WAL: e = cc_wal_decode(buf, n, &wal2, &why); break;
+    default: return '?';
+    }
+    if (e == CC_OK)
+        return '.';
+    const char *cls = e == CC_E_CORRUPT ? "Corrupt" : e == CC_E_LIMIT ? "Limit" : 0;
+    for (int i = 0; cls && why && i < n_reasons; i++)
+        if (!strcmp(reasons[i].cls, cls) && !strcmp(reasons[i].why, why))
+            return reasons[i].c;
+    return '?';
+}
+
+/* D-1: ObjectId (two independent C implementations) and, when the vector is
+ * accepted, decode then encode reproduces the bytes exactly. */
+static int d1_ok(uint16_t kind, const uint8_t *b, size_t n, const uint8_t oid[32], int accepted)
+{
+    uint8_t a[32], c[32], re[V_BYTES_MAX + 64];
+    size_t rn = 0;
+    int ok = 1;
+#ifndef CC_MUTANT_SKIP_D1
+    d1_compared++;
+    ok = cc_object_id(kind, b, n, a) == CC_OK && sv1_object_id(kind, 1, b, n, c) == 0 &&
+         !memcmp(a, oid, 32) && !memcmp(c, oid, 32);
+    if (accepted) {
+        struct cc_root r;
+        memmove(buf, b, n);
+        why = 0;
+        int e = CC_E_ARG;
+        switch (kind) {
+        case CC_KIND_AGENT_ROOT:
+            e = cc_root_decode(buf, n, &r, &why) || cc_root_encode(&r, re, sizeof re, &rn, &why);
+            break;
+        case CC_KIND_MANIFEST:
+            e = cc_manifest_decode(buf, n, &man2, &why) || cc_manifest_encode(&man2, re, sizeof re, &rn, &why);
+            break;
+        case CC_KIND_AGENT_STATE:
+            e = cc_state_decode(buf, n, &st2, &why) || cc_state_encode(&st2, re, sizeof re, &rn, &why);
+            break;
+        case CC_KIND_CORTEX_WAL:
+            e = cc_wal_decode(buf, n, &wal2, &why) || cc_wal_encode(&wal2, re, sizeof re, &rn, &why);
+            break;
+        }
+        ok = ok && e == CC_OK && rn == n && !memcmp(re, b, n);
+    }
+#else
+    (void)kind; (void)b; (void)n; (void)oid; (void)accepted; (void)a; (void)c; (void)re; (void)rn;
+#endif
+    return ok;
+}
+
+/* D-2: verdict of the untouched vector and of every single-bit flip must equal
+ * the Rust verdict string. Returns the number of disagreements; prints the
+ * first few. */
+static unsigned long d2_mismatches(const char *name, uint16_t kind, const uint8_t *b, size_t n,
+                                   const char *verdict, size_t vlen)
+{
+    uint8_t t[V_BYTES_MAX];
+    unsigned long bad = 0;
+    if (vlen != 8 * n + 1)
+        return 1;
+    memcpy(t, b, n);
+#ifndef CC_MUTANT_SKIP_D2
+    if (c_verdict(kind, t, n) != verdict[0])
+        bad++;
+    d2_compared++;
+    for (size_t i = 0; i < n * 8; i++) {
+        t[i / 8] ^= (uint8_t)(1u << (i % 8));
+        char cv = c_verdict(kind, t, n);
+        t[i / 8] ^= (uint8_t)(1u << (i % 8));
+        d2_compared++;
+        if (cv != verdict[i + 1]) {
+            if (bad++ < 3 && !quiet)
+                printf("  D-2 divergence %s bit %zu: C '%c' Rust '%c'\n", name, i, cv, verdict[i + 1]);
+        }
+    }
+#else
+    (void)name; (void)kind; (void)verdict;
+#endif
+    return bad;
+}
+
+static void test_golden(void)
+{
+    CHECK(n_vecs == 22 && n_bids == 5 && n_deferred == 4 && n_reasons == 21);
+    /* Branch ids named in the fixture equal the C derivation (D-1). */
+    {
+        uint8_t rb[32], e[32];
+        cc_root_branch_id(AGENT, rb);
+        CHECK(hex_n(RB_HEX, 32, e) && !memcmp(rb, e, 32));
+    }
+    for (int i = 0; i < n_vecs; i++) {
+        struct vec *v = &vecs[i];
+        int expect_ok = strcmp(v->name, "state_forksum_overflow") != 0;
+        CHECK(v->verdict != 0);
+        if (!v->verdict)
+            continue;
+        d2_expected += 8 * v->n + 1;
+        /* the Rust verdict of the untouched vector: accept, except the hostile one */
+        CHECK((v->verdict[0] == '.') == expect_ok);
+        int ok = d1_ok(v->kind, v->bytes, v->n, v->oid, v->verdict[0] == '.');
+        if (!ok)
+            printf("  D-1 mismatch: %s\n", v->name);
+        CHECK(ok);
+        unsigned long bad = d2_mismatches(v->name, v->kind, v->bytes, v->n, v->verdict, v->verdict_len);
+        if (bad)
+            printf("  D-2: %s: %lu disagreements with Rust\n", v->name, bad);
+        CHECK(bad == 0);
+    }
+    /* The work was done: every vector, every bit (not skipped, not truncated). */
+    CHECK(d1_compared == (unsigned long)n_vecs);
+    CHECK(d2_compared == d2_expected && d2_expected > 80000);
+    printf("  golden: %d vectors, %lu D-2 verdicts compared (C vs Rust)\n", n_vecs, d2_compared);
+}
+
+/* The comparisons refuse tampered vectors: a flipped byte, a flipped ObjectId
+ * bit and an altered verdict character are each detected. */
+static void test_tampered(void)
+{
+    struct vec *v = &vecs[0]; /* root_operator, accepted */
+    uint8_t t[V_BYTES_MAX], o[32];
+    char vs[1024];
+    quiet = 1;
+    CHECK(v->verdict && d1_ok(v->kind, v->bytes, v->n, v->oid, 1));
+    memcpy(t, v->bytes, v->n);
+    t[100] ^= 0x01; /* inside the provisioned generation: still decodes, bytes differ */
+    CHECK(!d1_ok(v->kind, t, v->n, v->oid, 1));
+    memcpy(o, v->oid, 32);
+    o[31] ^= 0x80;
+    CHECK(!d1_ok(v->kind, v->bytes, v->n, o, 1));
+    CHECK(v->verdict_len < sizeof vs);
+    memcpy(vs, v->verdict, v->verdict_len);
+    CHECK(d2_mismatches(v->name, v->kind, v->bytes, v->n, vs, v->verdict_len) == 0);
+    vs[0] = 'a'; /* untouched vector claimed refused */
+    CHECK(d2_mismatches(v->name, v->kind, v->bytes, v->n, vs, v->verdict_len) == 1);
+    memcpy(vs, v->verdict, v->verdict_len);
+    vs[1 + 8 * 20] = vs[1 + 8 * 20] == 'f' ? 'a' : 'f'; /* a flip verdict altered */
+    CHECK(d2_mismatches(v->name, v->kind, v->bytes, v->n, vs, v->verdict_len) == 1);
+    /* wrong length of verdict string is itself a disagreement */
+    CHECK(d2_mismatches(v->name, v->kind, v->bytes, v->n, vs, v->verdict_len - 1) == 1);
+    /* a bit-flipped vector decodes to the verdict Rust gives for that flip */
+    memcpy(t, v->bytes, v->n);
+    t[0] ^= 0x01; /* magic */
+    CHECK(c_verdict(v->kind, t, v->n) == 'a');
+}
+
+int main(int argc, char **argv)
 {
     memset(AGENT, 0x11, 32);
     test_branch_ids();
@@ -546,5 +851,16 @@ int main(void)
     test_state();
     test_wal();
     test_decode_cap();
+#ifdef CC_FIXTURE_DIR
+    const char *dir = argc > 1 ? argv[1] : CC_FIXTURE_DIR;
+#else
+    const char *dir = argc > 1 ? argv[1] : 0;
+#endif
+    int loaded = dir && load_fixtures(dir);
+    CHECK(loaded);
+    if (loaded) {
+        test_golden();
+        test_tampered();
+    }
     return ck_t_verdict("test_continuity_codec");
 }

@@ -550,25 +550,33 @@ $(OUT)/host-san/test_artifact: $(KDIR)/tests/test_artifact.c $(ART_HOST_DEPS) $(
 # CK_HARDWARE_STAGING (svc/continuity_codec.h).
 CC_HOST_SRCS := $(KDIR)/svc/continuity_codec.c $(NATIVE)/argus/sha256.c $(NATIVE)/store/store_v1.c
 CC_HOST_INC := -I$(KDIR)/svc -I$(NATIVE)/argus -I$(NATIVE)/store
-CC_HOST_DEPS := $(CC_HOST_SRCS) $(KDIR)/svc/continuity_codec.h $(NATIVE)/argus/sha256.h \
+CC_HOST_DEPS := $(wildcard $(KDIR)/tests/fixtures/continuity_*.txt) $(CC_HOST_SRCS) $(KDIR)/svc/continuity_codec.h $(NATIVE)/argus/sha256.h \
 	$(NATIVE)/store/store_v1.h $(KDIR)/tests/ck_test.h
+# Cut 2 adds UNCHECKED_FORK_SUM (wrapping fork-count sum), MANIFEST_LAST_WAL_ZERO
+# (only the golden vectors see it), SKIP_D1 and SKIP_D2 (test-side: the golden
+# or the decode-agreement comparison is skipped; the test counts its
+# comparisons, so skipping one is a FAIL).
 CC_MUTANTS := CC_MUTANT_SKIP_TAKE_BOUND CC_MUTANT_ACCEPT_RESERVED CC_MUTANT_CHILD_INDEX_LE \
-	CC_MUTANT_TRUNCATE_AT_CAP
+	CC_MUTANT_TRUNCATE_AT_CAP CC_MUTANT_UNCHECKED_FORK_SUM CC_MUTANT_MANIFEST_LAST_WAL_ZERO \
+	CC_MUTANT_SKIP_D1 CC_MUTANT_SKIP_D2
+# Rust-emitted fixtures (D-1, D-2) read by the test at run time.
+CC_FIXTURES := $(abspath $(KDIR)/tests/fixtures)
+CC_FIXTURE_DEF := -DCC_FIXTURE_DIR='"$(CC_FIXTURES)"'
 
 $(OUT)/host/test_continuity_codec: $(KDIR)/tests/test_continuity_codec.c $(CC_HOST_DEPS)
 	@mkdir -p $(dir $@)
-	$(HOSTCC) $(HCFLAGS) $(CC_HOST_INC) -o $@ $< $(CC_HOST_SRCS)
+	$(HOSTCC) $(HCFLAGS) $(CC_HOST_INC) $(CC_FIXTURE_DEF) -o $@ $< $(CC_HOST_SRCS)
 
 $(OUT)/host-san/test_continuity_codec: $(KDIR)/tests/test_continuity_codec.c $(CC_HOST_DEPS)
 	@mkdir -p $(dir $@)
-	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CC_HOST_INC) -o $@ $< $(CC_HOST_SRCS)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CC_HOST_INC) $(CC_FIXTURE_DEF) -o $@ $< $(CC_HOST_SRCS)
 
 continuity-mutants: $(OUT)/host/test_continuity_codec
 	@mkdir -p $(OUT)/host-mut; fail=0; \
 	$(OUT)/host/test_continuity_codec > $(OUT)/host-mut/base.log 2>&1 || { echo "unmutated test_continuity_codec fails"; fail=1; }; \
 	for m in $(CC_MUTANTS); do \
 	  b=$(OUT)/host-mut/test_continuity_codec_$$m; \
-	  if ! $(HOSTCC) $(HCFLAGS) $(CC_HOST_INC) -D$$m -o $$b $(KDIR)/tests/test_continuity_codec.c $(CC_HOST_SRCS); then \
+	  if ! $(HOSTCC) $(HCFLAGS) $(CC_HOST_INC) $(CC_FIXTURE_DEF) -D$$m -o $$b $(KDIR)/tests/test_continuity_codec.c $(CC_HOST_SRCS); then \
 	    echo "mutant $$m: does not build (FAIL)"; fail=1; continue; fi; \
 	  if $$b > $$b.log 2>&1; then echo "mutant $$m: SURVIVED (FAIL)"; fail=1; \
 	  elif grep -q "^test_continuity_codec: FAIL" $$b.log; then \

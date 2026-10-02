@@ -368,7 +368,11 @@ int cc_manifest_encode(const struct cc_manifest *v, uint8_t *out, size_t cap, si
     w_u16(&w, (uint16_t)v->n_wal);        /* :276 */
     w_zeros(&w, 6);                       /* :277 */
     for (uint32_t i = 0; i < v->n_wal; i++)
+#ifdef CC_MUTANT_MANIFEST_LAST_WAL_ZERO
+        w_bytes(&w, v->wal[i == 63 ? 0 : i], 32); /* MUTANT: id 63 replaced by id 0 */
+#else
         w_bytes(&w, v->wal[i], 32);       /* :278-280 */
+#endif
     *len = w.at;
     return CC_OK;
 }
@@ -482,10 +486,14 @@ int cc_state_validate(const struct cc_state *s, const char **why)
     uint64_t forks = 0;
     int over = 0;
     for (uint32_t i = 0; i < s->n; i++) {
+#ifdef CC_MUTANT_UNCHECKED_FORK_SUM
+        forks += s->br[i].forks; /* MUTANT: wrapping sum, overflow never refused */
+#else
         if (s->br[i].forks > UINT64_MAX - forks)
             over = 1;
         else
             forks += s->br[i].forks;
+#endif
     }
     if (roots != 1 || over || forks != children)
         return fail(why, CC_E_CORRUPT, "fork indexes are not contiguous");

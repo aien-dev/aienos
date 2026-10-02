@@ -466,7 +466,7 @@ impl AgentState {
                 Some(p) => {
                     let parent = self.branch(&p).ok_or(bad("parent branch is absent"))?;
                     // Scan capped at MAX_BRANCHES, as in the C codec
-                    // (continuity_codec.c:463-475): `forks` is input-controlled,
+                    // (cc_state_validate in continuity_codec.c): `forks` is input-controlled,
                     // so an uncapped scan lets a hostile table spin for up to
                     // 2^64 hashes. A table that passes the fork-sum check below
                     // has every forks <= 255, so the cap changes no outcome for
@@ -485,7 +485,7 @@ impl AgentState {
         // overflow checks on, so a plain `.sum()` would wrap and accept e.g.
         // {root forks = 2^64-1, child forks = 2}. An overflowing sum can never
         // equal `children` (<= 255), so it is refused with the same class and
-        // text as the C codec (native/kernel/svc/continuity_codec.c:482-491).
+        // text as the C codec (cc_state_validate in native/kernel/svc/continuity_codec.c).
         let forks = self
             .branches
             .iter()
@@ -886,3 +886,8 @@ pub fn resume<D: StoreDevice>(store: &mut Store<D>) -> Result<(Continuity, bool)
 #[cfg(test)]
 #[path = "continuity_tests.rs"]
 mod tests;
+
+/// D-1/D-2 golden-vector emitter for the C codec (test-only).
+#[cfg(test)]
+#[path = "continuity_vectors.rs"]
+mod continuity_vectors;
