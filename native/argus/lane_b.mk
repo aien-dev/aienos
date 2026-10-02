@@ -51,7 +51,7 @@ test-ring: $(LANE_B_OUT)/test_argus_ring
 	./$(LANE_B_OUT)/test_argus_ring 10000000
 
 test-ring-tsan: $(LANE_B_OUT)/test_argus_ring_tsan
-	$(TSAN_RUN) ./$(LANE_B_OUT)/test_argus_ring_tsan 1000000 --allow-no-refusals
+	$(TSAN_RUN) ./$(LANE_B_OUT)/test_argus_ring_tsan 1000000
 
 bench-ring: $(LANE_B_OUT)/bench_argus_ring
 	./$(LANE_B_OUT)/bench_argus_ring
