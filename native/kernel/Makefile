@@ -60,6 +60,9 @@
 #   make continuity-resolve-mutants
 #                        TEST-only -D mutants of svc/continuity_resolve.c must each fail
 #                        test_continuity_resolve -> CK_CONTINUITY_RESOLVE_MUTANTS: PASS
+#   make continuity-commit-mutants
+#                        TEST-only -D mutants of svc/continuity_commit.c (and MC-11 of the codec) must
+#                        each fail test_continuity_commit -> CK_CONTINUITY_COMMIT_MUTANTS: PASS
 #   make stage-test | stage-sanitize | stage-free   stage host tests (stage.mk)
 #   make print-kcflags   flags stage code must be built with
 #   make udp-echo        host UDP echo helper for scripts/qemu_ck_net_test.sh:
@@ -494,7 +497,7 @@ HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
 	$(KDIR)/core/handoff_check.c
 TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy test_handoff \
-	test_continuity_codec test_continuity_resolve
+	test_continuity_codec test_continuity_resolve test_continuity_commit
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -574,7 +577,7 @@ $(OUT)/host-san/test_continuity_codec: $(KDIR)/tests/test_continuity_codec.c $(C
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CC_HOST_INC) $(CC_FIXTURE_DEF) -o $@ $< $(CC_HOST_SRCS)
 
-continuity-mutants: $(OUT)/host/test_continuity_codec continuity-resolve-mutants
+continuity-mutants: $(OUT)/host/test_continuity_codec continuity-resolve-mutants continuity-commit-mutants
 	@mkdir -p $(OUT)/host-mut; fail=0; \
 	$(OUT)/host/test_continuity_codec > $(OUT)/host-mut/base.log 2>&1 || { echo "unmutated test_continuity_codec fails"; fail=1; }; \
 	for m in $(CC_MUTANTS); do \
@@ -639,6 +642,50 @@ continuity-resolve-mutants: $(OUT)/host/test_continuity_resolve
 	  else echo "mutant flag $$m refused under CK_HARDWARE_STAGING"; fi; \
 	done; \
 	if [ $$fail = 0 ]; then echo "CK_CONTINUITY_RESOLVE_MUTANTS: PASS"; else echo "CK_CONTINUITY_RESOLVE_MUTANTS: FAIL"; exit 1; fi
+
+
+# Continuity provision/commit/resume (C port cut 4): host test over the REAL sealed
+# Store in a file with the real ck_rng over a mocked RNDR, power cuts at every
+# checkpoint and block boundary, and TEST-only -D mutants, each of which must make
+# the test print its FAIL verdict. Mutant flags are refused under
+# CK_HARDWARE_STAGING (svc/continuity_commit.h; MC-11 in svc/continuity_codec.h).
+CM_HOST_SRCS := $(KDIR)/svc/continuity_commit.c $(CR_HOST_SRCS) $(KDIR)/core/entropy.c
+CM_HOST_INC := $(CR_HOST_INC) -I$(KDIR)/core
+CM_HOST_DEPS := $(CM_HOST_SRCS) $(wildcard $(KDIR)/svc/continuity_*.h) $(KDIR)/core/entropy.h \
+	$(wildcard $(NATIVE)/store/*.h $(NATIVE)/m5/*.h $(NATIVE)/disk/*.h $(NATIVE)/crypto/*.h) $(KDIR)/tests/ck_test.h
+# MC-1 resume provisions, MC-3 resume skips the commit, MC-7 provision with a root,
+# MC-8 split transaction, MC-9 writable check removed, MC-10 fixed agent id,
+# MC-11 silent truncation (the codec's CC_MUTANT_TRUNCATE_AT_CAP).
+CM_MUTANTS := CM_MUTANT_RESUME_PROVISIONS CM_MUTANT_RESUME_NO_COMMIT CM_MUTANT_PROVISION_WITH_ROOT \
+	CM_MUTANT_SPLIT_TXN CM_MUTANT_NO_WRITABLE_CHECK CM_MUTANT_FIXED_AGENT CC_MUTANT_TRUNCATE_AT_CAP
+
+$(OUT)/host/test_continuity_commit: $(KDIR)/tests/test_continuity_commit.c $(CM_HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(CM_HOST_INC) -o $@ $< $(CM_HOST_SRCS)
+
+$(OUT)/host-san/test_continuity_commit: $(KDIR)/tests/test_continuity_commit.c $(CM_HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CM_HOST_INC) -o $@ $< $(CM_HOST_SRCS)
+
+continuity-commit-mutants: $(OUT)/host/test_continuity_commit
+	@mkdir -p $(OUT)/host-mut; fail=0; \
+	$(OUT)/host/test_continuity_commit > $(OUT)/host-mut/commit_base.log 2>&1 || { echo "unmutated test_continuity_commit fails"; fail=1; }; \
+	for m in $(CM_MUTANTS); do \
+	  b=$(OUT)/host-mut/test_continuity_commit_$$m; \
+	  if ! $(HOSTCC) $(HCFLAGS) $(CM_HOST_INC) -D$$m -o $$b $(KDIR)/tests/test_continuity_commit.c $(CM_HOST_SRCS); then \
+	    echo "mutant $$m: does not build (FAIL)"; fail=1; continue; fi; \
+	  if $$b > $$b.log 2>&1; then echo "mutant $$m: SURVIVED (FAIL)"; fail=1; \
+	  elif grep -q "^test_continuity_commit: FAIL" $$b.log; then \
+	    echo "mutant $$m: killed ($$(grep -c '^  FAIL ' $$b.log) checks failed)"; \
+	  else echo "mutant $$m: no FAIL verdict (crashed?) (FAIL)"; fail=1; fi; \
+	done; \
+	for m in $(CM_MUTANTS); do \
+	  if $(HOSTCC) $(HCFLAGS) $(CM_HOST_INC) -DCK_HARDWARE_STAGING=1 -D$$m \
+	      -fsyntax-only $(KDIR)/svc/continuity_commit.c 2>/dev/null; then \
+	    echo "mutant flag $$m accepted under CK_HARDWARE_STAGING (FAIL)"; fail=1; \
+	  else echo "mutant flag $$m refused under CK_HARDWARE_STAGING"; fi; \
+	done; \
+	if [ $$fail = 0 ]; then echo "CK_CONTINUITY_COMMIT_MUTANTS: PASS"; else echo "CK_CONTINUITY_COMMIT_MUTANTS: FAIL"; exit 1; fi
 
 ART_TOOL := $(OUT)/host/ck_artifact_tool
 $(ART_TOOL): $(KDIR)/tools/ck_artifact_tool.c $(ART_HOST_DEPS)
