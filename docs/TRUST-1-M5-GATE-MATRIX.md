@@ -77,3 +77,11 @@ running them, and writes a content-addressed receipt (`evidence/trust1_m5_qualif
 New on main since the snapshot: Gate 5 swTPM simulation (#185), `native/crypto`
 (#183), `native/m5` (#186). Overall is unchanged: **TRUST-1 NOT QUALIFIED. M5
 NOT QUALIFIED.** The receipt committed with that update was the authoritative count at the time; the newest one is named in the section above.
+
+## Update 2026-10-02 (LT-C5): fresh receipt and 100-boot soak
+
+Newest receipt, run at 44de11f with QEMU suites on:
+`evidence/trust1_m5_qualification_3f9d07f50196b4ad741b03c353ed3c45c268a72f04c32f00a0ddfab5294a3eee.json`,
+`TRUST1_M5_QUALIFICATION: NOT_QUALIFIED (pass=19 fail=1 not_run=1 blocked=11 missing=5)`. It supersedes 3358bc25.
+The one FAIL is `t1_gate7_preflight`, which reads live operator state: the Spark now has SecureBoot=0 (Drake's decision 2026-10-01), so the pre-flight correctly refuses. It is not a code regression. `store_rust_crosscheck` is NOT_RUN (Rust store tool not built).
+Gate 4 soak: `GATE4_SOAK_RUNS=100 bash scripts/qemu_security_suite.sh` passed 100/100 boots plus the tampered-binary rejection (swTPM, QEMU, forge job C5-SOAK, log `~/workspace/test-queue-logs/C5-SOAK-005901.log`). Gate 4 stays MISSING_IMPLEMENTATION for the loader A/B and manifest items.
