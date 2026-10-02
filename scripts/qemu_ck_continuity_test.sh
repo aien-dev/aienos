@@ -66,7 +66,7 @@ boot; l=$(out '^CONTINUITY: RESUMED ')
 if view_ok "${l}" RESUMED 4 5 1 2 && [[ "$(agent_of "${l}")" == "${agent}" && "$(field memory "${l}")" == "${mem}" ]]; then pass "85a cold restart 2: incarnation=4 sequence=5"; else bad "85a: '${l}'"; fi
 
 # 86 reference: the new memory after one uninterrupted mode 8 commit
-image="${rem_image}"; plan 8
+work_image="${top}/work.img"; cp "${rem_image}" "${work_image}"; image="${work_image}"; plan 8
 boot; l=$(out '^CONTINUITY: COMMITTED ')
 new_mem=$(field memory "${l}")
 if [[ -n "${new_mem}" && "${new_mem}" != "${mem}" ]]; then pass "86 reference: uninterrupted commit gives new memory ${new_mem}"; else bad "86 reference commit: '${l}'"; fi
@@ -80,7 +80,7 @@ for cp in before_first_write after_payload_objects after_catalog after_commit_re
         after_final_flush|before_anchor|after_anchor) want=new ;;
         *) want=old ;;
     esac
-    cp "${rem_image}" "${image}"
+    cp "${rem_image}" "${work_image}"; image="${work_image}"
     plan 8 "cp=${cp}"
     boot_kill "${cp}"
     seen=$(grep -c "^CHECKPOINT: ${cp}\$" "${work}/serial.txt" || true)
@@ -101,7 +101,7 @@ for cp in before_first_write after_payload_objects after_catalog after_commit_re
 done
 
 # 87 malformed peer: read-only resume
-cp "${rem_image}" "${image}"
+cp "${rem_image}" "${work_image}"; image="${work_image}"
 "${cont_tool}" inject-peer "${image}" 4096 >/dev/null || bad "87 inject-peer tool failed"
 plan 6
 boot; l=$(out '^CONTINUITY: ')
