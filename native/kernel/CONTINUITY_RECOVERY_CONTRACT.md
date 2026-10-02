@@ -464,12 +464,26 @@ main design point of this contract.
   challenge (section 1.7) mean the first two units of the **Store region** in
   both. PROPOSED: the C challenge does not also bind the anchor record; adding it
   would make C challenges differ from Rust ones and needs a decision.
-- **K-7 Mode selection.** The Rust qualification picks a mode from a control
-  block on the NVMe disk (store_qual.rs:27-48; store-tool `cfg`,
+- **K-7 Mode selection. DECIDED (cut 6).** The Rust qualification picks a mode
+  from a control block on the NVMe disk (store_qual.rs:27-48; store-tool `cfg`,
   crates/aienos-store-tool/src/main.rs:108-122; response at bytes 16..48). The C
-  disk layout has no control block. PROPOSED: a TEST-only C mechanism with the
-  same mode numbers (5-11), refused in `CK_HARDWARE_STAGING`. Its exact form is
-  left to the first wiring cut.
+  disk layout has no control block and none is added. Decision: a TEST-only
+  build flag `CK_TEST_CONTINUITY=1` builds a separate image
+  (`full-test-continuity`), using the same pattern as `CK_TEST_STORE_CRASH`. The
+  host writes one ASCII plan line
+  `AIENCONT v1 mode=<N>[ cp=<checkpoint>][ response=<64 hex>]` into the last
+  4096-byte unit of the AIENOS partition (the read-write probe scratch unit, which
+  the devices stage restores byte for byte). Modes use the Rust numbers: 5
+  provision, 6 resume, 7 resume + remember, 8 resume + commit with crash point
+  `cp` (halts at the C checkpoint name, section 5.2), 9 Recovery inspect, 10
+  inspect + repair-degraded-peer, 11 inspect + provision-identity; mode 1 (or no
+  plan) is the ordinary Store boot. For modes 5-11 the continuity or Recovery
+  boot runs INSTEAD of the boot-record commit, so read-only rows leave the image
+  byte-identical. The build refuses the flag with `CK_HARDWARE_STAGING`,
+  `CK_QEMU_UNSAFE_DMA` and `CK_TEST_STORE_CRASH`; the default image carries none
+  of the hook code or strings (`cont_check` in the Makefile). The TEST operator
+  key (0x0f x32) exists only in that image and is announced
+  `RECOVERY_OPERATOR_KEY: TEST-ONLY`. Code: `svc/continuity_boot.{c,h}`.
 
 ---
 

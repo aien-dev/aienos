@@ -6,7 +6,8 @@
 # (scripts/qemu_ck_boot_test.sh, scripts/qemu_ck_store_test.sh,
 # scripts/qemu_ck_net_test.sh, scripts/qemu_ck_artifact_test.sh,
 # scripts/qemu_ck_smp_test.sh, scripts/qemu_ck_store_crash_test.sh,
-# scripts/qemu_ck_disk_layout_test.sh), and prints
+# scripts/qemu_ck_disk_layout_test.sh, scripts/qemu_ck_continuity_test.sh,
+# scripts/qemu_ck_recovery_test.sh), and prints
 # one line per gate:
 #     AIENOS_CK_<gate>: PASS|FAIL|NOT_RUN [(reason)]
 # for M1 M3 SMMU NVME_SHUTDOWN P2_ARTIFACT M0_ROLLBACK M4_NVME M4_STORE M4_STORE_CRASH
@@ -45,6 +46,8 @@ set -uo pipefail
 #         smp   -> verdict line from scripts/qemu_ck_smp_test.sh
 #         crash -> verdict line from scripts/qemu_ck_store_crash_test.sh
 #         disk  -> verdict line from scripts/qemu_ck_disk_layout_test.sh
+#         cont  -> verdict line from scripts/qemu_ck_continuity_test.sh
+#         recov -> verdict line from scripts/qemu_ck_recovery_test.sh
 #         missing -> NOT_RUN (MISSING_IMPLEMENTATION), never run, never PASS
 # ===========================================================================
 CK_GATE_TABLE='
@@ -57,15 +60,15 @@ M0_ROLLBACK|missing|C loader signatures, A/B, BootNext and rollback are parked (
 M4_NVME|store|-
 M4_STORE|store|-
 M4_STORE_CRASH|crash|-
-M4_CONTINUITY|missing|no continuity core (ADR 0016 agent identity and memory) in the C kernel
-M4_RECOVERY|missing|no Recovery Core (ADR 0006) in the C kernel
+M4_CONTINUITY|cont|-
+M4_RECOVERY|recov|-
 ARGUS1_REVOKE|store|-
 KEYBOARD|missing|no xHCI/USB HID keyboard driver in the C kernel
 NET|net|-
 SMP|smp|-
 DISK_LAYOUT|disk|-
 '
-CHILDREN=(boot store net artifact smp crash disk)
+CHILDREN=(boot store net artifact smp crash disk cont recov)
 # ===========================================================================
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -110,6 +113,8 @@ set_default_children() {
         [smp]="${repo_root}/scripts/qemu_ck_smp_test.sh"
         [crash]="${repo_root}/scripts/qemu_ck_store_crash_test.sh"
         [disk]="${repo_root}/scripts/qemu_ck_disk_layout_test.sh"
+        [cont]="${repo_root}/scripts/qemu_ck_continuity_test.sh"
+        [recov]="${repo_root}/scripts/qemu_ck_recovery_test.sh"
     )
 }
 
@@ -343,7 +348,7 @@ self_test() {
     }
     scenario() { # NAME BOOT_SCRIPT STORE_SCRIPT [NET_SCRIPT] [ARTIFACT_SCRIPT] [SMP_SCRIPT] [CRASH_SCRIPT] [DISK_SCRIPT] (absent: missing)
         scen="$1"
-        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}" [smp]="${6:-${tmp}/kids/no_smp_child.sh}" [crash]="${7:-${tmp}/kids/no_crash_child.sh}" [disk]="${8:-${tmp}/kids/no_disk_child.sh}")
+        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}" [smp]="${6:-${tmp}/kids/no_smp_child.sh}" [crash]="${7:-${tmp}/kids/no_crash_child.sh}" [disk]="${8:-${tmp}/kids/no_disk_child.sh}" [cont]="${tmp}/kids/no_cont_child.sh" [recov]="${tmp}/kids/no_recov_child.sh")
         run_children 2>/dev/null
         evaluate_table >"${tmp}/${scen}.out"
     }
@@ -476,7 +481,7 @@ self_test() {
         jq -e '.physical == "NOT_RUN" and (.gates | length) == 16 and .verdict == "NOT_ALL_GATES_PASS"
                and ([.gates[] | select(.id == "M1")][0].verdict == "PASS")
                and ([.gates[] | select(.id == "ARGUS1_REVOKE")][0].verdict == "FAIL")
-               and (.children | length) == 7 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
+               and (.children | length) == 9 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
             && ok "receipt is valid JSON (jq) with expected fields" || bad "receipt JSON invalid or fields wrong"
     else
         echo "SKIP  jq not installed; JSON validity not machine-checked"
@@ -495,7 +500,7 @@ self_test() {
         [[ -n "${g}" ]] || continue
         rows=$((rows + 1))
         case "${s}" in
-            boot|store|net|artifact|smp|crash|disk) [[ "${w}" == - ]] || tbad=1 ;;
+            boot|store|net|artifact|smp|crash|disk|cont|recov) [[ "${w}" == - ]] || tbad=1 ;;
             missing) [[ -n "${w}" && "${w}" != - ]] || tbad=1 ;;
             *) tbad=1 ;;
         esac

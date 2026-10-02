@@ -206,6 +206,55 @@ $(error CK_TEST_STORE_CRASH_MUTANT must be skip_root_flush or accept_bad_root_cr
 endif
 endif
 
+
+# TEST-ONLY continuity / Recovery Core mode selection (svc/continuity_boot.h,
+# contract K-7; only scripts/qemu_ck_continuity_test.sh and
+# scripts/qemu_ck_recovery_test.sh set it): the Store stage reads a mode plan
+# from the scratch unit and runs the continuity or Recovery Core wiring instead
+# of the boot-record commit. Own OUT subdirectory; announces itself; refused
+# with CK_HARDWARE_STAGING, CK_QEMU_UNSAFE_DMA and CK_TEST_STORE_CRASH.
+# CK_TEST_CONTINUITY_MUTANT (only with it) builds a deliberately broken
+# continuity layer the gates must catch:
+#   resume_no_commit             resume does not commit the new incarnation
+#   resume_provisions            resume mints an identity on an unprovisioned Store
+#   degraded_is_unprovisioned    a degraded mount reads as unprovisioned (MR-5)
+#   compare_16                   operator response compared on 16 of 32 bytes
+#   bare_sha256                  operator response is a bare SHA-256, not an HMAC
+CK_TEST_CONTINUITY ?=
+CK_TEST_CONTINUITY_MUTANT ?=
+ifneq ($(strip $(CK_TEST_CONTINUITY)),)
+ifneq ($(strip $(CK_TEST_CONTINUITY)),1)
+$(error CK_TEST_CONTINUITY must be empty or 1)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_TEST_CONTINUITY (TEST-ONLY continuity mode selection) cannot be combined with CK_HARDWARE_STAGING)
+endif
+ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),)
+$(error CK_TEST_CONTINUITY (TEST-ONLY continuity mode selection) cannot be combined with CK_QEMU_UNSAFE_DMA)
+endif
+ifneq ($(strip $(CK_TEST_STORE_CRASH)),)
+$(error CK_TEST_CONTINUITY (TEST-ONLY continuity mode selection) cannot be combined with CK_TEST_STORE_CRASH)
+endif
+endif
+ifneq ($(strip $(CK_TEST_CONTINUITY_MUTANT)),)
+ifneq ($(strip $(CK_TEST_CONTINUITY)),1)
+$(error CK_TEST_CONTINUITY_MUTANT needs CK_TEST_CONTINUITY=1 (TEST-ONLY))
+endif
+ifeq ($(strip $(CK_TEST_CONTINUITY_MUTANT)),resume_no_commit)
+CONT_MUTANT_FLAGS := -DCM_MUTANT_RESUME_NO_COMMIT=1
+else ifeq ($(strip $(CK_TEST_CONTINUITY_MUTANT)),resume_provisions)
+CONT_MUTANT_FLAGS := -DCM_MUTANT_RESUME_PROVISIONS=1
+else ifeq ($(strip $(CK_TEST_CONTINUITY_MUTANT)),degraded_is_unprovisioned)
+CONT_MUTANT_FLAGS := -DRC_MUTANT_DEGRADED_IS_UNPROVISIONED=1
+else ifeq ($(strip $(CK_TEST_CONTINUITY_MUTANT)),compare_16)
+CONT_MUTANT_FLAGS := -DCR_MUTANT_COMPARE_16=1
+else ifeq ($(strip $(CK_TEST_CONTINUITY_MUTANT)),bare_sha256)
+CONT_MUTANT_FLAGS := -DCR_MUTANT_BARE_SHA256=1
+else
+$(error CK_TEST_CONTINUITY_MUTANT must be resume_no_commit, resume_provisions, degraded_is_unprovisioned, compare_16 or bare_sha256)
+endif
+endif
+
 # Owner provisioning. The hardware staging image never embeds the TEST Store
 # keys, the TEST store uuid or the TEST machine id: it needs owner PUBLIC
 # material and the machine identity as files (format: tools/ck_owner_gen.c;
@@ -334,6 +383,19 @@ FULL_NAME := full-test-store-crash
 endif
 STAGE_DMA_FLAGS += -DCK_TEST_STORE_CRASH=1 $(STORE_MUTANT_FLAGS)
 endif
+ifeq ($(strip $(CK_TEST_CONTINUITY)),1)
+# Own OUT subdirectory: TEST objects never mix with a default image. The
+# continuity layer is linked only here (default images carry none of it).
+ifneq ($(strip $(CK_TEST_CONTINUITY_MUTANT)),)
+FULL_NAME := full-test-continuity-mutant-$(strip $(CK_TEST_CONTINUITY_MUTANT))
+else
+FULL_NAME := full-test-continuity
+endif
+STAGE_DMA_FLAGS += -DCK_TEST_CONTINUITY=1 $(CONT_MUTANT_FLAGS) -I$(KDIR)/core
+STAGE_SRCS += $(KDIR)/svc/continuity_codec.c $(KDIR)/svc/continuity_resolve.c \
+	$(KDIR)/svc/continuity_resolve_sealed.c $(KDIR)/svc/continuity_commit.c $(KDIR)/svc/continuity_recovery.c \
+	$(KDIR)/svc/continuity_boot.c
+endif
 ifeq ($(strip $(CK_TEST_DISK_XLATE_BYPASS)),1)
 FULL_NAME := $(FULL_NAME)-test-xlate-bypass
 STAGE_DMA_FLAGS += -DCK_TEST_DISK_XLATE_BYPASS=1
@@ -454,6 +516,19 @@ define crash_check
 	fi
 endef
 
+# cont_check(elf): a full image built without CK_TEST_CONTINUITY must carry no
+# continuity wiring code or strings; a TEST continuity image must announce itself.
+define cont_check
+	@if [ "$(strip $(CK_TEST_CONTINUITY))" = 1 ]; then \
+	  grep -aqF "TEST-ONLY continuity mode selection image" $(1) || { echo "TEST continuity image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
+	else \
+	  s=$$(grep -aoE "AIENCONT|RECOVERY_OPERATOR_KEY|RECOVERY_CORE:|CONTINUITY: |TEST-ONLY MUTANT" $(1) | sort -u | tr "\n" " "); \
+	  y=$$($(KNM) $(1) | grep -E " (ck_cont_boot_stage|cr_resume|cr_provision|rc_inspect)$$" | tr "\n" " "); \
+	  if [ -n "$$s$$y" ]; then echo "default image carries the TEST continuity wiring: $$s$$y"; rm -f $(1); exit 1; fi; \
+	  echo "no continuity wiring code in $(1)"; \
+	fi
+endef
+
 # link_image(output elf, objects): refuses undefined symbols (weak stage
 # references excepted) and any relocation other than R_AARCH64_RELATIVE.
 define link_image
@@ -488,6 +563,7 @@ $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	$(call xhci_mut_check,$@)
 	$(call smp_check,$@)
 	$(call crash_check,$@)
+	$(call cont_check,$@)
 
 $(EFI): $(ELF)
 	$(call pe_image,$<,$@)
@@ -747,6 +823,18 @@ $(STORE_IMG_TOOL): $(STORE_IMG_SRCS) $(STAGE_HDRS)
 	$(HOSTCC) $(STAGE_HOST_FLAGS) $(STAGE_INC) -o $@ $(STORE_IMG_SRCS)
 store-image: $(STORE_IMG_TOOL)
 
+# Continuity / Recovery Core QEMU gate tool (scripts/qemu_ck_continuity_test.sh,
+# scripts/qemu_ck_recovery_test.sh): operator response, degraded-peer injection,
+# AgentRoot corruption on a boot-disk image. Hosted; never part of an image.
+CONT_TOOL := $(OUT)/host/ck_cont_tool
+CONT_TOOL_SRCS := $(STAGE_OWN_SRCS) $(STAGE_NATIVE_SRCS) $(NATIVE)/disk/disk_file.c \
+	$(KDIR)/svc/tests/ck_host.c $(KDIR)/svc/continuity_resolve.c $(KDIR)/svc/continuity_codec.c \
+	$(KDIR)/tools/ck_cont_tool.c
+$(CONT_TOOL): $(CONT_TOOL_SRCS) $(STAGE_HDRS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(STAGE_HOST_FLAGS) $(STAGE_INC) -o $@ $(CONT_TOOL_SRCS)
+cont-tool: $(CONT_TOOL)
+
 # GPT boot-disk image tool (QEMU gates; hosted, never part of an image).
 GPT_IMG_TOOL := $(OUT)/host/ck_gpt_image
 GPT_IMG_SRCS := $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \
@@ -773,4 +861,4 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize handoff-mutant clean print-kcflags udp-echo tool store-image gpt-image owner-gen continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full test sanitize handoff-mutant clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen continuity-mutants continuity-resolve-mutants FORCE
