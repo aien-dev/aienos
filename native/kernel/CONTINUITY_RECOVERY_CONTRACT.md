@@ -447,7 +447,7 @@ main design point of this contract.
 - **K-4 GraphBadNewer.** When the newest root is graph-broken, Rust mounts
   degraded on the older generation (recovery_core_tests.rs:178-219). In the
   sealed Store the anchor holds the newer generation, so `ss_open` is expected to
-  refuse with `SS_E_ROLLBACK` (store_sealed.h:57). **Cut 5: CONFIRMED for a flipped byte of the newest AgentRoot (see K-3: `SS_E_ROLLBACK`, reason `SealedRefusal(-303)`, no action applicable); UNVERIFIED for other forms of newest-root graph damage (a CRC-valid but graph-broken root with a fresh anchor), which have no C test.** Either way no action may be applicable (INV-15).
+  refuse with `SS_E_ROLLBACK` (store_sealed.h:57). **Cut 5: CONFIRMED for a flipped byte of the newest AgentRoot (see K-3: `SS_E_ROLLBACK`, reason `SealedRefusal(-303)`, no action applicable); cut 7: host test written (`t_k4`), covering only a sealed-valid newer MANIFEST (next sequence, fresh anchor) whose agent_state object was never written, NOT_RUN until the forge reports; predicted outcome: the Store mounts Valid, reason `ContinuityCorrupt("referenced object is absent")` (continuity_recovery.c:102-111, continuity_resolve.c:75), no action applicable. Still unbuilt, with no C test: a graph-broken newest AgentRoot and a foreign-agent state.** Either way no action may be applicable (INV-15).
 - **K-5 Degraded mount through ss_open. DECIDED by running it (cut 3, host PASS).** The question was whether
   `ss_open` returns 0 on a `DegradedRecovery` mount with a malformed peer (needed for INV-11 and repair).
   **Answer: yes.** `test_continuity_resolve.c` `t_degraded` (:716, printed at :751) commits two generations
@@ -462,8 +462,16 @@ main design point of this contract.
   The C layout is anchor units 0-3, Store region 4..U-2, probe unit U-1
   (native/kernel/dev/disk_layout.h). Raw superblock "units 0 and 1" in the
   challenge (section 1.7) mean the first two units of the **Store region** in
-  both. PROPOSED: the C challenge does not also bind the anchor record; adding it
-  would make C challenges differ from Rust ones and needs a decision.
+  both. **Cut 7: host test written (`tests/test_continuity_geometry.c`, `make -C native/kernel test`, binary
+  `$(OUT)/host/test_continuity_geometry`, also in `sanitize`), NOT_RUN until the forge
+  reports.** It shows, on the real sealed Store in a file: `rc state_digest` equals SHA-256 over
+  Store-region units 0 and 1 read from the image and differs from the digest of the anchor units;
+  a flipped byte in Store-region unit 0, and separately unit 1, changes the digest (and the
+  challenge after flipping the inactive slot); a flipped byte in each of the four anchor units
+  leaves the digest unchanged; the `dev/disk_layout.h` constants (anchor 4, probe 1, minimum Store
+  64) give a Store region of units 4..U-2 (U-5 units). PROPOSED: the C
+  challenge does not also bind the anchor record; adding it would make C challenges differ from
+  Rust ones and needs a decision.
 - **K-7 Mode selection. DECIDED (cut 6).** The Rust qualification picks a mode
   from a control block on the NVMe disk (store_qual.rs:27-48; store-tool `cfg`,
   crates/aienos-store-tool/src/main.rs:108-122; response at bytes 16..48). The C

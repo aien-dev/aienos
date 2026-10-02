@@ -576,7 +576,7 @@ HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
 	$(KDIR)/core/handoff_check.c
 TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy test_handoff \
-	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery
+	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -785,6 +785,15 @@ $(OUT)/host/test_continuity_recovery: $(KDIR)/tests/test_continuity_recovery.c $
 $(OUT)/host-san/test_continuity_recovery: $(KDIR)/tests/test_continuity_recovery.c $(RC_HOST_DEPS)
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CM_HOST_INC) -o $@ $< $(RC_HOST_SRCS)
+
+# K-6 region geometry (cut 7): host test over the real sealed Store in a file; needs dev/disk_layout.h.
+$(OUT)/host/test_continuity_geometry: $(KDIR)/tests/test_continuity_geometry.c $(RC_HOST_DEPS) $(KDIR)/dev/disk_layout.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(CM_HOST_INC) -I$(KDIR)/dev -o $@ $< $(RC_HOST_SRCS)
+
+$(OUT)/host-san/test_continuity_geometry: $(KDIR)/tests/test_continuity_geometry.c $(RC_HOST_DEPS) $(KDIR)/dev/disk_layout.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CM_HOST_INC) -I$(KDIR)/dev -o $@ $< $(RC_HOST_SRCS)
 
 continuity-recovery-mutants: $(OUT)/host/test_continuity_recovery
 	@mkdir -p $(OUT)/host-mut; fail=0; \
