@@ -4,9 +4,9 @@
  *   reporting, and a two-thread run with a deliberately slow consumer:
  *   attempts == popped + sum(refused) + critical_overflow, FIFO per class,
  *   and every refusal reported exactly once by argus_ring_drain_drops.
- * Usage: test_argus_ring [events] [--allow-no-refusals]   (default 10,000,000)
- * --allow-no-refusals: for sanitizer builds, where the slowed producer may
- * never outrun the consumer; the identity and FIFO checks still apply.
+ * Usage: test_argus_ring [events]   (default 10,000,000; must exceed 1024)
+ * The SPSC run starts with a held consumer, so refusal/backpressure is guaranteed
+ * by construction (not by thread timing) in every build, sanitized or not.
  */
 #include "argus_abi.h"
 #include <pthread.h>
@@ -240,6 +240,11 @@ typedef struct {
     ArgusRing *r;
     uint64_t events;
     _Atomic int producer_done;
+    _Atomic int consumer_released;   /* the consumer does not pop until the producer sets this */
+    /* Phase 0 (held consumer): the producer offers SPSC_CAP INFORMATIONAL events while
+     * nothing pops, so the outcome does not depend on thread scheduling. */
+    uint64_t hold_accepted, hold_refused, hold_first_refusal;
+    ArgusRingStats hold_stats;       /* snapshot taken while the consumer is still held */
     /* producer results */
     uint64_t attempts, accepted[5], refused_rc[5];
     /* consumer results */
@@ -252,8 +257,10 @@ static void *producer(void *arg)
 {
     Spsc *t = arg;
     uint64_t rs = 0x1234567887654321ull, next[5] = {0};
+    t->hold_first_refusal = UINT64_MAX;
     for (uint64_t i = 0; i < t->events; i++) {
-        uint64_t roll = xs(&rs) % 100;
+        int hold = i < SPSC_CAP;   /* phase 0: consumer held, INFORMATIONAL only */
+        uint64_t roll = hold ? 99 : xs(&rs) % 100;
         uint8_t cls = roll < 5 ? 1 : roll < 30 ? 2 : roll < 60 ? 3 : 4;
         ArgusEvent e = mk(cls, i + 1, ++next[cls]);   /* resource = per-class attempt number */
         e.object_id = (uint32_t)(i * 2654435761u);
@@ -262,6 +269,14 @@ static void *producer(void *arg)
         if (rc == ARGUS_OK) t->accepted[cls]++;
         else if (rc == ARGUS_ERR_FULL) t->refused_rc[cls]++;
         else { fprintf(stderr, "FAIL push rc %d\n", rc); exit(1); }
+        if (hold) {
+            if (rc == ARGUS_OK) t->hold_accepted++;
+            else { t->hold_refused++; if (t->hold_first_refusal == UINT64_MAX) t->hold_first_refusal = i; }
+        }
+        if (i + 1 == SPSC_CAP) {   /* end of phase 0: look, then let the consumer go */
+            argus_ring_stats(t->r, &t->hold_stats);
+            atomic_store_explicit(&t->consumer_released, 1, memory_order_release);
+        }
     }
     atomic_store_explicit(&t->producer_done, 1, memory_order_release);
     return NULL;
@@ -286,6 +301,7 @@ static void *consumer(void *arg)
     Spsc *t = arg;
     uint64_t last_res[5] = {0}, last_seq = 0, drop_seq = 1;
     volatile uint64_t sink = 0;
+    while (!atomic_load_explicit(&t->consumer_released, memory_order_acquire)) { /* held */ }
     for (;;) {
         ArgusEvent e;
         int done = atomic_load_explicit(&t->producer_done, memory_order_acquire);
@@ -312,14 +328,16 @@ static void *consumer(void *arg)
     return NULL;
 }
 
-static void test_spsc(uint64_t events, int require_refusals)
+static void test_spsc(uint64_t events)
 {
+    if (events <= SPSC_CAP) { fprintf(stderr, "events must exceed %u\n", SPSC_CAP); exit(2); }
     Spsc t;
     memset(&t, 0, sizeof t);
     void *mem;
     t.r = new_ring(SPSC_CAP, &mem);
     t.events = events;
     atomic_init(&t.producer_done, 0);
+    atomic_init(&t.consumer_released, 0);
     pthread_t pc, cc;
     pthread_create(&cc, NULL, consumer, &t);
     pthread_create(&pc, NULL, producer, &t);
@@ -347,8 +365,18 @@ static void test_spsc(uint64_t events, int require_refusals)
     for (int c = 1; c <= 4; c++) CHECK(t.reported[c] == t.refused_rc[c]);   /* every refusal reported exactly once */
     CHECK(t.fifo_errors == 0);
     CHECK(t.content_errors == 0);
-    if (require_refusals) CHECK(sum_refused > 0);   /* the consumer really was slow */
-    else if (sum_refused == 0) printf("  note: consumer kept up in this run; refusal path not exercised\n");
+    /* Deterministic backpressure (consumer held, ring offered SPSC_CAP INFORMATIONAL events, nothing popped):
+     * exactly the INFORMATIONAL watermark is accepted, the rest is refused and counted, the first refusal is the
+     * event right at the watermark, and the ring is left exactly at the watermark. */
+    uint32_t sat = argus_ring_saturation_point(SPSC_CAP, ARGUS_CLASS_INFORMATIONAL);
+    CHECK(sat > 0 && sat < SPSC_CAP);
+    CHECK(t.hold_accepted == sat);
+    CHECK(t.hold_refused == SPSC_CAP - sat);
+    CHECK(t.hold_first_refusal == sat);
+    CHECK(t.hold_stats.pushed == sat && t.hold_stats.popped == 0 && t.hold_stats.depth == sat);
+    CHECK(t.hold_stats.refused[4] == SPSC_CAP - sat && t.hold_stats.refused[1] + t.hold_stats.refused[2] + t.hold_stats.refused[3] == 0);
+    CHECK(t.hold_stats.critical_overflow == 0);
+    CHECK(sum_refused >= SPSC_CAP - sat);
     free(mem);
     printf("spsc: identity attempts == popped + sum(refused) + critical_overflow holds; FIFO per class OK; "
            "all refusals reported by drain_drops\n");
@@ -361,8 +389,7 @@ int main(int argc, char **argv)
     test_class_floor();
     test_watermarks();
     test_drain_drops();
-    int require_refusals = !(argc > 2 && strcmp(argv[2], "--allow-no-refusals") == 0);
-    test_spsc(events, require_refusals);
+    test_spsc(events);
     if (failures) { printf("test_argus_ring: FAIL (%d)\n", failures); return 1; }
     printf("test_argus_ring: PASS\n");
     return 0;
