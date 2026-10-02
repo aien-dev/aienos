@@ -4,12 +4,65 @@
 # restore boot entries. Host-side, static check only: extracts the built
 # initrd and greps for files and init hooks. No real devices, no root, no
 # QEMU boot (qemu_verify_recovery_media.sh already covers the boot itself).
+# Verdict: PASS only when every check ran and passed; FAIL on any failed check
+# (exit 1); NOT_RUN (exit 3) when a check class was skipped (readelf missing, or
+# the test-only no-gocryptfs allowance in use). A skip is never a PASS.
+# bash scripts/verify_recovery_tools.sh --self-test   negative controls, no build.
 # Zero Disk Secrets and Unslop compliant.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
+
+# --self-test: negative controls on a synthetic image. No build, no QEMU, no
+# root. Proves the verdict follows the checks: a missing tool is FAIL, a
+# skipped check class (no gocryptfs allowed, no readelf) is NOT_RUN (exit 3),
+# and only a complete, unskipped image is PASS.
+if [[ "${1:-}" == --self-test ]]; then
+    self="${REPO_ROOT}/scripts/verify_recovery_tools.sh"
+    command -v readelf >/dev/null || { echo "NOT_RUN  self-test needs readelf on this host"; echo "RECOVERY_TOOLS_SELF_TEST: NOT_RUN"; exit 3; }
+    t="$(mktemp -d)"; trap 'rm -rf "${t}"' EXIT
+    st=0
+    mk_root() { # dir: a complete synthetic recovery root
+        local d="$1" f
+        mkdir -p "${d}/bin" "${d}/etc" "${d}/usr/local/sbin" "${d}/lib/aarch64-linux-gnu"
+        for f in busybox mount lsblk blkid cryptsetup fsck.vfat mkfs.vfat fsck.ext4 efibootmgr chroot findmnt \
+                 tpm2_pcrread sbverify age gocryptfs fusermount3; do
+            : >"${d}/bin/${f}"; chmod +x "${d}/bin/${f}"
+        done
+        : >"${d}/usr/local/sbin/collect_recovery_boot_evidence"
+        : >"${d}/lib/aarch64-linux-gnu/libtss2-tcti-device.so.0"
+        printf 'nvme.ko\ndm-crypt.ko\n' >"${d}/etc/aienos-modules.order"
+        printf '#!/bin/sh\n# aienos.test=1\n# efibootmgr\nexec /bin/sh\n' >"${d}/init"; chmod +x "${d}/init"
+    }
+    mk_img() { (cd "$1" && find . | cpio -o -H newc --quiet 2>/dev/null) | gzip -c >"$2"; }
+    # expect NAME RC MARKER IMAGE [PATH_OVERRIDE] [ALLOW_NO_GOCRYPTFS]
+    expect() {
+        local name="$1" want_rc="$2" want="$3" img="$4" path="${5:-${PATH}}" allow="${6:-0}" rc=0 out
+        out="$(PATH="${path}" AIENOS_RECOVERY_ALLOW_NO_GOCRYPTFS="${allow}" /bin/bash "${self}" "${img}" 2>&1)" || rc=$?
+        if [[ "${rc}" == "${want_rc}" ]] && grep -q "^RECOVERY_TOOLS: ${want}" <<<"${out}"; then
+            echo "PASS  ${name} -> ${want} (exit ${rc})"
+        else
+            echo "FAIL  ${name}: want ${want} exit ${want_rc}, got exit ${rc}: $(grep '^RECOVERY_TOOLS:' <<<"${out}" || echo 'no verdict line')"; st=1
+        fi
+    }
+    mk_root "${t}/full"; mk_img "${t}/full" "${t}/full.img"
+    expect "complete image" 0 PASS "${t}/full.img"
+    mk_root "${t}/noage"; rm "${t}/noage/bin/age"; mk_img "${t}/noage" "${t}/noage.img"
+    expect "mutant: age deleted from the image" 1 FAIL "${t}/noage.img"
+    mk_root "${t}/nogo"; rm "${t}/nogo/bin/gocryptfs"; mk_img "${t}/nogo" "${t}/nogo.img"
+    expect "mutant: gocryptfs missing, not allowed" 1 FAIL "${t}/nogo.img"
+    expect "gocryptfs missing, test-only allowance -> check skipped" 3 NOT_RUN "${t}/nogo.img" "${PATH}" 1
+    # A PATH with the tools the script needs but no readelf: the closure check cannot run.
+    mkdir -p "${t}/nopath"
+    for c in gzip cpio sed grep mktemp rm mkdir readlink head cat dirname basename sort wc tr; do
+        ln -s "$(command -v "${c}")" "${t}/nopath/${c}"
+    done
+    expect "readelf absent -> library closure checks skipped" 3 NOT_RUN "${t}/full.img" "${t}/nopath"
+    if [[ ${st} == 0 ]]; then echo "RECOVERY_TOOLS_SELF_TEST: PASS"; exit 0; fi
+    echo "RECOVERY_TOOLS_SELF_TEST: FAIL"; exit 1
+fi
 
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "${WORK_DIR}"' EXIT
@@ -45,6 +98,7 @@ echo "Extracting ${INITRD_IMG}..."
 gzip -dc "${INITRD_IMG}" | (cd "${ROOT_DIR}" && cpio -idm --quiet)
 
 FAILED=0
+SKIPS=()
 check() {
     if [[ "$2" == 1 ]]; then
         echo "PASS  $1"
@@ -91,7 +145,7 @@ check "tpm2 device transport library packaged (dlopen, not seen by ldd)" \
 check "sbverify present" "$(have_file bin/sbverify)"
 check "age present" "$(have_file bin/age)"
 if [[ "${AIENOS_RECOVERY_ALLOW_NO_GOCRYPTFS:-0}" == 1 ]]; then
-    echo "SKIP  gocryptfs present (TEST-ONLY image built on a host without gocryptfs)"
+    echo "SKIP  gocryptfs present (TEST-ONLY image built on a host without gocryptfs)"; SKIPS+=("gocryptfs present (TEST-ONLY image without gocryptfs)")
 else
     check "gocryptfs present" "$(have_file bin/gocryptfs)"
 fi
@@ -129,7 +183,7 @@ if command -v readelf >/dev/null; then
     tcti="$(compgen -G "${ROOT_DIR}/lib/*-linux-gnu/libtss2-tcti-device.so.0" | head -n 1 || true)"
     [[ -z "${tcti}" ]] || check "tpm2 device transport: its libraries are inside the image" "$(closure_ok "$(readlink -f "${tcti}")")"
 else
-    echo "SKIP  library closure checks (readelf not installed)"
+    echo "SKIP  library closure checks (readelf not installed)"; SKIPS+=("library closure checks (readelf not installed)")
 fi
 
 echo ""
@@ -143,5 +197,11 @@ echo ""
 if [[ "${FAILED}" != 0 ]]; then
     echo "RECOVERY_TOOLS: FAIL"
     exit 1
+fi
+# A skipped check is not a passed check: say NOT_RUN and exit 3, never PASS.
+if [[ ${#SKIPS[@]} -gt 0 ]]; then
+    printf 'NOT_RUN  skipped check: %s\n' "${SKIPS[@]}"
+    echo "RECOVERY_TOOLS: NOT_RUN (${#SKIPS[@]} check(s) skipped; every other check passed)"
+    exit 3
 fi
 echo "RECOVERY_TOOLS: PASS (initrd ships mount, EFI repair, and boot-entry restore capability)"

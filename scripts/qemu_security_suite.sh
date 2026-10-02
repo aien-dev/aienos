@@ -12,6 +12,42 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
+# judge_corrupt_rejection LOG: Subtest 3 verdict from the console log of the
+# corrupted-image boot. PASS needs positive evidence that the firmware ran and
+# the console was captured (the AAVMF banner), and no "kernel: alive". A missing
+# or empty log, or a log without the banner, is FAIL: QEMU that never started
+# must not read as "the firmware rejected the image".
+judge_corrupt_rejection() {
+    local log="$1"
+    if [[ ! -f "${log}" ]]; then
+        echo "FAIL  Corrupted-image boot left no console log: nothing shows the firmware ran"; return 1
+    fi
+    if ! grep -q "UEFI firmware (version" "${log}"; then
+        echo "FAIL  Corrupted-image console log has no firmware banner: QEMU or the firmware did not run, so no rejection was observed"; return 1
+    fi
+    if grep -q "kernel: alive" "${log}"; then
+        echo "FAIL  Corrupted binary unexpectedly reached kernel alive"; return 1
+    fi
+    echo "PASS  Corrupted binary cleanly rejected by firmware without reaching kernel alive (firmware banner present)"
+}
+
+# --self-test: negative controls for judge_corrupt_rejection. No QEMU, no build.
+if [[ "${1:-}" == --self-test ]]; then
+    st=0; t="$(mktemp -d)"; trap 'rm -rf "${t}"' EXIT
+    expect_rc() { # name want_rc log
+        local rc=0; judge_corrupt_rejection "$3" >/dev/null || rc=$?
+        if [[ "${rc}" == "$2" ]]; then echo "PASS  $1 -> exit ${rc}"; else echo "FAIL  $1: wanted ${2}, got ${rc}"; st=1; fi
+    }
+    printf 'UEFI firmware (version 2024.02 built at 12:48:22 on Jun  2 2026)\nBdsDxe: loading Boot0001 "UEFI Misc Device"\nBdsDxe: failed to load Boot0001\n' >"${t}/rejected.txt"
+    expect_rc "firmware ran, image rejected (no kernel: alive)" 0 "${t}/rejected.txt"
+    expect_rc "mutant: no log file at all (QEMU never started)" 1 "${t}/absent.txt"
+    : >"${t}/empty.txt"; expect_rc "mutant: empty console log" 1 "${t}/empty.txt"
+    printf 'qemu-system-aarch64: invalid option\n' >"${t}/nobanner.txt"; expect_rc "mutant: log without the firmware banner" 1 "${t}/nobanner.txt"
+    { cat "${t}/rejected.txt"; echo "kernel: alive"; } >"${t}/booted.txt"; expect_rc "mutant: corrupted image reached kernel: alive" 1 "${t}/booted.txt"
+    if [[ ${st} == 0 ]]; then echo "QEMU_SECURITY_SUITE_SELF_TEST: PASS"; exit 0; fi
+    echo "QEMU_SECURITY_SUITE_SELF_TEST: FAIL"; exit 1
+fi
+
 code_fd="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}"
 vars_fd="${AAVMF_VARS:-/usr/share/AAVMF/AAVMF_VARS.fd}"
 ITERATIONS="${GATE4_SOAK_RUNS:-5}"
@@ -132,12 +168,7 @@ set -e
 if [[ -f "${corrupt_log}" ]]; then
     tr -d "\r" <"${corrupt_log}" >"${corrupt_work}/serial_corrupt.txt"
     [[ -z "${AIENOS_LOG_DIR:-}" ]] || cp "${corrupt_work}/serial_corrupt.txt" "${AIENOS_LOG_DIR}/gate4_corrupt_serial.log"
-    if grep -q "kernel: alive" "${corrupt_work}/serial_corrupt.txt"; then
-        echo "FAIL  Corrupted binary unexpectedly reached kernel alive"
-        exit 1
-    else
-        echo "PASS  Corrupted binary cleanly rejected by firmware without reaching kernel alive"
-    fi
 fi
+judge_corrupt_rejection "${corrupt_work}/serial_corrupt.txt" || exit 1
 
 echo "TRUST-1 Gate 4 Security Suite: ALL TESTS PASS"

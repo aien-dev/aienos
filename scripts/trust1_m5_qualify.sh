@@ -48,9 +48,9 @@ set -uo pipefail
 # ===========================================================================
 GATE_TABLE='
 t1_measurement_tools|software|run_measurement_tools|2|^TRUST-1 measurement tools self-test: ALL PASS$|TRUST-1 Gate 0/2 read-only tools self-test on a software TPM
-t1_key_ceremony|software|run_key_ceremony|-|^TRUST-1 key ceremony self-test \(throwaway keys\): ALL PASS$|TRUST-1 Gate 3 key ceremony self-test with throwaway keys
+t1_key_ceremony|software|run_key_ceremony|3|^TRUST-1 key ceremony self-test \(throwaway keys\): ALL PASS$|TRUST-1 Gate 3 key ceremony self-test with throwaway keys
 t1_gate7_preflight|software|run_gate7_preflight|-|^GATE7_PREFLIGHT: PASS|TRUST-1 Gate 7 read-only pre-flight (depends on operator state)
-t1_recovery_tools|software|run_recovery_tools|-|^RECOVERY_TOOLS: PASS|recovery initrd ships mount, EFI repair and boot-entry restore tools
+t1_recovery_tools|software|run_recovery_tools|3|^RECOVERY_TOOLS: PASS|recovery initrd ships mount, EFI repair and boot-entry restore tools
 store_torn_slot_c|software|run_store_c|-|^TORN_SLOT_HOST_EMULATION: PASS|Store C reference torn-write test (host block-device emulation)
 store_native_c|software|run_store_c|-|^AIENOS_STORE_NATIVE: PASS$|C twin of the System Store v1 engine + sealed Store (host file-backed; golden vectors byte-identical to Rust)
 store_rust_crosscheck|software|run_store_rust_xcheck|2|^STORE_RUST_CROSSCHECK: PASS$|Rust aienos-store-tool opens C-written stores and reads back the same generation and objects (C to Rust direction; NOT_RUN when the Rust tool is not built)
@@ -617,8 +617,19 @@ self_test() {
         jq -e '.verdict == "NOT_QUALIFIED" and .counts.blocked == 1 and .gates[1].verdict == "NOT_RUN" and .gates[1].blocker == "BLOCKED_OPERATOR" and .gates[0].blocker == "-" and .tree_clean_before == true and .machine.pcr_sha256["1"] == "cd"' "${receipt_path}" >/dev/null \
             && ok "receipt is valid JSON (jq) with expected fields" || bad "receipt is not valid JSON or fields wrong"
     else
-        echo "SKIP  jq not installed; JSON validity not machine-checked"
+        echo "SKIP  jq not installed; JSON validity not machine-checked"; jq_skipped=1
     fi
+
+    # The two scripts that return 3 for "a check was skipped" must map to NOT_RUN
+    # through their table rows, never PASS and never an accidental FAIL.
+    for g in t1_key_ceremony t1_recovery_tools; do
+        row="$(grep "^${g}|" "${BASH_SOURCE[0]}" | head -1)"
+        IFS='|' read -r _ _ _ nrc marker _ <<<"${row}"
+        v="$(classify_log software 3 "${nrc}" "${marker}" /dev/null)"
+        [[ "${v%%|*}" == NOT_RUN ]] && ok "${g}: exit 3 (a skipped check) -> NOT_RUN" || bad "${g}: exit 3 classified ${v%%|*}"
+        v="$(classify_log software 0 "${nrc}" "${marker}" /dev/null)"
+        [[ "${v%%|*}" == FAIL ]] && ok "${g}: exit 0 without its marker line -> FAIL" || bad "${g}: exit 0 without marker classified ${v%%|*}"
+    done
 
     # Quiet-flag header must match the rows (TR-02 inspector fix item 3).
     # Mutation: the flag is up while a QEMU gate is evaluated and down when
@@ -684,7 +695,8 @@ self_test() {
     fi
 
     rm -rf --one-file-system "${tmp}"
-    if [[ ${st_fail} == 0 ]]; then echo "TRUST1_M5_QUALIFY_SELF_TEST: PASS"; exit 0; fi
+    if [[ ${st_fail} == 0 && ${jq_skipped:-0} == 0 ]]; then echo "TRUST1_M5_QUALIFY_SELF_TEST: PASS"; exit 0; fi
+    if [[ ${st_fail} == 0 ]]; then echo "TRUST1_M5_QUALIFY_SELF_TEST: PASS (jq missing: receipt JSON validity NOT_RUN)"; exit 0; fi
     echo "TRUST1_M5_QUALIFY_SELF_TEST: FAIL"; exit 1
 }
 

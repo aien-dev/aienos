@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0.0",
+  "receipt_type": "gate1_zero_disk_recovery_addendum",
+  "procedure_id": "TRUST-1-GATE1-ADDENDUM-2026-10-02",
+  "timestamp_utc": "2026-10-02T00:00:00Z",
+  "amends_receipt": {
+    "path": "evidence/gate1_zero_disk_recovery_receipt.json",
+    "sha256": "e1d6ac54f56570a89450c129922de6001b8bb510b4d9db6ed11d93608937885d",
+    "previous_claim": "invariants block lists zero_internal_storage_dependency, internal_nvme_unmounted, atlas_recov_protected and qemu_zero_disk_verified as true, and status PASS_EMULATOR_VERIFIED",
+    "corrected_claim": "Those four true values were written as literals by the receipt writer of that time. The receipt carries no QEMU serial-log hash, no check output and no image-to-boot binding, so none of the four is backed by evidence recorded in the receipt. Read each as NOT_RUN. The current writer scripts/capture_gate1_receipt.sh computes qemu_zero_disk_boot and qemu_boot_bound_to_image_hash from a real run and records internal_nvme_unmounted and atlas_recov_protected as NOT_RUN."
+  },
+  "field_status": {
+    "zero_internal_storage_dependency": "NOT_RUN",
+    "internal_nvme_unmounted": "NOT_RUN",
+    "atlas_recov_protected": "NOT_RUN",
+    "qemu_zero_disk_verified": "NOT_RUN"
+  },
+  "unchanged_facts": "artifact sha256 values and the utilities list in the original receipt are file facts and are not amended",
+  "physical_hardware_status": "NOT_RUN",
+  "tier_words": { "host": "PASS", "qemu": "NOT_RUN", "hardware": "NOT_RUN" },
+  "result": "ORIGINAL_INVARIANTS_NOT_BACKED"
+}

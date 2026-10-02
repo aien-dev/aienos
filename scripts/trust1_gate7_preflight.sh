@@ -171,7 +171,12 @@ else
     rc=$?
 fi
 grep -E '^(FAIL|SKIP)|^image not found' "${log}" | sed 's/^/      /'
-check "every recovery tool is inside ${image_note}" "$([[ ${rc} -eq 0 ]] && echo 1 || echo 0)"
+if [[ ${rc} -eq 3 ]]; then
+    # verify_recovery_tools.sh exits 3 when a check class was skipped (NOT_RUN).
+    fail "every recovery tool is inside ${image_note}: NOT CHECKED in full (verify_recovery_tools.sh skipped a check class and reported NOT_RUN)"
+else
+    check "every recovery tool is inside ${image_note}" "$([[ ${rc} -eq 0 ]] && echo 1 || echo 0)"
+fi
 
 echo ""
 echo "-- Not checked here (need Drake's reboots or later gates) --"
