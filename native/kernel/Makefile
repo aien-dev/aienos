@@ -57,6 +57,9 @@
 #   make continuity-mutants
 #                        TEST-only -D mutants of svc/continuity_codec.c must
 #                        each fail test_continuity_codec -> CK_CONTINUITY_CODEC_MUTANTS: PASS
+#   make continuity-resolve-mutants
+#                        TEST-only -D mutants of svc/continuity_resolve.c must each fail
+#                        test_continuity_resolve -> CK_CONTINUITY_RESOLVE_MUTANTS: PASS
 #   make stage-test | stage-sanitize | stage-free   stage host tests (stage.mk)
 #   make print-kcflags   flags stage code must be built with
 #   make udp-echo        host UDP echo helper for scripts/qemu_ck_net_test.sh:
@@ -491,7 +494,7 @@ HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
 	$(KDIR)/core/handoff_check.c
 TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy test_handoff \
-	test_continuity_codec
+	test_continuity_codec test_continuity_resolve
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -571,7 +574,7 @@ $(OUT)/host-san/test_continuity_codec: $(KDIR)/tests/test_continuity_codec.c $(C
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CC_HOST_INC) $(CC_FIXTURE_DEF) -o $@ $< $(CC_HOST_SRCS)
 
-continuity-mutants: $(OUT)/host/test_continuity_codec
+continuity-mutants: $(OUT)/host/test_continuity_codec continuity-resolve-mutants
 	@mkdir -p $(OUT)/host-mut; fail=0; \
 	$(OUT)/host/test_continuity_codec > $(OUT)/host-mut/base.log 2>&1 || { echo "unmutated test_continuity_codec fails"; fail=1; }; \
 	for m in $(CC_MUTANTS); do \
@@ -588,6 +591,54 @@ continuity-mutants: $(OUT)/host/test_continuity_codec
 	  echo "mutant flag accepted under CK_HARDWARE_STAGING (FAIL)"; fail=1; \
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_CONTINUITY_CODEC_MUTANTS: PASS"; else echo "CK_CONTINUITY_CODEC_MUTANTS: FAIL"; exit 1; fi
+
+# Continuity resolve + challenge/HMAC (C port cut 3): host test over the REAL
+# sealed Store in a file (native/store + m5 + crypto + disk), TEST-only -D
+# mutants, each of which must make the test print its FAIL verdict. Mutant flags
+# are refused under CK_HARDWARE_STAGING (svc/continuity_resolve.h).
+CR_STORE_SRCS := $(NATIVE)/store/store_v1.c $(NATIVE)/store/store_engine.c $(NATIVE)/store/store_disk.c \
+	$(NATIVE)/store/store_sealed.c $(NATIVE)/store/torn_slot.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \
+	$(NATIVE)/m5/m5_keys.c $(NATIVE)/m5/m5_envelope.c $(NATIVE)/m5/m5_state.c $(NATIVE)/crypto/aes.c \
+	$(NATIVE)/crypto/polyval.c $(NATIVE)/crypto/gcm_siv.c $(NATIVE)/crypto/hmac.c $(NATIVE)/crypto/ct.c
+CR_HOST_SRCS := $(KDIR)/svc/continuity_resolve.c $(KDIR)/svc/continuity_resolve_sealed.c \
+	$(KDIR)/svc/continuity_codec.c $(NATIVE)/argus/sha256.c $(CR_STORE_SRCS)
+CR_HOST_INC := -I$(KDIR)/svc -I$(NATIVE)/argus -I$(NATIVE)/store -I$(NATIVE)/disk -I$(NATIVE)/m5 -I$(NATIVE)/crypto
+CR_HOST_DEPS := $(wildcard $(KDIR)/tests/fixtures/continuity_*.txt) $(CR_HOST_SRCS) $(wildcard $(KDIR)/svc/continuity_*.h) \
+	$(wildcard $(NATIVE)/store/*.h $(NATIVE)/m5/*.h $(NATIVE)/disk/*.h $(NATIVE)/crypto/*.h) $(KDIR)/tests/ck_test.h
+CR_FIXTURE_DEF := -DCR_FIXTURE_DIR='"$(CC_FIXTURES)"'
+# MC-2 orphan check, MC-4 previous, MC-12 conflict, MR-2 digest, MR-3 action,
+# MR-4 16-byte compare, MR-8 bare SHA-256 and no domain.
+CR_MUTANTS := CR_MUTANT_NO_ORPHAN_CHECK CR_MUTANT_IGNORE_PREVIOUS CR_MUTANT_SKIP_CONFLICT \
+	CR_MUTANT_CHALLENGE_NO_DIGEST CR_MUTANT_CHALLENGE_NO_ACTION CR_MUTANT_COMPARE_16 \
+	CR_MUTANT_BARE_SHA256 CR_MUTANT_NO_DOMAIN
+
+$(OUT)/host/test_continuity_resolve: $(KDIR)/tests/test_continuity_resolve.c $(CR_HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(CR_HOST_INC) $(CR_FIXTURE_DEF) -o $@ $< $(CR_HOST_SRCS)
+
+$(OUT)/host-san/test_continuity_resolve: $(KDIR)/tests/test_continuity_resolve.c $(CR_HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CR_HOST_INC) $(CR_FIXTURE_DEF) -o $@ $< $(CR_HOST_SRCS)
+
+continuity-resolve-mutants: $(OUT)/host/test_continuity_resolve
+	@mkdir -p $(OUT)/host-mut; fail=0; \
+	$(OUT)/host/test_continuity_resolve > $(OUT)/host-mut/resolve_base.log 2>&1 || { echo "unmutated test_continuity_resolve fails"; fail=1; }; \
+	for m in $(CR_MUTANTS); do \
+	  b=$(OUT)/host-mut/test_continuity_resolve_$$m; \
+	  if ! $(HOSTCC) $(HCFLAGS) $(CR_HOST_INC) $(CR_FIXTURE_DEF) -D$$m -o $$b $(KDIR)/tests/test_continuity_resolve.c $(CR_HOST_SRCS); then \
+	    echo "mutant $$m: does not build (FAIL)"; fail=1; continue; fi; \
+	  if $$b > $$b.log 2>&1; then echo "mutant $$m: SURVIVED (FAIL)"; fail=1; \
+	  elif grep -q "^test_continuity_resolve: FAIL" $$b.log; then \
+	    echo "mutant $$m: killed ($$(grep -c '^  FAIL ' $$b.log) checks failed)"; \
+	  else echo "mutant $$m: no FAIL verdict (crashed?) (FAIL)"; fail=1; fi; \
+	done; \
+	for m in $(CR_MUTANTS); do \
+	  if $(HOSTCC) $(HCFLAGS) $(CR_HOST_INC) -DCK_HARDWARE_STAGING=1 -D$$m \
+	      -fsyntax-only $(KDIR)/svc/continuity_resolve.c 2>/dev/null; then \
+	    echo "mutant flag $$m accepted under CK_HARDWARE_STAGING (FAIL)"; fail=1; \
+	  else echo "mutant flag $$m refused under CK_HARDWARE_STAGING"; fi; \
+	done; \
+	if [ $$fail = 0 ]; then echo "CK_CONTINUITY_RESOLVE_MUTANTS: PASS"; else echo "CK_CONTINUITY_RESOLVE_MUTANTS: FAIL"; exit 1; fi
 
 ART_TOOL := $(OUT)/host/ck_artifact_tool
 $(ART_TOOL): $(KDIR)/tools/ck_artifact_tool.c $(ART_HOST_DEPS)
@@ -632,4 +683,4 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize handoff-mutant clean print-kcflags udp-echo tool store-image gpt-image owner-gen continuity-mutants FORCE
+.PHONY: all full test sanitize handoff-mutant clean print-kcflags udp-echo tool store-image gpt-image owner-gen continuity-mutants continuity-resolve-mutants FORCE
