@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # AIENOS End-to-End Build and Evidence Verification Harness
 # Enforces sequential integration gates on the host DGX Spark environment.
+# Last line: VERIFY_ALL: PASS only when every step ran; VERIFY_ALL: NOT_RUN if any step
+# was skipped (scripts/lib_verify_summary.sh; test: bash scripts/lib_verify_summary.sh --self-test).
 
 set -euo pipefail
 #
@@ -17,13 +19,8 @@ if [[ -n "${AIENOS_LOG_DIR:-}" ]]; then
 fi
 cd "${REPO_ROOT}"
 
-skipped() {
-    echo "SKIPPED: $*"
-    if [[ "${AIENOS_STRICT:-0}" == "1" ]]; then
-        echo "STRICT FAIL: a step was skipped under AIENOS_STRICT=1 ($*)" >&2
-        exit 1
-    fi
-}
+# shellcheck source=scripts/lib_verify_summary.sh
+source "${REPO_ROOT}/scripts/lib_verify_summary.sh"
 
 echo "============================================================"
 echo "AIENOS Integration Verification Harness"
@@ -178,12 +175,8 @@ else
 fi
 
 echo ""
-echo "============================================================"
-echo "HOST VERIFICATIONS PASSED."
-echo "Config A: observed capture verified. M0 native-boot rollback proven in QEMU."
-echo "Kernel: aarch64-unknown-none library compiles. Native boot remains untested."
-echo "UEFI: diagnostic and GB10-discovering handoff images build; hardware boot remains untested."
-echo "============================================================"
+# Steps 1 to 6e (host checks and QEMU emulator runs) are done. The closing verdict is
+# written once, at the very end, from what actually ran (final_verdict).
 
 # Step 7: TRUST-1 Gate 4 Security Suite (swTPM, Soak, Fault Injection)
 echo ""
@@ -208,7 +201,7 @@ fi
 echo ""
 echo "--- [Recovery Media Tooling Manifest] ---"
 if command -v gzip >/dev/null && command -v cpio >/dev/null; then
-    ./scripts/verify_recovery_tools.sh
+    run_or_skip "recovery tool manifest" ./scripts/verify_recovery_tools.sh
 else
     skipped "gzip or cpio not present on host."
 fi
@@ -241,7 +234,15 @@ fi
 echo ""
 echo "--- [TRUST-1 Gate 3 Key Ceremony Tool Self-Test] ---"
 if command -v openssl >/dev/null && openssl version | grep -q '^OpenSSL 3\.'; then
-    ./scripts/test_trust1_key_ceremony.sh 2>/dev/null
+    run_or_skip "TRUST-1 key ceremony self-test" bash -c 'exec ./scripts/test_trust1_key_ceremony.sh 2>/dev/null'
 else
     skipped "OpenSSL 3 not present on host."
 fi
+
+# Step 13: evidence receipts with hardcoded invariant labels must be amended.
+echo ""
+echo "--- [Evidence Receipt Label Lint] ---"
+run_or_skip "receipt label lint self-test" ./scripts/check_receipt_labels.sh --self-test
+run_or_skip "receipt label lint" ./scripts/check_receipt_labels.sh
+
+final_verdict

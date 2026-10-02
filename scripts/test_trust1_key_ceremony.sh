@@ -5,7 +5,9 @@
 # backups each decrypt from their own copy; the record holds no private
 # material; a changed manifest, a swapped public key, and a wrong
 # passphrase are each refused; the Boot Signer cert can sign and verify an
-# EFI image (when sbsign/sbverify and a built loader are present).
+# EFI image (when sbsign/sbverify and a built loader are present; AIENOS_KEY_CEREMONY_EFI
+# names another PE image). If that last check cannot run the verdict is NOT_RUN (exit 3),
+# never ALL PASS.
 
 set -euo pipefail
 
@@ -88,7 +90,8 @@ bash "${tool}" verify "${work}/gen1snap" 3 >/dev/null 2>&1 && fail "rollback to 
 bash "${tool}" verify "${out}/public" 3 >/dev/null || fail "current generation 3 refused"
 pass "a validly signed older generation is refused when generation 3 is the minimum"
 
-efi="${repo_root}/target/aarch64-unknown-uefi/release/aienos-handoff.efi"
+efi="${AIENOS_KEY_CEREMONY_EFI:-${repo_root}/target/aarch64-unknown-uefi/release/aienos-handoff.efi}"
+skipped_checks=()
 if command -v sbsign >/dev/null && command -v sbverify >/dev/null && [[ -f "${efi}" ]]; then
     "${OPENSSL}" pkey -in "${out}/private/boot_signer.key.pem" -passin file:"${work}/pass" \
         -out "${work}/bs.key" 2>/dev/null
@@ -98,7 +101,15 @@ if command -v sbsign >/dev/null && command -v sbverify >/dev/null && [[ -f "${ef
         || fail "Boot Signer signature does not verify"
     pass "Boot Signer cert signs and verifies the EFI loader (sbsign/sbverify)"
 else
-    echo "SKIP  Boot Signer EFI signing (sbsign, sbverify or built loader missing)"
+    echo "SKIP  Boot Signer EFI signing (sbsign, sbverify or built loader missing)"; skipped_checks+=("Boot Signer EFI signing")
 fi
 
+# A skipped check is not a passed check. The ALL PASS line is printed only when
+# every check ran; otherwise NOT_RUN and exit 3 (the qualify table maps 3 to
+# NOT_RUN).
+if [[ ${#skipped_checks[@]} -gt 0 ]]; then
+    printf 'NOT_RUN  skipped check: %s\n' "${skipped_checks[@]}"
+    echo "TRUST-1 key ceremony self-test (throwaway keys): NOT_RUN (${#skipped_checks[@]} check(s) skipped; every other check passed)"
+    exit 3
+fi
 echo "TRUST-1 key ceremony self-test (throwaway keys): ALL PASS"

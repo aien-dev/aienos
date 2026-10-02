@@ -20,6 +20,48 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
+# Per-invariant judges for the Default OS boot logs. The guest (rollback_mock.rs
+# run_default) prints a PASS line for each invariant it checked itself and a FAIL
+# line otherwise. A host label may only say PASS when the log carries that
+# invariant's own evidence and no FAIL line for it.
+log_consumed_ok() { # LOG: BootNext was consumed
+    [[ -f "$1" ]] || return 1
+    grep -q "DEFAULT_OS: BOOT_NEXT=CONSUMED_PASS" "$1" 2>/dev/null && \
+    grep -q "PASS  NATIVE_ROLLBACK_BOOTNEXT_CONSUMED" "$1" && \
+    ! grep -q "FAIL  NATIVE_ROLLBACK_BOOTNEXT_STILL_PRESENT" "$1"
+}
+log_unchanged_ok() { # LOG: BootOrder still starts with the Default entry 0001
+    [[ -f "$1" ]] || return 1
+    grep -q "DEFAULT_OS: BOOT_ORDER\[0\]=0001" "$1" 2>/dev/null && \
+    grep -q "PASS  NATIVE_ROLLBACK_DEFAULT_UNCHANGED" "$1" && \
+    ! grep -q "FAIL  NATIVE_ROLLBACK_DEFAULT_ORDER_ALTERED" "$1"
+}
+
+if [[ "${1:-}" == --self-test ]]; then
+    st=0; t="$(mktemp -d)"; trap 'rm -rf "${t}"' EXIT
+    good() { printf 'DEFAULT_OS: BOOT_CURRENT=0001\nDEFAULT_OS: BOOT_ORDER[0]=0001\nDEFAULT_OS: BOOT_NEXT=CONSUMED_PASS\nPASS  NATIVE_ROLLBACK_BOOTNEXT_CONSUMED\nPASS  NATIVE_ROLLBACK_DEFAULT_UNCHANGED\n'; }
+    expect() { # name want(0|1) function log
+        local rc=0; "$3" "$4" || rc=$?
+        if [[ "${rc}" == "$2" ]]; then echo "PASS  $1 -> exit ${rc}"; else echo "FAIL  $1: wanted ${2}, got ${rc}"; st=1; fi
+    }
+    good >"${t}/good.log"
+    expect "good Default boot: BootNext consumed" 0 log_consumed_ok "${t}/good.log"
+    expect "good Default boot: BootOrder unchanged" 0 log_unchanged_ok "${t}/good.log"
+    # Mutant: the firmware boot order was altered. The old host check ignored this and still printed DEFAULT_UNCHANGED: PASS.
+    good | sed -e 's/BOOT_ORDER\[0\]=0001/BOOT_ORDER[0]=0002/' -e 's/^PASS  NATIVE_ROLLBACK_DEFAULT_UNCHANGED$/FAIL  NATIVE_ROLLBACK_DEFAULT_ORDER_ALTERED/' >"${t}/order.log"
+    expect "mutant: BootOrder altered -> DEFAULT_UNCHANGED not PASS" 1 log_unchanged_ok "${t}/order.log"
+    expect "mutant: BootOrder altered leaves the BootNext label alone" 0 log_consumed_ok "${t}/order.log"
+    # Mutant: BootNext still present.
+    good | sed -e 's/CONSUMED_PASS/STILL_PRESENT/' -e 's/^PASS  NATIVE_ROLLBACK_BOOTNEXT_CONSUMED$/FAIL  NATIVE_ROLLBACK_BOOTNEXT_STILL_PRESENT/' >"${t}/next.log"
+    expect "mutant: BootNext still present -> CONSUMED not PASS" 1 log_consumed_ok "${t}/next.log"
+    # Mutant: the guest never printed the invariant lines (only the old unchanged markers).
+    printf 'DEFAULT_OS: BOOT_CURRENT=0001\nDEFAULT_OS: BOOT_NEXT=CONSUMED_PASS\nPASS  NATIVE_ROLLBACK_REPEAT_BOOT\n' >"${t}/old.log"
+    expect "mutant: log with only the old markers -> DEFAULT_UNCHANGED not PASS" 1 log_unchanged_ok "${t}/old.log"
+    expect "mutant: missing log file -> not PASS" 1 log_unchanged_ok "${t}/absent.log"
+    if [[ ${st} == 0 ]]; then echo "NATIVE_ROLLBACK_SELF_TEST: PASS"; exit 0; fi
+    echo "NATIVE_ROLLBACK_SELF_TEST: FAIL"; exit 1
+fi
+
 CODE_FD="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}"
 VARS_FD="${AAVMF_VARS:-/usr/share/AAVMF/AAVMF_VARS.fd}"
 
@@ -285,19 +327,21 @@ run_qemu_boot "${SUB6_DIR}/esp" "${SUB6_DIR}/vars.fd" "${SUB6_DIR}/boot3_default
 # Boot 4: Second consecutive boot of Default OS (proves system stays on Default, no loops)
 run_qemu_boot "${SUB6_DIR}/esp" "${SUB6_DIR}/vars.fd" "${SUB6_DIR}/boot4_default2.log" 20 || true
 
-if grep -q 'BdsDxe: starting Boot0001 "Default Linux OS"' "${SUB6_DIR}/boot3_default1.log" && \
-   grep -q 'BdsDxe: starting Boot0001 "Default Linux OS"' "${SUB6_DIR}/boot4_default2.log" && \
-   grep -q "DEFAULT_OS: BOOT_CURRENT=0001" "${SUB6_DIR}/boot4_default2.log" && \
-   grep -q "DEFAULT_OS: BOOT_NEXT=CONSUMED_PASS" "${SUB6_DIR}/boot4_default2.log" && \
-   grep -q "PASS  NATIVE_ROLLBACK_REPEAT_BOOT" "${SUB6_DIR}/boot4_default2.log"; then
+b3="${SUB6_DIR}/boot3_default1.log"; b4="${SUB6_DIR}/boot4_default2.log"
+if grep -q 'BdsDxe: starting Boot0001 "Default Linux OS"' "${b3}" && \
+   grep -q 'BdsDxe: starting Boot0001 "Default Linux OS"' "${b4}" && \
+   grep -q "DEFAULT_OS: BOOT_CURRENT=0001" "${b4}" && \
+   grep -q "PASS  NATIVE_ROLLBACK_REPEAT_BOOT" "${b4}"; then
     pass "Subsequent reboot stayed on Default OS via AAVMF BootOrder without re-executing candidate"
-    echo "NATIVE_ROLLBACK_BOOTNEXT_CONSUMED: PASS"
-    echo "NATIVE_ROLLBACK_DEFAULT_UNCHANGED: PASS"
 else
     fail "Repeated boot failed to stay on Default OS"
-    echo "NATIVE_ROLLBACK_BOOTNEXT_CONSUMED: FAIL"
-    echo "NATIVE_ROLLBACK_DEFAULT_UNCHANGED: FAIL"
 fi
+# Each invariant label is judged from its own evidence in BOTH Default boots.
+sub6_consumed=FAIL; sub6_unchanged=FAIL
+if log_consumed_ok "${b3}" && log_consumed_ok "${b4}"; then sub6_consumed=PASS; else fail "BootNext was not proven consumed in both Default boots"; fi
+if log_unchanged_ok "${b3}" && log_unchanged_ok "${b4}"; then sub6_unchanged=PASS; else fail "Default BootOrder was not proven unchanged in both Default boots"; fi
+echo "NATIVE_ROLLBACK_BOOTNEXT_CONSUMED: ${sub6_consumed}"
+echo "NATIVE_ROLLBACK_DEFAULT_UNCHANGED: ${sub6_unchanged}"
 
 echo ""
 echo "============================================================"

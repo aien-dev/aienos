@@ -2,9 +2,9 @@
 # only compiled these into the kernel image; nothing ran their own tests.
 #
 # Coverage map (what runs where):
-#   native/capability  test                   ci.yml
+#   native/capability  test                   ci.yml (ci.yml is disabled_manually on GitHub, so this does NOT run in CI today)
 #   native/capability  mutants                this file
-#   native/store       test mutants           ci.yml
+#   native/store       test mutants           ci.yml (ci.yml is disabled_manually on GitHub, so this does NOT run in CI today)
 #   native/kernel      test sanitize + gates  ck-kernel.yml (owned by another lane)
 #   native/net         test sanitize mutants  this file
 #   native/sig         test sanitize mutants  this file

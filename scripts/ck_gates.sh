@@ -268,7 +268,7 @@ write_receipt() {
         echo "  \"finished_utc\": $(json_str "$(date -u +%FT%TZ)"),"
         echo "  \"commit\": $(json_str "${head_sha}"),"
         echo "  \"commit_subject\": $(json_str "${head_subject}"),"
-        echo "  \"tree_clean_before\": true,"
+        echo "  \"tree_clean_before\": ${tree_clean_before},"
         echo "  \"tree_clean_after\": ${tree_clean_after},"
         echo "  \"quiet_flag\": $(json_str "${QUIET_FLAG}"),"
         echo "  \"quiet_flag_present_at_start\": ${quiet_at_start},"
@@ -469,7 +469,7 @@ self_test() {
     scenario R "$(fake bootR 0 'AIENOS_CK_M1: PASS')" "$(fake storeR 0 'AIENOS_CK_M4_NVME: PASS')"
     count_rows
     out_dir="${tmp}/out"; mkdir -p "${out_dir}"
-    started_utc=x; head_sha=x; head_subject='quote " backslash \ tab	end'; tree_clean_after=true; quiet_at_start=false
+    started_utc=x; head_sha=x; head_subject='quote " backslash \ tab	end'; tree_clean_before=true; tree_clean_after=true; quiet_at_start=false
     h_host=h; h_arch=a; h_kernel=k; h_cpu=c; q_path=q; q_version=v; fw_code_sha=x; fw_vars_sha=y; dma_mode="$(nvme_dma_mode)"
     write_receipt
     if [[ -f "${receipt_path}" && "$(sha_of <"${receipt_path}")" == "${receipt_sha}" && "${receipt_path}" == *"/ck_gates_${receipt_sha}.json" ]]; then
@@ -477,6 +477,14 @@ self_test() {
     else
         bad "receipt name does not match its content hash"
     fi
+    # tree_clean_before comes from the pre-run tree state, never a literal.
+    grep -q '"tree_clean_before": true,' "${receipt_path}" && ok "receipt records tree_clean_before true when the tree was clean" || bad "tree_clean_before not true in a clean-tree receipt"
+    tree_clean_before=false; out_dir="${tmp}/out_dirty"; mkdir -p "${out_dir}"
+    write_receipt
+    grep -q '"tree_clean_before": false,' "${receipt_path}" && ok "mutant: dirty tree before the run -> receipt says tree_clean_before false" || bad "mutant survived: tree_clean_before stayed true"
+    tree_clean_before=true; out_dir="${tmp}/out"
+    # Restore the clean-tree receipt as the one the checks below look at.
+    write_receipt
     if command -v jq >/dev/null; then
         jq -e '.physical == "NOT_RUN" and (.gates | length) == 16 and .verdict == "NOT_ALL_GATES_PASS"
                and ([.gates[] | select(.id == "M1")][0].verdict == "PASS")
@@ -484,7 +492,7 @@ self_test() {
                and (.children | length) == 9 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
             && ok "receipt is valid JSON (jq) with expected fields" || bad "receipt JSON invalid or fields wrong"
     else
-        echo "SKIP  jq not installed; JSON validity not machine-checked"
+        echo "NOT_RUN  jq not installed; JSON validity not machine-checked"; jq_skipped=1
     fi
     local before_sha; before_sha="$(sha_of <"${receipt_path}")"
     echo junk >"${work_dir}/other.tmp"
@@ -528,7 +536,7 @@ self_test() {
     [[ ${rc} == 2 ]] && ok "unknown argument -> exit 2" || bad "unknown argument gave exit ${rc}"
 
     rm -rf --one-file-system "${tmp}"
-    if [[ ${st_fail} == 0 ]]; then echo "AIENOS_CK_GATES_SELF_TEST: PASS"; exit 0; fi
+    if [[ ${st_fail} == 0 ]]; then echo "AIENOS_CK_GATES_SELF_TEST: PASS${jq_skipped:+ (jq NOT_RUN: JSON validity of the receipt not machine-checked)}"; exit 0; fi
     echo "AIENOS_CK_GATES_SELF_TEST: FAIL"; exit 1
 }
 
@@ -548,6 +556,8 @@ main() {
 
     refuse_if_dirty "${repo_root}"
     local before; before="$(tree_state "${repo_root}")"
+    tree_clean_before=true
+    [[ -z "${before}" ]] || tree_clean_before=false
     head_sha="$(git -C "${repo_root}" rev-parse HEAD)"
     head_subject="$(git -C "${repo_root}" log -1 --format=%s HEAD)"
     started_utc="$(date -u +%FT%TZ)"
