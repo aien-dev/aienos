@@ -9,4 +9,8 @@ int ck_compat_fclose(FILE *f);
 #define fopen(p, m) ck_compat_fopen((p), (m))
 #define fread(b, s, n, f) ck_compat_fread((b), (s), (n), (f))
 #define fclose(f) ck_compat_fclose(f)
+/* snprintf for the TEST-ONLY continuity wiring (svc/continuity_recovery.c): the kernel's own formatter, core/fmt.c. */
+#include <stdarg.h>
+int ck_snprintf(char *buf, size_t n, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+#define snprintf ck_snprintf
 #endif

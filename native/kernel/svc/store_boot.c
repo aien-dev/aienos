@@ -7,6 +7,7 @@
 #include "m5.h"
 #include "sha256.h"
 #include "store_crash.h"
+#include "continuity_boot.h"
 
 #ifdef CK_HARDWARE_STAGING
 /* Hardware staging image: owner provisioning generated at build time by
@@ -346,6 +347,18 @@ int ck_stage_store(void)
 #else
 #ifdef CK_TEST_STORE_CRASH
     d = ck_store_crash_setup(d);
+#endif
+#ifdef CK_TEST_CONTINUITY
+    {
+        /* K-7: a modes 5..11 plan runs the continuity / Recovery Core test
+         * boot INSTEAD of the boot-record commit (svc/continuity_boot.h). */
+        int crc = 0;
+        if (ck_cont_boot_stage(d, &crc)) {
+            ck_art_stage_load(0, "continuity test mode");
+            ck_dev_nvme_release();
+            return crc;
+        }
+    }
 #endif
     ck_store_test_keys(&keys);
     rc = store_boot_run(d, &keys, ck_store_test_uuid, commit ? commit : "unknown", &r);
