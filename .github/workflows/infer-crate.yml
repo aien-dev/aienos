@@ -1,0 +1,39 @@
+name: Inference crate (aienos-infer)
+
+# Host checks for the no_std inference crate (aienos#34). The retired "CI"
+# workflow (ci.yml) is disabled on GitHub since the move to the C kernel, so
+# this is the only automatic check for crates/aienos-infer. Real-model golden
+# tests skip when the model file is absent; the ggml fixtures always run.
+on:
+  pull_request:
+    paths:
+      - "crates/aienos-infer/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/infer-crate.yml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/aienos-infer/**"
+
+permissions:
+  contents: read
+
+jobs:
+  infer-host:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: aarch64-unknown-none
+      - name: fmt
+        run: cargo fmt -p aienos-infer --check
+      - name: clippy
+        run: cargo clippy -p aienos-infer --all-targets -- -D warnings
+      - name: test
+        run: cargo test -p aienos-infer
+      - name: no_std build (aarch64-unknown-none)
+        run: cargo build -p aienos-infer --target aarch64-unknown-none
