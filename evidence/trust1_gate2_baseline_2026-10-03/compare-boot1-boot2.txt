@@ -1,0 +1,7 @@
+A: baseline-after-restart boot_id=a1e81fa0-16fc-452d-a689-8bfccc49cc7a
+B: cold-boot-1 boot_id=79caf03e-7e18-4787-a855-e42bfb0900ed
+CHANGED pcr_sha256_1 0x265306bef2cebe25fdcd4558f25c940523539d121d741f60d5f5a0fe3e523c22 -> 0xd700258c7b8bdbdca97ba8dc878fe4be0d674f448ac8510ec39b6746f74398e4
+CHANGED pcr_sha256_10 0x47ae3ac4dd22c1f06ec05df5d97a33c12e082453826f43e7cfdcd5541b5a23dd -> 0x978d3b1b1924145826e2634c26c3727f032f7bb2343c607a224355c2f49112fe
+CHANGED eventlog_sha256 af50feff65dde203580eaec73376fb656f43559c204fdcae22101ea378ddb43f -> 099d7ed9c8ba330b340789907629c25e6cf8a33eeaff66bfefb4f3bfd091baa6
+compared=35 changed=3
+PCR1 delta again = EV_EFI_HANDOFF_TABLES2 digest only; boot entries identical.

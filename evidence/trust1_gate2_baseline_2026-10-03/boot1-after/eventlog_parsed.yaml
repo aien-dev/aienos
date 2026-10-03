@@ -1,0 +1,1156 @@
+---
+version: 1
+events:
+- EventNum: 0
+  PCRIndex: 0
+  EventType: EV_NO_ACTION
+  Digest: "0000000000000000000000000000000000000000"
+  EventSize: 33
+  SpecID:
+  - Signature: Spec ID Event03
+    platformClass: 0
+    specVersionMinor: 0
+    specVersionMajor: 2
+    specErrata: 105
+    uintnSize: 2
+    numberOfAlgorithms: 1
+    Algorithms:
+    - Algorithm[0]:
+      algorithmId: sha256
+      digestSize: 32
+    vendorInfoSize: 0
+- EventNum: 1
+  PCRIndex: 7
+  EventType: EV_EFI_VARIABLE_DRIVER_CONFIG
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "ce9ce386b52e099f3019e512a0d6062d6b560efe4ff3e5661c7525e2f9c263df"
+  EventSize: 52
+  Event:
+    VariableName: 8be4df61-93ca-11d2-aa0d-00e098032b8c
+    UnicodeNameLength: 10
+    VariableDataLength: 0
+    UnicodeName: SecureBoot
+- EventNum: 2
+  PCRIndex: 7
+  EventType: EV_EFI_VARIABLE_DRIVER_CONFIG
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "dea7b80ab53a3daaa24d5cc46c64e1fa9ffd03739f90aadbd8c0867c4a5b4890"
+  EventSize: 36
+  Event:
+    VariableName: 8be4df61-93ca-11d2-aa0d-00e098032b8c
+    UnicodeNameLength: 2
+    VariableDataLength: 0
+    UnicodeName: PK
+- EventNum: 3
+  PCRIndex: 7
+  EventType: EV_EFI_VARIABLE_DRIVER_CONFIG
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "e670e121fcebd473b8bc41bb801301fc1d9afa33904f06f7149b74f12c47a68f"
+  EventSize: 38
+  Event:
+    VariableName: 8be4df61-93ca-11d2-aa0d-00e098032b8c
+    UnicodeNameLength: 3
+    VariableDataLength: 0
+    UnicodeName: KEK
+- EventNum: 4
+  PCRIndex: 7
+  EventType: EV_EFI_VARIABLE_DRIVER_CONFIG
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "baf89a3ccace52750c5f0128351e0422a41597a1adfd50822aa363b9d124ea7c"
+  EventSize: 36
+  Event:
+    VariableName: d719b2cb-3d3a-4596-a3bc-dad00e67656f
+    UnicodeNameLength: 2
+    VariableDataLength: 0
+    UnicodeName: db
+- EventNum: 5
+  PCRIndex: 7
+  EventType: EV_EFI_VARIABLE_DRIVER_CONFIG
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "9f75b6823bff6af1024a4e2036719cdd548d3cbc2bf1de8e7ef4d0ed01f94bf9"
+  EventSize: 38
+  Event:
+    VariableName: d719b2cb-3d3a-4596-a3bc-dad00e67656f
+    UnicodeNameLength: 3
+    VariableDataLength: 0
+    UnicodeName: dbx
+- EventNum: 6
+  PCRIndex: 7
+  EventType: EV_SEPARATOR
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+  EventSize: 4
+  Event: "00000000"
+- EventNum: 7
+  PCRIndex: 2
+  EventType: EV_EFI_BOOT_SERVICES_DRIVER
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "6455f073ecb5637935658cbb672e18d46fd4387aeb5f836caaeec833ae464451"
+  EventSize: 76
+  Event:
+    ImageLocationInMemory: 0x8523a018
+    ImageLengthInMemory: 12288
+    ImageLinkTimeAddress: 0x80a38868
+    LengthOfDevicePath: 44
+    DevicePath: '040714001ac26380588e764595ce089e87975d2304061400658fd3b0578a6348b5fd45878f64dcb67fff0400'
+- EventNum: 8
+  PCRIndex: 2
+  EventType: EV_EFI_BOOT_SERVICES_DRIVER
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "0d5642cb2f824da5906032caafe28bd25a837553d39dd66f44741021a7f28650"
+  EventSize: 76
+  Event:
+    ImageLocationInMemory: 0x8523a018
+    ImageLengthInMemory: 12288
+    ImageLinkTimeAddress: 0x80a940f4
+    LengthOfDevicePath: 44
+    DevicePath: '040714001ac26380588e764595ce089e87975d2304061400ed47565089c9624c87ab4cd5126878f87fff0400'
+- EventNum: 9
+  PCRIndex: 2
+  EventType: EV_EFI_BOOT_SERVICES_DRIVER
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "3e9d4b5ea1c2bd56c0a82728bd8f4f04ee65c9599404fefae023c29d1d39675b"
+  EventSize: 76
+  Event:
+    ImageLocationInMemory: 0x8523a018
+    ImageLengthInMemory: 12288
+    ImageLinkTimeAddress: 0x80b0bbf0
+    LengthOfDevicePath: 44
+    DevicePath: '040714001ac26380588e764595ce089e87975d230406140060df8b4c852077458a4696cb180967bc7fff0400'
+- EventNum: 10
+  PCRIndex: 2
+  EventType: EV_EFI_BOOT_SERVICES_DRIVER
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "5c2028606845dca2971d6fc7050685b6c1741f0d8b5dd30499b742f3f18326ed"
+  EventSize: 76
+  Event:
+    ImageLocationInMemory: 0x851b4018
+    ImageLengthInMemory: 32768
+    ImageLinkTimeAddress: 0x80b75800
+    LengthOfDevicePath: 44
+    DevicePath: '040714001ac26380588e764595ce089e87975d2304061400a9bdb90e10303a49a6a8b5e80eddf8707fff0400'
+- EventNum: 11
+  PCRIndex: 2
+  EventType: EV_EFI_BOOT_SERVICES_DRIVER
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "7050d6e48216a0d04429b48a5a1dc5ff3bc6230abec2e171439b346ddc573b84"
+  EventSize: 76
+  Event:
+    ImageLocationInMemory: 0x8522b018
+    ImageLengthInMemory: 16384
+    ImageLinkTimeAddress: 0x80f90240
+    LengthOfDevicePath: 44
+    DevicePath: '040714001ac26380588e764595ce089e87975d230406140085cbda11dcf517479db153e7dc725c207fff0400'
+- EventNum: 12
+  PCRIndex: 1
+  EventType: EV_EFI_VARIABLE_BOOT
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "59e40cca27349e8adc7aea0463345e254e4acc38cc980cc5b7a6ae0a7a0e57d5"
+  EventSize: 54
+  Event:
+    VariableName: 8be4df61-93ca-11d2-aa0d-00e098032b8c
+    UnicodeNameLength: 9
+    VariableDataLength: 4
+    UnicodeName: BootOrder
+    VariableData: "01000300"
+- EventNum: 13
+  PCRIndex: 1
+  EventType: EV_EFI_VARIABLE_BOOT
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "d63064c5befa9070563091ce61d1fd9705c1f3367c71558bdde6e53805405e50"
+  EventSize: 160
+  Event:
+    VariableName: 8be4df61-93ca-11d2-aa0d-00e098032b8c
+    UnicodeNameLength: 8
+    VariableDataLength: 112
+    UnicodeName: Boot0001
+    VariableData: "7500620075006e0074007500000004012a000100000000080000000000000050090000000000e9242b7ceb0cd74aa4019bf3c92c26ee0202040436005c004500460049005c007500620075006e00740075005c007300680069006d0061006100360034002e0065006600690000007fff"
+- EventNum: 14
+  PCRIndex: 1
+  EventType: EV_EFI_VARIABLE_BOOT
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "5cb4adea05c4ec06806b1f052a4e5a843c26dacb5a6af03f27dc689b3c1e4686"
+  EventSize: 362
+  Event:
+    VariableName: 8be4df61-93ca-11d2-aa0d-00e098032b8c
+    UnicodeNameLength: 8
+    VariableDataLength: 314
+    UnicodeName: Boot0003
+    VariableData: "55004500460049003a0020005000580045002000490050007600340020005200650061006c00740065006b002000500043004900650020003100300020004700420045002000460061006d0069006c007900200043006f006e00740072006f006c006c0065007200000002010c00d041080a07000000010106000000010106000000030b25004cbb472bb87b000000000000000000000000000000000000000000000000000000030c1b0000000000000000000000000000000000000000000000007fff040001047200ef47642dc93ba041ac194d51d01b4ce65000580045002000490050007600340020005200650061006c00740065006b002000500043004900650020003100300020004700420045002000460061006d0069006c007900200043006f006e00740072006f006c006c006500720000007fff"
+- EventNum: 15
+  PCRIndex: 4
+  EventType: EV_EFI_ACTION
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "3d6772b4f84ed47595d72a2c4c5ffd15f5bb72c7507fe26f2aaee2c69d5633ba"
+  EventSize: 40
+  Event: |-
+    Calling EFI Application from Boot Option
+- EventNum: 16
+  PCRIndex: 0
+  EventType: EV_SEPARATOR
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+  EventSize: 4
+  Event: "00000000"
+- EventNum: 17
+  PCRIndex: 1
+  EventType: EV_SEPARATOR
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+  EventSize: 4
+  Event: "00000000"
+- EventNum: 18
+  PCRIndex: 2
+  EventType: EV_SEPARATOR
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+  EventSize: 4
+  Event: "00000000"
+- EventNum: 19
+  PCRIndex: 3
+  EventType: EV_SEPARATOR
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+  EventSize: 4
+  Event: "00000000"
+- EventNum: 20
+  PCRIndex: 4
+  EventType: EV_SEPARATOR
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+  EventSize: 4
+  Event: "00000000"
+- EventNum: 21
+  PCRIndex: 5
+  EventType: EV_SEPARATOR
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+  EventSize: 4
+  Event: "00000000"
+- EventNum: 22
+  PCRIndex: 6
+  EventType: EV_SEPARATOR
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+  EventSize: 4
+  Event: "00000000"
+- EventNum: 23
+  PCRIndex: 1
+  EventType: EV_EFI_HANDOFF_TABLES2
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "cb23494434a79e1fe4ddd1318433da4f7adac49ea683e94b74536175bb84cf9e"
+  EventSize: 45
+  Event: "0c536d62696f735461626c650001000000000000004415fdf294972c4a992ee5bbcf20e3940000dc8600000000"
+- EventNum: 24
+  PCRIndex: 5
+  EventType: EV_EFI_GPT_EVENT
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "cad1f72dc08a78bb00bf93114353af9953041e4acb8fb371c107fcb113742db9"
+  EventSize: 356
+  Event: "4546492050415254000001005c000000eb2a8423000000000100000000000000af52eedc0100000022000000000000008e52eedc01000000e9577951befc7742859bbc9508162aad02000000000000008000000080000000118c637e020000000000000028732ac11ff8d211ba4b00a0c93ec93be9242b7ceb0cd74aa4019bf3c92c26ee0008000000000000ff570900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a2a0d0ebe5b9334487c068b6b72699c7c1c0c249219a534aa43a95ab7d99602700580900000000008e52eedc010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+- EventNum: 25
+  PCRIndex: 4
+  EventType: EV_EFI_BOOT_SERVICES_APPLICATION
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "9fb0e9b7570f5f2304b4668063e8cfc811fa6cc50c1226a5f9ac7f708d35fea9"
+  EventSize: 172
+  Event:
+    ImageLocationInMemory: 0x84a46018
+    ImageLengthInMemory: 987336
+    ImageLinkTimeAddress: 0x0
+    LengthOfDevicePath: 140
+    DevicePath: '02010c00d041080a040000000101060000000101060000000317100001000000002538c851500d3904012a000100000000080000000000000050090000000000e9242b7ceb0cd74aa4019bf3c92c26ee0202040436005c004500460049005c007500620075006e00740075005c007300680069006d0061006100360034002e0065006600690000007fff0400'
+- EventNum: 26
+  PCRIndex: 14
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "06f1770b45dbbb841effe50a70913963d0a1df264906edd2bdd31447aa8e0399"
+  EventSize: 8
+  Event:
+    String: "MokList\0"
+- EventNum: 27
+  PCRIndex: 14
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "8d8a3aae50d5d25838c95c034aadce7b548c9a952eb7925e366eda537c59c3b0"
+  EventSize: 9
+  Event:
+    String: "MokListX\0"
+- EventNum: 28
+  PCRIndex: 7
+  EventType: EV_EFI_VARIABLE_AUTHORITY
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "922e939a5565798a5ef12fe09d8b49bf951a8e7f89a0cca7a51636693d41a34d"
+  EventSize: 68
+  Event:
+    VariableName: 605dab50-e046-4300-abb6-3dd810dd8b23
+    UnicodeNameLength: 9
+    VariableDataLength: 18
+    UnicodeName: SbatLevel
+    VariableData: "736261742c312c323032313033303231380a"
+- EventNum: 29
+  PCRIndex: 14
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a"
+  EventSize: 15
+  Event:
+    String: "MokListTrusted\0"
+- EventNum: 30
+  PCRIndex: 4
+  EventType: EV_EFI_BOOT_SERVICES_APPLICATION
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "7ccac653614dc831526cf2b3db31cffa78f1c0ae4b03d0dcd4cdc13ce4d4ef6b"
+  EventSize: 90
+  Event:
+    ImageLocationInMemory: 0x82ac1018
+    ImageLengthInMemory: 2799496
+    ImageLinkTimeAddress: 0x0
+    LengthOfDevicePath: 58
+    DevicePath: '040436005c004500460049005c007500620075006e00740075005c00670072007500620061006100360034002e0065006600690000007fff0400'
+- EventNum: 31
+  PCRIndex: 9
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "1be26412e4244fed1d63ee0bb10e78da073c46a91a4508d63a17a6e826443149"
+  EventSize: 31
+  Event:
+    String: "(hd0,gpt1)/EFI/ubuntu/grub.cfg\0"
+- EventNum: 32
+  PCRIndex: 9
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "1be26412e4244fed1d63ee0bb10e78da073c46a91a4508d63a17a6e826443149"
+  EventSize: 31
+  Event:
+    String: "(hd0,gpt1)/EFI/ubuntu/grub.cfg\0"
+- EventNum: 33
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "c866bd9cef1391846eef7ad551f7698aeca1d186fafebfa2780c6b5ed5d16a73"
+  EventSize: 67
+  Event:
+    String: "grub_cmd: search.fs_uuid d27bfd26-ff30-400e-9eca-9cdf73de9406 root\0"
+- EventNum: 34
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "36c3cac68b601a8a9cd7098cde6aa6f6d6a5f2ee512aab5c90837cfba2a0b9fe"
+  EventSize: 42
+  Event:
+    String: "grub_cmd: set prefix=(hd0,gpt2)/boot/grub\0"
+- EventNum: 35
+  PCRIndex: 9
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "e1dfb3780e3a2a96e26405ef4f817c0792dd82182a5fb44531be6fe96b856a86"
+  EventSize: 43
+  Event:
+    String: "(hd0,gpt2)/boot/grub/arm64-efi/command.lst\0"
+- EventNum: 36
+  PCRIndex: 9
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "32fc7f5de8c0a5dc0b1e7eb609ca31a77eb3475539e1d97a4543dca1b9b26c57"
+  EventSize: 38
+  Event:
+    String: "(hd0,gpt2)/boot/grub/arm64-efi/fs.lst\0"
+- EventNum: 37
+  PCRIndex: 9
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "1b766f38a94927fe9b7bc1e809f0363e778e14c601e800faea271a2e75d3fc43"
+  EventSize: 42
+  Event:
+    String: "(hd0,gpt2)/boot/grub/arm64-efi/crypto.lst\0"
+- EventNum: 38
+  PCRIndex: 9
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "30455d73080bd006762ef3da4a131c576e8d1873b2745e743fc660e8676d4434"
+  EventSize: 44
+  Event:
+    String: "(hd0,gpt2)/boot/grub/arm64-efi/terminal.lst\0"
+- EventNum: 39
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "0f693a3995fdec16ad5a0d5f0b1301d3c889d81a8fa071f2fc55dd671c96b977"
+  EventSize: 51
+  Event:
+    String: "grub_cmd: configfile (hd0,gpt2)/boot/grub/grub.cfg\0"
+- EventNum: 40
+  PCRIndex: 9
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "cc9b3ce814a915e8f90f74c268dfbe46bfb554146254b3663dd8f2200f8f1be2"
+  EventSize: 30
+  Event:
+    String: "(hd0,gpt2)/boot/grub/grub.cfg\0"
+- EventNum: 41
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "f6323637f8936d07c47d31d9a905d7ba82c561e3aaf43eeeeb30491c47215422"
+  EventSize: 46
+  Event:
+    String: "grub_cmd: [ -s (hd0,gpt2)/boot/grub/grubenv ]\0"
+- EventNum: 42
+  PCRIndex: 9
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "f64122858064885ef0733e42c6a3d2d3fd642671f714db0d974b880c0f087430"
+  EventSize: 29
+  Event:
+    String: "(hd0,gpt2)/boot/grub/grubenv\0"
+- EventNum: 43
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "0e3a17e0c48e42d79f4d1576e7f787c911239510586505c326143b9b268bdd65"
+  EventSize: 32
+  Event:
+    String: "grub_cmd: set have_grubenv=true\0"
+- EventNum: 44
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "f8b99f77983990e8804864cade91f361b5b6600cc2832febaef878ac8b44d27e"
+  EventSize: 19
+  Event:
+    String: "grub_cmd: load_env\0"
+- EventNum: 45
+  PCRIndex: 9
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "f64122858064885ef0733e42c6a3d2d3fd642671f714db0d974b880c0f087430"
+  EventSize: 29
+  Event:
+    String: "(hd0,gpt2)/boot/grub/grubenv\0"
+- EventNum: 46
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "d2b92983e66aff99982fe5af55e0f9277dc0f8879934e17b00147e1f4156179e"
+  EventSize: 19
+  Event:
+    String: "grub_cmd: [  = 2 ]\0"
+- EventNum: 47
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "82a4a14e43a4f76118ae63285d0af05af139f260fae57b2c20737a1c1df3382b"
+  EventSize: 19
+  Event:
+    String: "grub_cmd: [  = 1 ]\0"
+- EventNum: 48
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "ce8124bc1b0fbc0cb5cd47338ca0c7d5f5446d79936e443a201d96b192a7bd65"
+  EventSize: 15
+  Event:
+    String: "grub_cmd: [  ]\0"
+- EventNum: 49
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "3a118940bf2675007df3368cb6d45cf2756f328d3e75daf69a971dd21bd1bc58"
+  EventSize: 24
+  Event:
+    String: "grub_cmd: set default=0\0"
+- EventNum: 50
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "4568361fb7581b31a42d645ab534302fb9f742adaa37b7fde152215d69e259fb"
+  EventSize: 22
+  Event:
+    String: "grub_cmd: [ xy = xy ]\0"
+- EventNum: 51
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "09f17d4dfb4b97f16246632c21b1ac2125c95c148899eee5069fbb1b34365513"
+  EventSize: 35
+  Event:
+    String: "grub_cmd: menuentry_id_option=--id\0"
+- EventNum: 52
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "4af0bb370c9e3b7982027d02e04c935e32d52b528007476bfc50d36d1b86815e"
+  EventSize: 37
+  Event:
+    String: "grub_cmd: export menuentry_id_option\0"
+- EventNum: 53
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "ce8124bc1b0fbc0cb5cd47338ca0c7d5f5446d79936e443a201d96b192a7bd65"
+  EventSize: 15
+  Event:
+    String: "grub_cmd: [  ]\0"
+- EventNum: 54
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "df24f1cae6b428fdd09bc14b06df255f93060ff05d56c3127724168596f73d5f"
+  EventSize: 33
+  Event:
+    String: "grub_cmd: terminal_input console\0"
+- EventNum: 55
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "fed7c930939012174a23271f9fa177a39891cd1baf6ccd22bccce96acd0514d1"
+  EventSize: 34
+  Event:
+    String: "grub_cmd: terminal_output console\0"
+- EventNum: 56
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "82a4a14e43a4f76118ae63285d0af05af139f260fae57b2c20737a1c1df3382b"
+  EventSize: 19
+  Event:
+    String: "grub_cmd: [  = 1 ]\0"
+- EventNum: 57
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "4568361fb7581b31a42d645ab534302fb9f742adaa37b7fde152215d69e259fb"
+  EventSize: 22
+  Event:
+    String: "grub_cmd: [ xy = xy ]\0"
+- EventNum: 58
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "61caa54fc24ba8b3e79be63f375a08f374244e4ede8e0d6080060aa3fa5f7fbb"
+  EventSize: 35
+  Event:
+    String: "grub_cmd: set timeout_style=hidden\0"
+- EventNum: 59
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "d3a793f471b6bfe8d783f5e629314cad4763d48986a8cd4df25475334b40f49b"
+  EventSize: 24
+  Event:
+    String: "grub_cmd: set timeout=0\0"
+- EventNum: 60
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "77b77b95bc1f19318aff6ab597b9e49635938ac92536205e8071639108ff5d9f"
+  EventSize: 44
+  Event:
+    String: "grub_cmd: set menu_color_normal=green/black\0"
+- EventNum: 61
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "20f0f30f793e82b55e8782c4c9b380a4aad6a8cd23144793b7235b3105eaa450"
+  EventSize: 47
+  Event:
+    String: "grub_cmd: set menu_color_highlight=black/green\0"
+- EventNum: 62
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "f249e761a7e37510f8acf59142c117444c3aa1bc5a719ae7eab60d3b7109180a"
+  EventSize: 34
+  Event:
+    String: "grub_cmd: set linux_gfx_mode=keep\0"
+- EventNum: 63
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "22e041251eb54eeb3270245759aa3e8bd3b77a647db988b681b1eafc6960aa45"
+  EventSize: 32
+  Event:
+    String: "grub_cmd: export linux_gfx_mode\0"
+- EventNum: 64
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "57a9995cf46be8ee7dc5974092d1a317d4a73fc16df8abacba0de45a6f0e699c"
+  EventSize: 792
+  Event:
+    String: "grub_cmd: menuentry DGX OS GNU/Linux --class dgx --class gnu-linux --class gnu --class os --id gnulinux-simple-d27bfd26-ff30-400e-9eca-9cdf73de9406 {\n\
+      \trecordfail\n\
+      \tload_video\n\
+      \tgfxmode $linux_gfx_mode\n\
+      \tinsmod gzio\n\
+      \tif [ x$grub_platform = xxen ]; then insmod xzio; insmod lzopio; fi\n\
+      \tinsmod part_gpt\n\
+      \tinsmod ext2\n\
+      \tsearch --no-floppy --fs-uuid --set=root d27bfd26-ff30-400e-9eca-9cdf73de9406\n\
+      \tlinux	/boot/vmlinuz-7.0.0-1019-nvidia root=UUID=d27bfd26-ff30-400e-9eca-9cdf73de9406 ro  init_on_alloc=0 iommu.passthrough=0 console=tty0 plymouth.ignore-serial-consoles plymouth.use-simpledrm earlycon=uart,mmio32,0x16A00000 console=tty0 console=ttyS0,921600 crashkernel=1G-:0M quiet splash initcall_blacklist=tegra234_cbb_init pci=pcie_bus_safe $vt_handoff\n\
+      \tinitrd	/boot/initrd.img-7.0.0-1019-nvidia\n\
+      }\0"
+- EventNum: 65
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "0cf52cbdf012c3d978dd7ee976e81d68d428265699ca1a49405872c6163fae51"
+  EventSize: 5444
+  Event:
+    String: "grub_cmd: submenu Advanced options for DGX OS GNU/Linux --id gnulinux-advanced-d27bfd26-ff30-400e-9eca-9cdf73de9406 {\n\
+      \tmenuentry 'DGX OS GNU/Linux, with Linux 7.0.0-1019-nvidia' --class dgx --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-7.0.0-1019-nvidia-advanced-d27bfd26-ff30-400e-9eca-9cdf73de9406' {\n\
+      \t\trecordfail\n\
+      \t\tload_video\n\
+      \t\tgfxmode $linux_gfx_mode\n\
+      \t\tinsmod gzio\n\
+      \t\tif [ x$grub_platform = xxen ]; then insmod xzio; insmod lzopio; fi\n\
+      \t\tinsmod part_gpt\n\
+      \t\tinsmod ext2\n\
+      \t\tsearch --no-floppy --fs-uuid --set=root d27bfd26-ff30-400e-9eca-9cdf73de9406\n\
+      \t\techo	'Loading Linux 7.0.0-1019-nvidia ...'\n\
+      \t\tlinux	/boot/vmlinuz-7.0.0-1019-nvidia root=UUID=d27bfd26-ff30-400e-9eca-9cdf73de9406 ro  init_on_alloc=0 iommu.passthrough=0 console=tty0 plymouth.ignore-serial-consoles plymouth.use-simpledrm earlycon=uart,mmio32,0x16A00000 console=tty0 console=ttyS0,921600 crashkernel=1G-:0M quiet splash initcall_blacklist=tegra234_cbb_init pci=pcie_bus_safe $vt_handoff\n\
+      \t\techo	'Loading initial ramdisk ...'\n\
+      \t\tinitrd	/boot/initrd.img-7.0.0-1019-nvidia\n\
+      \t}\n\
+      \tmenuentry 'DGX OS GNU/Linux, with Linux 7.0.0-1019-nvidia (recovery mode)' --class dgx --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-7.0.0-1019-nvidia-recovery-d27bfd26-ff30-400e-9eca-9cdf73de9406' {\n\
+      \t\trecordfail\n\
+      \t\tload_video\n\
+      \t\tinsmod gzio\n\
+      \t\tif [ x$grub_platform = xxen ]; then insmod xzio; insmod lzopio; fi\n\
+      \t\tinsmod part_gpt\n\
+      \t\tinsmod ext2\n\
+      \t\tsearch --no-floppy --fs-uuid --set=root d27bfd26-ff30-400e-9eca-9cdf73de9406\n\
+      \t\techo	'Loading Linux 7.0.0-1019-nvidia ...'\n\
+      \t\tlinux	/boot/vmlinuz-7.0.0-1019-nvidia root=UUID=d27bfd26-ff30-400e-9eca-9cdf73de9406 ro recovery nomodeset  init_on_alloc=0 iommu.passthrough=0 console=tty0 plymouth.ignore-serial-consoles plymouth.use-simpledrm earlycon=uart,mmio32,0x16A00000\n\
+      \t\techo	'Loading initial ramdisk ...'\n\
+      \t\tinitrd	/boot/initrd.img-7.0.0-1019-nvidia\n\
+      \t}\n\
+      \tmenuentry 'DGX OS GNU/Linux, with Linux 6.17.0-1032-nvidia' --class dgx --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-6.17.0-1032-nvidia-advanced-d27bfd26-ff30-400e-9eca-9cdf73de9406' {\n\
+      \t\trecordfail\n\
+      \t\tload_video\n\
+      \t\tgfxmode $linux_gfx_mode\n\
+      \t\tinsmod gzio\n\
+      \t\tif [ x$grub_platform = xxen ]; then insmod xzio; insmod lzopio; fi\n\
+      \t\tinsmod part_gpt\n\
+      \t\tinsmod ext2\n\
+      \t\tsearch --no-floppy --fs-uuid --set=root d27bfd26-ff30-400e-9eca-9cdf73de9406\n\
+      \t\techo	'Loading Linux 6.17.0-1032-nvidia ...'\n\
+      \t\tlinux	/boot/vmlinuz-6.17.0-1032-nvidia root=UUID=d27bfd26-ff30-400e-9eca-9cdf73de9406 ro  init_on_alloc=0 iommu.passthrough=0 console=tty0 plymouth.ignore-serial-consoles plymouth.use-simpledrm earlycon=uart,mmio32,0x16A00000 console=tty0 console=ttyS0,921600 crashkernel=1G-:0M quiet splash initcall_blacklist=tegra234_cbb_init pci=pcie_bus_safe $vt_handoff\n\
+      \t\techo	'Loading initial ramdisk ...'\n\
+      \t\tinitrd	/boot/initrd.img-6.17.0-1032-nvidia\n\
+      \t}\n\
+      \tmenuentry 'DGX OS GNU/Linux, with Linux 6.17.0-1032-nvidia (recovery mode)' --class dgx --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-6.17.0-1032-nvidia-recovery-d27bfd26-ff30-400e-9eca-9cdf73de9406' {\n\
+      \t\trecordfail\n\
+      \t\tload_video\n\
+      \t\tinsmod gzio\n\
+      \t\tif [ x$grub_platform = xxen ]; then insmod xzio; insmod lzopio; fi\n\
+      \t\tinsmod part_gpt\n\
+      \t\tinsmod ext2\n\
+      \t\tsearch --no-floppy --fs-uuid --set=root d27bfd26-ff30-400e-9eca-9cdf73de9406\n\
+      \t\techo	'Loading Linux 6.17.0-1032-nvidia ...'\n\
+      \t\tlinux	/boot/vmlinuz-6.17.0-1032-nvidia root=UUID=d27bfd26-ff30-400e-9eca-9cdf73de9406 ro recovery nomodeset  init_on_alloc=0 iommu.passthrough=0 console=tty0 plymouth.ignore-serial-consoles plymouth.use-simpledrm earlycon=uart,mmio32,0x16A00000\n\
+      \t\techo	'Loading initial ramdisk ...'\n\
+      \t\tinitrd	/boot/initrd.img-6.17.0-1032-nvidia\n\
+      \t}\n\
+      \tmenuentry 'DGX OS GNU/Linux, with Linux 6.11.0-1014-nvidia' --class dgx --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-6.11.0-1014-nvidia-advanced-d27bfd26-ff30-400e-9eca-9cdf73de9406' {\n\
+      \t\trecordfail\n\
+      \t\tload_video\n\
+      \t\tgfxmode $linux_gfx_mode\n\
+      \t\tinsmod gzio\n\
+      \t\tif [ x$grub_platform = xxen ]; then insmod xzio; insmod lzopio; fi\n\
+      \t\tinsmod part_gpt\n\
+      \t\tinsmod ext2\n\
+      \t\tsearch --no-floppy --fs-uuid --set=root d27bfd26-ff30-400e-9eca-9cdf73de9406\n\
+      \t\techo	'Loading Linux 6.11.0-1014-nvidia ...'\n\
+      \t\tlinux	/boot/vmlinuz-6.11.0-1014-nvidia root=UUID=d27bfd26-ff30-400e-9eca-9cdf73de9406 ro  init_on_alloc=0 iommu.passthrough=0 console=tty0 plymouth.ignore-serial-consoles plymouth.use-simpledrm earlycon=uart,mmio32,0x16A00000 console=tty0 console=ttyS0,921600 crashkernel=1G-:0M quiet splash initcall_blacklist=tegra234_cbb_init pci=pcie_bus_safe $vt_handoff\n\
+      \t\techo	'Loading initial ramdisk ...'\n\
+      \t\tinitrd	/boot/initrd.img-6.11.0-1014-nvidia\n\
+      \t}\n\
+      \tmenuentry 'DGX OS GNU/Linux, with Linux 6.11.0-1014-nvidia (recovery mode)' --class dgx --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-6.11.0-1014-nvidia-recovery-d27bfd26-ff30-400e-9eca-9cdf73de9406' {\n\
+      \t\trecordfail\n\
+      \t\tload_video\n\
+      \t\tinsmod gzio\n\
+      \t\tif [ x$grub_platform = xxen ]; then insmod xzio; insmod lzopio; fi\n\
+      \t\tinsmod part_gpt\n\
+      \t\tinsmod ext2\n\
+      \t\tsearch --no-floppy --fs-uuid --set=root d27bfd26-ff30-400e-9eca-9cdf73de9406\n\
+      \t\techo	'Loading Linux 6.11.0-1014-nvidia ...'\n\
+      \t\tlinux	/boot/vmlinuz-6.11.0-1014-nvidia root=UUID=d27bfd26-ff30-400e-9eca-9cdf73de9406 ro recovery nomodeset  init_on_alloc=0 iommu.passthrough=0 console=tty0 plymouth.ignore-serial-consoles plymouth.use-simpledrm earlycon=uart,mmio32,0x16A00000\n\
+      \t\techo	'Loading initial ramdisk ...'\n\
+      \t\tinitrd	/boot/initrd.img-6.11.0-1014-nvidia\n\
+      \t}\n\
+      }\0"
+- EventNum: 66
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "5d487e285706b36d48eff03e56383e4692de24b867b38fcb3c5896fd222a5957"
+  EventSize: 24
+  Event:
+    String: "grub_cmd: [ efi = efi ]\0"
+- EventNum: 67
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "8a0672215643524931da9a98294d41f13a6e324adf780e239ef0b5ea033255bd"
+  EventSize: 33
+  Event:
+    String: "grub_cmd: fwsetup --is-supported\0"
+- EventNum: 68
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "d0b128de61633eaded03eaf1923aaed67e1973fb10714ad91515906104cd640f"
+  EventSize: 20
+  Event:
+    String: "grub_cmd: [ 0 = 0 ]\0"
+- EventNum: 69
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "ba0a0eba7367337a506a6c7bb223356ee9d83badd3c6ee91cca8c977bfe23c5e"
+  EventSize: 79
+  Event:
+    String: "grub_cmd: menuentry UEFI Firmware Settings --id uefi-firmware {\n\
+      \t\t\tfwsetup\n\
+      \t\t}\0"
+- EventNum: 70
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "fb29eca095a84ec2672c0c4367f5972b34135a8b50974cf0698d9b90ee44428f"
+  EventSize: 49
+  Event:
+    String: "grub_cmd: [ -f (hd0,gpt2)/boot/grub/custom.cfg ]\0"
+- EventNum: 71
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "b99843ca754608ac7eb3bb60728ffaf42bfa1c22b1c9ad609d4ae9ab3a9ad081"
+  EventSize: 76
+  Event:
+    String: "grub_cmd: [ -z (hd0,gpt2)/boot/grub -a -f (hd0,gpt2)/boot/grub/custom.cfg ]\0"
+- EventNum: 72
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "b16913eeb8625c21d37e26b05f609b500185d18c5bfea38abd97009608fe266a"
+  EventSize: 37
+  Event:
+    String: "grub_cmd: setparams DGX OS GNU/Linux\0"
+- EventNum: 73
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "a57e067e286efc4eea89659d40f13a38cc1792e4277bed820ded674c94bf2ead"
+  EventSize: 21
+  Event:
+    String: "grub_cmd: recordfail\0"
+- EventNum: 74
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "64bda8f65b1585d7868248a292c449660cc8f75075c10d87ae59a4db401ce119"
+  EventSize: 27
+  Event:
+    String: "grub_cmd: set recordfail=1\0"
+- EventNum: 75
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "cfa4676ffe751d1547e77a8d66a033b59b3eed3400d9b3a305d2601891ab0e59"
+  EventSize: 22
+  Event:
+    String: "grub_cmd: [ -n true ]\0"
+- EventNum: 76
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "4e7a22f96bae467df0f26975e0bf7614d6b92993301c65bae6a85c6530e460bf"
+  EventSize: 18
+  Event:
+    String: "grub_cmd: [ -z  ]\0"
+- EventNum: 77
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "ce2cc20777ba8d3bc75b662163c3abe370344d4bae17d75fb5bd408d1fb6badf"
+  EventSize: 30
+  Event:
+    String: "grub_cmd: save_env recordfail\0"
+- EventNum: 78
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "7626abd8be7442c2e575364a3e95cb3a3b533c58afbba402d2bdabdff85d29c7"
+  EventSize: 21
+  Event:
+    String: "grub_cmd: load_video\0"
+- EventNum: 79
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "4568361fb7581b31a42d645ab534302fb9f742adaa37b7fde152215d69e259fb"
+  EventSize: 22
+  Event:
+    String: "grub_cmd: [ xy = xy ]\0"
+- EventNum: 80
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "d71353f5368eb2c1280590928128979bd96ea8db1e8c81493f7878383b76ab3b"
+  EventSize: 27
+  Event:
+    String: "grub_cmd: insmod all_video\0"
+- EventNum: 81
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "2fa8065d9ee309384d35f8d530186b776d26e1bb5632f89a46d56e93b140282b"
+  EventSize: 23
+  Event:
+    String: "grub_cmd: gfxmode keep\0"
+- EventNum: 82
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "15a5018b0177cf9c49c0b97911df67e7f2c193d3613e3fc4c9eb98a2b5d06fcc"
+  EventSize: 30
+  Event:
+    String: "grub_cmd: set gfxpayload=keep\0"
+- EventNum: 83
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "b55d84bbb0a00f175ebbc6ca167f18dd6a9cb49b141535bfcc6c4ef9c53b1866"
+  EventSize: 26
+  Event:
+    String: "grub_cmd: [ keep = keep ]\0"
+- EventNum: 84
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "141dcfd03b1736e86f617122e7f31cffe89f7cf0faa773f1bced28f7f0c1fa13"
+  EventSize: 38
+  Event:
+    String: "grub_cmd: set vt_handoff=vt.handoff=7\0"
+- EventNum: 85
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "6c4674d4c652ee67b98a6206d7541ccbf2d5dc0a18dae31ad66e82c794c49784"
+  EventSize: 22
+  Event:
+    String: "grub_cmd: insmod gzio\0"
+- EventNum: 86
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "18865468f2e4bd9f0cc4ffdda1335f405d06df8d6ff183b373f50e08e81f924d"
+  EventSize: 26
+  Event:
+    String: "grub_cmd: [ xefi = xxen ]\0"
+- EventNum: 87
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "62cd76d31ca3d10d742e46c6ff171046ce19dd90f361a827fec6571e59c24794"
+  EventSize: 26
+  Event:
+    String: "grub_cmd: insmod part_gpt\0"
+- EventNum: 88
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "b838a4d2860c81058105fbb1907a1fb7f60b65591b099b3b000d9b31d8d2fb20"
+  EventSize: 22
+  Event:
+    String: "grub_cmd: insmod ext2\0"
+- EventNum: 89
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "e671300720906e33b021a98550b94e154e5b33ccc9b7ce1e3e7f42710d6c7cba"
+  EventSize: 87
+  Event:
+    String: "grub_cmd: search --no-floppy --fs-uuid --set=root d27bfd26-ff30-400e-9eca-9cdf73de9406\0"
+- EventNum: 90
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "2a29f9eae133053dba8cc3d1f0bcdd683e9bb20912d17667e52e31dff7fe08b8"
+  EventSize: 368
+  Event:
+    String: "grub_cmd: linux /boot/vmlinuz-7.0.0-1019-nvidia root=UUID=d27bfd26-ff30-400e-9eca-9cdf73de9406 ro init_on_alloc=0 iommu.passthrough=0 console=tty0 plymouth.ignore-serial-consoles plymouth.use-simpledrm earlycon=uart,mmio32,0x16A00000 console=tty0 console=ttyS0,921600 crashkernel=1G-:0M quiet splash initcall_blacklist=tegra234_cbb_init pci=pcie_bus_safe vt.handoff=7\0"
+- EventNum: 91
+  PCRIndex: 9
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "6220c8a5fca3340de6e0b3b7da5c834d1ff2868c90f2eeb171695ec393df45c6"
+  EventSize: 32
+  Event:
+    String: "/boot/vmlinuz-7.0.0-1019-nvidia\0"
+- EventNum: 92
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "6e9428ce545e22f3968e2c8009bf951d978124a2e45431848d2b37284e38ed56"
+  EventSize: 368
+  Event:
+    String: "kernel_cmdline: /boot/vmlinuz-7.0.0-1019-nvidia root=UUID=d27bfd26-ff30-400e-9eca-9cdf73de9406 ro init_on_alloc=0 iommu.passthrough=0 console=tty0 plymouth.ignore-serial-consoles plymouth.use-simpledrm earlycon=uart,mmio32,0x16A00000 console=tty0 console=ttyS0,921600 crashkernel=1G-:0M quiet splash initcall_blacklist=tegra234_cbb_init pci=pcie_bus_safe vt.handoff=7\0"
+- EventNum: 93
+  PCRIndex: 8
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "1b00737c6b1d413913c0114b19dcb6bb36eeeee74b48a37cfeea6dabb9fe0684"
+  EventSize: 52
+  Event:
+    String: "grub_cmd: initrd /boot/initrd.img-7.0.0-1019-nvidia\0"
+- EventNum: 94
+  PCRIndex: 9
+  EventType: EV_IPL
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "7376c4b966cd53f38b121b760590eb584497fed2dec112be69c473608671663b"
+  EventSize: 35
+  Event:
+    String: "/boot/initrd.img-7.0.0-1019-nvidia\0"
+- EventNum: 95
+  PCRIndex: 9
+  EventType: EV_EVENT_TAG
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "30421c7b142f59adb657d5d2ae3326d25e140e21b575ec2110d5d9e47a5fdb79"
+  EventSize: 34
+  Event: "ed223b8f1a0000004c4f414445445f494d4147453a3a4c6f61644f7074696f6e7300"
+- EventNum: 96
+  PCRIndex: 9
+  EventType: EV_EVENT_TAG
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "7376c4b966cd53f38b121b760590eb584497fed2dec112be69c473608671663b"
+  EventSize: 21
+  Event: "ec223b8f0d0000004c696e757820696e6974726400"
+- EventNum: 97
+  PCRIndex: 5
+  EventType: EV_EFI_ACTION
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "d8043d6b7b85ad358eb3b6ae6a873ab7ef23a26352c5dc4faa5aeedacf5eb41b"
+  EventSize: 29
+  Event: |-
+    Exit Boot Services Invocation
+- EventNum: 98
+  PCRIndex: 5
+  EventType: EV_EFI_ACTION
+  DigestCount: 1
+  Digests:
+  - AlgorithmId: sha256
+    Digest: "b54f7542cbd872a81a9d9dea839b2b8d747c7ebd5ea6615c40f42f44a6dbeba0"
+  EventSize: 40
+  Event: |-
+    Exit Boot Services Returned with Success
+pcrs:
+  sha256:
+    0  : 0x3d458cfe55cc03ea1f443f1562beec8df51c75e14a9fcf9a7234a13f198e7969
+    1  : 0x265306bef2cebe25fdcd4558f25c940523539d121d741f60d5f5a0fe3e523c22
+    2  : 0x4e0a0cf49a01dd797a54bee5a8d01a73b9b4fdce29b7b59177d8beaee45a7c6c
+    3  : 0x3d458cfe55cc03ea1f443f1562beec8df51c75e14a9fcf9a7234a13f198e7969
+    4  : 0xcfadd602cf80ff3887432ae3526939f6ff2b486dbcd1158f58ae7b757cc50693
+    5  : 0xf72d2e96253dd2afc446c37116813a711d649daaaa12620f9a7cf5a0dec47a58
+    6  : 0x3d458cfe55cc03ea1f443f1562beec8df51c75e14a9fcf9a7234a13f198e7969
+    7  : 0x127c18eba2300e30767fafe71f4e5975776f665d22c7ca9017c7c24846b96fa1
+    8  : 0x0e3bc6488f6c6b84a2e7160103b173d58274f501a66d50af173ee74537c2bee2
+    9  : 0x0fcd3715a3fffef1669e5835866350668a649180ff834f76df41ff862fbf6506
+    14 : 0x3934eca101a2cd5f472a58d55edf2204ea214d1e426280458614790a50f26555
