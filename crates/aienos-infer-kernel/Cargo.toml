@@ -1,0 +1,25 @@
+# Standalone (not a member of the host workspace): built only for
+# aarch64-unknown-none and linked into the C kernel image (CK_INFER_LIB).
+[package]
+name = "aienos-infer-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0 WITH LLVM-exception"
+description = "Links aienos-infer into the general-regs-only C kernel: bump allocator + ingest probe (aienos#34 lane 4)."
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+aienos-infer = { path = "../aienos-infer" }
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+lto = false
+codegen-units = 1
+
+[profile.dev]
+panic = "abort"
