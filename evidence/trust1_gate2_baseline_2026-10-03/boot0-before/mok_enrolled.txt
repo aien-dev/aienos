@@ -1,0 +1,4 @@
+SHA1 Fingerprint: 76:a0:92:06:58:00:bf:37:69:01:c3:72:cd:55:a9:0e:1f:de:d2:e0
+        Subject: C=GB, ST=Isle of Man, L=Douglas, O=Canonical Ltd., CN=Canonical Ltd. Master Certificate Authority
+SHA1 Fingerprint: 8e:8a:0c:99:f2:56:34:f1:91:ba:19:b2:d4:7d:d7:51:17:fc:a8:fb
+        Subject: CN=AIEN Spark owner key (telemetry)
