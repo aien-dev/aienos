@@ -16,6 +16,7 @@ members = [
     "crates/aienos-evidence",
     "crates/aienos-store-tool",
     "crates/aienos-explain",
+    "crates/aienos-infer",
 ]
 
 [workspace.package]
