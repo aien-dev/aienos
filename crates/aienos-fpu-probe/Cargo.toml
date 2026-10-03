@@ -1,0 +1,22 @@
+# Standalone (not a member of the host workspace): built only for
+# aarch64-unknown-none and linked into the C kernel image (CK_RUST_LIBS).
+[package]
+name = "aienos-fpu-probe"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0 WITH LLVM-exception"
+description = "One FP/SIMD-enabled Rust unit called from the general-regs-only C kernel (aienos#34 lane 0)."
+
+[lib]
+crate-type = ["staticlib"]
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+lto = false
+codegen-units = 1
+
+[profile.dev]
+panic = "abort"

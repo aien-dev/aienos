@@ -103,5 +103,6 @@ uint64_t ck_entropy_retries(void);
  * the MMU on the boot core's tables, checked in and parked in WFE. Prints
  * the smp: lines scripts/qemu_ck_smp_test.sh judges; never panics. */
 void ck_smp_run(void);
+void ck_fpu_run(void); /* core/fpu.c: probe build only (CK_RUST_LIBS), else a no-op */
 
 #endif

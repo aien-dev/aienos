@@ -138,6 +138,9 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
      * scripts/qemu_ck_smp_test.sh (CK gate SMP). */
     ck_smp_run();
 
+    /* One FP/SIMD-enabled Rust unit (core/fpu.c), probe build only. */
+    ck_fpu_run();
+
     /* M3 isolation checks (core/m3.c), before any stage registers an IRQ. */
     ck_m3_run();
 

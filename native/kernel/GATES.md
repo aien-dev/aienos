@@ -25,7 +25,7 @@ C gates (one line each from `ck_gates.sh`): `M1` and `M3` (from
 `scripts/qemu_ck_net_test.sh`; rows 102-106 and 110-112; the script now also checks the virtio-net SMMU fence (ACCESS_PLATFORM required, out-of-window device DMA refused), rows 102 and 110-112 are QEMU PASS on this branch from the committed forge log `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`, hardware NOT_RUN), the kernel entropy rows 107-109 (M1 via `scripts/lib_ck_m1_checks.sh`, ARGUS1_REVOKE and M4_STORE via the Store gate boot 7),
 `DISK_LAYOUT` (C-only, from `scripts/qemu_ck_disk_layout_test.sh`, rows 118-123: QEMU PASS at 741b2b8 before the merge with main 8555049, rerun pending at the merged head; row 123 host test), and the NOT_RUN gates
 `SMP` (C-only, from `scripts/qemu_ck_smp_test.sh`, rows 113-117, NOT_RUN pending forge receipt), `M0_ROLLBACK`, `M4_STORE_CRASH` (now read from `scripts/qemu_ck_store_crash_test.sh`, rows 73-80; NOT_RUN until a forge receipt exists),
-`M4_CONTINUITY`, `M4_RECOVERY`, `KEYBOARD`.
+`M4_CONTINUITY`, `M4_RECOVERY`, `KEYBOARD`, and `FPU` (C-only, from `scripts/qemu_ck_fpu_test.sh`, rows 124-128; QEMU PASS, hardware NOT_RUN).
 
 `M4_NVME` and `SMMU` PASS in the SMMU-confined mode (default `make full`
 image, QEMU `iommu=smmuv3`). The unconfined bypass build
@@ -512,3 +512,22 @@ qemu rows: `ck_m1_boot_qemu` (M1), `ck_store_kernel_qemu` (M4_STORE) and
 `ck_argus1_revoke_qemu` (ARGUS1_REVOKE). Its `m5_store_kernel_binding` row
 stays MISSING_IMPLEMENTATION: it asks for the binding on a real device, which
 QEMU cannot show.
+
+## FPU: scripts/qemu_ck_fpu_test.sh -> CK `FPU` (aienos#34 lane 0, C-only, no Rust-kernel counterpart)
+
+One floating-point/SIMD-enabled Rust unit (`crates/aienos-fpu-probe`, a no_std staticlib) is linked into a
+QEMU-only probe image (`make -C native/kernel CK_RUST_LIBS=<libaienos_fpu_probe.a>`, which adds
+`-DCK_FPU_PROBE=1` for `core/fpu.c`) and called from the C kernel, which stays `-mgeneral-regs-only`. The
+default image is unchanged (no Rust, no FP code). The kernel runs at EL1h; `ck_fpu_enable()` sets
+`CPACR_EL1.FPEN = 0b11` + `isb` (vectors.S already did at the EL2 -> EL1 drop; CPTR_EL2 is set to no-trap
+there). The unit runs with DAIF masked: the kernel saves no FP state. The gate is NOT_RUN (never a silent
+pass) when cargo, the `aarch64-unknown-none` target, QEMU or AAVMF is missing. Not required in CI (the
+runner is not known to have the Rust target); required list in `ck-kernel.yml` skips it.
+
+| # | check | gate | status |
+|---|---|---|---|
+| 124 | probe returns 0; f32 dot product of two 16-element arrays = 68.0 exactly (`dot_bits=0x42880000`) | FPU | QEMU PASS (aienos-ni-fp branch; hardware NOT_RUN) |
+| 125 | f32 exp approximation: exp(1) within 1e-4 of e (bits checked by the script, not the kernel) | FPU | QEMU PASS (hardware NOT_RUN) |
+| 126 | NEON `vaddq_f32` lanes = 11,22,33,44 via `core::arch::aarch64` | FPU | QEMU PASS (hardware NOT_RUN) |
+| 127 | `CPACR_EL1.FPEN = 0b11` read back at EL1 after `ck_fpu_enable()` | FPU | QEMU PASS (hardware NOT_RUN) |
+| 128 | negative control: with FPEN cleared in `ck_fpu_enable()` the first FP instruction traps and the gate FAILs (kernel fault report, no result line); canned-log self-test (`--self-test`) rejects wrong dot/exp/NEON/rc/FPEN/missing lines | FPU | QEMU PASS (control killed; hardware NOT_RUN) |

@@ -32,6 +32,7 @@ on:
       - 'native/**'
       - 'scripts/ck_gates.sh'
       - 'scripts/qemu_ck_*.sh'
+      - 'crates/aienos-fpu-probe/**'
       - 'scripts/lib_ck_m1_checks.sh'
       - '.github/workflows/ck-kernel.yml'
   pull_request:
@@ -40,6 +41,7 @@ on:
       - 'native/**'
       - 'scripts/ck_gates.sh'
       - 'scripts/qemu_ck_*.sh'
+      - 'crates/aienos-fpu-probe/**'
       - 'scripts/lib_ck_m1_checks.sh'
       - '.github/workflows/ck-kernel.yml'
 
@@ -96,9 +98,11 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/ck-receipt/logs"
           cp -r /tmp/ck-gates-work.*/logs/* "${RUNNER_TEMP}/ck-receipt/logs/" 2>/dev/null || true
           [ "${rc}" = 0 ] || exit 1
+          # FPU is not required: it needs the Rust target aarch64-unknown-none, which this
+          # runner image is not known to have, so it prints NOT_RUN there (aienos#34 lane 0).
           # Every gate with a C implementation (source != missing in the
           # ck_gates.sh table) must be PASS.
-          required=$(sed -n "/^CK_GATE_TABLE='/,/^'/p" scripts/ck_gates.sh | awk -F'|' 'NF==3 && $2!="missing" {print $1}')
+          required=$(sed -n "/^CK_GATE_TABLE='/,/^'/p" scripts/ck_gates.sh | awk -F'|' 'NF==3 && $2!="missing" && $1!="FPU" {print $1}')
           [ -n "${required}" ] || { echo "could not read the gate table"; exit 1; }
           fail=0
           for g in ${required}; do
