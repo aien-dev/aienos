@@ -25,7 +25,7 @@ C gates (one line each from `ck_gates.sh`): `M1` and `M3` (from
 `scripts/qemu_ck_net_test.sh`; rows 102-106 and 110-112; the script now also checks the virtio-net SMMU fence (ACCESS_PLATFORM required, out-of-window device DMA refused), rows 102 and 110-112 are QEMU PASS on this branch from the committed forge log `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`, hardware NOT_RUN), the kernel entropy rows 107-109 (M1 via `scripts/lib_ck_m1_checks.sh`, ARGUS1_REVOKE and M4_STORE via the Store gate boot 7),
 `DISK_LAYOUT` (C-only, from `scripts/qemu_ck_disk_layout_test.sh`, rows 118-123: QEMU PASS at 741b2b8 before the merge with main 8555049, rerun pending at the merged head; row 123 host test), and the NOT_RUN gates
 `SMP` (C-only, from `scripts/qemu_ck_smp_test.sh`, rows 113-117, NOT_RUN pending forge receipt), `M0_ROLLBACK`, `M4_STORE_CRASH` (now read from `scripts/qemu_ck_store_crash_test.sh`, rows 73-80; NOT_RUN until a forge receipt exists),
-`M4_CONTINUITY`, `M4_RECOVERY`, `KEYBOARD`, `FPU` (C-only, from `scripts/qemu_ck_fpu_test.sh`, rows 124-128; QEMU PASS, hardware NOT_RUN), and `INFER` (C-only, from `scripts/qemu_ck_infer_test.sh`, rows 129-134; QEMU PASS, hardware NOT_RUN).
+`M4_CONTINUITY`, `M4_RECOVERY`, `KEYBOARD`, `FPU` (C-only, from `scripts/qemu_ck_fpu_test.sh`, rows 124-128; QEMU PASS, hardware NOT_RUN), and `INFER` (C-only, from `scripts/qemu_ck_infer_test.sh`, rows 129-139; QEMU PASS, hardware NOT_RUN).
 
 `M4_NVME` and `SMMU` PASS in the SMMU-confined mode (default `make full`
 image, QEMU `iommu=smmuv3`). The unconfined bypass build
@@ -532,13 +532,23 @@ runner is not known to have the Rust target); required list in `ck-kernel.yml` s
 | 127 | `CPACR_EL1.FPEN = 0b11` read back at EL1 after `ck_fpu_enable()` | FPU | QEMU PASS (hardware NOT_RUN) |
 | 128 | negative control: with FPEN cleared in `ck_fpu_enable()` the first FP instruction traps and the gate FAILs (kernel fault report, no result line); canned-log self-test (`--self-test`) rejects wrong dot/exp/NEON/rc/FPEN/missing lines | FPU | QEMU PASS (control killed; hardware NOT_RUN) |
 
-## INFER: scripts/qemu_ck_infer_test.sh -> CK `INFER` (aienos#34 lane 4 cut 1, C-only, no Rust-kernel counterpart)
+## INFER: scripts/qemu_ck_infer_test.sh -> CK `INFER` (aienos#34 lane 4 cut 1 + lane 5 cut 2, C-only, no Rust-kernel counterpart)
 
 The kernel ingests the 807,694,368-byte Llama-3.2-1B-Instruct Q4_K_M GGUF into its own RAM and calls the Rust
 crate `crates/aienos-infer` from C through `crates/aienos-infer-kernel` (a no_std staticlib: the `extern "C"`
-entry `aienos_infer_probe` plus a documented bump allocator over one 256 MiB region). It parses the GGUF header,
-binds the `Model`, tokenizes the fixed chat prompt "What is the capital of France?" and prints tensor count,
-vocab size and the prompt ids. No token generation yet. QEMU-only probe image:
+entry `aienos_infer_run` plus a documented bump allocator over one 256 MiB region). It parses the GGUF header,
+binds the `Model`, tokenizes the fixed chat prompt "What is the capital of France?", runs prefill and greedy
+decode until `<|eot_id|>` (128009) or 16 tokens on the same code path as the host test
+(`crates/aienos-infer/tests/forward.rs`: `DecodeState`, `prefill`, `argmax`, `forward`), and hands ids, decoded
+bytes and per-token microseconds (`ck_time_us`) back for the kernel to print (`infer: tokens=`, `infer: text=`,
+`infer: tok_us=`, `infer: decode_tokens=N mean_tok_us=`). The weights stay quantised in the ingested bytes
+(Q4_K/Q6_K dequantised per block inside each dot product); only norms, the KV cache (64 positions) and
+activations live on the unit's heap. Unload: the unit keeps nothing past its return, the kernel forgets the heap
+region (`aienos_infer_heap_init(0, 0)`: every later allocation fails closed) and returns every frame of the model
+and the heap; `infer: unloaded heap_live_kib=.. frames_free_before=.. frames_free_after=..` must show the free-frame
+count back at its pre-ingest value, and the kernel then continues to M3, the stages, the final report and the PSCI
+reset. FP registers are left dirty after the unit (nothing else in the kernel reads them; EL0 traps on FP).
+QEMU-only probe image:
 `make -C native/kernel CK_INFER_LIB=<libaienos_infer_kernel.a>` (adds `-DCK_INFER_PROBE=1` for `core/infer.c`;
 refused together with `CK_RUST_LIBS` or `CK_HARDWARE_STAGING`). The default image is unchanged; the probe image
 must carry its own TEST-ONLY fw_cfg announcement (the default-image fw_cfg ban in `fwcfg_check` stays).
@@ -559,4 +569,9 @@ required in CI (the runner has neither the model nor the target).
 | 131 | probe rc = 0; 147 tensors (`golden.rs:112`), vocab 128256, 16 layers | INFER | QEMU PASS (hardware NOT_RUN) |
 | 132 | first four prompt ids = 128000 128006 882 128007 and prompt length 17, both read from `crates/aienos-infer/tests/fixtures/ref_fr.txt` by the script | INFER | QEMU PASS (hardware NOT_RUN) |
 | 133 | kernel alive, no panic/fault, final report, QEMU exit 0 (PSCI reset); M1/M3 boot gate unchanged PASS | INFER | QEMU PASS (hardware NOT_RUN) |
-| 134 | negative control: `--negative-control` overwrites the GGUF magic in a host copy -> probe rc=-2, every probe check FAILs, control prints PASS; `--self-test` canned logs reject 17 mutations, each by its own FAIL line | INFER | QEMU PASS (control caught; hardware NOT_RUN) |
+| 134 | negative control: `--negative-control` overwrites the GGUF magic in a host copy -> probe rc=-2, every probe check FAILs, control prints PASS; `--self-test` canned logs reject 33 mutations, each by its own FAIL line | INFER | QEMU PASS (control caught; hardware NOT_RUN) |
+| 135 | generated ids = the llama.cpp greedy sequence of `ref_fr.txt` "step" lines, exact: 791 6864 315 9822 374 12366 13 128009 (EOT included), read from the fixture by the script and also hard-coded in `core/infer.c` for the kernel verdict | INFER | QEMU PASS (hardware NOT_RUN) |
+| 136 | decoded text contains "Paris" (`infer: text=The capital of France is Paris.`) | INFER | QEMU PASS (hardware NOT_RUN) |
+| 137 | per-token timing line present: 7 decode forwards, mean > 0 us. First native CPU number: 40.40 s per decode token, prefill 553.9 s for 17 tokens, whole Rust call 837.8 s, under QEMU TCG single core (not hardware; host test on one Grace core is 0.59 s per forward) | INFER | QEMU PASS (hardware NOT_RUN) |
+| 138 | clean unload: `infer: unloaded` line present before the final report, frame-return rc 0,0, free frames after = before the ingest (1021097 = 1021097; 262728 frames returned), kernel then reaches M3, stages, final report, PSCI reset (QEMU exit 0) | INFER | QEMU PASS (hardware NOT_RUN) |
+| 139 | live control: the same serial log re-checked against a mutated expected-id list (second-to-last id + 1) must FAIL on the token check, else the gate FAILs; `--self-test` also covers wrong/short/swapped tokens, missing tokens/text/timing/unload lines, missing "Paris", leaked frames, refused frame return, unload after the final report | INFER | QEMU PASS (control caught; hardware NOT_RUN) |

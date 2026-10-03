@@ -20,9 +20,13 @@
 # in native/kernel/GATES.md.
 #
 # QEMU is an emulator: a PASS here qualifies nothing physical (the receipt
-# says "physical": "NOT_RUN"). The child scripts take the machine quiet flag
-# (~/workspace/.spark-quiet) themselves and report NOT_RUN while another run
-# holds it; this script does not take it.
+# says "physical": "NOT_RUN"). The child scripts serialise themselves: the
+# FPU and INFER children take the QEMU gate lock (~/workspace/.qemu-gate-lock,
+# exclusive create) and report NOT_RUN while another gate run holds it or
+# while the machine quiet flag (~/workspace/.spark-quiet) exists, which they
+# only read (no agent raises the quiet flag without Drake's approval); the
+# older children still take the quiet flag themselves. This script takes
+# neither.
 #
 # Usage: bash scripts/ck_gates.sh [--out DIR]
 #        bash scripts/ck_gates.sh --self-test

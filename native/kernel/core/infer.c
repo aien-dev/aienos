@@ -1,6 +1,8 @@
 /* infer.c -- ingest the Llama-3.2-1B GGUF into kernel RAM and call the Rust
  * inference crate from the general-regs-only C kernel (aienos#34 lane 4,
- * cut 1: header, model bind and prompt tokenization; no token generation).
+ * cut 1: header, model bind, prompt tokenization; aienos#34 lane 5 cut 2:
+ * prefill + greedy decode of the fixed prompt, decoded text, per-token
+ * timing, then a clean unload that returns every frame).
  * Only compiled into the probe build: Makefile CK_INFER_LIB=<.a> adds
  * -DCK_INFER_PROBE=1; the default image carries none of this.
  *
@@ -34,7 +36,19 @@
 #include "sha256.h"
 
 extern void aienos_infer_heap_init(uintptr_t base, uintptr_t len);
-extern int32_t aienos_infer_probe(const uint8_t *model, uint64_t len, uint32_t *out);
+/* Mirror of crates/aienos-infer-kernel/src/lib.rs `InferResult` (#[repr(C)]). */
+#define INFER_MAX_NEW 16
+#define INFER_TEXT_BYTES 256
+struct infer_result {
+    uint32_t words[9];
+    uint32_t ntok;
+    uint32_t tokens[INFER_MAX_NEW];
+    uint64_t tok_us[INFER_MAX_NEW];
+    uint64_t prefill_us;
+    uint32_t text_len;
+    uint8_t text[INFER_TEXT_BYTES];
+};
+extern int32_t aienos_infer_run(const uint8_t *model, uint64_t len, struct infer_result *out);
 
 #define CPACR_FPEN_SHIFT 20
 #define PAGE 4096ull
@@ -44,6 +58,27 @@ extern int32_t aienos_infer_probe(const uint8_t *model, uint64_t len, uint32_t *
 
 /* The prompt's expected first four ids (crates/aienos-infer/tests/fixtures/ref_fr.txt). */
 static const uint32_t expect_ids[4] = {128000, 128006, 882, 128007};
+/* The greedy reply llama.cpp produced for the same prompt ("step" lines of the
+ * same fixture): "The capital of France is Paris." then <|eot_id|>. */
+static const uint32_t expect_gen[8] = {791, 6864, 315, 9822, 374, 12366, 13, 128009};
+/* Decoded reply, escaped for one console line: printable ASCII other than
+ * backslash as is, everything else as \\xNN. 4 bytes per input byte + NUL. */
+static char esc[4 * INFER_TEXT_BYTES + 1];
+static void escape(char *out, const uint8_t *b, uint32_t n)
+{
+    static const char d[] = "0123456789abcdef";
+    for (uint32_t i = 0; i < n; i++) {
+        if (b[i] >= 0x20 && b[i] < 0x7f && b[i] != 0x5c) {
+            *out++ = (char)b[i];
+        } else {
+            *out++ = 0x5c;
+            *out++ = 0x78;
+            *out++ = d[b[i] >> 4];
+            *out++ = d[b[i] & 15];
+        }
+    }
+    *out = 0;
+}
 
 static volatile uint8_t *fwcfg;
 
@@ -202,6 +237,7 @@ void ck_infer_run(void)
     ck_printf("infer: fw_cfg base=0x%llx dma=yes file=%s size=%u\n", (unsigned long long)base,
               MODEL_FILE, size);
 
+    uint64_t frames_before = ck_mm_free_frames();
     uint64_t mpages = ((uint64_t)size + PAGE - 1) / PAGE, mpa = 0, hpa = 0;
     if (ck_mm_frames_alloc(mpages, &mpa) || ck_mm_frames_alloc(HEAP_BYTES / PAGE, &hpa)) {
         ck_printf("infer: ingest FAIL (no frames: need %llu + %llu pages, %llu free)\nAIENOS_CK_INFER: FAIL\n",
@@ -232,8 +268,11 @@ void ck_infer_run(void)
     hex(dh, dg, SHA256_DIGEST_SIZE);
     ck_printf("infer: sha256=%s sha_us=%llu\n", dh, (unsigned long long)(ck_time_us() - t1));
 
-    /* FP/SIMD on, every exception masked for the Rust unit (see core/fpu.c). */
-    uint32_t out[9] = {0};
+    /* FP/SIMD on, every exception masked for the Rust unit (see core/fpu.c).
+     * The FP registers are left dirty afterwards (nothing else in the kernel
+     * reads them; EL0 traps on FP). */
+    static struct infer_result res; /* ~0.5 KiB; static keeps it off the EL1 stack */
+    memset(&res, 0, sizeof res);
     uint64_t v = ck_rd(cpacr_el1);
     v |= 3ull << CPACR_FPEN_SHIFT;
     ck_wr(cpacr_el1, v);
@@ -242,9 +281,10 @@ void ck_infer_run(void)
     uint64_t daif = ck_rd(daif);
     __asm__ volatile("msr daifset, #0xf" ::: "memory");
     uint64_t t2 = ck_time_us();
-    int32_t prc = aienos_infer_probe((const uint8_t *)(uintptr_t)mpa, size, out);
+    int32_t prc = aienos_infer_run((const uint8_t *)(uintptr_t)mpa, size, &res);
     uint64_t t3 = ck_time_us();
     ck_wr(daif, daif);
+    const uint32_t *out = res.words;
 
     ck_printf("infer: probe rc=%d tensors=%u vocab=%u ids=%u,%u,%u,%u prompt_len=%u layers=%u heap_peak_kib=%u probe_us=%llu\n",
               prc, out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7], out[8],
@@ -252,6 +292,40 @@ void ck_infer_run(void)
     int ok = prc == 0;
     for (unsigned i = 0; i < 4; i++)
         ok = ok && out[2 + i] == expect_ids[i];
+
+    /* Generation lines: ids, per-token microseconds, decoded bytes. */
+    uint32_t ntok = res.ntok <= INFER_MAX_NEW ? res.ntok : INFER_MAX_NEW;
+    ck_printf("infer: prefill_us=%llu prompt_len=%u", (unsigned long long)res.prefill_us, out[6]);
+    ck_printf("\ninfer: tokens=");
+    for (uint32_t i = 0; i < ntok; i++)
+        ck_printf("%s%u", i ? " " : "", res.tokens[i]);
+    ck_printf("\ninfer: tok_us=");
+    uint64_t sum = 0;
+    for (uint32_t i = 1; i < ntok; i++) {
+        ck_printf("%s%llu", i > 1 ? "," : "", (unsigned long long)res.tok_us[i]);
+        sum += res.tok_us[i];
+    }
+    ck_printf("\ninfer: decode_tokens=%u mean_tok_us=%llu\n", ntok > 1 ? ntok - 1 : 0,
+              (unsigned long long)(ntok > 1 ? sum / (ntok - 1) : 0));
+    uint32_t tl = res.text_len <= INFER_TEXT_BYTES ? res.text_len : INFER_TEXT_BYTES;
+    escape(esc, res.text, tl);
+    ck_printf("infer: text=%s\n", esc);
+    ok = ok && ntok == sizeof expect_gen / sizeof expect_gen[0];
+    for (uint32_t i = 0; ok && i < ntok; i++)
+        ok = ok && res.tokens[i] == expect_gen[i];
+
+    /* Unload: the Rust unit kept nothing (its objects died at return); forget
+     * its heap region, then return every frame of the model and the heap. The
+     * free-frame count must come back to what it was before the ingest. */
+    aienos_infer_heap_init(0, 0);
+    int f1 = ck_mm_frames_free(mpa, mpages), f2 = ck_mm_frames_free(hpa, HEAP_BYTES / PAGE);
+    uint64_t frames_after = ck_mm_free_frames();
+    struct ck_mm_usage mu;
+    ck_mm_usage(&mu);
+    ck_printf("infer: unloaded heap_live_kib=%llu frames_free_before=%llu frames_free_after=%llu frames_returned=%llu rc=%d,%d\n",
+              (unsigned long long)((mu.heap_bytes - mu.heap_free) / 1024), (unsigned long long)frames_before,
+              (unsigned long long)frames_after, (unsigned long long)(mpages + HEAP_BYTES / PAGE), f1, f2);
+    ok = ok && f1 == 0 && f2 == 0 && frames_after == frames_before;
     ck_printf("AIENOS_CK_INFER: %s\n", ok ? "PASS" : "FAIL");
 }
 #else

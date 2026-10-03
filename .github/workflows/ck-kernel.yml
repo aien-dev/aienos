@@ -101,7 +101,8 @@ jobs:
           cp -r /tmp/ck-gates-work.*/logs/* "${RUNNER_TEMP}/ck-receipt/logs/" 2>/dev/null || true
           [ "${rc}" = 0 ] || exit 1
           # FPU and INFER are not required: they need the Rust target aarch64-unknown-none (and INFER the 800 MB model file), which this
-          # runner image is not known to have, so it prints NOT_RUN there (aienos#34 lane 0).
+          # runner image is not known to have, so it prints NOT_RUN there (aienos#34 lanes 0, 4 and 5; INFER now also
+          # requires the exact llama.cpp token sequence, "Paris" in the decoded text and a clean unload).
           # Every gate with a C implementation (source != missing in the
           # ck_gates.sh table) must be PASS.
           required=$(sed -n "/^CK_GATE_TABLE='/,/^'/p" scripts/ck_gates.sh | awk -F'|' 'NF==3 && $2!="missing" && $1!="FPU" && $1!="INFER" {print $1}')

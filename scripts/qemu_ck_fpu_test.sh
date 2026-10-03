@@ -6,7 +6,9 @@
 # add) and printed its results (aienos#34 lane 0).
 # Last line: AIENOS_CK_FPU: PASS|FAIL|NOT_RUN (read by scripts/ck_gates.sh).
 # NOT_RUN (never a silent pass) when cargo, the aarch64-unknown-none Rust
-# target, qemu or AAVMF is missing, or the machine quiet flag is held.
+# target, qemu or AAVMF is missing, the QEMU gate lock (~/workspace/
+# .qemu-gate-lock) is held by another gate run, or the machine quiet flag
+# (~/workspace/.spark-quiet) exists; this script never writes the quiet flag.
 # QEMU is not hardware: a PASS here qualifies nothing physical.
 #
 # FAIL when the script re-checks the serial lines itself and finds: no
@@ -17,7 +19,8 @@
 #
 # Usage: bash scripts/qemu_ck_fpu_test.sh               the gate
 #        bash scripts/qemu_ck_fpu_test.sh --self-test   canned logs, no QEMU/build
-# Environment: AIENOS_QEMU_TIMEOUT (180 s), AIENOS_QUIET_FLAG / AIENOS_QUIET_TAG,
+# Environment: AIENOS_QEMU_TIMEOUT (180 s), AIENOS_GATE_LOCK / AIENOS_GATE_TAG,
+# AIENOS_QUIET_FLAG (read only),
 # AIENOS_LOG_DIR, AIENOS_QEMU_VERBOSE.
 set -euo pipefail
 
@@ -92,22 +95,31 @@ CARGO_TARGET_DIR="${repo_root}/target/fpu-probe" cargo build -q --release --targ
     --manifest-path crates/aienos-fpu-probe/Cargo.toml
 make -s -C native/kernel CROSS="${cross}" OUT="${out}" AIENOS_COMMIT="${commit}" CK_RUST_LIBS="${lib}" >/dev/null
 
+# Machine-wide quiet flag: read only, never written here (Drake's rule: no
+# agent raises it without approval). If someone holds it: NOT_RUN.
 quiet_flag="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
-quiet_tag="${AIENOS_QUIET_TAG:-qemu_ck_fpu_test $$}"
-if ! ( set -C; echo "${quiet_tag}" > "${quiet_flag}" ) 2>/dev/null; then
+if [[ -e "${quiet_flag}" ]]; then
     echo "NOT_RUN  quiet flag ${quiet_flag} is held: $(head -c 200 "${quiet_flag}" 2>/dev/null || true)"
     echo "${verdict_name}: NOT_RUN"
     exit 3
 fi
-own_flag=1
-release_flag() {
-    if [[ "${own_flag}" == 1 ]]; then
-        own_flag=0
-        if [[ -f "${quiet_flag}" ]] && grep -qxF -- "${quiet_tag}" "${quiet_flag}"; then rm -f "${quiet_flag}"; fi
+# One QEMU gate at a time: exclusive create (set -C) of the gate lock.
+gate_lock="${AIENOS_GATE_LOCK:-${HOME}/workspace/.qemu-gate-lock}"
+gate_tag="${AIENOS_GATE_TAG:-qemu_ck_fpu_test $$}"
+if ! ( set -C; echo "${gate_tag}" > "${gate_lock}" ) 2>/dev/null; then
+    echo "NOT_RUN  QEMU gate lock ${gate_lock} is held: $(head -c 200 "${gate_lock}" 2>/dev/null || true)"
+    echo "${verdict_name}: NOT_RUN"
+    exit 3
+fi
+own_lock=1
+release_lock() {
+    if [[ "${own_lock}" == 1 ]]; then
+        own_lock=0
+        if [[ -f "${gate_lock}" ]] && grep -qxF -- "${gate_tag}" "${gate_lock}"; then rm -f "${gate_lock}"; fi
     fi
 }
 work="$(mktemp -d)"
-cleanup() { rm -rf "${work}"; release_flag; }
+cleanup() { rm -rf "${work}"; release_lock; }
 trap cleanup EXIT
 mkdir -p "${work}/esp/EFI/BOOT" "${work}/esp/EFI/AIENOS"
 touch "${work}/esp/EFI/AIENOS/BOOTREPORT.TXT"
@@ -128,7 +140,7 @@ timeout "${AIENOS_QEMU_TIMEOUT:-180}" qemu-system-aarch64 \
 qemu_status=$?
 set -e
 elapsed=$(( $(date +%s) - started ))
-release_flag
+release_lock
 
 tr -d '\r' <"${log}" >"${work}/serial.txt"
 [[ -z "${AIENOS_LOG_DIR:-}" ]] || cp "${work}/serial.txt" "${AIENOS_LOG_DIR}/qemu_ck_fpu_serial.log"
