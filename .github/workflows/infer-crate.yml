@@ -29,11 +29,19 @@ jobs:
         with:
           components: clippy, rustfmt
           targets: aarch64-unknown-none
+      - name: crate present?
+        id: present
+        run: |
+          if [ -d crates/aienos-infer ]; then echo "yes=true" >> "$GITHUB_OUTPUT"; else echo "crates/aienos-infer absent on this ref; nothing to check"; echo "yes=false" >> "$GITHUB_OUTPUT"; fi
       - name: fmt
+        if: steps.present.outputs.yes == 'true'
         run: cargo fmt -p aienos-infer --check
       - name: clippy
+        if: steps.present.outputs.yes == 'true'
         run: cargo clippy -p aienos-infer --all-targets -- -D warnings
       - name: test
+        if: steps.present.outputs.yes == 'true'
         run: cargo test -p aienos-infer
       - name: no_std build (aarch64-unknown-none)
+        if: steps.present.outputs.yes == 'true'
         run: cargo build -p aienos-infer --target aarch64-unknown-none
