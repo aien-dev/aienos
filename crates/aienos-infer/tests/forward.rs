@@ -1,3 +1,4 @@
+#![allow(clippy::chunks_exact_to_as_chunks)]
 //! Golden tests for the Llama-3.2-1B forward pass, tokenizer and greedy decode
 //! against llama.cpp (aienos#34 lanes 2+3).
 //!

@@ -6,6 +6,12 @@
 
 use core::f32::consts::{FRAC_PI_2, LN_2, LOG2_E, PI, TAU};
 
+/// Cody-Waite split of ln 2: the high part is exact in f32 (355/512), so the
+/// reduction `x - n*LN_2_HI` is exact for large |n|; the low part restores precision.
+#[allow(clippy::excessive_precision)] // exact f32 (355/512), written in full on purpose
+const LN_2_HI: f32 = 0.693_359_375;
+const LN_2_LO: f32 = -2.121_944_4e-4;
+
 /// Newton square root from a bit-trick seed (error ~1 ulp).
 pub fn sqrt(x: f32) -> f32 {
     if x <= 0.0 {
@@ -28,7 +34,8 @@ pub fn exp(x: f32) -> f32 {
     } else {
         (scaled - 0.5) as i32
     };
-    let r = x - n as f32 * LN_2;
+    // Cody-Waite two-part ln2 keeps the reduction exact for large |n|.
+    let r = (x - n as f32 * LN_2_HI) - n as f32 * LN_2_LO;
     let p = 1.0
         + r * (1.0
             + r * (0.5 + r * (1.0 / 6.0 + r * (1.0 / 24.0 + r * (1.0 / 120.0 + r / 720.0)))));

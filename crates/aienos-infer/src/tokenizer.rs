@@ -394,14 +394,12 @@ fn match_one(s: &str) -> usize {
     }
     // 3: 1..=3 digits
     if is_number(c0) {
-        let mut n = 0;
         let mut len = 0;
-        for c in s.chars() {
+        for (n, c) in s.chars().enumerate() {
             if n == 3 || !is_number(c) {
                 break;
             }
             len += c.len_utf8();
-            n += 1;
         }
         return len;
     }
@@ -458,7 +456,7 @@ mod tests {
         assert_eq!(byte_to_char(b'\n'), 'Ċ');
         assert_eq!(byte_to_char(0), 'Ā');
         assert_eq!(byte_to_char(127), 'ġ');
-        assert_eq!(byte_to_char(173), 'ĭ');
+        assert_eq!(byte_to_char(173), 'Ń');
         for b in 0..=255u8 {
             assert_eq!(char_to_byte(byte_to_char(b)), Some(b));
         }
