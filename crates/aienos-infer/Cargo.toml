@@ -1,0 +1,11 @@
+[package]
+name = "aienos-infer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "no_std GGUF reader and ggml block dequantizers for native AIENOS inference"
+
+[lib]
+path = "src/lib.rs"
