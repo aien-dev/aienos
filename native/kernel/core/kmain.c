@@ -141,6 +141,9 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     /* One FP/SIMD-enabled Rust unit (core/fpu.c), probe build only. */
     ck_fpu_run();
 
+    /* Ingest the GGUF over fw_cfg and call the Rust inference unit (core/infer.c), probe build only. */
+    ck_infer_run();
+
     /* M3 isolation checks (core/m3.c), before any stage registers an IRQ. */
     ck_m3_run();
 

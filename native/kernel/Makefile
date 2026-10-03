@@ -158,6 +158,23 @@ $(error CK_RUST_LIBS (FP probe, QEMU gate only) cannot be combined with CK_HARDW
 endif
 CK_EXTRA_CFLAGS += -DCK_FPU_PROBE=1
 endif
+
+# Inference ingest probe (aienos#34 lane 4): CK_INFER_LIB=<path to
+# libaienos_infer_kernel.a> links that Rust no_std staticlib (aienos-infer +
+# bump allocator) and compiles core/infer.c (-DCK_INFER_PROBE=1): the kernel
+# ingests a GGUF from QEMU fw_cfg and calls the Rust unit. C flags stay
+# -mgeneral-regs-only. QEMU gate only; not combinable with CK_RUST_LIBS (two
+# Rust staticlibs would duplicate compiler_builtins) nor hardware staging.
+CK_INFER_LIB ?=
+ifneq ($(strip $(CK_INFER_LIB)),)
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_INFER_LIB (inference probe, QEMU gate only) cannot be combined with CK_HARDWARE_STAGING)
+endif
+ifneq ($(strip $(CK_RUST_LIBS)),)
+$(error CK_INFER_LIB and CK_RUST_LIBS cannot be combined: two Rust staticlibs duplicate compiler_builtins)
+endif
+CK_EXTRA_CFLAGS += -DCK_INFER_PROBE=1
+endif
 ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),)
 ifneq ($(strip $(CK_HARDWARE_STAGING)),)
 $(error CK_QEMU_UNSAFE_DMA (unconfined DMA, QEMU debug only) cannot be combined with CK_HARDWARE_STAGING: no SMMU confinement means no DMA)
@@ -346,7 +363,7 @@ CORE_C := $(BOOT)/efi_main.c \
 	$(KDIR)/core/acpi.c $(KDIR)/core/console.c $(KDIR)/core/fmt.c \
 	$(KDIR)/core/kmain.c $(KDIR)/core/handoff_check.c $(KDIR)/core/libc_min.c $(KDIR)/core/report.c \
 	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c \
-	$(KDIR)/core/fpu.c $(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c $(KDIR)/core/smp.c \
+	$(KDIR)/core/fpu.c $(KDIR)/core/infer.c $(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c $(KDIR)/core/smp.c \
 	$(KDIR)/mm/frames.c $(KDIR)/mm/heap.c $(KDIR)/mm/mmu.c $(KDIR)/mm/pt.c
 # P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
 # (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
@@ -451,6 +468,9 @@ ART_HDRS := $(wildcard $(NATIVE)/sig/*.h $(NATIVE)/argus/sha256.h $(KDIR)/svc/co
 $(ART_OBJS): KCFLAGS += $(ART_INC)
 $(ART_OBJS): $(ART_HDRS)
 
+# core/infer.c uses the in-core SHA-256 (argus) to prove the ingested bytes.
+$(KOBJ)/kernel/core/infer.o: KCFLAGS += -I$(NATIVE)/argus
+
 $(OUT)/trust.stamp: FORCE
 	@mkdir -p $(OUT)
 	@echo '$(ART_TRUST_FLAGS)' | cmp -s - $@ || echo '$(ART_TRUST_FLAGS)' > $@
@@ -473,8 +493,12 @@ $(foreach s,$(STAGE_SRCS),$(eval $(call stage_rule,$(s))))
 
 # fwcfg_check(elf): a default image (no CK_TEST_FWCFG_ARTIFACTS) must carry no
 # fw_cfg artifact code or strings; a test image must carry its announcement.
+# The inference probe image (CK_INFER_LIB, aienos#34 lane 4) reads its model over
+# fw_cfg by design: it must carry its own TEST-ONLY announcement instead.
 define fwcfg_check
-	@if [ "$(strip $(CK_TEST_FWCFG_ARTIFACTS))" = 1 ]; then \
+	@if [ -n "$(strip $(CK_INFER_LIB))" ]; then \
+	  grep -aqF "TEST-ONLY QEMU fw_cfg model ingest" $(1) || { echo "inference probe image lacks its TEST-ONLY fw_cfg announcement"; rm -f $(1); exit 1; }; \
+	elif [ "$(strip $(CK_TEST_FWCFG_ARTIFACTS))" = 1 ]; then \
 	  grep -aqF "TEST-ONLY QEMU fw_cfg side channel" $(1) || { echo "test fw_cfg image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
 	else \
 	  s=$$(grep -aoE "opt/aienos/artifacts|fw_cfg|QEMU0002" $(1) | sort -u | tr "\n" " "); \
@@ -561,14 +585,14 @@ define pe_image
 endef
 
 $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
-	$(call link_image,$@,$(CORE_OBJS) $(CK_RUST_LIBS))
+	$(call link_image,$@,$(CORE_OBJS) $(CK_RUST_LIBS) $(CK_INFER_LIB))
 	@s=$$($(KNM) $@ | grep -E ' [TtDdBbWwVv] ck_stage_(devices|security|store|quiesce)$$' || true); \
 	if [ -n "$$s" ]; then echo "core image defines stage symbols: $$s"; rm -f $@; exit 1; fi
 	$(call fwcfg_check,$@)
 	$(call smp_check,$@)
 
 $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
-	$(call link_image,$@,$(CORE_OBJS) $(STAGE_LINK) $(CK_RUST_LIBS))
+	$(call link_image,$@,$(CORE_OBJS) $(STAGE_LINK) $(CK_RUST_LIBS) $(CK_INFER_LIB))
 	@for s in ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce ck_stage_disk_artifacts; do \
 	  $(KNM) $@ | grep -qE " [TW] $$s$$" || { echo "full image lacks $$s"; rm -f $@; exit 1; }; done
 	$(call fwcfg_check,$@)
