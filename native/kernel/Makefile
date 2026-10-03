@@ -145,6 +145,19 @@ CK_EXTRA_CFLAGS ?=
 # no SMMU exists. Never with hardware staging.
 CK_QEMU_UNSAFE_DMA ?=
 CK_HARDWARE_STAGING ?=
+
+# FP/SIMD probe (aienos#34 lane 0): CK_RUST_LIBS=<path to libaienos_fpu_probe.a>
+# links that Rust no_std staticlib into the image and compiles core/fpu.c's
+# probe (-DCK_FPU_PROBE=1). The C compile flags stay -mgeneral-regs-only; only
+# the Rust unit uses FP/SIMD. Empty (default) = no Rust, no FP code. QEMU
+# gate only: never combined with hardware staging.
+CK_RUST_LIBS ?=
+ifneq ($(strip $(CK_RUST_LIBS)),)
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_RUST_LIBS (FP probe, QEMU gate only) cannot be combined with CK_HARDWARE_STAGING)
+endif
+CK_EXTRA_CFLAGS += -DCK_FPU_PROBE=1
+endif
 ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),)
 ifneq ($(strip $(CK_HARDWARE_STAGING)),)
 $(error CK_QEMU_UNSAFE_DMA (unconfined DMA, QEMU debug only) cannot be combined with CK_HARDWARE_STAGING: no SMMU confinement means no DMA)
@@ -333,7 +346,7 @@ CORE_C := $(BOOT)/efi_main.c \
 	$(KDIR)/core/acpi.c $(KDIR)/core/console.c $(KDIR)/core/fmt.c \
 	$(KDIR)/core/kmain.c $(KDIR)/core/handoff_check.c $(KDIR)/core/libc_min.c $(KDIR)/core/report.c \
 	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c \
-	$(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c $(KDIR)/core/smp.c \
+	$(KDIR)/core/fpu.c $(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c $(KDIR)/core/smp.c \
 	$(KDIR)/mm/frames.c $(KDIR)/mm/heap.c $(KDIR)/mm/mmu.c $(KDIR)/mm/pt.c
 # P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
 # (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
@@ -548,14 +561,14 @@ define pe_image
 endef
 
 $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
-	$(call link_image,$@,$(CORE_OBJS))
+	$(call link_image,$@,$(CORE_OBJS) $(CK_RUST_LIBS))
 	@s=$$($(KNM) $@ | grep -E ' [TtDdBbWwVv] ck_stage_(devices|security|store|quiesce)$$' || true); \
 	if [ -n "$$s" ]; then echo "core image defines stage symbols: $$s"; rm -f $@; exit 1; fi
 	$(call fwcfg_check,$@)
 	$(call smp_check,$@)
 
 $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
-	$(call link_image,$@,$(CORE_OBJS) $(STAGE_LINK))
+	$(call link_image,$@,$(CORE_OBJS) $(STAGE_LINK) $(CK_RUST_LIBS))
 	@for s in ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce ck_stage_disk_artifacts; do \
 	  $(KNM) $@ | grep -qE " [TW] $$s$$" || { echo "full image lacks $$s"; rm -f $@; exit 1; }; done
 	$(call fwcfg_check,$@)
