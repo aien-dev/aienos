@@ -20,8 +20,15 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod decode;
 pub mod gguf;
 pub mod half;
+pub mod math;
+pub mod model;
 pub mod quant;
+pub mod tokenizer;
 
+pub use decode::{argmax, generate_greedy, DecodeState};
 pub use gguf::{ArrayView, GgmlType, Gguf, GgufError, TensorInfo, Value, ValueType};
+pub use model::{InferError, Model};
+pub use tokenizer::Tokenizer;
