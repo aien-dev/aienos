@@ -106,7 +106,6 @@ static int esp_model(int argc, char **argv, uint32_t bs, uint64_t blocks, uint64
 static int cmd_create(int argc, char **argv)
 {
     if (argc < 6) return usage();
-    if (argc > 6 && strcmp(argv[5], "esp-model") != 0) return usage();
     uint32_t bs = (uint32_t)strtoul(argv[3], NULL, 10);
     uint64_t mib = strtoull(argv[4], NULL, 10);
     if ((bs != 512 && bs != 4096) || mib < 16 || mib > 1048576) return usage();
