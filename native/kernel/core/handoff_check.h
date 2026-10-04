@@ -1,5 +1,5 @@
 /* handoff_check.h -- pure validator of the loader -> kernel handoff record
- * (docs/BOOT_HANDOFF_CONTRACT.md section 6, CHANDOF1 v1). No I/O, no
+ * (docs/BOOT_HANDOFF_CONTRACT.md section 6, CHANDOF3). No I/O, no
  * globals the caller can see; host tested by tests/test_handoff.c. */
 #ifndef AIENOS_CK_HANDOFF_CHECK_H
 #define AIENOS_CK_HANDOFF_CHECK_H
@@ -14,7 +14,7 @@
 /* UEFI EFI_MEMORY_DESCRIPTOR_VERSION. */
 #define CK_HANDOFF_DESC_VERSION 1u
 
-/* Returns 0 when h is an acceptable CHANDOF1 record. Otherwise returns -1
+/* Returns 0 when h is an acceptable CHANDOF3 record. Otherwise returns -1
  * and sets *why to the refusal reason without the "handoff: " prefix
  * (for example "bad magic"); the kernel panics with "handoff: <why>".
  * *why may point at a static buffer overwritten by the next call. */

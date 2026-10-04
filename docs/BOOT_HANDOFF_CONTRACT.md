@@ -45,7 +45,7 @@ There is **no Rust loader to C kernel handoff in the code**. Three facts:
    exists anywhere (ADR 0024 Q3).
 
 So this contract freezes the record the C kernel already accepts
-(`ck_handoff`, magic `CHANDOF2`) as the **one** entry ABI. Any loader (the C
+(`ck_handoff`, magic `CHANDOF3`) as the **one** entry ABI. Any loader (the C
 stub today; the Rust loader only if Q3 is reopened; Atlas later) must produce
 exactly this record. The Rust loader is not extended by this document.
 
@@ -68,7 +68,7 @@ little endian). **They are not compiler-checked**: the code cut in section
 
 | Off | Size | Field | Meaning | Producer | Kernel reads it? |
 | --- | --- | --- | --- | --- | --- |
-| 0 | 8 | `magic` | `CK_HANDOFF_MAGIC` = `0x32464f444e414843`, ASCII `CHANDOF2` little endian (`handoff.h`). `CK_HANDOFF_MAGIC_V1` (`CHANDOF1`, the 112-byte layout) is refused | `efi_main.c` | yes, `kmain.c`, `core/handoff_check.c` |
+| 0 | 8 | `magic` | `CK_HANDOFF_MAGIC` = `0x33464f444e414843`, ASCII `CHANDOF3` little endian (`handoff.h`). `CHANDOF1` (the 112-byte layout) and `CHANDOF2` (the 192-byte layout) are refused as `unsupported version 1` / `2` | `efi_main.c` | yes, `kmain.c`, `core/handoff_check.c` |
 | 8 | 4 | `firmware_el` | `CurrentEL` at UEFI entry | `efi_main.c:61,63` | yes, report only `kmain.c:57` |
 | 12 | 4 | `desc_version` | UEFI memory descriptor version from `GetMemoryMap` | `efi_main.c:128` | **no** (never checked) |
 | 16 | 8 | `firmware_ttbr0` | `TTBR0_EL2` (or EL1) of the firmware regime | `efi_main.c:67,70` | yes, report only `kmain.c:53` |
@@ -93,16 +93,24 @@ little endian). **They are not compiler-checked**: the code cut in section
 | 176 | 8 | `model_disk_last_block` | `EFI_BLOCK_IO_MEDIA.LastBlock` of the matched whole disk | `efi_model.c` | report only |
 | 184 | 4 | `model_block_size` | 512 or 4096 | `efi_model.c` | yes, `core/handoff_check.c` |
 | 188 | 4 | `reserved1` | zero; refused if nonzero | zero (BSS) | yes, `core/handoff_check.c` |
-| 192 | | end | total size 192 bytes (`_Static_assert` in `handoff.h`) | | |
+| 192 | 8 | `fb_base` | CHANDOF3: `FrameBufferBase` of the chosen GOP mode (physical address of pixel (0,0), UEFI 2.10 section 12.9.2); 0 unless `fb_status` is 1 | `efi_gop.c` | yes, `core/handoff_check.c`, mapped Device-nGnRE by `mm/mmu.c` (`ck_mmio_map`) |
+| 200 | 8 | `fb_size` | `FrameBufferSize`; must be at least `fb_pitch * fb_height * 4` | `efi_gop.c` | yes, `core/handoff_check.c` |
+| 208 | 4 | `fb_width` | `HorizontalResolution`, 1..16384 | `efi_gop.c` | yes, check + `core/fbcon.c` |
+| 212 | 4 | `fb_height` | `VerticalResolution`, 1..16384 | `efi_gop.c` | yes, check + `core/fbcon.c` |
+| 216 | 4 | `fb_pitch` | `PixelsPerScanLine` (pixels, not bytes), `fb_width`..16384 | `efi_gop.c` | yes, check + `core/fbcon.c` |
+| 220 | 4 | `fb_format` | `EFI_GRAPHICS_PIXEL_FORMAT`: 0 RGBX or 1 BGRX when present; with `fb_status` 2 the format the first GOP reported (report only) | `efi_gop.c` | yes, `core/handoff_check.c` |
+| 224 | 4 | `fb_status` | 0 `CK_HANDOFF_FB_NONE` (no GOP; every `fb_*` field zero), 1 `CK_HANDOFF_FB_PRESENT`, 2 `CK_HANDOFF_FB_NO_LINEAR` (GOP present, only `PixelBitMask`/`PixelBltOnly`; `fb_base`/`fb_size` zero); other values refused | `efi_gop.c` | yes, `core/handoff_check.c`, `core/kmain.c` |
+| 228 | 4 | `fb_gop_handles` | GOP handles `LocateHandleBuffer` returned (report only; nonzero unless `fb_status` is 0) | `efi_gop.c` | check only |
+| 232 | | end | total size 232 bytes (`_Static_assert` in `handoff.h`) | | |
 
 ### 3.1 Inputs the task asked about that are not in the record
 
 | Input | Status today | Where it comes from instead |
 | --- | --- | --- |
-| Version field | The version is the trailing digit inside the magic (`CHANDOF2`, `handoff.h`); a new layout gets a new magic, there is no separate version number. `CHANDOF2` (2026-10-04) appended the boot-disk model block (offsets 112..192, section 3). `CHANDOF1` records are refused (`handoff_check.c`, `test_handoff.c` case 2). | |
-| Record size field | **MISSING.** The magic fixes the size: `CHANDOF1` = 112 bytes, `CHANDOF2` = 192 bytes (`_Static_assert` in `handoff.h`). | |
+| Version field | The version is the trailing digit inside the magic (`CHANDOF3`, `handoff.h`); a new layout gets a new magic, there is no separate version number. `CHANDOF2` (2026-10-04) appended the boot-disk model block (offsets 112..192), `CHANDOF3` (2026-10-04, L6-C) the GOP framebuffer block (offsets 192..232, section 3). `CHANDOF1` and `CHANDOF2` records are refused with `handoff: unsupported version <n> (kernel reads CHANDOF3 only)` (`handoff_check.c`, `test_handoff.c` case 2; QEMU: the AIENOS_CK_SCREEN negative control). | |
+| Record size field | **MISSING.** The magic fixes the size: `CHANDOF1` = 112 bytes, `CHANDOF2` = 192 bytes, `CHANDOF3` = 232 bytes (`_Static_assert` in `handoff.h`). | |
 | DTB pointer | **MISSING.** The C kernel is ACPI only (no `fdt`/`dtb` symbol anywhere in `native/`). Not part of v1. | |
-| Framebuffer (GOP) | **MISSING** in `ck_handoff`. The Rust loader captures one (`crates/aienos-boot/src/handoff.rs:1170-1178`, type `crates/aienos-kernel/src/display/mod.rs:22-30`), the C stub does not. Not part of v1. | |
+| Framebuffer (GOP) | **In the record since `CHANDOF3`** (offsets 192..232). The stub (`native/boot/efi_gop.c`) takes the GOP on ConOut's handle when it has a linear 32-bit framebuffer, else the first GOP handle that does; it reads the current mode only (no `SetMode`, no `Blt`). The kernel maps the visible bytes (`fb_pitch * fb_height * 4`) Device-nGnRE with `ck_mmio_map` when they lie outside every RAM range it maps write-back, else refuses the screen and says so on the UART (`screen: refused ...`). It then mirrors every console line on screen (`core/fbcon.c`: 8x8 font, white on black, half-scroll). No GOP: `screen: none ...` on the UART and the boot goes on. | |
 | Console UART | Not in the record. The stub parses SPCR and configures the console **inside the shared image** (`efi_main.c:91-95`); the kernel inherits that state through static variables, not through the record. A separately linked kernel would get no console. **MISSING** for that case. | |
 | Entropy | Not in the record. The kernel probes `RNDR` itself and fails closed (`kmain.c:121-132`, `arch/rndr.c`). No loader-supplied seed; PROPOSED: never accept one (a loader seed would be an unverified input). | |
 | Owner key material (after #215) | Not in the record. Owner **public** keys and machine id are compiled into the hardware staging image at build time (`native/kernel/Makefile:97-125`, `CK_OWNER_PUBKEYS`, `CK_MACHINE_ID`). PROPOSED: the handoff never carries key material. | |
@@ -178,7 +186,7 @@ panic: <reason>
 | --- | --- | --- |
 | `h == NULL` | **not checked**: `kmain.c:174` dereferences | PROPOSED `panic: handoff: null record` |
 | bad magic | CODE `kmain.c:174-175` | `panic: handoff: bad magic` (exists, frozen) |
-| unknown newer magic `CHANDOF<n>` | refused as bad magic (same line) | PROPOSED `panic: handoff: unsupported version <n>` |
+| unknown newer magic `CHANDOF<n>` | CODE `core/handoff_check.c` (any `CHANDOF<digit>` other than 3, including the old 1 and 2) | `panic: handoff: unsupported version <n> (kernel reads CHANDOF3 only)` |
 | `reserved0 != 0` | **not checked** | PROPOSED `panic: handoff: reserved field nonzero` |
 | `desc_size < 40` or not a multiple of 8 | partly: `< 40` makes `ck_frames_from_efi` return -1 and the kernel panics `mm: no usable memory in the UEFI map` (`mm/frames.c:95`, `mm/mmu.c:113-116`) | PROPOSED `panic: handoff: bad descriptor size <n>` |
 | `desc_version != 1` | **not checked** | PROPOSED `panic: handoff: bad descriptor version <n>` (value 1 per UEFI `EFI_MEMORY_DESCRIPTOR_VERSION`, UNVERIFIED in this cut) |
@@ -193,6 +201,8 @@ panic: <reason>
 | model present with `model_len == 0`, `model_base` not 4 KiB aligned, base+len overflow, `model_block_size` not 512/4096, or `model_extents` 0 or > 128 | CODE `core/handoff_check.c`, `tests/test_handoff.c` case 7 | `handoff: bad model range` / `model base unaligned` / `model range overflow` / `bad model block size` / `bad model extents` |
 | no model (`model_flags == 0`) but any model field or `model_sha256` byte nonzero | CODE `core/handoff_check.c` | `handoff: model fields without model` |
 | `reserved1 != 0` | CODE `core/handoff_check.c` | `handoff: reserved1 field nonzero` |
+| `fb_status` not 0/1/2; `fb_status` 0 with any `fb_*` field nonzero; `fb_status` 2 with `fb_base`/`fb_size` set or no GOP handle; `fb_status` 1 with `fb_format` not 0/1, width/height 0 or > 16384, pitch < width or > 16384, base 0 or not 4-byte aligned, `fb_size < fb_pitch * fb_height * 4`, base+size overflow, or no GOP handle | CODE `core/handoff_check.c`, `tests/test_handoff.c` case 8 | `handoff: bad fb status <n>` / `fb fields without gop` / `fb range without linear framebuffer <n>` / `bad fb gop handles 0` / `bad fb format <n>` / `bad fb width <n>` / `bad fb height <n>` / `bad fb pitch <n>` / `bad fb base <n>` / `fb size too small <n>` / `fb range overflow <n>` |
+| framebuffer overlaps a RAM range the kernel maps write-back | CODE `mm/mmu.c` (not a panic: no screen) | `screen: refused (framebuffer 0x<base>+0x<len> overlaps RAM mapped write-back); report on UART only` |
 | declared `model_sha256` differs from the SHA-256 of the loaded bytes | CODE `core/infer.c` (not a panic: the kernel refuses to decode and reports `AIENOS_CK_INFER: FAIL`) | `infer: sha256 mismatch declared=<hex>` |
 
 Every PROPOSED check runs **before** `ck_mm_build` (before the first frame
@@ -273,7 +283,7 @@ QEMU only; Machine 1 is NOT_RUN.
 
 ## 8. Frozen forever vs extensible
 
-**Frozen (v2, `CHANDOF2`; v1 `CHANDOF1` is superseded and refused):** the magic value; the 192-byte layout and every
+**Frozen (v3, `CHANDOF3`; v1 `CHANDOF1` and v2 `CHANDOF2` are superseded and refused):** the magic value; the 232-byte layout and every
 offset in section 3; the meaning of every field; `x0` = record address;
 `ExitBootServices` done before the call; the reserved-range rules in
 section 5; the `panic: handoff: bad magic` line; "no rollback state and no
@@ -291,7 +301,7 @@ Host unit tests (no QEMU) against a PROPOSED pure validator, each with the
 exact refusal line from section 6:
 
 1. NULL record.
-2. Magic off by one bit; the old magic `CHANDOF1` (DONE: `tests/test_handoff.c` case 2).
+2. Magic off by one bit; the old magics `CHANDOF1` and `CHANDOF2` and a future `CHANDOF4` (DONE: `tests/test_handoff.c` case 2; `CHANDOF2` also in QEMU, `scripts/qemu_ck_screen_test.sh` negative control).
 3. `reserved0 = 1`.
 4. `desc_size` 0, 39, 41 (not a multiple of 8).
 5. `desc_version` 0 and 2.

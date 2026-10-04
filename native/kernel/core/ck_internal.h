@@ -21,6 +21,14 @@ int ck_console_set_uart(const struct ck_spcr *spcr);
 /* Name of the active UART driver for the report, e.g. "pl011". */
 const char *ck_console_uart_name(void);
 uint64_t ck_console_uart_base(void);
+/* GOP framebuffer console (core/fbcon.c): set up and clear the screen, then
+ * mirror every console byte on it. -1 if the geometry is unusable. */
+int ck_console_set_fb(volatile void *base, uint32_t width, uint32_t height, uint32_t pitch,
+                      uint32_t format);
+/* 0 and the grid while the screen console is on, else -1. */
+int ck_console_fb_info(uint32_t *scale, uint32_t *cols, uint32_t *rows);
+/* Called by ck_reset: hold the screen CK_FB_HOLD_S seconds (build knob). */
+void ck_console_fb_hold(void);
 
 /* ---- report (core/report.c) ---- */
 void ck_set_stage(const char *name);
@@ -38,6 +46,9 @@ __attribute__((noreturn)) void ck_fault_report(const char *what, uint64_t esr, u
                                                uint64_t elr, unsigned el);
 
 /* ---- memory (mm/mmu.c) ---- */
+#define CK_MM_FB_NONE 0u
+#define CK_MM_FB_MAPPED 1u
+#define CK_MM_FB_OVERLAPS_RAM 2u
 struct ck_mm_report {
     uint64_t root;
     uint64_t pt_tables;
@@ -45,6 +56,10 @@ struct ck_mm_report {
     uint64_t heap_lo, heap_hi, heap_guard_lo, heap_guard_hi;
     uint64_t dma_lo, dma_hi;
     uint64_t ram_ranges, free_bytes;
+    /* CHANDOF3 framebuffer: CK_MM_FB_NONE / _MAPPED (Device-nGnRE, ck_mmio_map)
+     * / _OVERLAPS_RAM (refused: inside a RAM range mapped write-back). */
+    uint32_t fb_map;
+    uint64_t fb_map_bytes;
 };
 /* EL2/firmware phase: frames from the map, our tables, stack, heap, DMA pool.
  * Returns the stack top for the EL1 entry. */

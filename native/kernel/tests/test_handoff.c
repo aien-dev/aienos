@@ -77,12 +77,23 @@ int main(void)
     /* 1. NULL record */
     expect(0, "handoff: null record");
 
-    /* 2. bad magic: one bit off; CHANDOF1 (the previous layout) and 0 */
+    /* 2. bad magic: one bit off and 0; the previous layouts CHANDOF1 and
+     * CHANDOF2 and a future CHANDOF4 get the "unsupported version" line
+     * (contract section 6), a non-digit version byte is plain bad magic. */
     h = good();
-    h.magic ^= 1;
+    h.magic ^= 1ull << 8;
     expect(&h, "handoff: bad magic");
     h = good();
     h.magic = CK_HANDOFF_MAGIC_V1;
+    expect(&h, "handoff: unsupported version 1 (kernel reads CHANDOF3 only)");
+    h = good();
+    h.magic = CK_HANDOFF_MAGIC_V2;
+    expect(&h, "handoff: unsupported version 2 (kernel reads CHANDOF3 only)");
+    h = good();
+    h.magic = CK_HANDOFF_MAGIC_STEM | (uint64_t)'4' << 56;
+    expect(&h, "handoff: unsupported version 4 (kernel reads CHANDOF3 only)");
+    h = good();
+    h.magic = CK_HANDOFF_MAGIC_STEM | (uint64_t)'X' << 56;
     expect(&h, "handoff: bad magic");
     h = good();
     h.magic = 0;
@@ -181,6 +192,72 @@ int main(void)
     h = m;
     h.model_flags = CK_HANDOFF_MODEL_PRESENT;
     expect(&h, "");
+
+    /* 8. CHANDOF3 framebuffer fields (contract section 3): absent GOP must be
+     * all zero; a GOP without a linear framebuffer carries no range; a
+     * present framebuffer (the Spark's Linux view: 1920x1080, 7680-byte
+     * stride, 32 bpp; QEMU ramfb) passes the geometry checks. */
+    h = good();
+    h.fb_width = 800;
+    expect(&h, "handoff: fb fields without gop");
+    h = good();
+    h.fb_gop_handles = 1;
+    expect(&h, "handoff: fb fields without gop");
+    h = good();
+    h.fb_status = 3;
+    expect(&h, "handoff: bad fb status 3");
+    h = good();
+    h.fb_status = CK_HANDOFF_FB_NO_LINEAR;
+    h.fb_gop_handles = 1;
+    h.fb_format = 3; /* PixelBltOnly, recorded for the report */
+    expect(&h, "");
+    h.fb_base = 0x80000000ull;
+    expect(&h, "handoff: fb range without linear framebuffer 0");
+    h.fb_base = 0;
+    h.fb_gop_handles = 0;
+    expect(&h, "handoff: bad fb gop handles 0");
+    struct ck_handoff f = good();
+    f.fb_status = CK_HANDOFF_FB_PRESENT;
+    f.fb_base = 0x1f0000000ull;
+    f.fb_size = 1920ull * 1080 * 4;
+    f.fb_width = 1920;
+    f.fb_height = 1080;
+    f.fb_pitch = 1920;
+    f.fb_format = CK_HANDOFF_FB_BGRX;
+    f.fb_gop_handles = 1;
+    expect(&f, "");
+    h = f;
+    h.fb_format = CK_HANDOFF_FB_RGBX;
+    expect(&h, "");
+    h = f;
+    h.fb_format = 2; /* PixelBitMask is never PRESENT */
+    expect(&h, "handoff: bad fb format 2");
+    h = f;
+    h.fb_width = 0;
+    expect(&h, "handoff: bad fb width 0");
+    h = f;
+    h.fb_height = 16385;
+    expect(&h, "handoff: bad fb height 16385");
+    h = f;
+    h.fb_pitch = 1919;
+    expect(&h, "handoff: bad fb pitch 1919");
+    h = f;
+    h.fb_pitch = 2048; /* padded scan lines: size must cover pitch, not width */
+    expect(&h, "handoff: fb size too small 8294400");
+    h.fb_size = 2048ull * 1080 * 4;
+    expect(&h, "");
+    h = f;
+    h.fb_base = 0;
+    expect(&h, "handoff: bad fb base 0");
+    h = f;
+    h.fb_base = 0x1f0000002ull;
+    expect(&h, "handoff: bad fb base 8321499138");
+    h = f;
+    h.fb_base = ~0ull - 4095;
+    expect(&h, "handoff: fb range overflow 8294400");
+    h = f;
+    h.fb_gop_handles = 0;
+    expect(&h, "handoff: bad fb gop handles 0");
 
     /* Check order: the first failing field is reported. */
     h = good();

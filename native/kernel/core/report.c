@@ -66,6 +66,7 @@ void ck_reset(void)
         quiescing = 1; /* a panic inside the hook resets without it */
         ck_stage_quiesce();
     }
+    ck_console_fb_hold();
     ck_mb();
     psci_call(0x84000009u); /* PSCI SYSTEM_RESET */
     psci_call(0x84000008u); /* SYSTEM_OFF if reset was refused */

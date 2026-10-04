@@ -4,20 +4,37 @@
  *
  * CHANDOF2 (2026-10-04, aienos#34 lane 6): CHANDOF1 plus the yardstick
  * model's bytes, read by the stub from the boot disk before ExitBootServices
- * (native/boot/efi_model.c, map format native/boot/model_map.h). Per the
- * contract (docs/BOOT_HANDOFF_CONTRACT.md section 8) a new layout gets a new
- * magic; a kernel built for CHANDOF2 refuses CHANDOF1 as "bad magic". */
+ * (native/boot/efi_model.c, map format native/boot/model_map.h).
+ * CHANDOF3 (2026-10-04, L6-C): CHANDOF2 plus the UEFI Graphics Output
+ * Protocol linear framebuffer the stub found before ExitBootServices
+ * (native/boot/efi_gop.c), so the kernel can show its report on a screen
+ * (core/fbcon.c). Per the contract (docs/BOOT_HANDOFF_CONTRACT.md section 8)
+ * a new layout gets a new magic; a kernel built for CHANDOF3 refuses
+ * CHANDOF1 and CHANDOF2 as "unsupported version <n>". */
 #ifndef AIENOS_CK_HANDOFF_H
 #define AIENOS_CK_HANDOFF_H
 #include <stdint.h>
 #include <stddef.h>
 
-#define CK_HANDOFF_MAGIC 0x32464f444e414843ull    /* "CHANDOF2" */
+#define CK_HANDOFF_MAGIC 0x33464f444e414843ull    /* "CHANDOF3" */
 #define CK_HANDOFF_MAGIC_V1 0x31464f444e414843ull /* "CHANDOF1": refused */
+#define CK_HANDOFF_MAGIC_V2 0x32464f444e414843ull /* "CHANDOF2": refused */
+/* The seven bytes "CHANDOF" (little endian, low 56 bits); the top byte is
+ * the ASCII version digit. */
+#define CK_HANDOFF_MAGIC_STEM 0x00464f444e414843ull
 
 /* model_flags */
 #define CK_HANDOFF_MODEL_PRESENT 1u /* model_base/model_len hold the model */
 #define CK_HANDOFF_MODEL_BLOCKIO 2u /* read through UEFI Block I/O from MODEL.MAP */
+
+/* fb_status (CHANDOF3) */
+#define CK_HANDOFF_FB_NONE 0u      /* no Graphics Output Protocol: every fb_* field zero */
+#define CK_HANDOFF_FB_PRESENT 1u   /* linear 32-bit framebuffer, fb_format 0 (RGBX) or 1 (BGRX) */
+#define CK_HANDOFF_FB_NO_LINEAR 2u /* GOP found, but PixelBitMask/PixelBltOnly: fb_base/fb_size zero */
+/* fb_format: EFI_GRAPHICS_PIXEL_FORMAT (UEFI 2.10 section 12.9.2) */
+#define CK_HANDOFF_FB_RGBX 0u /* PixelRedGreenBlueReserved8BitPerColor: byte 0 red */
+#define CK_HANDOFF_FB_BGRX 1u /* PixelBlueGreenRedReserved8BitPerColor: byte 0 blue */
+#define CK_HANDOFF_FB_MAX_DIM 16384u /* refused above this width/height/pitch */
 
 struct ck_handoff {
     uint64_t magic;
@@ -46,10 +63,20 @@ struct ck_handoff {
     uint64_t model_disk_last_block; /* EFI_BLOCK_IO_MEDIA.LastBlock of the disk */
     uint32_t model_block_size; /* EFI_BLOCK_IO_MEDIA.BlockSize of the disk */
     uint32_t reserved1;        /* zero */
+    /* CHANDOF3: the GOP framebuffer (EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE and its
+     * Info, UEFI 2.10 section 12.9.2), or all zero without a GOP. */
+    uint64_t fb_base;          /* FrameBufferBase: physical, pixel (0,0) */
+    uint64_t fb_size;          /* FrameBufferSize, bytes */
+    uint32_t fb_width;         /* HorizontalResolution, pixels */
+    uint32_t fb_height;        /* VerticalResolution, pixels */
+    uint32_t fb_pitch;         /* PixelsPerScanLine (pixels, not bytes) */
+    uint32_t fb_format;        /* CK_HANDOFF_FB_RGBX / _BGRX (EFI enum value) */
+    uint32_t fb_status;        /* CK_HANDOFF_FB_* */
+    uint32_t fb_gop_handles;   /* GOP handles the stub saw (report only) */
 };
-/* Layout pins for the frozen CHANDOF2 record (docs/BOOT_HANDOFF_CONTRACT.md
+/* Layout pins for the frozen CHANDOF3 record (docs/BOOT_HANDOFF_CONTRACT.md
  * section 3, LP64): a reorder, resize or new field fails the build. */
-_Static_assert(sizeof(struct ck_handoff) == 192, "ck_handoff size");
+_Static_assert(sizeof(struct ck_handoff) == 232, "ck_handoff size");
 _Static_assert(offsetof(struct ck_handoff, magic) == 0, "ck_handoff.magic offset");
 _Static_assert(offsetof(struct ck_handoff, firmware_el) == 8, "ck_handoff.firmware_el offset");
 _Static_assert(offsetof(struct ck_handoff, desc_version) == 12, "ck_handoff.desc_version offset");
@@ -75,6 +102,14 @@ _Static_assert(offsetof(struct ck_handoff, model_read_us) == 168, "ck_handoff.mo
 _Static_assert(offsetof(struct ck_handoff, model_disk_last_block) == 176, "ck_handoff.model_disk_last_block offset");
 _Static_assert(offsetof(struct ck_handoff, model_block_size) == 184, "ck_handoff.model_block_size offset");
 _Static_assert(offsetof(struct ck_handoff, reserved1) == 188, "ck_handoff.reserved1 offset");
+_Static_assert(offsetof(struct ck_handoff, fb_base) == 192, "ck_handoff.fb_base offset");
+_Static_assert(offsetof(struct ck_handoff, fb_size) == 200, "ck_handoff.fb_size offset");
+_Static_assert(offsetof(struct ck_handoff, fb_width) == 208, "ck_handoff.fb_width offset");
+_Static_assert(offsetof(struct ck_handoff, fb_height) == 212, "ck_handoff.fb_height offset");
+_Static_assert(offsetof(struct ck_handoff, fb_pitch) == 216, "ck_handoff.fb_pitch offset");
+_Static_assert(offsetof(struct ck_handoff, fb_format) == 220, "ck_handoff.fb_format offset");
+_Static_assert(offsetof(struct ck_handoff, fb_status) == 224, "ck_handoff.fb_status offset");
+_Static_assert(offsetof(struct ck_handoff, fb_gop_handles) == 228, "ck_handoff.fb_gop_handles offset");
 
 /* Kernel core entry, still at the firmware EL with firmware translation. */
 __attribute__((noreturn)) void ck_kernel_entry(struct ck_handoff *h);
