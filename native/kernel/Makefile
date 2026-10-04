@@ -136,6 +136,22 @@ SMP_TEST_FLAGS := -DCK_TEST_SMP_SKIP_CPU=1
 else
 SMP_TEST_FLAGS :=
 endif
+# TEST-ONLY stale handoff (AIENOS_CK_SCREEN negative control,
+# scripts/qemu_ck_screen_test.sh): the stub hands the kernel a CHANDOF2 magic;
+# the kernel must refuse it ("panic: handoff: unsupported version 2 ...").
+# Own OUT; announces itself; refused with CK_HARDWARE_STAGING. The default
+# image is checked to carry no trace of it ($(ELF) rule).
+CK_TEST_STALE_HANDOFF ?=
+ifneq ($(strip $(CK_TEST_STALE_HANDOFF)),)
+ifneq ($(strip $(CK_TEST_STALE_HANDOFF)),2)
+$(error CK_TEST_STALE_HANDOFF must be empty or 2)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_TEST_STALE_HANDOFF (TEST-only stale handoff) cannot be combined with CK_HARDWARE_STAGING)
+endif
+OUT ?= $(REPO)/target/native-kernel-test-stale-handoff
+SMP_TEST_FLAGS += -DCK_TEST_STALE_HANDOFF=2
+endif
 OUT ?= $(REPO)/target/native-kernel
 AIENOS_COMMIT ?= $(shell git -C $(REPO) rev-parse HEAD 2>/dev/null || echo unknown)
 
@@ -348,19 +364,28 @@ ifeq ($(strip $(CK_TEST_FWCFG_ARTIFACTS)),1)
 ART_TRUST_FLAGS += -DCK_TEST_FWCFG_ARTIFACTS=1
 endif
 
+# Screen hold before reset (core/console.c ck_console_fb_hold): seconds the
+# GOP framebuffer console keeps the last report on screen before the PSCI
+# reset, so an operator can read or photograph it. 0 (default) in every QEMU
+# gate; scripts/stage_one_time_boot_ck.sh builds the hardware image with 120.
+CK_FB_HOLD_S ?= 0
+ifeq ($(shell echo '$(CK_FB_HOLD_S)' | grep -Ex '[0-9]{1,4}'),)
+$(error CK_FB_HOLD_S must be 0..9999 seconds)
+endif
+
 KINC := -I$(KDIR)/include -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/arch -I$(BOOT)
 MODULE_INC := -I$(NATIVE)/disk -I$(NATIVE)/store -I$(NATIVE)/m5 -I$(NATIVE)/crypto \
 	-I$(NATIVE)/capability -I$(NATIVE)/argus -I$(NATIVE)/net
 KCFLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -nostdlib -fno-builtin \
 	-fno-stack-protector -fno-tree-loop-distribute-patterns -mstrict-align \
 	-mgeneral-regs-only -mno-outline-atomics -fno-asynchronous-unwind-tables -fpie \
-	-fvisibility=hidden -fno-plt $(KINC) $(SMP_TEST_FLAGS) $(CK_EXTRA_CFLAGS)
+	-fvisibility=hidden -fno-plt $(KINC) $(SMP_TEST_FLAGS) -DCK_FB_HOLD_S=$(CK_FB_HOLD_S) $(CK_EXTRA_CFLAGS)
 KLDFLAGS := -nostdlib -pie --no-dynamic-linker -z norelro -z noexecstack -z max-page-size=4096 --no-warn-rwx-segments \
 	-T $(BOOT)/image.ld
 
-CORE_C := $(BOOT)/efi_main.c $(BOOT)/efi_model.c \
+CORE_C := $(BOOT)/efi_main.c $(BOOT)/efi_model.c $(BOOT)/efi_gop.c \
 	$(KDIR)/arch/exception.c $(KDIR)/arch/gic.c $(KDIR)/arch/timer.c \
-	$(KDIR)/core/acpi.c $(KDIR)/core/console.c $(KDIR)/core/fmt.c \
+	$(KDIR)/core/acpi.c $(KDIR)/core/console.c $(KDIR)/core/fbcon.c $(KDIR)/core/fmt.c \
 	$(KDIR)/core/kmain.c $(KDIR)/core/handoff_check.c $(KDIR)/core/libc_min.c $(KDIR)/core/report.c \
 	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c \
 	$(KDIR)/core/fpu.c $(KDIR)/core/infer.c $(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c $(KDIR)/core/smp.c \
@@ -586,6 +611,8 @@ endef
 
 $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
 	$(call link_image,$@,$(CORE_OBJS) $(CK_RUST_LIBS) $(CK_INFER_LIB))
+	@if [ -z "$(strip $(CK_TEST_STALE_HANDOFF))" ] && grep -aqF "TEST-ONLY stale handoff" $@; then \
+	  echo "default image carries the TEST-only stale handoff"; rm -f $@; exit 1; fi
 	@s=$$($(KNM) $@ | grep -E ' [TtDdBbWwVv] ck_stage_(devices|security|store|quiesce)$$' || true); \
 	if [ -n "$$s" ]; then echo "core image defines stage symbols: $$s"; rm -f $@; exit 1; fi
 	$(call fwcfg_check,$@)
@@ -611,8 +638,8 @@ $(FULL_EFI): $(FULL_ELF)
 # ---- host unit tests ----
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
-	$(KDIR)/core/handoff_check.c
-TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy test_handoff \
+	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c
+TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy test_handoff test_fbcon \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
@@ -898,6 +925,13 @@ $(MODEL_MAP_TOOL): $(KDIR)/tools/ck_model_map.c $(NATIVE)/argus/sha256.c $(BOOT)
 	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -I$(BOOT) -I$(NATIVE)/argus -o $@ $(KDIR)/tools/ck_model_map.c $(NATIVE)/argus/sha256.c
 model-map: $(MODEL_MAP_TOOL)
 
+# ---- host checker for the AIENOS_CK_SCREEN gate (scripts/qemu_ck_screen_test.sh) ----
+FB_CHECK_TOOL := $(OUT)/host/ck_fb_check
+$(FB_CHECK_TOOL): $(KDIR)/tools/ck_fb_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/fbcon.h $(KDIR)/core/font8x8.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -o $@ $(KDIR)/tools/ck_fb_check.c $(KDIR)/core/fbcon.c
+fb-check: $(FB_CHECK_TOOL)
+
 # Owner provisioning generator (hosted; never part of an image) and the
 # generated header for the hardware staging image.
 OWNER_GEN := $(OUT)/host/ck_owner_gen
@@ -915,4 +949,4 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize handoff-mutant clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full test sanitize handoff-mutant clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE

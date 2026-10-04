@@ -7,6 +7,8 @@
   *   heap (64 MiB)                           RW, unmapped guard page on each side
  *   DMA pool (8 MiB)                       Normal Non-cacheable (ck_dma_alloc)
  *   MMIO                                   Device-nGnRE, XN (ck_mmio_map)
+ *   GOP framebuffer (CHANDOF3)             Device-nGnRE, XN (ck_mmio_map), visible
+ *                                          pitch x height x 4 bytes, only outside RAM
  *   ACPI tables outside WB RAM             Normal RO, XN
  *
  * Frames for tables, stack, heap and the pool come from the allocator, which
@@ -204,6 +206,27 @@ uint64_t ck_mm_build(const struct ck_handoff *h)
     uint64_t ub = ck_console_uart_base();
     if (ub)
         ck_mmio_map(ub, CK_PAGE);
+
+    /* GOP framebuffer (CHANDOF3, validated by handoff_check.c): Device-nGnRE
+     * like any MMIO, the bytes the console touches (pitch x height x 4).
+     * UEFI 2.10 12.9 says nothing about the memory attributes of the frame
+     * buffer after ExitBootServices (DOCS SILENT); on QEMU ramfb and, per
+     * Linux /proc/iomem, on the Spark it lies in a firmware-reserved range
+     * this kernel does not map as RAM. If it overlaps a RAM range mapped
+     * write-back the kernel refuses it (no second, mismatched mapping) and
+     * reports on the UART only. */
+    if (h->fb_status == CK_HANDOFF_FB_PRESENT) {
+        uint64_t fb_len = (uint64_t)h->fb_pitch * h->fb_height * 4u;
+        uint64_t lo = h->fb_base & ~(CK_PAGE - 1);
+        uint64_t hi = (h->fb_base + fb_len + CK_PAGE - 1) & ~(CK_PAGE - 1);
+        rep.fb_map_bytes = fb_len;
+        if (overlaps_ram(lo, hi)) {
+            rep.fb_map = CK_MM_FB_OVERLAPS_RAM;
+        } else {
+            ck_mmio_map(h->fb_base, fb_len);
+            rep.fb_map = CK_MM_FB_MAPPED;
+        }
+    }
 
     /* Tables were written through the firmware's cacheable mapping and our
      * walks are cacheable too; make them visible before the switch. */

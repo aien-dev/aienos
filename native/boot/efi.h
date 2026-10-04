@@ -2,7 +2,7 @@
  * boot services it calls (GetMemoryMap, ExitBootServices, SetWatchdogTimer,
  * AllocatePages, FreePages, FreePool, HandleProtocol, LocateHandleBuffer),
  * the Loaded Image, Simple File System and Block I/O protocols (model ingest,
- * efi_model.c). Field orders and offsets follow UEFI 2.10 (edk2
+ * efi_model.c) and the Graphics Output Protocol (framebuffer, efi_gop.c). Field orders and offsets follow UEFI 2.10 (edk2
  * MdePkg/Include/Uefi/UefiSpec.h, Protocol/BlockIo.h, SimpleFileSystem.h,
  * LoadedImage.h); _Static_asserts below pin the offsets this stub relies on.
  * Everything not used is a void pointer placeholder of the right size. */
@@ -197,5 +197,40 @@ typedef struct EFI_BLOCK_IO_PROTOCOL {
 _Static_assert(offsetof(EFI_BLOCK_IO_MEDIA, BlockSize) == 12, "Media.BlockSize");
 _Static_assert(offsetof(EFI_BLOCK_IO_MEDIA, LastBlock) == 24, "Media.LastBlock");
 _Static_assert(offsetof(EFI_BLOCK_IO_PROTOCOL, ReadBlocks) == 0x18, "BlockIo.ReadBlocks");
+
+/* --- Graphics Output Protocol (UEFI 2.10 section 12.9.2) --- */
+#define EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID_INIT \
+    { 0x9042a9de, 0x23dc, 0x4a38, { 0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a } }
+/* EFI_GRAPHICS_PIXEL_FORMAT */
+enum { PixelRedGreenBlueReserved8BitPerColor, PixelBlueGreenRedReserved8BitPerColor, PixelBitMask,
+       PixelBltOnly, PixelFormatMax };
+typedef struct {
+    uint32_t RedMask, GreenMask, BlueMask, ReservedMask;
+} EFI_PIXEL_BITMASK;
+typedef struct {
+    uint32_t Version;
+    uint32_t HorizontalResolution;
+    uint32_t VerticalResolution;
+    uint32_t PixelFormat; /* EFI_GRAPHICS_PIXEL_FORMAT (a C enum, 4 bytes) */
+    EFI_PIXEL_BITMASK PixelInformation;
+    uint32_t PixelsPerScanLine;
+} EFI_GRAPHICS_OUTPUT_MODE_INFORMATION;
+typedef struct {
+    uint32_t MaxMode;
+    uint32_t Mode;
+    EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *Info;
+    uint64_t SizeOfInfo;
+    uint64_t FrameBufferBase; /* EFI_PHYSICAL_ADDRESS */
+    uint64_t FrameBufferSize; /* UINTN */
+} EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE;
+typedef struct EFI_GRAPHICS_OUTPUT_PROTOCOL {
+    void *QueryMode, *SetMode, *Blt;
+    EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *Mode;
+} EFI_GRAPHICS_OUTPUT_PROTOCOL;
+_Static_assert(offsetof(EFI_GRAPHICS_OUTPUT_MODE_INFORMATION, PixelFormat) == 12, "Gop.Info.PixelFormat");
+_Static_assert(offsetof(EFI_GRAPHICS_OUTPUT_MODE_INFORMATION, PixelsPerScanLine) == 32, "Gop.Info.PixelsPerScanLine");
+_Static_assert(offsetof(EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE, FrameBufferBase) == 24, "Gop.Mode.FrameBufferBase");
+_Static_assert(offsetof(EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE, FrameBufferSize) == 32, "Gop.Mode.FrameBufferSize");
+_Static_assert(offsetof(EFI_GRAPHICS_OUTPUT_PROTOCOL, Mode) == 24, "Gop.Mode");
 
 #endif

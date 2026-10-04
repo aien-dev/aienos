@@ -1,14 +1,25 @@
 /* console.c -- ck_puts/ck_printf. Before ExitBootServices the boot stub
  * attaches UEFI ConOut; afterwards output goes to the UART the ACPI SPCR
  * names (PL011/SBSA, or 16550 in MMIO). With neither, output is dropped and
- * the panic path still resets. '\n' is sent as CR LF. */
+ * the panic path still resets. '\n' is sent as CR LF.
+ * After ExitBootServices every byte the UART gets is also drawn on the GOP
+ * framebuffer once the kernel turned it on (ck_console_set_fb, core/fbcon.c);
+ * a fault while drawing turns the screen off for good, the UART goes on. */
 #include "ck_internal.h"
+#include "fbcon.h"
+#include "arch.h"
+
+#ifndef CK_FB_HOLD_S
+#define CK_FB_HOLD_S 0
+#endif
 
 static void (*efi_write)(const char *s, size_t n);
 static volatile uint8_t *uart;
 static int uart_kind; /* 0 none, 1 pl011, 2 16550 */
 static unsigned uart_stride;
 static uint64_t uart_phys;
+static struct ck_fbcon fb;
+static int fb_on, fb_busy;
 
 void ck_console_set_efi(void (*write)(const char *s, size_t n))
 {
@@ -73,6 +84,15 @@ static void write_n(const char *s, size_t n)
         efi_write(s, n);
         return;
     }
+    if (fb_on) {
+        if (fb_busy) {
+            fb_on = 0; /* re-entered from a fault inside the drawing: screen off */
+        } else {
+            fb_busy = 1;
+            ck_fbcon_write(&fb, s, n);
+            fb_busy = 0;
+        }
+    }
     if (!uart_kind)
         return;
     for (size_t i = 0; i < n; i++) {
@@ -80,6 +100,41 @@ static void write_n(const char *s, size_t n)
             uart_putc('\r');
         uart_putc(s[i]);
     }
+}
+
+int ck_console_set_fb(volatile void *base, uint32_t width, uint32_t height, uint32_t pitch,
+                      uint32_t format)
+{
+    if (ck_fbcon_setup(&fb, base, width, height, pitch, format) != 0)
+        return -1;
+    fb_on = 1;
+    return 0;
+}
+
+int ck_console_fb_info(uint32_t *scale, uint32_t *cols, uint32_t *rows)
+{
+    if (!fb_on)
+        return -1;
+    *scale = fb.scale;
+    *cols = fb.cols;
+    *rows = fb.rows;
+    return 0;
+}
+
+/* Before a reset: keep the screen readable for CK_FB_HOLD_S seconds (0 in
+ * every QEMU build; the hardware staging build sets it so an operator can
+ * read or photograph the final report before the machine resets). */
+void ck_console_fb_hold(void)
+{
+    if (!fb_on || CK_FB_HOLD_S <= 0)
+        return;
+    uint64_t f = ck_rd(cntfrq_el0);
+    if (!f)
+        return;
+    ck_printf("screen: holding %u s before reset\n", (unsigned)CK_FB_HOLD_S);
+    uint64_t t0 = ck_rd(cntpct_el0);
+    while (ck_rd(cntpct_el0) - t0 < (uint64_t)CK_FB_HOLD_S * f)
+        __asm__ volatile("yield");
 }
 
 void ck_puts(const char *s)

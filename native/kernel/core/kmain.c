@@ -38,12 +38,48 @@ static void run_stage(const char *name, int (*fn)(void))
         ck_printf("stage %s: FAIL rc=%d\n", name, rc);
 }
 
+/* CHANDOF3: put the console on the GOP framebuffer (mapped by ck_mm_build)
+ * or say on the UART why there is no screen. The first line drawn on the
+ * screen is the "screen: gop" line (scripts/qemu_ck_screen_test.sh renders
+ * the serial log from that line on and compares it with a QEMU screendump). */
+static void screen_start(const struct ck_handoff *h, const struct ck_mm_report *mm)
+{
+    if (h->fb_status == CK_HANDOFF_FB_NONE) {
+        ck_puts("screen: none (no UEFI Graphics Output Protocol); report on UART only\n");
+        return;
+    }
+    if (h->fb_status == CK_HANDOFF_FB_NO_LINEAR) {
+        ck_printf("screen: none (GOP handles=%u, none with a linear 32-bit framebuffer); report on UART only\n",
+                  h->fb_gop_handles);
+        return;
+    }
+    if (mm->fb_map != CK_MM_FB_MAPPED) {
+        ck_printf("screen: refused (framebuffer 0x%llx+0x%llx overlaps RAM mapped write-back); report on UART "
+                  "only\n",
+                  (unsigned long long)h->fb_base, (unsigned long long)mm->fb_map_bytes);
+        return;
+    }
+    if (ck_console_set_fb((volatile void *)(uintptr_t)h->fb_base, h->fb_width, h->fb_height, h->fb_pitch,
+                          h->fb_format) != 0) {
+        ck_printf("screen: refused (geometry %ux%u pitch=%u format=%u unusable); report on UART only\n",
+                  h->fb_width, h->fb_height, h->fb_pitch, h->fb_format);
+        return;
+    }
+    uint32_t scale = 0, cols = 0, rows = 0;
+    ck_console_fb_info(&scale, &cols, &rows);
+    ck_printf("screen: gop %ux%u pitch=%u format=%s base=0x%llx bytes=0x%llx scale=%u grid=%ux%u font=8x8 "
+              "mode=half-scroll\n",
+              h->fb_width, h->fb_height, h->fb_pitch, h->fb_format == CK_HANDOFF_FB_RGBX ? "rgbx" : "bgrx",
+              (unsigned long long)h->fb_base, (unsigned long long)mm->fb_map_bytes, scale, cols, rows);
+}
+
 static __attribute__((noreturn)) void ck_el1_main(void *arg)
 {
     struct ck_handoff *h = arg;
     ck_set_stage("kernel_el1");
     ck_mm_el1_ready();
     const struct ck_mm_report *mm = ck_mm_report();
+    screen_start(h, mm);
 
     ck_puts("\n");
     ck_report_header("kernel");
