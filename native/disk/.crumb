@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/disk",
-  "layer": "native/disk",
-  "purpose": "Directory native/disk. Purpose not yet described by a human.",
   "above": {
     "name": "native",
     "path": ".."
@@ -18,8 +14,80 @@
     }
   ],
   "extensions": {
+    "generated": {
+      "children": [
+        {
+          "digest": "ab636ddf6d518b35c2ebfbce3c32533aef415f32e676dfaa68b8fb4c2fe56603",
+          "last_commit": "950cc4c",
+          "name": "qemu",
+          "purpose": "Directory native/disk/qemu. Purpose not yet described by a human."
+        },
+        {
+          "digest": "69c1958da6a4fb466d80bc8a4debe13b98ebf93913bc4cd08b4fa23cea900882",
+          "last_commit": "950cc4c",
+          "name": "tests",
+          "purpose": "Directory native/disk/tests. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:1bd311046010486cd77dbaded82dd3df67ba171ef7df710da29ba89adf34e014",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:31584482d53c2b82d89a44a8a12f67c7f808f740d95ad5ad050b58bcca6b47aa",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 16,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:568f057e4d25f423ff84eb76da336b6415b6a8e3cf1a1528f3cf857747bd1955"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 190,
+          "sha": "811bbc0",
+          "source": "backfill-git",
+          "subject": "Merge pull request #190 from aien-dev/lane11/native-disk",
+          "timestamp": "2026-10-01T00:06:23-05:00"
+        },
+        {
+          "lane": "lane11",
+          "note": "#190 native/disk + NVMe driver + QEMU test: merged 811bbc0894c7510ab6c0c70fc356c5797b3e1832",
+          "pr": 190,
+          "ref": "2026-10-01-push-lane11-report.md",
+          "sha": "811bbc0",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane23",
+          "note": "§2 new \"later merges\" addendum: aienos #189 6bcef8a, #190 811bbc0, #191 697391f, #192 08cb905, #193 8d511d6; omega #128 ee89461, #129 d78fd11, #130 7fb59d3, #131 f7b22f1, #132 ff2af05, #133 c6cf052,",
+          "pr": 190,
+          "ref": "2026-10-01-push-lane23-report.md",
+          "sha": "811bbc0",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane12",
+          "note": "~09:20Z Lane 12 DONE: aienos#189 6bcef8a (M5 migration sig, TEST keys; receipt f21f2c03… NOT_QUALIFIED pass15 blocked11 missing5 not_run0; QEMU checks ran), omega#130 7fb59d3 (G3 commitment signing",
+          "pr": 190,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "811bbc0",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane11",
+          "note": "~11:20Z Lane 11 DONE: aienos#190 811bbc0 (disk+NVMe), #191 697391f (C Store engine, Rust-compatible bytes, 1097 power-cut checks). Receipt 6fd36c30… not_run=3 (QEMU off) coexists with Lane 12's f21",
+          "pr": 190,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "811bbc0",
+          "source": "backfill-lane-report"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
     "seed": {
-      "purpose_auto": "Directory native/disk. Purpose not yet described by a human.",
       "files": [
         "Makefile",
         "README.md",
@@ -29,55 +97,12 @@
         "disk_file.h",
         "disk_nvme.c",
         "disk_nvme.h"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "811bbc0",
-          "timestamp": "2026-10-01T00:06:23-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #190 from aien-dev/lane11/native-disk",
-          "pr": 190
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane11",
-          "sha": "811bbc0",
-          "pr": 190,
-          "note": "#190 native/disk + NVMe driver + QEMU test: merged 811bbc0894c7510ab6c0c70fc356c5797b3e1832",
-          "ref": "2026-10-01-push-lane11-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane23",
-          "sha": "811bbc0",
-          "pr": 190,
-          "note": "§2 new \"later merges\" addendum: aienos #189 6bcef8a, #190 811bbc0, #191 697391f, #192 08cb905, #193 8d511d6; omega #128 ee89461, #129 d78fd11, #130 7fb59d3, #131 f7b22f1, #132 ff2af05, #133 c6cf052,",
-          "ref": "2026-10-01-push-lane23-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane12",
-          "sha": "811bbc0",
-          "pr": 190,
-          "note": "~09:20Z Lane 12 DONE: aienos#189 6bcef8a (M5 migration sig, TEST keys; receipt f21f2c03… NOT_QUALIFIED pass15 blocked11 missing5 not_run0; QEMU checks ran), omega#130 7fb59d3 (G3 commitment signing",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane11",
-          "sha": "811bbc0",
-          "pr": 190,
-          "note": "~11:20Z Lane 11 DONE: aienos#190 811bbc0 (disk+NVMe), #191 697391f (C Store engine, Rust-compatible bytes, 1097 power-cut checks). Receipt 6fd36c30… not_run=3 (QEMU off) coexists with Lane 12's f21",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        }
-      ]
+      ],
+      "purpose_auto": "Directory native/disk. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/disk",
+  "name": "native/disk",
+  "purpose": "Directory native/disk. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

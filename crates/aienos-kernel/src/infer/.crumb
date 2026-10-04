@@ -1,54 +1,66 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-kernel/src/infer",
-  "layer": "crates/aienos-kernel/src/infer",
-  "purpose": "Directory crates/aienos-kernel/src/infer. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-kernel/src",
     "path": ".."
   },
   "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:4a443b2a8cb9d29d74c06b7cbb749f03b8467b195fee959e62fe1d500d9d45e4",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 5,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:6c4797a4763ae5e090913975e8d5eb7e9000d2c775a269271f52a54285b6d099"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 101,
+          "sha": "a06b2de",
+          "source": "backfill-git",
+          "subject": "kernel(infer): RoPE and decode attention with GQA and a KV cache (part of #34) (#101)",
+          "timestamp": "2026-09-24T11:27:35-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 88,
+          "sha": "32a47f7",
+          "source": "backfill-git",
+          "subject": "kernel(infer): NEON matvec/matmul, RMSNorm, softmax, SiLU (part of #34) (#88)",
+          "timestamp": "2026-09-24T10:46:14-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 87,
+          "sha": "3f22ea1",
+          "source": "backfill-git",
+          "subject": "feat(kernel): add byte-level BPE tokenizer (#87)",
+          "timestamp": "2026-09-24T10:45:06-05:00"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 3
+    },
     "seed": {
-      "purpose_auto": "Directory crates/aienos-kernel/src/infer. Purpose not yet described by a human.",
       "files": [
         "attention.rs",
         "gemm.rs",
         "mod.rs",
         "rope.rs",
         "tokenizer.rs"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 3,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "a06b2de",
-          "timestamp": "2026-09-24T11:27:35-05:00",
-          "author": "aien-dev",
-          "subject": "kernel(infer): RoPE and decode attention with GQA and a KV cache (part of #34) (#101)",
-          "pr": 101
-        },
-        {
-          "source": "backfill-git",
-          "sha": "32a47f7",
-          "timestamp": "2026-09-24T10:46:14-05:00",
-          "author": "aien-dev",
-          "subject": "kernel(infer): NEON matvec/matmul, RMSNorm, softmax, SiLU (part of #34) (#88)",
-          "pr": 88
-        },
-        {
-          "source": "backfill-git",
-          "sha": "3f22ea1",
-          "timestamp": "2026-09-24T10:45:06-05:00",
-          "author": "aien-dev",
-          "subject": "feat(kernel): add byte-level BPE tokenizer (#87)",
-          "pr": 87
-        }
-      ]
+      ],
+      "purpose_auto": "Directory crates/aienos-kernel/src/infer. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-kernel/src/infer",
+  "name": "crates/aienos-kernel/src/infer",
+  "purpose": "Directory crates/aienos-kernel/src/infer. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

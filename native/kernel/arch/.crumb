@@ -1,15 +1,78 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/kernel/arch",
-  "layer": "native/kernel/arch",
-  "purpose": "Directory native/kernel/arch. Purpose not yet described by a human.",
   "above": {
     "name": "native/kernel",
     "path": ".."
   },
   "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:4c9da3fdaf762c784403ae3281c3a7e49b891596ed52ab27aaf62f2ea66c5502",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 8,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:4a52e32ff5b03da822abdbf8b12e84e7b4ce62afa965002966470544a4922e2d"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 201,
+          "sha": "0d0efa5",
+          "source": "backfill-git",
+          "subject": "ck: port M3 isolation (threads, EL0, preemption, placement, typed IPC) to the C kernel (QEMU) (#201)",
+          "timestamp": "2026-10-01T04:58:30-05:00"
+        },
+        {
+          "lane": "lane25",
+          "note": "PR #201, squash-merged as 0d0efa5. Built by an Opus worker; the lead verified it, fixed the review findings and produced the receipt.",
+          "pr": 201,
+          "ref": "2026-10-01-push-lane25-report.md",
+          "sha": "0d0efa5",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane25",
+          "note": "09:59Z Lane 25 DONE: aienos #201 (M3 isolation port: tasks, preempt, EL0 lockout, fault isolation, IPC w/ narrowable caps; single core). ck_gates 7 PASS/6 NOT_RUN of 13, QEMU only. Follow-ups: virtio",
+          "pr": 201,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "0d0efa5",
+          "source": "backfill-lane-report"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 194,
+          "sha": "34c6053",
+          "source": "backfill-git",
+          "subject": "Merge pull request #194 from aien-dev/lane18/native-kernel-core",
+          "timestamp": "2026-10-01T02:17:36-05:00"
+        },
+        {
+          "lane": "lane18",
+          "note": "#194 C kernel core + UEFI entry stub + memory/exceptions + host tests: merge 34c60536da7a95d8b782b13e52495730578c83ba",
+          "pr": 194,
+          "ref": "2026-10-01-push-lane18-report.md",
+          "sha": "34c6053",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane18",
+          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
+          "pr": 194,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "34c6053",
+          "source": "backfill-lane-report"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 2
+    },
     "seed": {
-      "purpose_auto": "Directory native/kernel/arch. Purpose not yet described by a human.",
       "files": [
         "arch.h",
         "exception.c",
@@ -17,63 +80,12 @@
         "m3.S",
         "timer.c",
         "vectors.S"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 2,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "0d0efa5",
-          "timestamp": "2026-10-01T04:58:30-05:00",
-          "author": "aien-dev",
-          "subject": "ck: port M3 isolation (threads, EL0, preemption, placement, typed IPC) to the C kernel (QEMU) (#201)",
-          "pr": 201
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane25",
-          "sha": "0d0efa5",
-          "pr": 201,
-          "note": "PR #201, squash-merged as 0d0efa5. Built by an Opus worker; the lead verified it, fixed the review findings and produced the receipt.",
-          "ref": "2026-10-01-push-lane25-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane25",
-          "sha": "0d0efa5",
-          "pr": 201,
-          "note": "09:59Z Lane 25 DONE: aienos #201 (M3 isolation port: tasks, preempt, EL0 lockout, fault isolation, IPC w/ narrowable caps; single core). ck_gates 7 PASS/6 NOT_RUN of 13, QEMU only. Follow-ups: virtio",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "34c6053",
-          "timestamp": "2026-10-01T02:17:36-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #194 from aien-dev/lane18/native-kernel-core",
-          "pr": 194
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane18",
-          "sha": "34c6053",
-          "pr": 194,
-          "note": "#194 C kernel core + UEFI entry stub + memory/exceptions + host tests: merge 34c60536da7a95d8b782b13e52495730578c83ba",
-          "ref": "2026-10-01-push-lane18-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane18",
-          "sha": "34c6053",
-          "pr": 194,
-          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        }
-      ]
+      ],
+      "purpose_auto": "Directory native/kernel/arch. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/kernel/arch",
+  "name": "native/kernel/arch",
+  "purpose": "Directory native/kernel/arch. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

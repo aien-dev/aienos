@@ -1,15 +1,54 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/boot",
-  "layer": "native/boot",
-  "purpose": "Directory native/boot. Purpose not yet described by a human.",
   "above": {
     "name": "native",
     "path": ".."
   },
   "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:cbaa1c62b54f71216a8991d0e8b9f29330fb3c51eb852cb45eb775ff0b7dbb2c",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 6,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:58b337eda239dba014d78f8ccddffe32d323e7be7c9b88195cf1bc94360da8cc"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 194,
+          "sha": "34c6053",
+          "source": "backfill-git",
+          "subject": "Merge pull request #194 from aien-dev/lane18/native-kernel-core",
+          "timestamp": "2026-10-01T02:17:36-05:00"
+        },
+        {
+          "lane": "lane18",
+          "note": "#194 C kernel core + UEFI entry stub + memory/exceptions + host tests: merge 34c60536da7a95d8b782b13e52495730578c83ba",
+          "pr": 194,
+          "ref": "2026-10-01-push-lane18-report.md",
+          "sha": "34c6053",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane18",
+          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
+          "pr": 194,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "34c6053",
+          "source": "backfill-lane-report"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
     "seed": {
-      "purpose_auto": "Directory native/boot. Purpose not yet described by a human.",
       "files": [
         "README.md",
         "efi.h",
@@ -17,39 +56,12 @@
         "efi_main.c",
         "handoff.h",
         "image.ld"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "34c6053",
-          "timestamp": "2026-10-01T02:17:36-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #194 from aien-dev/lane18/native-kernel-core",
-          "pr": 194
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane18",
-          "sha": "34c6053",
-          "pr": 194,
-          "note": "#194 C kernel core + UEFI entry stub + memory/exceptions + host tests: merge 34c60536da7a95d8b782b13e52495730578c83ba",
-          "ref": "2026-10-01-push-lane18-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane18",
-          "sha": "34c6053",
-          "pr": 194,
-          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        }
-      ]
+      ],
+      "purpose_auto": "Directory native/boot. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/boot",
+  "name": "native/boot",
+  "purpose": "Directory native/boot. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

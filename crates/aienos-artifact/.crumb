@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-artifact",
-  "layer": "crates/aienos-artifact",
-  "purpose": "Directory crates/aienos-artifact. Purpose not yet described by a human.",
   "above": {
     "name": "crates",
     "path": ".."
@@ -14,51 +10,74 @@
     }
   ],
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-artifact. Purpose not yet described by a human.",
-      "files": [
-        "Cargo.toml"
-      ]
+    "generated": {
+      "children": [
+        {
+          "digest": "e7ed37a16332ed63780e226496a4bf449cddeb4a4ae93655acf7e64fbe426871",
+          "last_commit": "bb3a5f4",
+          "name": "src",
+          "purpose": "Directory crates/aienos-artifact/src. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:d47b8610ed8ea27683d0b0fa1d2e474428f541eb4e621d7f4c4ba1f2a771bf25",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:a265db4553bf11e9299c94fd916b36c5059fd749a2b824512dc0ab9c243e728c",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 13,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:0247de5f43dd7d116461eecab416d53f228fb6182f446024319d6b61ae93b221"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 4,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 124,
           "sha": "4dd5726",
-          "timestamp": "2026-09-25T07:02:01-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "P2-6A: Admission Receipt v0 (canonical encoding, strict decode, TEST-ONLY signing, CLI) (#124)",
-          "pr": 124
+          "timestamp": "2026-09-25T07:02:01-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 121,
           "sha": "1a62ca3",
-          "timestamp": "2026-09-24T21:20:14-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Merge pull request #121 from aien-dev/phase2/binary-artifact-v0",
-          "pr": 121
+          "timestamp": "2026-09-24T21:20:14-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 120,
           "sha": "952e53e",
-          "timestamp": "2026-09-24T21:05:20-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Merge pull request #120 from aien-dev/phase2/binary-artifact-v0",
-          "pr": 120
+          "timestamp": "2026-09-24T21:05:20-05:00"
         },
         {
-          "source": "backfill-git",
-          "sha": "7604b6e",
-          "timestamp": "2026-09-24T20:41:08-05:00",
           "author": "aien-dev",
+          "pr": 119,
+          "sha": "7604b6e",
+          "source": "backfill-git",
           "subject": "Merge pull request #119 from aien-dev/phase2/binary-artifact-v0",
-          "pr": 119
+          "timestamp": "2026-09-24T20:41:08-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 4
+    },
+    "seed": {
+      "files": [
+        "Cargo.toml"
+      ],
+      "purpose_auto": "Directory crates/aienos-artifact. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-artifact",
+  "name": "crates/aienos-artifact",
+  "purpose": "Directory crates/aienos-artifact. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

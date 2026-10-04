@@ -1,67 +1,79 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/capability/tests",
-  "layer": "native/capability/tests",
-  "purpose": "Directory native/capability/tests. Purpose not yet described by a human.",
   "above": {
     "name": "native/capability",
     "path": ".."
   },
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory native/capability/tests. Purpose not yet described by a human.",
-      "files": [
-        "capability_test.c",
-        "contain_test.c"
-      ]
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:96269f071dd30edbbaf1a52af28f696d46c966c3086aab662bf1c90f98927c92",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 2,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:bd798f0c277c7680040467b79fd1fe8e1a8ec986dcaa6b2535811b16f2ac6a6c"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 4,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 166,
           "sha": "9ac377f",
-          "timestamp": "2026-09-29T08:23:21-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Merge pull request #166 from aien-dev/feat/argus-1-g",
-          "pr": 166
+          "timestamp": "2026-09-29T08:23:21-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 161,
           "sha": "d39dd5b",
-          "timestamp": "2026-09-29T06:33:10-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Merge pull request #161: capability observer callback (AEGIS -> ARGUS)",
-          "pr": 161
+          "timestamp": "2026-09-29T06:33:10-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 158,
           "sha": "4c21386",
-          "timestamp": "2026-09-28T21:00:02-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #158 from aien-dev/fix/cap-generation-restart",
-          "pr": 158
-        },
-        {
           "source": "backfill-git",
-          "sha": "c97249a",
-          "timestamp": "2026-09-27T19:05:24-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #156 from aien-dev/feat/capability-c",
-          "pr": 156
+          "subject": "Merge pull request #158 from aien-dev/fix/cap-generation-restart",
+          "timestamp": "2026-09-28T21:00:02-05:00"
         },
         {
-          "source": "backfill-lane-report",
-          "lane": "lane1",
-          "sha": "c97249a",
+          "author": "aien-dev",
           "pr": 156,
+          "sha": "c97249a",
+          "source": "backfill-git",
+          "subject": "Merge pull request #156 from aien-dev/feat/capability-c",
+          "timestamp": "2026-09-27T19:05:24-05:00"
+        },
+        {
+          "lane": "lane1",
           "note": "WP-B production Store on 512-byte SSD: MISSING_IMPLEMENTATION. Production Store/NVMe path is Rust; protocol proven (#136, #175 native/store/torn_slot.c); dependency = C NVMe driver + C ADR 0015 engin",
-          "ref": "2026-10-01-push-lane1-report.md"
+          "pr": 156,
+          "ref": "2026-10-01-push-lane1-report.md",
+          "sha": "c97249a",
+          "source": "backfill-lane-report"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 4
+    },
+    "seed": {
+      "files": [
+        "capability_test.c",
+        "contain_test.c"
+      ],
+      "purpose_auto": "Directory native/capability/tests. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/capability/tests",
+  "name": "native/capability/tests",
+  "purpose": "Directory native/capability/tests. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

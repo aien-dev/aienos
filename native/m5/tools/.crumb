@@ -1,58 +1,70 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/m5/tools",
-  "layer": "native/m5/tools",
-  "purpose": "Directory native/m5/tools. Purpose not yet described by a human.",
   "above": {
     "name": "native/m5",
     "path": ".."
   },
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory native/m5/tools. Purpose not yet described by a human.",
-      "files": [
-        "m5_migsig.c"
-      ]
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:0cfa96047a78c70ea597daf37fb756f310424080491969f3e38802e71b60c994",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 1,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:2754374819d074c008f340b81ac691059f1eff0dbc229676116c962234443cd4"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "6bcef8a",
-          "timestamp": "2026-10-01T00:24:04-05:00",
           "author": "aien-dev",
+          "pr": 189,
+          "sha": "6bcef8a",
+          "source": "backfill-git",
           "subject": "Merge pull request #189 from aien-dev/lane12/m5-migration-sig",
-          "pr": 189
+          "timestamp": "2026-10-01T00:24:04-05:00"
         },
         {
-          "source": "backfill-lane-report",
           "lane": "lane12",
-          "sha": "6bcef8a",
-          "pr": 189,
           "note": "PR aienos #189 MERGED, merge commit 6bcef8a. CodeQL checks all pass.",
-          "ref": "2026-10-01-push-lane12-report.md"
+          "pr": 189,
+          "ref": "2026-10-01-push-lane12-report.md",
+          "sha": "6bcef8a",
+          "source": "backfill-lane-report"
         },
         {
-          "source": "backfill-lane-report",
           "lane": "lane23",
-          "sha": "6bcef8a",
-          "pr": 189,
           "note": "§2 new \"later merges\" addendum: aienos #189 6bcef8a, #190 811bbc0, #191 697391f, #192 08cb905, #193 8d511d6; omega #128 ee89461, #129 d78fd11, #130 7fb59d3, #131 f7b22f1, #132 ff2af05, #133 c6cf052,",
-          "ref": "2026-10-01-push-lane23-report.md"
+          "pr": 189,
+          "ref": "2026-10-01-push-lane23-report.md",
+          "sha": "6bcef8a",
+          "source": "backfill-lane-report"
         },
         {
-          "source": "backfill-lane-report",
           "lane": "lane12",
-          "sha": "6bcef8a",
-          "pr": 189,
           "note": "~09:20Z Lane 12 DONE: aienos#189 6bcef8a (M5 migration sig, TEST keys; receipt f21f2c03… NOT_QUALIFIED pass15 blocked11 missing5 not_run0; QEMU checks ran), omega#130 7fb59d3 (G3 commitment signing",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
+          "pr": 189,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "6bcef8a",
+          "source": "backfill-lane-report"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
+    "seed": {
+      "files": [
+        "m5_migsig.c"
+      ],
+      "purpose_auto": "Directory native/m5/tools. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/m5/tools",
+  "name": "native/m5/tools",
+  "purpose": "Directory native/m5/tools. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

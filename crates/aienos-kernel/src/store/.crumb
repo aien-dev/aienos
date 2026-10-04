@@ -1,70 +1,82 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-kernel/src/store",
-  "layer": "crates/aienos-kernel/src/store",
-  "purpose": "Directory crates/aienos-kernel/src/store. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-kernel/src",
     "path": ".."
   },
   "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:65eae3c74fff17cf4adf6f795c72ce3a65a32bb8d90a735fa8674a9a7bbe5a4e",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 5,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:7f1e21a5ca6cbc472d4498884beaaf3edee4780ca9a3969f68e031a1c185eac3"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 142,
+          "sha": "a2a0382",
+          "source": "backfill-git",
+          "subject": "M4: continuity objects over Store v1; same identity and memory across cold restarts (CONTINUITY_QEMU) (#142)",
+          "timestamp": "2026-09-25T17:56:21-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 136,
+          "sha": "23f61e4",
+          "source": "backfill-git",
+          "subject": "P3: 512-byte NVMe crash qualification campaign (STORE_512B_CRASH_RECOVERY_QEMU) (#136)",
+          "timestamp": "2026-09-25T16:37:26-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 135,
+          "sha": "123929a",
+          "source": "backfill-git",
+          "subject": "P3: System Store v1 malformed-peer recovery amendment (STORE_MALFORMED_PEER_RECOVERY) (#135)",
+          "timestamp": "2026-09-25T15:12:39-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 131,
+          "sha": "5f835ba",
+          "source": "backfill-git",
+          "subject": "feat(store): implement System Store v1 mount and transactions (#131)",
+          "timestamp": "2026-09-25T13:04:58-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 130,
+          "sha": "9919813",
+          "source": "backfill-git",
+          "subject": "P3-1: freeze System Store v1 format and canonical vectors (#130)",
+          "timestamp": "2026-09-25T08:50:17-05:00"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 5
+    },
     "seed": {
-      "purpose_auto": "Directory crates/aienos-kernel/src/store. Purpose not yet described by a human.",
       "files": [
         "checkpoint.rs",
         "device.rs",
         "engine.rs",
         "genesis.rs",
         "v1.rs"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 5,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "a2a0382",
-          "timestamp": "2026-09-25T17:56:21-05:00",
-          "author": "aien-dev",
-          "subject": "M4: continuity objects over Store v1; same identity and memory across cold restarts (CONTINUITY_QEMU) (#142)",
-          "pr": 142
-        },
-        {
-          "source": "backfill-git",
-          "sha": "23f61e4",
-          "timestamp": "2026-09-25T16:37:26-05:00",
-          "author": "aien-dev",
-          "subject": "P3: 512-byte NVMe crash qualification campaign (STORE_512B_CRASH_RECOVERY_QEMU) (#136)",
-          "pr": 136
-        },
-        {
-          "source": "backfill-git",
-          "sha": "123929a",
-          "timestamp": "2026-09-25T15:12:39-05:00",
-          "author": "aien-dev",
-          "subject": "P3: System Store v1 malformed-peer recovery amendment (STORE_MALFORMED_PEER_RECOVERY) (#135)",
-          "pr": 135
-        },
-        {
-          "source": "backfill-git",
-          "sha": "5f835ba",
-          "timestamp": "2026-09-25T13:04:58-05:00",
-          "author": "aien-dev",
-          "subject": "feat(store): implement System Store v1 mount and transactions (#131)",
-          "pr": 131
-        },
-        {
-          "source": "backfill-git",
-          "sha": "9919813",
-          "timestamp": "2026-09-25T08:50:17-05:00",
-          "author": "aien-dev",
-          "subject": "P3-1: freeze System Store v1 format and canonical vectors (#130)",
-          "pr": 130
-        }
-      ]
+      ],
+      "purpose_auto": "Directory crates/aienos-kernel/src/store. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-kernel/src/store",
+  "name": "crates/aienos-kernel/src/store",
+  "purpose": "Directory crates/aienos-kernel/src/store. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

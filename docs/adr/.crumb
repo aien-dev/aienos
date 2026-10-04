@@ -1,15 +1,190 @@
 {
-  "schema_version": "1.0.0",
-  "name": "docs/adr",
-  "layer": "docs/adr",
-  "purpose": "Directory docs/adr. Purpose not yet described by a human.",
   "above": {
     "name": "docs",
     "path": ".."
   },
   "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:cfbb5cf8737f3e74c173b9a95aafaff4cb121d6a352de86f1b322cf0891b76c9",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 20,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:0bb25ead0bb799e5829e2efa5922cfbe534147990db226c8c5d1971acb1b13b0"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 149,
+          "sha": "e3d3a10",
+          "source": "backfill-git",
+          "subject": "docs(adr): adopt ADR 0017 (M5 architecture) and amend ADR 0016 migration boundary (#149)",
+          "timestamp": "2026-09-25T19:09:05-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 142,
+          "sha": "a2a0382",
+          "source": "backfill-git",
+          "subject": "M4: continuity objects over Store v1; same identity and memory across cold restarts (CONTINUITY_QEMU) (#142)",
+          "timestamp": "2026-09-25T17:56:21-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 139,
+          "sha": "5ac7cfc",
+          "source": "backfill-git",
+          "subject": "test(store): prove ADR 0015 golden vectors with the kernel encoders in Rust (#139)",
+          "timestamp": "2026-09-25T17:37:17-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 135,
+          "sha": "123929a",
+          "source": "backfill-git",
+          "subject": "P3: System Store v1 malformed-peer recovery amendment (STORE_MALFORMED_PEER_RECOVERY) (#135)",
+          "timestamp": "2026-09-25T15:12:39-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 130,
+          "sha": "9919813",
+          "source": "backfill-git",
+          "subject": "P3-1: freeze System Store v1 format and canonical vectors (#130)",
+          "timestamp": "2026-09-25T08:50:17-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 128,
+          "sha": "ff5de9c",
+          "source": "backfill-git",
+          "subject": "P2-7: negative matrix + canonical SEED-0B QEMU qualification (SEED_0B_QEMU: PASS) (#128)",
+          "timestamp": "2026-09-25T07:46:07-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 124,
+          "sha": "4dd5726",
+          "source": "backfill-git",
+          "subject": "P2-6A: Admission Receipt v0 (canonical encoding, strict decode, TEST-ONLY signing, CLI) (#124)",
+          "timestamp": "2026-09-25T07:02:01-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 121,
+          "sha": "1a62ca3",
+          "source": "backfill-git",
+          "subject": "Merge pull request #121 from aien-dev/phase2/binary-artifact-v0",
+          "timestamp": "2026-09-24T21:20:14-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 120,
+          "sha": "952e53e",
+          "source": "backfill-git",
+          "subject": "Merge pull request #120 from aien-dev/phase2/binary-artifact-v0",
+          "timestamp": "2026-09-24T21:05:20-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 118,
+          "sha": "a6363cb",
+          "source": "backfill-git",
+          "subject": "Merge pull request #118 from aien-dev/phase2/binary-artifact-v0",
+          "timestamp": "2026-09-24T20:21:44-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 107,
+          "sha": "d4a6844",
+          "source": "backfill-git",
+          "subject": "feat(abi): freeze AIENOS ABI v1 with golden-byte encoding and ADR 0013 (part of #30, M3) (#107)",
+          "timestamp": "2026-09-24T17:09:58-05:00"
+        },
+        {
+          "lane": "lane30",
+          "note": "Drafts: /tmp/lane30/drafts/OSC-IDENTITY-0.md and OSC-3-ADR0013-REQUEST.md (ADR 0013 read live at aienos d4a6844: Handle 8 B u32+u32; request ABI v2 16 B with u64 generation, v1 refused).",
+          "pr": 107,
+          "ref": "2026-10-01-push-lane30-report.md",
+          "sha": "d4a6844",
+          "source": "backfill-lane-report"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 84,
+          "sha": "4a8e428",
+          "source": "backfill-git",
+          "subject": "docs(adr): amend ADR 0012 with voice-first interaction and survival kit (#84)",
+          "timestamp": "2026-09-24T10:43:40-05:00"
+        },
+        {
+          "author": "Copilot",
+          "pr": 57,
+          "sha": "60faa8f",
+          "source": "backfill-git",
+          "subject": "docs(rig): Machine 1 hardware test rig design and ADR 0011 (power, HDMI capture, HID input) (#57)",
+          "timestamp": "2026-09-24T09:16:25-05:00"
+        },
+        {
+          "author": "Copilot",
+          "pr": 54,
+          "sha": "98c5762",
+          "source": "backfill-git",
+          "subject": "docs(adr): ADR 0010 fabric machine identity and capability advertisement design record (#54)",
+          "timestamp": "2026-09-24T09:13:03-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 62,
+          "sha": "017a9a8",
+          "source": "backfill-git",
+          "subject": "docs(adr): ADR 0012 self-construction, capability growth, generations (#62)",
+          "timestamp": "2026-09-24T09:08:18-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 52,
+          "sha": "a1babb4",
+          "source": "backfill-git",
+          "subject": "docs(adr): formalize two-stage EL2 bootstrap to EL1h kernel transition (#52)",
+          "timestamp": "2026-09-23T23:42:16-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 15,
+          "sha": "52109bc",
+          "source": "backfill-git",
+          "subject": "First-boot evidence image for Machine 1 and ADR 0008 bring-up exception (#15)",
+          "timestamp": "2026-09-23T20:19:04-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 2,
+          "sha": "bc25e73",
+          "source": "backfill-git",
+          "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
+          "timestamp": "2026-09-23T18:21:24-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 1,
+          "sha": "b6ef95f",
+          "source": "backfill-git",
+          "subject": "docs(adr): native boot stays next milestone; minimal Linux is Benchmark Config B only (#1)",
+          "timestamp": "2026-09-23T16:32:52-05:00"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 19
+    },
     "seed": {
-      "purpose_auto": "Directory docs/adr. Purpose not yet described by a human.",
       "files": [
         "0001-native-boot-milestone-and-linux-island.md",
         "0002-incumbent-os-as-migration-environment.md",
@@ -31,175 +206,12 @@
         "0016-continuity-objects-over-store-v1.md",
         "0017-m5-key-hierarchy-and-encrypted-store.md",
         "README.md"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 19,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "e3d3a10",
-          "timestamp": "2026-09-25T19:09:05-05:00",
-          "author": "aien-dev",
-          "subject": "docs(adr): adopt ADR 0017 (M5 architecture) and amend ADR 0016 migration boundary (#149)",
-          "pr": 149
-        },
-        {
-          "source": "backfill-git",
-          "sha": "a2a0382",
-          "timestamp": "2026-09-25T17:56:21-05:00",
-          "author": "aien-dev",
-          "subject": "M4: continuity objects over Store v1; same identity and memory across cold restarts (CONTINUITY_QEMU) (#142)",
-          "pr": 142
-        },
-        {
-          "source": "backfill-git",
-          "sha": "5ac7cfc",
-          "timestamp": "2026-09-25T17:37:17-05:00",
-          "author": "aien-dev",
-          "subject": "test(store): prove ADR 0015 golden vectors with the kernel encoders in Rust (#139)",
-          "pr": 139
-        },
-        {
-          "source": "backfill-git",
-          "sha": "123929a",
-          "timestamp": "2026-09-25T15:12:39-05:00",
-          "author": "aien-dev",
-          "subject": "P3: System Store v1 malformed-peer recovery amendment (STORE_MALFORMED_PEER_RECOVERY) (#135)",
-          "pr": 135
-        },
-        {
-          "source": "backfill-git",
-          "sha": "9919813",
-          "timestamp": "2026-09-25T08:50:17-05:00",
-          "author": "aien-dev",
-          "subject": "P3-1: freeze System Store v1 format and canonical vectors (#130)",
-          "pr": 130
-        },
-        {
-          "source": "backfill-git",
-          "sha": "ff5de9c",
-          "timestamp": "2026-09-25T07:46:07-05:00",
-          "author": "aien-dev",
-          "subject": "P2-7: negative matrix + canonical SEED-0B QEMU qualification (SEED_0B_QEMU: PASS) (#128)",
-          "pr": 128
-        },
-        {
-          "source": "backfill-git",
-          "sha": "4dd5726",
-          "timestamp": "2026-09-25T07:02:01-05:00",
-          "author": "aien-dev",
-          "subject": "P2-6A: Admission Receipt v0 (canonical encoding, strict decode, TEST-ONLY signing, CLI) (#124)",
-          "pr": 124
-        },
-        {
-          "source": "backfill-git",
-          "sha": "1a62ca3",
-          "timestamp": "2026-09-24T21:20:14-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #121 from aien-dev/phase2/binary-artifact-v0",
-          "pr": 121
-        },
-        {
-          "source": "backfill-git",
-          "sha": "952e53e",
-          "timestamp": "2026-09-24T21:05:20-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #120 from aien-dev/phase2/binary-artifact-v0",
-          "pr": 120
-        },
-        {
-          "source": "backfill-git",
-          "sha": "a6363cb",
-          "timestamp": "2026-09-24T20:21:44-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #118 from aien-dev/phase2/binary-artifact-v0",
-          "pr": 118
-        },
-        {
-          "source": "backfill-git",
-          "sha": "d4a6844",
-          "timestamp": "2026-09-24T17:09:58-05:00",
-          "author": "aien-dev",
-          "subject": "feat(abi): freeze AIENOS ABI v1 with golden-byte encoding and ADR 0013 (part of #30, M3) (#107)",
-          "pr": 107
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane30",
-          "sha": "d4a6844",
-          "pr": 107,
-          "note": "Drafts: /tmp/lane30/drafts/OSC-IDENTITY-0.md and OSC-3-ADR0013-REQUEST.md (ADR 0013 read live at aienos d4a6844: Handle 8 B u32+u32; request ABI v2 16 B with u64 generation, v1 refused).",
-          "ref": "2026-10-01-push-lane30-report.md"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "4a8e428",
-          "timestamp": "2026-09-24T10:43:40-05:00",
-          "author": "aien-dev",
-          "subject": "docs(adr): amend ADR 0012 with voice-first interaction and survival kit (#84)",
-          "pr": 84
-        },
-        {
-          "source": "backfill-git",
-          "sha": "60faa8f",
-          "timestamp": "2026-09-24T09:16:25-05:00",
-          "author": "Copilot",
-          "subject": "docs(rig): Machine 1 hardware test rig design and ADR 0011 (power, HDMI capture, HID input) (#57)",
-          "pr": 57
-        },
-        {
-          "source": "backfill-git",
-          "sha": "98c5762",
-          "timestamp": "2026-09-24T09:13:03-05:00",
-          "author": "Copilot",
-          "subject": "docs(adr): ADR 0010 fabric machine identity and capability advertisement design record (#54)",
-          "pr": 54
-        },
-        {
-          "source": "backfill-git",
-          "sha": "017a9a8",
-          "timestamp": "2026-09-24T09:08:18-05:00",
-          "author": "aien-dev",
-          "subject": "docs(adr): ADR 0012 self-construction, capability growth, generations (#62)",
-          "pr": 62
-        },
-        {
-          "source": "backfill-git",
-          "sha": "a1babb4",
-          "timestamp": "2026-09-23T23:42:16-05:00",
-          "author": "aien-dev",
-          "subject": "docs(adr): formalize two-stage EL2 bootstrap to EL1h kernel transition (#52)",
-          "pr": 52
-        },
-        {
-          "source": "backfill-git",
-          "sha": "52109bc",
-          "timestamp": "2026-09-23T20:19:04-05:00",
-          "author": "aien-dev",
-          "subject": "First-boot evidence image for Machine 1 and ADR 0008 bring-up exception (#15)",
-          "pr": 15
-        },
-        {
-          "source": "backfill-git",
-          "sha": "bc25e73",
-          "timestamp": "2026-09-23T18:21:24-05:00",
-          "author": "aien-dev",
-          "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
-          "pr": 2
-        },
-        {
-          "source": "backfill-git",
-          "sha": "b6ef95f",
-          "timestamp": "2026-09-23T16:32:52-05:00",
-          "author": "aien-dev",
-          "subject": "docs(adr): native boot stays next milestone; minimal Linux is Benchmark Config B only (#1)",
-          "pr": 1
-        }
-      ]
+      ],
+      "purpose_auto": "Directory docs/adr. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "docs/adr",
+  "name": "docs/adr",
+  "purpose": "Directory docs/adr. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

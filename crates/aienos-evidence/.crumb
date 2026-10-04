@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-evidence",
-  "layer": "crates/aienos-evidence",
-  "purpose": "Directory crates/aienos-evidence. Purpose not yet described by a human.",
   "above": {
     "name": "crates",
     "path": ".."
@@ -14,35 +10,58 @@
     }
   ],
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-evidence. Purpose not yet described by a human.",
-      "files": [
-        "Cargo.toml"
-      ]
+    "generated": {
+      "children": [
+        {
+          "digest": "3a2a8524efb5a0ba6ee9470537d862bad5b69a58ca6328e49e48715f8de36c09",
+          "last_commit": "e960272",
+          "name": "src",
+          "purpose": "Directory crates/aienos-evidence/src. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:77c1f566be80f025bdb191e29a47eb07fe3ed2832535f5df4f29ff60aec4b4b3",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:e88324eb9a32d23d8358413c7404038ee4095fcf8c4889ac9c221b97aef80b8e",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 10,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:f0c5766c2a965888b6e893213d2b31052c9e7c52f22c6a02be4b39cf80f6b36d"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 2,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "4372a8d",
-          "timestamp": "2026-09-25T17:37:36-05:00",
           "author": "aien-dev",
+          "pr": 140,
+          "sha": "4372a8d",
+          "source": "backfill-git",
           "subject": "chore(rollback): port native-boot rollback verifier to Rust, drop python3 (#140)",
-          "pr": 140
+          "timestamp": "2026-09-25T17:37:36-05:00"
         },
         {
-          "source": "backfill-git",
-          "sha": "9bd233d",
-          "timestamp": "2026-09-23T19:30:29-05:00",
           "author": "aien-dev",
+          "pr": 12,
+          "sha": "9bd233d",
+          "source": "backfill-git",
           "subject": "Replace Python evidence tooling with Rust and recapture a clean Config A (#12)",
-          "pr": 12
+          "timestamp": "2026-09-23T19:30:29-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 2
+    },
+    "seed": {
+      "files": [
+        "Cargo.toml"
+      ],
+      "purpose_auto": "Directory crates/aienos-evidence. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-evidence",
+  "name": "crates/aienos-evidence",
+  "purpose": "Directory crates/aienos-evidence. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

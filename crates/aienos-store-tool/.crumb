@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-store-tool",
-  "layer": "crates/aienos-store-tool",
-  "purpose": "Directory crates/aienos-store-tool. Purpose not yet described by a human.",
   "above": {
     "name": "crates",
     "path": ".."
@@ -14,43 +10,66 @@
     }
   ],
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-store-tool. Purpose not yet described by a human.",
-      "files": [
-        "Cargo.toml"
-      ]
+    "generated": {
+      "children": [
+        {
+          "digest": "37a250c16fcf1ee0351e5ef165ee010fd987c23958b5582b4fd86b212e966573",
+          "last_commit": "761e63d",
+          "name": "src",
+          "purpose": "Directory crates/aienos-store-tool/src. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:0213c8f331c9520c68ce679b8e1104c04aa862cfa3dedbad3f88410b2a11b380",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:716d679da128e7aab8efb6e9cf836ee22a62fe9fe6993e2d0a20c3016d78b3a0",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 2,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:b7c2b35b4232b998b5a2ba1ef98ce05fc4e6353d0c3a45bc5abb56baa9137100"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 3,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 144,
           "sha": "761e63d",
-          "timestamp": "2026-09-25T18:27:34-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "feat(recovery): Recovery Core inspection, operator actions, and QEMU qualification (ADR 0006) (#144)",
-          "pr": 144
+          "timestamp": "2026-09-25T18:27:34-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 142,
           "sha": "a2a0382",
-          "timestamp": "2026-09-25T17:56:21-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "M4: continuity objects over Store v1; same identity and memory across cold restarts (CONTINUITY_QEMU) (#142)",
-          "pr": 142
+          "timestamp": "2026-09-25T17:56:21-05:00"
         },
         {
-          "source": "backfill-git",
-          "sha": "23f61e4",
-          "timestamp": "2026-09-25T16:37:26-05:00",
           "author": "aien-dev",
+          "pr": 136,
+          "sha": "23f61e4",
+          "source": "backfill-git",
           "subject": "P3: 512-byte NVMe crash qualification campaign (STORE_512B_CRASH_RECOVERY_QEMU) (#136)",
-          "pr": 136
+          "timestamp": "2026-09-25T16:37:26-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 3
+    },
+    "seed": {
+      "files": [
+        "Cargo.toml"
+      ],
+      "purpose_auto": "Directory crates/aienos-store-tool. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-store-tool",
+  "name": "crates/aienos-store-tool",
+  "purpose": "Directory crates/aienos-store-tool. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

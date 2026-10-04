@@ -1,107 +1,119 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-kernel/src/arch",
-  "layer": "crates/aienos-kernel/src/arch",
-  "purpose": "Directory crates/aienos-kernel/src/arch. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-kernel/src",
     "path": ".."
   },
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-kernel/src/arch. Purpose not yet described by a human.",
-      "files": [
-        "aarch64.rs",
-        "mod.rs"
-      ]
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:1d30ca7021c15e3a0b501caa9149ddf071899bd6cf5f1fe26df88d55f0ec776e",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 2,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:4e4c843e19b7f2e897280b260cebf771d7ca982d391796077e89e5dbdf5e5400"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 10,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 142,
           "sha": "a2a0382",
-          "timestamp": "2026-09-25T17:56:21-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "M4: continuity objects over Store v1; same identity and memory across cold restarts (CONTINUITY_QEMU) (#142)",
-          "pr": 142
+          "timestamp": "2026-09-25T17:56:21-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 80,
           "sha": "6b4290f",
-          "timestamp": "2026-09-24T10:25:36-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "boot: enter EL1h with AIENOS page tables and caches on (#66, ADR 0009) (#80)",
-          "pr": 80
+          "timestamp": "2026-09-24T10:25:36-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 75,
           "sha": "acba849",
-          "timestamp": "2026-09-24T09:54:35-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "kernel(usb): add xHCI discovery and keyboard descriptors (SEED-0A 2c) (#75)",
-          "pr": 75
+          "timestamp": "2026-09-24T09:54:35-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 15,
           "sha": "52109bc",
-          "timestamp": "2026-09-23T20:19:04-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "First-boot evidence image for Machine 1 and ADR 0008 bring-up exception (#15)",
-          "pr": 15
+          "timestamp": "2026-09-23T20:19:04-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 14,
           "sha": "44fcba7",
-          "timestamp": "2026-09-23T19:58:07-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Discover CPU topology from the ACPI MADT and record the revised critical path (#14)",
-          "pr": 14
+          "timestamp": "2026-09-23T19:58:07-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 13,
           "sha": "a22b1d8",
-          "timestamp": "2026-09-23T19:38:27-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Make the native boot report visible without serial and self-returning (#13)",
-          "pr": 13
+          "timestamp": "2026-09-23T19:38:27-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 9,
           "sha": "e37bd2b",
-          "timestamp": "2026-09-23T18:42:34-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Merge pull request #9 from aien-dev/feat/aienos-boot-timing",
-          "pr": 9
+          "timestamp": "2026-09-23T18:42:34-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 5,
           "sha": "d1ae435",
-          "timestamp": "2026-09-23T18:31:01-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "feat(boot): compile explicit UEFI to early-kernel handoff image (#5)",
-          "pr": 5
+          "timestamp": "2026-09-23T18:31:01-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 3,
           "sha": "28c939c",
-          "timestamp": "2026-09-23T18:24:28-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "fix(kernel): use Spark 8250 MMIO UART register layout (#3)",
-          "pr": 3
+          "timestamp": "2026-09-23T18:24:28-05:00"
         },
         {
-          "source": "backfill-git",
-          "sha": "bc25e73",
-          "timestamp": "2026-09-23T18:21:24-05:00",
           "author": "aien-dev",
+          "pr": 2,
+          "sha": "bc25e73",
+          "source": "backfill-git",
           "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
-          "pr": 2
+          "timestamp": "2026-09-23T18:21:24-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 10
+    },
+    "seed": {
+      "files": [
+        "aarch64.rs",
+        "mod.rs"
+      ],
+      "purpose_auto": "Directory crates/aienos-kernel/src/arch. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-kernel/src/arch",
+  "name": "crates/aienos-kernel/src/arch",
+  "purpose": "Directory crates/aienos-kernel/src/arch. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-c1-tree",
-  "layer": "crates/aienos-c1-tree",
-  "purpose": "Directory crates/aienos-c1-tree. Purpose not yet described by a human.",
   "above": {
     "name": "crates",
     "path": ".."
@@ -14,27 +10,50 @@
     }
   ],
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-c1-tree. Purpose not yet described by a human.",
-      "files": [
-        "Cargo.toml"
-      ]
+    "generated": {
+      "children": [
+        {
+          "digest": "c4e73e6c433a48fb64a5245f2013976b042e08e61547fed29f63a81eb83ae4a9",
+          "last_commit": "bc25e73",
+          "name": "src",
+          "purpose": "Directory crates/aienos-c1-tree/src. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:b8d86bd2ff955746678ddf4f8fab9182bb3c0a3648bb24eece36bece39743278",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:01d4fe4a0bd556f338ac4615b7ed1c9141e4f8035c07e0082f2894a57fa071d0",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 6,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:1e157d25c5dc194c76b5962990147c5735dfb314d1ed11bbe5976b48534f211e"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "bc25e73",
-          "timestamp": "2026-09-23T18:21:24-05:00",
           "author": "aien-dev",
+          "pr": 2,
+          "sha": "bc25e73",
+          "source": "backfill-git",
           "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
-          "pr": 2
+          "timestamp": "2026-09-23T18:21:24-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
+    "seed": {
+      "files": [
+        "Cargo.toml"
+      ],
+      "purpose_auto": "Directory crates/aienos-c1-tree. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-c1-tree",
+  "name": "crates/aienos-c1-tree",
+  "purpose": "Directory crates/aienos-c1-tree. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

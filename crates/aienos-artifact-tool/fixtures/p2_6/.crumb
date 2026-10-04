@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-artifact-tool/fixtures/p2_6",
-  "layer": "crates/aienos-artifact-tool/fixtures/p2_6",
-  "purpose": "Directory crates/aienos-artifact-tool/fixtures/p2_6. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-artifact-tool",
     "path": "../.."
@@ -14,28 +10,51 @@
     }
   ],
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-artifact-tool/fixtures/p2_6. Purpose not yet described by a human.",
-      "files": [
-        "assemble.sh",
-        "pack.sh"
-      ]
+    "generated": {
+      "children": [
+        {
+          "digest": "840aed89b746a4a7ce182a9c0451e9b214b661542a794f553d062b4bfb432ed6",
+          "last_commit": "5ad82b3",
+          "name": "p26seed",
+          "purpose": "Directory crates/aienos-artifact-tool/fixtures/p2_6/p26seed. Purpose not yet described by a huma"
+        }
+      ],
+      "children_root": "sha256:b71def74f45a5689a4e18998806238c664fd678eaded10a7933b8fb0a21da02c",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:2811606d395a9d99516bd97b845fd673bfed3f04b5f592c795868c3f8abe5727",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 6,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:55cfddf35a6d8695b3cf45be65b914e4c96d1f053e48f4c81de1e16243595d67"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "5ad82b3",
-          "timestamp": "2026-09-25T07:16:47-05:00",
           "author": "aien-dev",
+          "pr": 127,
+          "sha": "5ad82b3",
+          "source": "backfill-git",
           "subject": "feat(seed0b): kernel Admission Receipt emission and first SEED-0B capability artifact (P2-6B) (#127)",
-          "pr": 127
+          "timestamp": "2026-09-25T07:16:47-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
+    "seed": {
+      "files": [
+        "assemble.sh",
+        "pack.sh"
+      ],
+      "purpose_auto": "Directory crates/aienos-artifact-tool/fixtures/p2_6. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-artifact-tool/fixtures/p2_6",
+  "name": "crates/aienos-artifact-tool/fixtures/p2_6",
+  "purpose": "Directory crates/aienos-artifact-tool/fixtures/p2_6. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

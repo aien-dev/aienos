@@ -1,15 +1,190 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-boot/src",
-  "layer": "crates/aienos-boot/src",
-  "purpose": "Directory crates/aienos-boot/src. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-boot",
     "path": ".."
   },
   "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:ffebb91d711dc4911ad9ca79f85a8a10daa308384a3e90e9ac1df7e850c0dab0",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 7,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:03c42e245e8545c8ad5586be9e6d18b3c83752555bf685e2a0289750c25dd14b"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 144,
+          "sha": "761e63d",
+          "source": "backfill-git",
+          "subject": "feat(recovery): Recovery Core inspection, operator actions, and QEMU qualification (ADR 0006) (#144)",
+          "timestamp": "2026-09-25T18:27:34-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 142,
+          "sha": "a2a0382",
+          "source": "backfill-git",
+          "subject": "M4: continuity objects over Store v1; same identity and memory across cold restarts (CONTINUITY_QEMU) (#142)",
+          "timestamp": "2026-09-25T17:56:21-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 138,
+          "sha": "2276906",
+          "source": "backfill-git",
+          "subject": "fix(seed0b): prove NX and Machine 1 claims instead of assuming them (#128 review) (#138)",
+          "timestamp": "2026-09-25T17:13:08-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 136,
+          "sha": "23f61e4",
+          "source": "backfill-git",
+          "subject": "P3: 512-byte NVMe crash qualification campaign (STORE_512B_CRASH_RECOVERY_QEMU) (#136)",
+          "timestamp": "2026-09-25T16:37:26-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 134,
+          "sha": "9750186",
+          "source": "backfill-git",
+          "subject": "P3: Store-over-NVMe QEMU crash/reboot qualification (STORE_V1_QEMU) (#134)",
+          "timestamp": "2026-09-25T14:23:02-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 133,
+          "sha": "c851d01",
+          "source": "backfill-git",
+          "subject": "P3: qualify NVMe power-fail atomicity for Store root writes (#133)",
+          "timestamp": "2026-09-25T13:16:01-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 132,
+          "sha": "3f8ebf3",
+          "source": "backfill-git",
+          "subject": "P3: native NVMe write and flush qualification on QEMU (#132)",
+          "timestamp": "2026-09-25T09:33:00-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 129,
+          "sha": "ef359ec",
+          "source": "backfill-git",
+          "subject": "P3 Native NVMe Read Substrate (QEMU-qualified) (#129)",
+          "timestamp": "2026-09-25T08:55:24-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 128,
+          "sha": "ff5de9c",
+          "source": "backfill-git",
+          "subject": "P2-7: negative matrix + canonical SEED-0B QEMU qualification (SEED_0B_QEMU: PASS) (#128)",
+          "timestamp": "2026-09-25T07:46:07-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 126,
+          "sha": "4cbea96",
+          "source": "backfill-git",
+          "subject": "M0: native-boot rollback qualification in QEMU (hardware qualification BLOCKED by trust chain) (#126)",
+          "timestamp": "2026-09-25T07:30:22-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 127,
+          "sha": "5ad82b3",
+          "source": "backfill-git",
+          "subject": "feat(seed0b): kernel Admission Receipt emission and first SEED-0B capability artifact (P2-6B) (#127)",
+          "timestamp": "2026-09-25T07:16:47-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 123,
+          "sha": "71cb170",
+          "source": "backfill-git",
+          "subject": "fix: clean aarch64/UEFI clippy lints and gate them in verify_all (#123)",
+          "timestamp": "2026-09-25T06:34:53-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 122,
+          "sha": "3a6174a",
+          "source": "backfill-git",
+          "subject": "P2-5: Binary Artifact loader — exact-byte W^X EL0 execution with full rollback (#122)",
+          "timestamp": "2026-09-25T06:23:20-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 110,
+          "sha": "35b3086",
+          "source": "backfill-git",
+          "subject": "feat(smmu): fail-closed DMA bring-up and PCI bus master sweep (M3 1C) (#110)",
+          "timestamp": "2026-09-24T17:24:08-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 109,
+          "sha": "e943690",
+          "source": "backfill-git",
+          "subject": "feat(abi): unify kernel subsystems and syscall boundary onto ABI v1 types (closes #30) (#109)",
+          "timestamp": "2026-09-24T17:15:14-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 106,
+          "sha": "78cec64",
+          "source": "backfill-git",
+          "subject": "feat(ipc): typed channels with attenuated, revocable capability delegation (part of #30, M3) (#106)",
+          "timestamp": "2026-09-24T17:09:14-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 108,
+          "sha": "c4eec66",
+          "source": "backfill-git",
+          "subject": "M3 1A: report the MMU switch and tick statistics, reconcile #27 and #28 (#108)",
+          "timestamp": "2026-09-24T17:06:42-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 105,
+          "sha": "668202e",
+          "source": "backfill-git",
+          "subject": "feat(scheduler): timer-driven preemption and MADT-aware placement (closes #29) (#105)",
+          "timestamp": "2026-09-24T15:00:42-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 104,
+          "sha": "0b0dc82",
+          "source": "backfill-git",
+          "subject": "feat(kernel): run EL0 tasks with capability checks and contained faults (part of #30, M3) (#104)",
+          "timestamp": "2026-09-24T14:46:40-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 103,
+          "sha": "b9c656f",
+          "source": "backfill-git",
+          "subject": "feat(smmu): wire SMMUv3 IORT discovery and DMA confinement in QEMU (part of #30, M3) (#103)",
+          "timestamp": "2026-09-24T14:27:49-05:00"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 36
+    },
     "seed": {
-      "purpose_auto": "Directory crates/aienos-boot/src. Purpose not yet described by a human.",
       "files": [
         "handoff.rs",
         "lib.rs",
@@ -18,175 +193,12 @@
         "rollback_mock.rs",
         "store_qual.rs",
         "usb_keyboard.rs"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 36,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "761e63d",
-          "timestamp": "2026-09-25T18:27:34-05:00",
-          "author": "aien-dev",
-          "subject": "feat(recovery): Recovery Core inspection, operator actions, and QEMU qualification (ADR 0006) (#144)",
-          "pr": 144
-        },
-        {
-          "source": "backfill-git",
-          "sha": "a2a0382",
-          "timestamp": "2026-09-25T17:56:21-05:00",
-          "author": "aien-dev",
-          "subject": "M4: continuity objects over Store v1; same identity and memory across cold restarts (CONTINUITY_QEMU) (#142)",
-          "pr": 142
-        },
-        {
-          "source": "backfill-git",
-          "sha": "2276906",
-          "timestamp": "2026-09-25T17:13:08-05:00",
-          "author": "aien-dev",
-          "subject": "fix(seed0b): prove NX and Machine 1 claims instead of assuming them (#128 review) (#138)",
-          "pr": 138
-        },
-        {
-          "source": "backfill-git",
-          "sha": "23f61e4",
-          "timestamp": "2026-09-25T16:37:26-05:00",
-          "author": "aien-dev",
-          "subject": "P3: 512-byte NVMe crash qualification campaign (STORE_512B_CRASH_RECOVERY_QEMU) (#136)",
-          "pr": 136
-        },
-        {
-          "source": "backfill-git",
-          "sha": "9750186",
-          "timestamp": "2026-09-25T14:23:02-05:00",
-          "author": "aien-dev",
-          "subject": "P3: Store-over-NVMe QEMU crash/reboot qualification (STORE_V1_QEMU) (#134)",
-          "pr": 134
-        },
-        {
-          "source": "backfill-git",
-          "sha": "c851d01",
-          "timestamp": "2026-09-25T13:16:01-05:00",
-          "author": "aien-dev",
-          "subject": "P3: qualify NVMe power-fail atomicity for Store root writes (#133)",
-          "pr": 133
-        },
-        {
-          "source": "backfill-git",
-          "sha": "3f8ebf3",
-          "timestamp": "2026-09-25T09:33:00-05:00",
-          "author": "aien-dev",
-          "subject": "P3: native NVMe write and flush qualification on QEMU (#132)",
-          "pr": 132
-        },
-        {
-          "source": "backfill-git",
-          "sha": "ef359ec",
-          "timestamp": "2026-09-25T08:55:24-05:00",
-          "author": "aien-dev",
-          "subject": "P3 Native NVMe Read Substrate (QEMU-qualified) (#129)",
-          "pr": 129
-        },
-        {
-          "source": "backfill-git",
-          "sha": "ff5de9c",
-          "timestamp": "2026-09-25T07:46:07-05:00",
-          "author": "aien-dev",
-          "subject": "P2-7: negative matrix + canonical SEED-0B QEMU qualification (SEED_0B_QEMU: PASS) (#128)",
-          "pr": 128
-        },
-        {
-          "source": "backfill-git",
-          "sha": "4cbea96",
-          "timestamp": "2026-09-25T07:30:22-05:00",
-          "author": "aien-dev",
-          "subject": "M0: native-boot rollback qualification in QEMU (hardware qualification BLOCKED by trust chain) (#126)",
-          "pr": 126
-        },
-        {
-          "source": "backfill-git",
-          "sha": "5ad82b3",
-          "timestamp": "2026-09-25T07:16:47-05:00",
-          "author": "aien-dev",
-          "subject": "feat(seed0b): kernel Admission Receipt emission and first SEED-0B capability artifact (P2-6B) (#127)",
-          "pr": 127
-        },
-        {
-          "source": "backfill-git",
-          "sha": "71cb170",
-          "timestamp": "2026-09-25T06:34:53-05:00",
-          "author": "aien-dev",
-          "subject": "fix: clean aarch64/UEFI clippy lints and gate them in verify_all (#123)",
-          "pr": 123
-        },
-        {
-          "source": "backfill-git",
-          "sha": "3a6174a",
-          "timestamp": "2026-09-25T06:23:20-05:00",
-          "author": "aien-dev",
-          "subject": "P2-5: Binary Artifact loader — exact-byte W^X EL0 execution with full rollback (#122)",
-          "pr": 122
-        },
-        {
-          "source": "backfill-git",
-          "sha": "35b3086",
-          "timestamp": "2026-09-24T17:24:08-05:00",
-          "author": "aien-dev",
-          "subject": "feat(smmu): fail-closed DMA bring-up and PCI bus master sweep (M3 1C) (#110)",
-          "pr": 110
-        },
-        {
-          "source": "backfill-git",
-          "sha": "e943690",
-          "timestamp": "2026-09-24T17:15:14-05:00",
-          "author": "aien-dev",
-          "subject": "feat(abi): unify kernel subsystems and syscall boundary onto ABI v1 types (closes #30) (#109)",
-          "pr": 109
-        },
-        {
-          "source": "backfill-git",
-          "sha": "78cec64",
-          "timestamp": "2026-09-24T17:09:14-05:00",
-          "author": "aien-dev",
-          "subject": "feat(ipc): typed channels with attenuated, revocable capability delegation (part of #30, M3) (#106)",
-          "pr": 106
-        },
-        {
-          "source": "backfill-git",
-          "sha": "c4eec66",
-          "timestamp": "2026-09-24T17:06:42-05:00",
-          "author": "aien-dev",
-          "subject": "M3 1A: report the MMU switch and tick statistics, reconcile #27 and #28 (#108)",
-          "pr": 108
-        },
-        {
-          "source": "backfill-git",
-          "sha": "668202e",
-          "timestamp": "2026-09-24T15:00:42-05:00",
-          "author": "aien-dev",
-          "subject": "feat(scheduler): timer-driven preemption and MADT-aware placement (closes #29) (#105)",
-          "pr": 105
-        },
-        {
-          "source": "backfill-git",
-          "sha": "0b0dc82",
-          "timestamp": "2026-09-24T14:46:40-05:00",
-          "author": "aien-dev",
-          "subject": "feat(kernel): run EL0 tasks with capability checks and contained faults (part of #30, M3) (#104)",
-          "pr": 104
-        },
-        {
-          "source": "backfill-git",
-          "sha": "b9c656f",
-          "timestamp": "2026-09-24T14:27:49-05:00",
-          "author": "aien-dev",
-          "subject": "feat(smmu): wire SMMUv3 IORT discovery and DMA confinement in QEMU (part of #30, M3) (#103)",
-          "pr": 103
-        }
-      ]
+      ],
+      "purpose_auto": "Directory crates/aienos-boot/src. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-boot/src",
+  "name": "crates/aienos-boot/src",
+  "purpose": "Directory crates/aienos-boot/src. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }
