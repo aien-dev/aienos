@@ -1,42 +1,54 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-capability/src",
-  "layer": "crates/aienos-capability/src",
-  "purpose": "Directory crates/aienos-capability/src. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-capability",
     "path": ".."
   },
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-capability/src. Purpose not yet described by a human.",
-      "files": [
-        "lib.rs"
-      ]
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:3e3db7622e53c339ff0383af982b4e0bf2e7bea7e091ff8d904d56331a68ee5a",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 1,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:415989d80d70c9adb40bfdcb81d561e359dbe52dc3cae6c1f2795e52fcf6cb6b"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 2,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "18caa07",
-          "timestamp": "2026-09-27T15:55:55-05:00",
           "author": "aien-dev",
+          "pr": 155,
+          "sha": "18caa07",
+          "source": "backfill-git",
           "subject": "Merge pull request #155 from aien-dev/feat/r9-generation-barrier",
-          "pr": 155
+          "timestamp": "2026-09-27T15:55:55-05:00"
         },
         {
-          "source": "backfill-git",
-          "sha": "24f1593",
-          "timestamp": "2026-09-27T15:50:43-05:00",
           "author": "aien-dev",
+          "pr": 154,
+          "sha": "24f1593",
+          "source": "backfill-git",
           "subject": "Merge pull request #154 from aien-dev/feat/r7-native-authority",
-          "pr": 154
+          "timestamp": "2026-09-27T15:50:43-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 2
+    },
+    "seed": {
+      "files": [
+        "lib.rs"
+      ],
+      "purpose_auto": "Directory crates/aienos-capability/src. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-capability/src",
+  "name": "crates/aienos-capability/src",
+  "purpose": "Directory crates/aienos-capability/src. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

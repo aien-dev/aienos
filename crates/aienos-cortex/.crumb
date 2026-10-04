@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-cortex",
-  "layer": "crates/aienos-cortex",
-  "purpose": "Directory crates/aienos-cortex. Purpose not yet described by a human.",
   "above": {
     "name": "crates",
     "path": ".."
@@ -14,27 +10,50 @@
     }
   ],
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-cortex. Purpose not yet described by a human.",
-      "files": [
-        "Cargo.toml"
-      ]
+    "generated": {
+      "children": [
+        {
+          "digest": "1ea60299f5c468e6713aff04a2588ae50d1d9667270d629368f6bcf3a6837ef0",
+          "last_commit": "bc25e73",
+          "name": "src",
+          "purpose": "Directory crates/aienos-cortex/src. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:92d1cbf580400ebb38fb86483abce93e4ec128765daa059f5d84d27f9ef52eee",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:f062e2e58faa2950ce8adeb2e4c16234dacce6672d560ed4fdeb7224c5093a77",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 6,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:8d85c1d3b93b28be2a5bada5c383d51b4d1bf11af78751aef5f628465b43a93d"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "bc25e73",
-          "timestamp": "2026-09-23T18:21:24-05:00",
           "author": "aien-dev",
+          "pr": 2,
+          "sha": "bc25e73",
+          "source": "backfill-git",
           "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
-          "pr": 2
+          "timestamp": "2026-09-23T18:21:24-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
+    "seed": {
+      "files": [
+        "Cargo.toml"
+      ],
+      "purpose_auto": "Directory crates/aienos-cortex. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-cortex",
+  "name": "crates/aienos-cortex",
+  "purpose": "Directory crates/aienos-cortex. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

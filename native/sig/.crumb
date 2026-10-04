@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/sig",
-  "layer": "native/sig",
-  "purpose": "Directory native/sig. Purpose not yet described by a human.",
   "above": {
     "name": "native",
     "path": ".."
@@ -14,8 +10,66 @@
     }
   ],
   "extensions": {
+    "generated": {
+      "children": [
+        {
+          "digest": "33dc4e9fb2d9d884bb3ae8b384327e07d1c4d6871a536b42317da9882e666ffb",
+          "last_commit": "cea54be",
+          "name": "tests",
+          "purpose": "Directory native/sig/tests. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:2c318acd4ff46092a89eec7b6b1f764bdc91bb6428427fffa9b04f05753be9fd",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:295150763e0b19f9f74a3b49d679213467075e9682f1f23d0e5ea838872d20e1",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 10,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:a75148cfdf71f99296a21640ad3cd979132d28df47879301c198da0f2f4b7a5a"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 188,
+          "sha": "913b962",
+          "source": "backfill-git",
+          "subject": "Merge pull request #188 from aien-dev/lane10/native-sig",
+          "timestamp": "2026-09-30T23:22:04-05:00"
+        },
+        {
+          "lane": "lane10",
+          "note": "Verdict: PASS (software primitive). PR aien-dev/aienos #188 MERGED, merge commit 913b962 (main tree identical to the tested branch cea54be).",
+          "pr": 188,
+          "ref": "2026-10-01-push-lane10-report.md",
+          "sha": "913b962",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane12",
+          "note": "native/sig vendored to src/searchtrace/sig/ with PROVENANCE.txt (aienos 913b962, per-file sha256).",
+          "pr": 188,
+          "ref": "2026-10-01-push-lane12-report.md",
+          "sha": "913b962",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane10",
+          "note": "~06:40Z Lane 10 DONE: Ed25519 in C merged aienos#188 913b962, 5917 checks, 14 mutants, AIENOS_SIG_NATIVE: PASS; Gemini reviewed (Codex+Grok out of usage). Not yet wired to M5 migration/M23 G3. Launch",
+          "pr": 188,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "913b962",
+          "source": "backfill-lane-report"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
     "seed": {
-      "purpose_auto": "Directory native/sig. Purpose not yet described by a human.",
       "files": [
         "Makefile",
         "README.md",
@@ -24,47 +78,12 @@
         "ed25519.c",
         "sha512.c",
         "sig_internal.h"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "913b962",
-          "timestamp": "2026-09-30T23:22:04-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #188 from aien-dev/lane10/native-sig",
-          "pr": 188
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane10",
-          "sha": "913b962",
-          "pr": 188,
-          "note": "Verdict: PASS (software primitive). PR aien-dev/aienos #188 MERGED, merge commit 913b962 (main tree identical to the tested branch cea54be).",
-          "ref": "2026-10-01-push-lane10-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane12",
-          "sha": "913b962",
-          "pr": 188,
-          "note": "native/sig vendored to src/searchtrace/sig/ with PROVENANCE.txt (aienos 913b962, per-file sha256).",
-          "ref": "2026-10-01-push-lane12-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane10",
-          "sha": "913b962",
-          "pr": 188,
-          "note": "~06:40Z Lane 10 DONE: Ed25519 in C merged aienos#188 913b962, 5917 checks, 14 mutants, AIENOS_SIG_NATIVE: PASS; Gemini reviewed (Codex+Grok out of usage). Not yet wired to M5 migration/M23 G3. Launch",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        }
-      ]
+      ],
+      "purpose_auto": "Directory native/sig. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/sig",
+  "name": "native/sig",
+  "purpose": "Directory native/sig. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

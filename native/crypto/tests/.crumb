@@ -1,50 +1,62 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/crypto/tests",
-  "layer": "native/crypto/tests",
-  "purpose": "Directory native/crypto/tests. Purpose not yet described by a human.",
   "above": {
     "name": "native/crypto",
     "path": ".."
   },
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory native/crypto/tests. Purpose not yet described by a human.",
-      "files": [
-        "crypto_test.c"
-      ]
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:dac1583f9b7627f80272af9cf90ef4e62dccc25593f8c4ee1ffbc2471b8f3462",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 1,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:8d8a1d7e007ce2f36bca8e9edb7c6e6849804b50612c56b412d739a2603ed907"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "84de088",
-          "timestamp": "2026-09-30T22:17:38-05:00",
           "author": "aien-dev",
+          "pr": 183,
+          "sha": "84de088",
+          "source": "backfill-git",
           "subject": "Merge pull request #183 from aien-dev/lane1/native-crypto",
-          "pr": 183
+          "timestamp": "2026-09-30T22:17:38-05:00"
         },
         {
-          "source": "backfill-lane-report",
           "lane": "lane1",
-          "sha": "84de088",
-          "pr": 183,
           "note": "WP-C native crypto: #183 merged 84de088. native/crypto test 1820 checks / AIENOS_CRYPTO_NATIVE: PASS, ASan/UBSan PASS, 8/8 mutants. 26 RFC 8452 vectors.",
-          "ref": "2026-10-01-push-lane1-report.md"
+          "pr": 183,
+          "ref": "2026-10-01-push-lane1-report.md",
+          "sha": "84de088",
+          "source": "backfill-lane-report"
         },
         {
-          "source": "backfill-lane-report",
           "lane": "lane1",
-          "sha": "84de088",
-          "pr": 183,
           "note": "~06:05Z Lane 1 DONE. aienos #182 2d9a368 (qualify harness), #183 84de088 (C crypto), #185 513d653 (Gate 5 swTPM sim), #186 4492ca9 (C M5 envelope), #187 929a720 (matrix+receipt NOT_QUALIFIED pass10/b",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
+          "pr": 183,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "84de088",
+          "source": "backfill-lane-report"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
+    "seed": {
+      "files": [
+        "crypto_test.c"
+      ],
+      "purpose_auto": "Directory native/crypto/tests. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/crypto/tests",
+  "name": "native/crypto/tests",
+  "purpose": "Directory native/crypto/tests. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

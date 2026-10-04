@@ -1,75 +1,87 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-kernel/src/nvme",
-  "layer": "crates/aienos-kernel/src/nvme",
-  "purpose": "Directory crates/aienos-kernel/src/nvme. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-kernel/src",
     "path": ".."
   },
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-kernel/src/nvme. Purpose not yet described by a human.",
-      "files": [
-        "atomicity.rs",
-        "driver.rs"
-      ]
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:ec1328a2fc6f55a1a0a66efe3322f9eaa4fe3dd495c458b2fb64ceabf69951f4",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 2,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:514dde2f4c77d89d342397ff2d893685cfc619147cbfcf46477426da3db22a49"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 6,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 133,
           "sha": "c851d01",
-          "timestamp": "2026-09-25T13:16:01-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "P3: qualify NVMe power-fail atomicity for Store root writes (#133)",
-          "pr": 133
+          "timestamp": "2026-09-25T13:16:01-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 132,
           "sha": "3f8ebf3",
-          "timestamp": "2026-09-25T09:33:00-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "P3: native NVMe write and flush qualification on QEMU (#132)",
-          "pr": 132
+          "timestamp": "2026-09-25T09:33:00-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 129,
           "sha": "ef359ec",
-          "timestamp": "2026-09-25T08:55:24-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "P3 Native NVMe Read Substrate (QEMU-qualified) (#129)",
-          "pr": 129
+          "timestamp": "2026-09-25T08:55:24-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 100,
           "sha": "1261bfc",
-          "timestamp": "2026-09-24T11:27:30-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "feat(nvme): implement polled block I/O (#100)",
-          "pr": 100
+          "timestamp": "2026-09-24T11:27:30-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 86,
           "sha": "9ebb187",
-          "timestamp": "2026-09-24T10:44:38-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "feat(nvme): create polled I/O queues (#86)",
-          "pr": 86
+          "timestamp": "2026-09-24T10:44:38-05:00"
         },
         {
-          "source": "backfill-git",
-          "sha": "b295a87",
-          "timestamp": "2026-09-24T10:29:52-05:00",
           "author": "aien-dev",
+          "pr": 82,
+          "sha": "b295a87",
+          "source": "backfill-git",
           "subject": "kernel: polled NVMe controller init and Identify, host-tested (part of #31) (#82)",
-          "pr": 82
+          "timestamp": "2026-09-24T10:29:52-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 6
+    },
+    "seed": {
+      "files": [
+        "atomicity.rs",
+        "driver.rs"
+      ],
+      "purpose_auto": "Directory crates/aienos-kernel/src/nvme. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-kernel/src/nvme",
+  "name": "crates/aienos-kernel/src/nvme",
+  "purpose": "Directory crates/aienos-kernel/src/nvme. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

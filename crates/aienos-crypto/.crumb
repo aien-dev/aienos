@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-crypto",
-  "layer": "crates/aienos-crypto",
-  "purpose": "Directory crates/aienos-crypto. Purpose not yet described by a human.",
   "above": {
     "name": "crates",
     "path": ".."
@@ -14,43 +10,66 @@
     }
   ],
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-crypto. Purpose not yet described by a human.",
-      "files": [
-        "Cargo.toml"
-      ]
+    "generated": {
+      "children": [
+        {
+          "digest": "df22f43d422699a0008974d22f67f8be01d22d0d654b47b70fe18f4528fb9daa",
+          "last_commit": "f0facc7",
+          "name": "src",
+          "purpose": "Directory crates/aienos-crypto/src. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:ef6e4823cebb32eaffb834d1c1e26e12b4ae6b026ccdddb6ba707032d40550e5",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:feccaaf349b9e88bc116db18951ffbd0145176b40ce702bc6320338c35b2e85e",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 6,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:2f0bb7150a70335c17ca5809b37982f1788f0e212a8ab9719de5a1f0a4a503a7"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 3,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "f0facc7",
-          "timestamp": "2026-09-29T15:22:43-05:00",
           "author": "dhgmonkey",
+          "pr": 174,
+          "sha": "f0facc7",
+          "source": "backfill-git",
           "subject": "Close key and plaintext cleanup gaps with in-house crypto (#174)",
-          "pr": 174
+          "timestamp": "2026-09-29T15:22:43-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 150,
           "sha": "06164a4",
-          "timestamp": "2026-09-25T19:40:30-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "feat(crypto,security): implement M5 AES-256-GCM-SIV, chunked envelopes, and security manifests (#150)",
-          "pr": 150
+          "timestamp": "2026-09-25T19:40:30-05:00"
         },
         {
-          "source": "backfill-git",
-          "sha": "7604b6e",
-          "timestamp": "2026-09-24T20:41:08-05:00",
           "author": "aien-dev",
+          "pr": 119,
+          "sha": "7604b6e",
+          "source": "backfill-git",
           "subject": "Merge pull request #119 from aien-dev/phase2/binary-artifact-v0",
-          "pr": 119
+          "timestamp": "2026-09-24T20:41:08-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 3
+    },
+    "seed": {
+      "files": [
+        "Cargo.toml"
+      ],
+      "purpose_auto": "Directory crates/aienos-crypto. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-crypto",
+  "name": "crates/aienos-crypto",
+  "purpose": "Directory crates/aienos-crypto. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

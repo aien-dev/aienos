@@ -1,85 +1,97 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-kernel/src/usb/xhci",
-  "layer": "crates/aienos-kernel/src/usb/xhci",
-  "purpose": "Directory crates/aienos-kernel/src/usb/xhci. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-kernel/src/usb",
     "path": ".."
   },
   "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:003c63ee66dabbd1ff616d92e6ec2bca5c1a2e40a1138a94ade276cf2176e1f5",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 5,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:ec1ada6bfa24fd421dfc907b63759313120dcd4e345f5dbea27335f8e3661302"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 110,
+          "sha": "35b3086",
+          "source": "backfill-git",
+          "subject": "feat(smmu): fail-closed DMA bring-up and PCI bus master sweep (M3 1C) (#110)",
+          "timestamp": "2026-09-24T17:24:08-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 103,
+          "sha": "b9c656f",
+          "source": "backfill-git",
+          "subject": "feat(smmu): wire SMMUv3 IORT discovery and DMA confinement in QEMU (part of #30, M3) (#103)",
+          "timestamp": "2026-09-24T14:27:49-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 102,
+          "sha": "a51db0b",
+          "source": "backfill-git",
+          "subject": "usb(audio): xHCI isochronous OUT engine for USB audio (part of #85, voice) (#102)",
+          "timestamp": "2026-09-24T11:27:40-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 76,
+          "sha": "a07d288",
+          "source": "backfill-git",
+          "subject": "kernel(usb): bring up polled xHCI keyboard controller (SEED-0A 2c) (#76)",
+          "timestamp": "2026-09-24T09:54:44-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 75,
+          "sha": "acba849",
+          "source": "backfill-git",
+          "subject": "kernel(usb): add xHCI discovery and keyboard descriptors (SEED-0A 2c) (#75)",
+          "timestamp": "2026-09-24T09:54:35-05:00"
+        },
+        {
+          "author": "Drake",
+          "sha": "3a8e3ba",
+          "source": "backfill-git",
+          "subject": "kernel(usb): xHCI rings and input contexts (SEED-0A input.keyboard.usb, part 2b)",
+          "timestamp": "2026-09-24T09:53:08-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 68,
+          "sha": "968695c",
+          "source": "backfill-git",
+          "subject": "kernel(usb): xHCI TRB layouts and SETUP packets (SEED-0A input.keyboard.usb, part 2a) (#68)",
+          "timestamp": "2026-09-24T09:45:03-05:00"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 7
+    },
     "seed": {
-      "purpose_auto": "Directory crates/aienos-kernel/src/usb/xhci. Purpose not yet described by a human.",
       "files": [
         "context.rs",
         "controller.rs",
         "mod.rs",
         "ring.rs",
         "trb.rs"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 7,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "35b3086",
-          "timestamp": "2026-09-24T17:24:08-05:00",
-          "author": "aien-dev",
-          "subject": "feat(smmu): fail-closed DMA bring-up and PCI bus master sweep (M3 1C) (#110)",
-          "pr": 110
-        },
-        {
-          "source": "backfill-git",
-          "sha": "b9c656f",
-          "timestamp": "2026-09-24T14:27:49-05:00",
-          "author": "aien-dev",
-          "subject": "feat(smmu): wire SMMUv3 IORT discovery and DMA confinement in QEMU (part of #30, M3) (#103)",
-          "pr": 103
-        },
-        {
-          "source": "backfill-git",
-          "sha": "a51db0b",
-          "timestamp": "2026-09-24T11:27:40-05:00",
-          "author": "aien-dev",
-          "subject": "usb(audio): xHCI isochronous OUT engine for USB audio (part of #85, voice) (#102)",
-          "pr": 102
-        },
-        {
-          "source": "backfill-git",
-          "sha": "a07d288",
-          "timestamp": "2026-09-24T09:54:44-05:00",
-          "author": "aien-dev",
-          "subject": "kernel(usb): bring up polled xHCI keyboard controller (SEED-0A 2c) (#76)",
-          "pr": 76
-        },
-        {
-          "source": "backfill-git",
-          "sha": "acba849",
-          "timestamp": "2026-09-24T09:54:35-05:00",
-          "author": "aien-dev",
-          "subject": "kernel(usb): add xHCI discovery and keyboard descriptors (SEED-0A 2c) (#75)",
-          "pr": 75
-        },
-        {
-          "source": "backfill-git",
-          "sha": "3a8e3ba",
-          "timestamp": "2026-09-24T09:53:08-05:00",
-          "author": "Drake",
-          "subject": "kernel(usb): xHCI rings and input contexts (SEED-0A input.keyboard.usb, part 2b)"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "968695c",
-          "timestamp": "2026-09-24T09:45:03-05:00",
-          "author": "aien-dev",
-          "subject": "kernel(usb): xHCI TRB layouts and SETUP packets (SEED-0A input.keyboard.usb, part 2a) (#68)",
-          "pr": 68
-        }
-      ]
+      ],
+      "purpose_auto": "Directory crates/aienos-kernel/src/usb/xhci. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-kernel/src/usb/xhci",
+  "name": "crates/aienos-kernel/src/usb/xhci",
+  "purpose": "Directory crates/aienos-kernel/src/usb/xhci. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

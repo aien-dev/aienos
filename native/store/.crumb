@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/store",
-  "layer": "native/store",
-  "purpose": "Directory native/store. Purpose not yet described by a human.",
   "above": {
     "name": "native",
     "path": ".."
@@ -14,8 +10,114 @@
     }
   ],
   "extensions": {
+    "generated": {
+      "children": [
+        {
+          "digest": "b0cb49a83a84e9295e3ff4ec0f77f83fa3697788454e27a9fd2b8d8c2e408f09",
+          "last_commit": "470c160",
+          "name": "tests",
+          "purpose": "Directory native/store/tests. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:01a52bf100eacedaefd89db0b755e10c4d02c2dc9e328fcb7cecf7b7b142bd7e",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:8c0d84e2ac3642d2bf59a7faf91c6ddf7c27b4038ee020f243fade5385044efb",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 22,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:780c24b1b76326e380b97f9243d0667ea19ef052222a0a4178cf911cb9e37e5d"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 199,
+          "sha": "470c160",
+          "source": "backfill-git",
+          "subject": "native/store: sealed envelope ids and nonces keyed on the plaintext (record v2) (#199)",
+          "timestamp": "2026-10-01T04:36:20-05:00"
+        },
+        {
+          "lane": "lane25",
+          "note": "Receipt evidence/ck_gates_d414b074fc687e1dd90229653d1b681d60b6ea7f94aca75caa0f8cfc27fc53e0.json (rebased on 470c160, Store v2): M1, M3, SMMU, NVME_SHUTDOWN, M4_NVME, M4_STORE, ARGUS1_REVOKE PASS; 6 N",
+          "pr": 199,
+          "ref": "2026-10-01-push-lane25-report.md",
+          "sha": "470c160",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane26",
+          "note": "## 1. native/store nonce safety -- PASS, MERGED aienos #199 -> 470c160",
+          "pr": 199,
+          "ref": "2026-10-01-push-lane26-report.md",
+          "sha": "470c160",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane26",
+          "note": "09:47Z Lane 26 report: aienos #199 470c160 (Store nonce/rollback fix: sealed monotonic counter, v1 refused, 24 rollback rounds no repeat; Rust ref has same virtio bug, untouched); #200 virtio-net att",
+          "pr": 199,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "470c160",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane26",
+          "note": "10:22Z Lane 26 DONE: aienos #199 470c160 (Store nonce v2), #200 d75a266 (virtio-net attach fix, virtqueue driver, sim only). Codex pass still owed after reset. Lane 26 host tests overlapped Lane 15 q",
+          "pr": 199,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "470c160",
+          "source": "backfill-lane-report"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 191,
+          "sha": "697391f",
+          "source": "backfill-git",
+          "subject": "Merge pull request #191 from aien-dev/lane11/native-store-engine",
+          "timestamp": "2026-10-01T00:56:05-05:00"
+        },
+        {
+          "lane": "lane11",
+          "note": "#191 native/store engine + sealed Store + qualify rows + matrix: merged 697391f64027013ec36bc150b05d0db851b813aa",
+          "pr": 191,
+          "ref": "2026-10-01-push-lane11-report.md",
+          "sha": "697391f",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane23",
+          "note": "§2 new \"later merges\" addendum: aienos #189 6bcef8a, #190 811bbc0, #191 697391f, #192 08cb905, #193 8d511d6; omega #128 ee89461, #129 d78fd11, #130 7fb59d3, #131 f7b22f1, #132 ff2af05, #133 c6cf052,",
+          "pr": 191,
+          "ref": "2026-10-01-push-lane23-report.md",
+          "sha": "697391f",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane11",
+          "note": "~11:20Z Lane 11 DONE: aienos#190 811bbc0 (disk+NVMe), #191 697391f (C Store engine, Rust-compatible bytes, 1097 power-cut checks). Receipt 6fd36c30… not_run=3 (QEMU off) coexists with Lane 12's f21",
+          "pr": 191,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "697391f",
+          "source": "backfill-lane-report"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 175,
+          "sha": "494e704",
+          "source": "backfill-git",
+          "subject": "Merge pull request #175 from aien-dev/feat/store-torn-write-recovery",
+          "timestamp": "2026-09-30T13:39:23-05:00"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 3
+    },
     "seed": {
-      "purpose_auto": "Directory native/store. Purpose not yet described by a human.",
       "files": [
         "Makefile",
         "README.md",
@@ -29,95 +131,12 @@
         "store_v1.h",
         "torn_slot.c",
         "torn_slot.h"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 3,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "470c160",
-          "timestamp": "2026-10-01T04:36:20-05:00",
-          "author": "aien-dev",
-          "subject": "native/store: sealed envelope ids and nonces keyed on the plaintext (record v2) (#199)",
-          "pr": 199
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane25",
-          "sha": "470c160",
-          "pr": 199,
-          "note": "Receipt evidence/ck_gates_d414b074fc687e1dd90229653d1b681d60b6ea7f94aca75caa0f8cfc27fc53e0.json (rebased on 470c160, Store v2): M1, M3, SMMU, NVME_SHUTDOWN, M4_NVME, M4_STORE, ARGUS1_REVOKE PASS; 6 N",
-          "ref": "2026-10-01-push-lane25-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane26",
-          "sha": "470c160",
-          "pr": 199,
-          "note": "## 1. native/store nonce safety -- PASS, MERGED aienos #199 -> 470c160",
-          "ref": "2026-10-01-push-lane26-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane26",
-          "sha": "470c160",
-          "pr": 199,
-          "note": "09:47Z Lane 26 report: aienos #199 470c160 (Store nonce/rollback fix: sealed monotonic counter, v1 refused, 24 rollback rounds no repeat; Rust ref has same virtio bug, untouched); #200 virtio-net att",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane26",
-          "sha": "470c160",
-          "pr": 199,
-          "note": "10:22Z Lane 26 DONE: aienos #199 470c160 (Store nonce v2), #200 d75a266 (virtio-net attach fix, virtqueue driver, sim only). Codex pass still owed after reset. Lane 26 host tests overlapped Lane 15 q",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "697391f",
-          "timestamp": "2026-10-01T00:56:05-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #191 from aien-dev/lane11/native-store-engine",
-          "pr": 191
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane11",
-          "sha": "697391f",
-          "pr": 191,
-          "note": "#191 native/store engine + sealed Store + qualify rows + matrix: merged 697391f64027013ec36bc150b05d0db851b813aa",
-          "ref": "2026-10-01-push-lane11-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane23",
-          "sha": "697391f",
-          "pr": 191,
-          "note": "§2 new \"later merges\" addendum: aienos #189 6bcef8a, #190 811bbc0, #191 697391f, #192 08cb905, #193 8d511d6; omega #128 ee89461, #129 d78fd11, #130 7fb59d3, #131 f7b22f1, #132 ff2af05, #133 c6cf052,",
-          "ref": "2026-10-01-push-lane23-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane11",
-          "sha": "697391f",
-          "pr": 191,
-          "note": "~11:20Z Lane 11 DONE: aienos#190 811bbc0 (disk+NVMe), #191 697391f (C Store engine, Rust-compatible bytes, 1097 power-cut checks). Receipt 6fd36c30… not_run=3 (QEMU off) coexists with Lane 12's f21",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "494e704",
-          "timestamp": "2026-09-30T13:39:23-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #175 from aien-dev/feat/store-torn-write-recovery",
-          "pr": 175
-        }
-      ]
+      ],
+      "purpose_auto": "Directory native/store. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/store",
+  "name": "native/store",
+  "purpose": "Directory native/store. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

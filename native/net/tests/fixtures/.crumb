@@ -1,68 +1,80 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/net/tests/fixtures",
-  "layer": "native/net/tests/fixtures",
-  "purpose": "Directory native/net/tests/fixtures. Purpose not yet described by a human.",
   "above": {
     "name": "native/net/tests",
     "path": ".."
   },
   "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:dee52184bb1879d3bbb1b3db0cb6b8aa9cce4fc524e3aa18e1ba93da79802f5f",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 3,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:f0f0eac73e6e1d46bdba6992cc6bcd18226fff511be129ceb01a0aac34334aad"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 200,
+          "sha": "d75a266",
+          "source": "backfill-git",
+          "subject": "native/net: accept real QEMU virtio-net-pci caps; split-virtqueue RX/TX driver (hosted) (#200)",
+          "timestamp": "2026-10-01T05:21:45-05:00"
+        },
+        {
+          "lane": "lane26",
+          "note": "Lane 26 kernel hook for virtio-net: wait for aienos #200 (still OPEN, Lane 26 merges it). Then:",
+          "pr": 200,
+          "ref": "2026-10-01-push-lane25-report.md",
+          "sha": "d75a266",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane26",
+          "note": "## 2. native/net virtio-net -- PASS (hosted only), MERGED aienos #200 -> d75a266 (lead reran make -C native/net test independently: all PASS)",
+          "pr": 200,
+          "ref": "2026-10-01-push-lane26-report.md",
+          "sha": "d75a266",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane29",
+          "note": "PR #203, squash-merged 9807281 (after #200 merged as d75a266). Receipt evidence/ck_gates_f669110b4f18e37e8318e83efbe544e5eab6214508861aa1523fca084945d710.json: 8 PASS (adds NET), 6 NOT_RUN of 14.",
+          "pr": 200,
+          "ref": "2026-10-01-push-lane29-report.md",
+          "sha": "d75a266",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane26",
+          "note": "10:22Z Lane 26 DONE: aienos #199 470c160 (Store nonce v2), #200 d75a266 (virtio-net attach fix, virtqueue driver, sim only). Codex pass still owed after reset. Lane 26 host tests overlapped Lane 15 q",
+          "pr": 200,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "d75a266",
+          "source": "backfill-lane-report"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
     "seed": {
-      "purpose_auto": "Directory native/net/tests/fixtures. Purpose not yet described by a human.",
       "files": [
         "dump_qemu_virtio_net_cfg.sh",
         "qemu822_virtio_net_pci_modern.cfg",
         "qemu822_virtio_net_pci_transitional.cfg"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "d75a266",
-          "timestamp": "2026-10-01T05:21:45-05:00",
-          "author": "aien-dev",
-          "subject": "native/net: accept real QEMU virtio-net-pci caps; split-virtqueue RX/TX driver (hosted) (#200)",
-          "pr": 200
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane26",
-          "sha": "d75a266",
-          "pr": 200,
-          "note": "Lane 26 kernel hook for virtio-net: wait for aienos #200 (still OPEN, Lane 26 merges it). Then:",
-          "ref": "2026-10-01-push-lane25-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane26",
-          "sha": "d75a266",
-          "pr": 200,
-          "note": "## 2. native/net virtio-net -- PASS (hosted only), MERGED aienos #200 -> d75a266 (lead reran make -C native/net test independently: all PASS)",
-          "ref": "2026-10-01-push-lane26-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane29",
-          "sha": "d75a266",
-          "pr": 200,
-          "note": "PR #203, squash-merged 9807281 (after #200 merged as d75a266). Receipt evidence/ck_gates_f669110b4f18e37e8318e83efbe544e5eab6214508861aa1523fca084945d710.json: 8 PASS (adds NET), 6 NOT_RUN of 14.",
-          "ref": "2026-10-01-push-lane29-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane26",
-          "sha": "d75a266",
-          "pr": 200,
-          "note": "10:22Z Lane 26 DONE: aienos #199 470c160 (Store nonce v2), #200 d75a266 (virtio-net attach fix, virtqueue driver, sim only). Codex pass still owed after reset. Lane 26 host tests overlapped Lane 15 q",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        }
-      ]
+      ],
+      "purpose_auto": "Directory native/net/tests/fixtures. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/net/tests/fixtures",
+  "name": "native/net/tests/fixtures",
+  "purpose": "Directory native/net/tests/fixtures. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

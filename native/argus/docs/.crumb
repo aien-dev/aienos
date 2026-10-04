@@ -1,78 +1,90 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/argus/docs",
-  "layer": "native/argus/docs",
-  "purpose": "Directory native/argus/docs. Purpose not yet described by a human.",
   "above": {
     "name": "native/argus",
     "path": ".."
   },
   "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:0778d413d1596682df475201b2ceaff4a79129c25b3b653d77fae290a19ba6af",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 5,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:153cd48b4862913648ec7681277e0f25e6977054524531869d43c395a99ec5eb"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 172,
+          "sha": "603c91d",
+          "source": "backfill-git",
+          "subject": "test(argus): close dependency direction check (#172)",
+          "timestamp": "2026-09-29T10:01:13-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 170,
+          "sha": "efadc17",
+          "source": "backfill-git",
+          "subject": "ARGUS-1 lane F: performance and false-positive gates (#170)",
+          "timestamp": "2026-09-29T09:40:04-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 169,
+          "sha": "08fcbd7",
+          "source": "backfill-git",
+          "subject": "Merge pull request #169 from aien-dev/feat/argus-1-h",
+          "timestamp": "2026-09-29T09:22:15-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 167,
+          "sha": "84f28cf",
+          "source": "backfill-git",
+          "subject": "Merge pull request #167 from aien-dev/feat/argus-1-ce",
+          "timestamp": "2026-09-29T09:03:31-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 163,
+          "sha": "e954b0b",
+          "source": "backfill-git",
+          "subject": "Merge pull request #163: ARGUS-1 L0 ABI v1.2 header (additive), Makefile lanes, pre-registered spec",
+          "timestamp": "2026-09-29T07:40:45-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 160,
+          "sha": "7523933",
+          "source": "backfill-git",
+          "subject": "Merge pull request #160: ARGUS-0 defensive-plane substrate (C), complete under documented limits",
+          "timestamp": "2026-09-29T07:36:51-05:00"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 6
+    },
     "seed": {
-      "purpose_auto": "Directory native/argus/docs. Purpose not yet described by a human.",
       "files": [
         "ARGUS0_GATES.md",
         "ARGUS1_GATES.md",
         "ARGUS1_PLAN.md",
         "ARGUS1_SPEC.md",
         "HOSTILE_REVIEW.md"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 6,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "603c91d",
-          "timestamp": "2026-09-29T10:01:13-05:00",
-          "author": "aien-dev",
-          "subject": "test(argus): close dependency direction check (#172)",
-          "pr": 172
-        },
-        {
-          "source": "backfill-git",
-          "sha": "efadc17",
-          "timestamp": "2026-09-29T09:40:04-05:00",
-          "author": "aien-dev",
-          "subject": "ARGUS-1 lane F: performance and false-positive gates (#170)",
-          "pr": 170
-        },
-        {
-          "source": "backfill-git",
-          "sha": "08fcbd7",
-          "timestamp": "2026-09-29T09:22:15-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #169 from aien-dev/feat/argus-1-h",
-          "pr": 169
-        },
-        {
-          "source": "backfill-git",
-          "sha": "84f28cf",
-          "timestamp": "2026-09-29T09:03:31-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #167 from aien-dev/feat/argus-1-ce",
-          "pr": 167
-        },
-        {
-          "source": "backfill-git",
-          "sha": "e954b0b",
-          "timestamp": "2026-09-29T07:40:45-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #163: ARGUS-1 L0 ABI v1.2 header (additive), Makefile lanes, pre-registered spec",
-          "pr": 163
-        },
-        {
-          "source": "backfill-git",
-          "sha": "7523933",
-          "timestamp": "2026-09-29T07:36:51-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #160: ARGUS-0 defensive-plane substrate (C), complete under documented limits",
-          "pr": 160
-        }
-      ]
+      ],
+      "purpose_auto": "Directory native/argus/docs. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/argus/docs",
+  "name": "native/argus/docs",
+  "purpose": "Directory native/argus/docs. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

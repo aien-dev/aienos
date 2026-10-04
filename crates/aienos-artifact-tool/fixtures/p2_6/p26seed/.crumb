@@ -1,37 +1,49 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-artifact-tool/fixtures/p2_6/p26seed",
-  "layer": "crates/aienos-artifact-tool/fixtures/p2_6/p26seed",
-  "purpose": "Directory crates/aienos-artifact-tool/fixtures/p2_6/p26seed. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-artifact-tool/fixtures/p2_6",
     "path": ".."
   },
   "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:840aed89b746a4a7ce182a9c0451e9b214b661542a794f553d062b4bfb432ed6",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 4,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:1e8d6325e9abc0a69563558608e0645a0dbad2f059f9ed5684539b334ed43f2c"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 127,
+          "sha": "5ad82b3",
+          "source": "backfill-git",
+          "subject": "feat(seed0b): kernel Admission Receipt emission and first SEED-0B capability artifact (P2-6B) (#127)",
+          "timestamp": "2026-09-25T07:16:47-05:00"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
     "seed": {
-      "purpose_auto": "Directory crates/aienos-artifact-tool/fixtures/p2_6/p26seed. Purpose not yet described by a human.",
       "files": [
         "code.bin",
         "data.bin",
         "manifest.json",
         "probe.S"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "5ad82b3",
-          "timestamp": "2026-09-25T07:16:47-05:00",
-          "author": "aien-dev",
-          "subject": "feat(seed0b): kernel Admission Receipt emission and first SEED-0B capability artifact (P2-6B) (#127)",
-          "pr": 127
-        }
-      ]
+      ],
+      "purpose_auto": "Directory crates/aienos-artifact-tool/fixtures/p2_6/p26seed. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-artifact-tool/fixtures/p2_6/p26seed",
+  "name": "crates/aienos-artifact-tool/fixtures/p2_6/p26seed",
+  "purpose": "Directory crates/aienos-artifact-tool/fixtures/p2_6/p26seed. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

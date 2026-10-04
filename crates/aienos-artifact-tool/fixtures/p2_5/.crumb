@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-artifact-tool/fixtures/p2_5",
-  "layer": "crates/aienos-artifact-tool/fixtures/p2_5",
-  "purpose": "Directory crates/aienos-artifact-tool/fixtures/p2_5. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-artifact-tool",
     "path": "../.."
@@ -22,28 +18,63 @@
     }
   ],
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-artifact-tool/fixtures/p2_5. Purpose not yet described by a human.",
-      "files": [
-        "assemble.sh",
-        "pack.sh"
-      ]
+    "generated": {
+      "children": [
+        {
+          "digest": "12ec8e2c7352d6526bad902bc37434ba39b42bf3b35f0ea96f6fed4e566e5013",
+          "last_commit": "3a6174a",
+          "name": "p25exec",
+          "purpose": "Directory crates/aienos-artifact-tool/fixtures/p2_5/p25exec. Purpose not yet described by a huma"
+        },
+        {
+          "digest": "e49ae76bea4102e68c5fb6241d8aa2a2eb70e7b9469608d2903c04069d37638b",
+          "last_commit": "3a6174a",
+          "name": "p25spin",
+          "purpose": "Directory crates/aienos-artifact-tool/fixtures/p2_5/p25spin. Purpose not yet described by a huma"
+        },
+        {
+          "digest": "86ac75b1138c0be9f16ffca1e4f4e6d35ca206fd7bcdd65a272573f98cf9d180",
+          "last_commit": "3a6174a",
+          "name": "p25wx",
+          "purpose": "Directory crates/aienos-artifact-tool/fixtures/p2_5/p25wx. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:6082777c4ccc20cae47f6fcac9a1198acc351d38d1aaed3d1839fc45d7577afc",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:31145588e22426c6766a2386e5616395ed12f603f12e9c84c23ba703cf374bf6",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 14,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:d9139352311dfefa51c34ca2553ff646cf58db6785f877efa5fbecaf40eb69cc"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "3a6174a",
-          "timestamp": "2026-09-25T06:23:20-05:00",
           "author": "aien-dev",
+          "pr": 122,
+          "sha": "3a6174a",
+          "source": "backfill-git",
           "subject": "P2-5: Binary Artifact loader — exact-byte W^X EL0 execution with full rollback (#122)",
-          "pr": 122
+          "timestamp": "2026-09-25T06:23:20-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
+    "seed": {
+      "files": [
+        "assemble.sh",
+        "pack.sh"
+      ],
+      "purpose_auto": "Directory crates/aienos-artifact-tool/fixtures/p2_5. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-artifact-tool/fixtures/p2_5",
+  "name": "crates/aienos-artifact-tool/fixtures/p2_5",
+  "purpose": "Directory crates/aienos-artifact-tool/fixtures/p2_5. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

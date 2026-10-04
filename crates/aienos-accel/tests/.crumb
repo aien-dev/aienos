@@ -1,34 +1,46 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-accel/tests",
-  "layer": "crates/aienos-accel/tests",
-  "purpose": "Directory crates/aienos-accel/tests. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-accel",
     "path": ".."
   },
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-accel/tests. Purpose not yet described by a human.",
-      "files": [
-        "gb10_fixtures.rs"
-      ]
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:f3d113cfcfbdea76e735ccb0543a6007b9e079c4eabc34dcc2bf64c6d9e550a6",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 1,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:caaeed577657c655780a497e0206dc7a5e4fb7828123e0e8156a07615d4ac924"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "3e71759",
-          "timestamp": "2026-09-25T07:34:53-05:00",
           "author": "aien-dev",
+          "pr": 125,
+          "sha": "3e71759",
+          "source": "backfill-git",
           "subject": "GB10 read-only hardware characterization and native accelerator contract (#125)",
-          "pr": 125
+          "timestamp": "2026-09-25T07:34:53-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
+    "seed": {
+      "files": [
+        "gb10_fixtures.rs"
+      ],
+      "purpose_auto": "Directory crates/aienos-accel/tests. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-accel/tests",
+  "name": "crates/aienos-accel/tests",
+  "purpose": "Directory crates/aienos-accel/tests. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

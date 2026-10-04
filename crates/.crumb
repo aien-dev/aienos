@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates",
-  "layer": "crates",
-  "purpose": "Directory crates. Purpose not yet described by a human.",
   "above": {
     "name": "cs-aienos",
     "path": ".."
@@ -66,177 +62,278 @@
     }
   ],
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates. Purpose not yet described by a human.",
-      "files": []
+    "generated": {
+      "children": [
+        {
+          "digest": "0a8510e7fedafbf6b5d1ea15307da3a1eb6e8d6bd6ffa7caabf193fabaa464b5",
+          "last_commit": "3e71759",
+          "name": "aienos-accel",
+          "purpose": "Directory crates/aienos-accel. Purpose not yet described by a human."
+        },
+        {
+          "digest": "68682a56017aef2e95b4101731a5bc023e0d297127e6b07af7d3be9f3d8afaeb",
+          "last_commit": "15d5f3d",
+          "name": "aienos-aegis",
+          "purpose": "Directory crates/aienos-aegis. Purpose not yet described by a human."
+        },
+        {
+          "digest": "d5ad195a8f38c6bd0e1cc00feb8c5040f0fc8eabe47a9a69d961c73d6901d61e",
+          "last_commit": "39e246a",
+          "name": "aienos-agent-state",
+          "purpose": "Directory crates/aienos-agent-state. Purpose not yet described by a human."
+        },
+        {
+          "digest": "a265db4553bf11e9299c94fd916b36c5059fd749a2b824512dc0ab9c243e728c",
+          "last_commit": "bb3a5f4",
+          "name": "aienos-artifact",
+          "purpose": "Directory crates/aienos-artifact. Purpose not yet described by a human."
+        },
+        {
+          "digest": "d7f3206903444c2cd06fe35beef52579a9df03838ea60149e710d3d3efc415a8",
+          "last_commit": "2276906",
+          "name": "aienos-artifact-tool",
+          "purpose": "Directory crates/aienos-artifact-tool. Purpose not yet described by a human."
+        },
+        {
+          "digest": "2baed8a0de57e0bf8b2dca0ee81b3a54e6eba14af1c3003a3602f9dab68f9c16",
+          "last_commit": "761e63d",
+          "name": "aienos-boot",
+          "purpose": "Directory crates/aienos-boot. Purpose not yet described by a human."
+        },
+        {
+          "digest": "01d4fe4a0bd556f338ac4615b7ed1c9141e4f8035c07e0082f2894a57fa071d0",
+          "last_commit": "bc25e73",
+          "name": "aienos-c1-tree",
+          "purpose": "Directory crates/aienos-c1-tree. Purpose not yet described by a human."
+        },
+        {
+          "digest": "8a0463de3e20f4781afc41b8f7b354a29a3b819b2a88a8588b62c2ae3a29ebef",
+          "last_commit": "187ecdf",
+          "name": "aienos-capability",
+          "purpose": "Directory crates/aienos-capability. Purpose not yet described by a human."
+        },
+        {
+          "digest": "ddcab59814a675942fbea09cd734c6d9726359da319efd962a9abd1a4949e9af",
+          "last_commit": "e3ec8a5",
+          "name": "aienos-capability-ffi",
+          "purpose": "Directory crates/aienos-capability-ffi. Purpose not yet described by a human."
+        },
+        {
+          "digest": "f062e2e58faa2950ce8adeb2e4c16234dacce6672d560ed4fdeb7224c5093a77",
+          "last_commit": "bc25e73",
+          "name": "aienos-cortex",
+          "purpose": "Directory crates/aienos-cortex. Purpose not yet described by a human."
+        },
+        {
+          "digest": "feccaaf349b9e88bc116db18951ffbd0145176b40ce702bc6320338c35b2e85e",
+          "last_commit": "f0facc7",
+          "name": "aienos-crypto",
+          "purpose": "Directory crates/aienos-crypto. Purpose not yet described by a human."
+        },
+        {
+          "digest": "e88324eb9a32d23d8358413c7404038ee4095fcf8c4889ac9c221b97aef80b8e",
+          "last_commit": "e960272",
+          "name": "aienos-evidence",
+          "purpose": "Directory crates/aienos-evidence. Purpose not yet described by a human."
+        },
+        {
+          "digest": "c3497f62d54b67e7408a2c3a66c6ccc4e01b08d0b3263dc0741d728cf80ac973",
+          "last_commit": "3e283fa",
+          "name": "aienos-kernel",
+          "purpose": "Directory crates/aienos-kernel. Purpose not yet described by a human."
+        },
+        {
+          "digest": "716d679da128e7aab8efb6e9cf836ee22a62fe9fe6993e2d0a20c3016d78b3a0",
+          "last_commit": "761e63d",
+          "name": "aienos-store-tool",
+          "purpose": "Directory crates/aienos-store-tool. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:b2cdd9368caf75a849d660b36a845142591375047c280ea7208dc529091d8b1a",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:21930fafd0e3f9797b75190d593e77cc310ee3c2469f87d0c73ac7d94e8fc61c",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 229,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:24bc0f4356e36822dda23cb38e7187527708eec4739c13e6b649a077e6a13457"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 90,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "f0facc7",
-          "timestamp": "2026-09-29T15:22:43-05:00",
           "author": "dhgmonkey",
+          "pr": 174,
+          "sha": "f0facc7",
+          "source": "backfill-git",
           "subject": "Close key and plaintext cleanup gaps with in-house crypto (#174)",
-          "pr": 174
+          "timestamp": "2026-09-29T15:22:43-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 153,
           "sha": "f854586",
-          "timestamp": "2026-09-29T07:41:53-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Merge pull request #153: test(m5): reject tampered late envelope chunks",
-          "pr": 153
+          "timestamp": "2026-09-29T07:41:53-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 159,
           "sha": "8706fb8",
-          "timestamp": "2026-09-28T21:00:21-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Merge pull request #159 from aien-dev/fix/envelope-preauth-alloc",
-          "pr": 159
+          "timestamp": "2026-09-28T21:00:21-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 155,
           "sha": "18caa07",
-          "timestamp": "2026-09-27T15:55:55-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Merge pull request #155 from aien-dev/feat/r9-generation-barrier",
-          "pr": 155
+          "timestamp": "2026-09-27T15:55:55-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 154,
           "sha": "24f1593",
-          "timestamp": "2026-09-27T15:50:43-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Merge pull request #154 from aien-dev/feat/r7-native-authority",
-          "pr": 154
+          "timestamp": "2026-09-27T15:50:43-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 150,
           "sha": "06164a4",
-          "timestamp": "2026-09-25T19:40:30-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "feat(crypto,security): implement M5 AES-256-GCM-SIV, chunked envelopes, and security manifests (#150)",
-          "pr": 150
+          "timestamp": "2026-09-25T19:40:30-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 144,
           "sha": "761e63d",
-          "timestamp": "2026-09-25T18:27:34-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "feat(recovery): Recovery Core inspection, operator actions, and QEMU qualification (ADR 0006) (#144)",
-          "pr": 144
+          "timestamp": "2026-09-25T18:27:34-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 143,
           "sha": "39e246a",
-          "timestamp": "2026-09-25T17:56:23-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "fix(agent-state): preserve branch identity across restore (#143)",
-          "pr": 143
+          "timestamp": "2026-09-25T17:56:23-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 142,
           "sha": "a2a0382",
-          "timestamp": "2026-09-25T17:56:21-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "M4: continuity objects over Store v1; same identity and memory across cold restarts (CONTINUITY_QEMU) (#142)",
-          "pr": 142
+          "timestamp": "2026-09-25T17:56:21-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 140,
           "sha": "4372a8d",
-          "timestamp": "2026-09-25T17:37:36-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "chore(rollback): port native-boot rollback verifier to Rust, drop python3 (#140)",
-          "pr": 140
+          "timestamp": "2026-09-25T17:37:36-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 139,
           "sha": "5ac7cfc",
-          "timestamp": "2026-09-25T17:37:17-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "test(store): prove ADR 0015 golden vectors with the kernel encoders in Rust (#139)",
-          "pr": 139
+          "timestamp": "2026-09-25T17:37:17-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 138,
           "sha": "2276906",
-          "timestamp": "2026-09-25T17:13:08-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "fix(seed0b): prove NX and Machine 1 claims instead of assuming them (#128 review) (#138)",
-          "pr": 138
+          "timestamp": "2026-09-25T17:13:08-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 136,
           "sha": "23f61e4",
-          "timestamp": "2026-09-25T16:37:26-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "P3: 512-byte NVMe crash qualification campaign (STORE_512B_CRASH_RECOVERY_QEMU) (#136)",
-          "pr": 136
+          "timestamp": "2026-09-25T16:37:26-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 135,
           "sha": "123929a",
-          "timestamp": "2026-09-25T15:12:39-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "P3: System Store v1 malformed-peer recovery amendment (STORE_MALFORMED_PEER_RECOVERY) (#135)",
-          "pr": 135
+          "timestamp": "2026-09-25T15:12:39-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 134,
           "sha": "9750186",
-          "timestamp": "2026-09-25T14:23:02-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "P3: Store-over-NVMe QEMU crash/reboot qualification (STORE_V1_QEMU) (#134)",
-          "pr": 134
+          "timestamp": "2026-09-25T14:23:02-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 133,
           "sha": "c851d01",
-          "timestamp": "2026-09-25T13:16:01-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "P3: qualify NVMe power-fail atomicity for Store root writes (#133)",
-          "pr": 133
+          "timestamp": "2026-09-25T13:16:01-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 131,
           "sha": "5f835ba",
-          "timestamp": "2026-09-25T13:04:58-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "feat(store): implement System Store v1 mount and transactions (#131)",
-          "pr": 131
+          "timestamp": "2026-09-25T13:04:58-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 132,
           "sha": "3f8ebf3",
-          "timestamp": "2026-09-25T09:33:00-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "P3: native NVMe write and flush qualification on QEMU (#132)",
-          "pr": 132
+          "timestamp": "2026-09-25T09:33:00-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 129,
           "sha": "ef359ec",
-          "timestamp": "2026-09-25T08:55:24-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "P3 Native NVMe Read Substrate (QEMU-qualified) (#129)",
-          "pr": 129
+          "timestamp": "2026-09-25T08:55:24-05:00"
         },
         {
-          "source": "backfill-git",
-          "sha": "9919813",
-          "timestamp": "2026-09-25T08:50:17-05:00",
           "author": "aien-dev",
+          "pr": 130,
+          "sha": "9919813",
+          "source": "backfill-git",
           "subject": "P3-1: freeze System Store v1 format and canonical vectors (#130)",
-          "pr": 130
+          "timestamp": "2026-09-25T08:50:17-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 90
+    },
+    "seed": {
+      "files": [],
+      "purpose_auto": "Directory crates. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates",
+  "name": "crates",
+  "purpose": "Directory crates. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-agent-state",
-  "layer": "crates/aienos-agent-state",
-  "purpose": "Directory crates/aienos-agent-state. Purpose not yet described by a human.",
   "above": {
     "name": "crates",
     "path": ".."
@@ -14,35 +10,58 @@
     }
   ],
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-agent-state. Purpose not yet described by a human.",
-      "files": [
-        "Cargo.toml"
-      ]
+    "generated": {
+      "children": [
+        {
+          "digest": "65a8c460540b0190c0d00418ba79639832abd8764dc0ea59a1ddec40cc1747bb",
+          "last_commit": "39e246a",
+          "name": "src",
+          "purpose": "Directory crates/aienos-agent-state/src. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:141b42405835f497b7769439b232fa33c45b093c4022ed8df2d70cfcc7bedba0",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:d5ad195a8f38c6bd0e1cc00feb8c5040f0fc8eabe47a9a69d961c73d6901d61e",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 8,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:15f902241a2f247dfeec1b22c4f35fd957718fc9d76ecf7256fac0603f11f0c1"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 2,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "39e246a",
-          "timestamp": "2026-09-25T17:56:23-05:00",
           "author": "aien-dev",
+          "pr": 143,
+          "sha": "39e246a",
+          "source": "backfill-git",
           "subject": "fix(agent-state): preserve branch identity across restore (#143)",
-          "pr": 143
+          "timestamp": "2026-09-25T17:56:23-05:00"
         },
         {
-          "source": "backfill-git",
-          "sha": "bc25e73",
-          "timestamp": "2026-09-23T18:21:24-05:00",
           "author": "aien-dev",
+          "pr": 2,
+          "sha": "bc25e73",
+          "source": "backfill-git",
           "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
-          "pr": 2
+          "timestamp": "2026-09-23T18:21:24-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 2
+    },
+    "seed": {
+      "files": [
+        "Cargo.toml"
+      ],
+      "purpose_auto": "Directory crates/aienos-agent-state. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-agent-state",
+  "name": "crates/aienos-agent-state",
+  "purpose": "Directory crates/aienos-agent-state. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

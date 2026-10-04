@@ -1,0 +1,44 @@
+name: Crumb compiler
+
+# RFC-0003 (aien-architecture, docs/CRUMB_PROTOCOL_RFC_0003.md): the repository compiles the
+# structural part of its own .crumb files (files, children, evidence, one digest per directory).
+# This check refuses a change whose committed crumbs are not exactly what the compiler produces.
+# The hand-written fields (purpose, invariants, ...) are never touched by the compiler and a
+# missing purpose is not an error here.
+# To fix a failure: build the tool from the aien-architecture commit pinned in crumb.lock,
+# run `crumb compile .` at the repository root and commit the .crumb files it rewrote.
+# Directories listed in .crumbignore (one per line) are left alone with their whole subtree.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  crumb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read pinned crumb tool commit
+        id: pins
+        run: |
+          sha=$(tr -d '[:space:]' < crumb.lock)
+          test -n "$sha"
+          echo "crumb=$sha" >> "$GITHUB_OUTPUT"
+      - name: Checkout pinned aien-architecture (crumb tool source)
+        uses: actions/checkout@v4
+        with:
+          repository: aien-dev/aien-architecture
+          ref: ${{ steps.pins.outputs.crumb }}
+          path: .crumb-tool-src
+      - name: Build the crumb tool, then remove its source from this tree
+        run: |
+          make -C .crumb-tool-src/tools/crumb crumb
+          cp .crumb-tool-src/tools/crumb/crumb "$RUNNER_TEMP/crumb"
+          rm -rf .crumb-tool-src
+      - name: Crumbs must be exactly what the compiler produces now
+        run: ${RUNNER_TEMP}/crumb verify .

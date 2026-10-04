@@ -1,35 +1,47 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/argus/bridge",
-  "layer": "native/argus/bridge",
-  "purpose": "Directory native/argus/bridge. Purpose not yet described by a human.",
   "above": {
     "name": "native/argus",
     "path": ".."
   },
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory native/argus/bridge. Purpose not yet described by a human.",
-      "files": [
-        "argus_aegis_bridge.c",
-        "argus_aegis_bridge.h"
-      ]
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:8fa25040d5da98cfa76b5c39ed4b48f9f02252e42b00d0eaf84b99265813c0f1",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 2,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:f6e5004e675b332b7d7173fba4c502a341aec78a02e2e917f0092f83cf39b401"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "138acb0",
-          "timestamp": "2026-09-29T09:04:35-05:00",
           "author": "aien-dev",
+          "pr": 168,
+          "sha": "138acb0",
+          "source": "backfill-git",
           "subject": "Merge pull request #168 from aien-dev/feat/argus-1-x",
-          "pr": 168
+          "timestamp": "2026-09-29T09:04:35-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
+    "seed": {
+      "files": [
+        "argus_aegis_bridge.c",
+        "argus_aegis_bridge.h"
+      ],
+      "purpose_auto": "Directory native/argus/bridge. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/argus/bridge",
+  "name": "native/argus/bridge",
+  "purpose": "Directory native/argus/bridge. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

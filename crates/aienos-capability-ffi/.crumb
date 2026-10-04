@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-capability-ffi",
-  "layer": "crates/aienos-capability-ffi",
-  "purpose": "Directory crates/aienos-capability-ffi. Purpose not yet described by a human.",
   "above": {
     "name": "crates",
     "path": ".."
@@ -14,27 +10,50 @@
     }
   ],
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-capability-ffi. Purpose not yet described by a human.",
-      "files": [
-        "Cargo.toml"
-      ]
+    "generated": {
+      "children": [
+        {
+          "digest": "787370cdc08874f27a8e87c34a46b17011913f6ab01ea412c103129d24482953",
+          "last_commit": "e3ec8a5",
+          "name": "src",
+          "purpose": "Directory crates/aienos-capability-ffi/src. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:3a5fc94d92942610ce31824c2157e369a5c983246a898d54728c8749a3bc31c7",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:ddcab59814a675942fbea09cd734c6d9726359da319efd962a9abd1a4949e9af",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 2,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:eeae684ddb4213d1a9af41a15c6662c39f573f2182b0121620605d7bdc429009"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "24f1593",
-          "timestamp": "2026-09-27T15:50:43-05:00",
           "author": "aien-dev",
+          "pr": 154,
+          "sha": "24f1593",
+          "source": "backfill-git",
           "subject": "Merge pull request #154 from aien-dev/feat/r7-native-authority",
-          "pr": 154
+          "timestamp": "2026-09-27T15:50:43-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
+    "seed": {
+      "files": [
+        "Cargo.toml"
+      ],
+      "purpose_auto": "Directory crates/aienos-capability-ffi. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-capability-ffi",
+  "name": "crates/aienos-capability-ffi",
+  "purpose": "Directory crates/aienos-capability-ffi. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

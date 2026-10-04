@@ -1,35 +1,47 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-kernel/src/sync",
-  "layer": "crates/aienos-kernel/src/sync",
-  "purpose": "Directory crates/aienos-kernel/src/sync. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-kernel/src",
     "path": ".."
   },
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-kernel/src/sync. Purpose not yet described by a human.",
-      "files": [
-        "mod.rs",
-        "spinlock.rs"
-      ]
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:2d69db3de4cc825da15f576da8375d3994c484741be4dafd356a1b469afce7f1",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 2,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:78893ae665ae14dbb92a18c10850eb08ebdcf04f21d2f15ed652709b13c16f99"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 1,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "bc25e73",
-          "timestamp": "2026-09-23T18:21:24-05:00",
           "author": "aien-dev",
+          "pr": 2,
+          "sha": "bc25e73",
+          "source": "backfill-git",
           "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
-          "pr": 2
+          "timestamp": "2026-09-23T18:21:24-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 1
+    },
+    "seed": {
+      "files": [
+        "mod.rs",
+        "spinlock.rs"
+      ],
+      "purpose_auto": "Directory crates/aienos-kernel/src/sync. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-kernel/src/sync",
+  "name": "crates/aienos-kernel/src/sync",
+  "purpose": "Directory crates/aienos-kernel/src/sync. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

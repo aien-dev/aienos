@@ -1,50 +1,62 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-aegis/tests",
-  "layer": "crates/aienos-aegis/tests",
-  "purpose": "Directory crates/aienos-aegis/tests. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-aegis",
     "path": ".."
   },
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-aegis/tests. Purpose not yet described by a human.",
-      "files": [
-        "phase_3_to_5_integration.rs"
-      ]
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:116b4a84f2a0b3f537433c1187e35f911f0c0dedea3b489607ac0132fdde9542",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 1,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:0934c6689e8111e99bd3072e461d5c14ddc96b1153f266fa7ca8ee6cebd64a4c"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 3,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 7,
           "sha": "4a5d9df",
-          "timestamp": "2026-09-23T18:38:16-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Merge pull request #7 from aien-dev/feat/aienos-world-bound-effects",
-          "pr": 7
+          "timestamp": "2026-09-23T18:38:16-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 6,
           "sha": "b900485",
-          "timestamp": "2026-09-23T18:35:52-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Merge pull request #6 from aien-dev/fix/aienos-aegis-boundaries",
-          "pr": 6
+          "timestamp": "2026-09-23T18:35:52-05:00"
         },
         {
-          "source": "backfill-git",
-          "sha": "bc25e73",
-          "timestamp": "2026-09-23T18:21:24-05:00",
           "author": "aien-dev",
+          "pr": 2,
+          "sha": "bc25e73",
+          "source": "backfill-git",
           "subject": "Integrate AIENOS blueprint, Config A capture, and host components (#2)",
-          "pr": 2
+          "timestamp": "2026-09-23T18:21:24-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 3
+    },
+    "seed": {
+      "files": [
+        "phase_3_to_5_integration.rs"
+      ],
+      "purpose_auto": "Directory crates/aienos-aegis/tests. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-aegis/tests",
+  "name": "crates/aienos-aegis/tests",
+  "purpose": "Directory crates/aienos-aegis/tests. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

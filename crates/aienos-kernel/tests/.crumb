@@ -1,15 +1,62 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-kernel/tests",
-  "layer": "crates/aienos-kernel/tests",
-  "purpose": "Directory crates/aienos-kernel/tests. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-kernel",
     "path": ".."
   },
   "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:e092f60723faa08615842e988f91c6bdb4cacce5838a69f8776d3e27a878af9f",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 9,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:ffb3dd318aa198005f5b372f1b73eb2f1a0453e354032ae30b2cea3d33f15dfb"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 139,
+          "sha": "5ac7cfc",
+          "source": "backfill-git",
+          "subject": "test(store): prove ADR 0015 golden vectors with the kernel encoders in Rust (#139)",
+          "timestamp": "2026-09-25T17:37:17-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 132,
+          "sha": "3f8ebf3",
+          "source": "backfill-git",
+          "subject": "P3: native NVMe write and flush qualification on QEMU (#132)",
+          "timestamp": "2026-09-25T09:33:00-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 129,
+          "sha": "ef359ec",
+          "source": "backfill-git",
+          "subject": "P3 Native NVMe Read Substrate (QEMU-qualified) (#129)",
+          "timestamp": "2026-09-25T08:55:24-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 130,
+          "sha": "9919813",
+          "source": "backfill-git",
+          "subject": "P3-1: freeze System Store v1 format and canonical vectors (#130)",
+          "timestamp": "2026-09-25T08:50:17-05:00"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 4
+    },
     "seed": {
-      "purpose_auto": "Directory crates/aienos-kernel/tests. Purpose not yet described by a human.",
       "files": [
         "nvme_completion.rs",
         "nvme_flush.rs",
@@ -20,47 +67,12 @@
         "nvme_write_prp.rs",
         "store_v1_golden_vectors.rs",
         "store_v1_negative.rs"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 4,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "5ac7cfc",
-          "timestamp": "2026-09-25T17:37:17-05:00",
-          "author": "aien-dev",
-          "subject": "test(store): prove ADR 0015 golden vectors with the kernel encoders in Rust (#139)",
-          "pr": 139
-        },
-        {
-          "source": "backfill-git",
-          "sha": "3f8ebf3",
-          "timestamp": "2026-09-25T09:33:00-05:00",
-          "author": "aien-dev",
-          "subject": "P3: native NVMe write and flush qualification on QEMU (#132)",
-          "pr": 132
-        },
-        {
-          "source": "backfill-git",
-          "sha": "ef359ec",
-          "timestamp": "2026-09-25T08:55:24-05:00",
-          "author": "aien-dev",
-          "subject": "P3 Native NVMe Read Substrate (QEMU-qualified) (#129)",
-          "pr": 129
-        },
-        {
-          "source": "backfill-git",
-          "sha": "9919813",
-          "timestamp": "2026-09-25T08:50:17-05:00",
-          "author": "aien-dev",
-          "subject": "P3-1: freeze System Store v1 format and canonical vectors (#130)",
-          "pr": 130
-        }
-      ]
+      ],
+      "purpose_auto": "Directory crates/aienos-kernel/tests. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-kernel/tests",
+  "name": "crates/aienos-kernel/tests",
+  "purpose": "Directory crates/aienos-kernel/tests. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

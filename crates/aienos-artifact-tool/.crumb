@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-artifact-tool",
-  "layer": "crates/aienos-artifact-tool",
-  "purpose": "Directory crates/aienos-artifact-tool. Purpose not yet described by a human.",
   "above": {
     "name": "crates",
     "path": ".."
@@ -18,76 +14,99 @@
     }
   ],
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-artifact-tool. Purpose not yet described by a human.",
-      "files": [
-        "Cargo.toml",
-        "README.md"
-      ]
+    "generated": {
+      "children": [
+        {
+          "digest": "2e9b452905c551e57f1e70075f5bac994cefa497181800f3bf145a9c6ceb36df",
+          "last_commit": "2276906",
+          "name": "src",
+          "purpose": "Directory crates/aienos-artifact-tool/src. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:9e74efbe992bdf8537913d0945f0b28487e757732babf47a95707d1203682e7b",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:d7f3206903444c2cd06fe35beef52579a9df03838ea60149e710d3d3efc415a8",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 25,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:3696f713812307854f90c24af2fb37daeae67a11dea85a601a25b14998724303"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 7,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 138,
           "sha": "2276906",
-          "timestamp": "2026-09-25T17:13:08-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "fix(seed0b): prove NX and Machine 1 claims instead of assuming them (#128 review) (#138)",
-          "pr": 138
+          "timestamp": "2026-09-25T17:13:08-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 128,
           "sha": "ff5de9c",
-          "timestamp": "2026-09-25T07:46:07-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "P2-7: negative matrix + canonical SEED-0B QEMU qualification (SEED_0B_QEMU: PASS) (#128)",
-          "pr": 128
+          "timestamp": "2026-09-25T07:46:07-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 127,
           "sha": "5ad82b3",
-          "timestamp": "2026-09-25T07:16:47-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "feat(seed0b): kernel Admission Receipt emission and first SEED-0B capability artifact (P2-6B) (#127)",
-          "pr": 127
+          "timestamp": "2026-09-25T07:16:47-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 124,
           "sha": "4dd5726",
-          "timestamp": "2026-09-25T07:02:01-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "P2-6A: Admission Receipt v0 (canonical encoding, strict decode, TEST-ONLY signing, CLI) (#124)",
-          "pr": 124
+          "timestamp": "2026-09-25T07:02:01-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 122,
           "sha": "3a6174a",
-          "timestamp": "2026-09-25T06:23:20-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "P2-5: Binary Artifact loader — exact-byte W^X EL0 execution with full rollback (#122)",
-          "pr": 122
+          "timestamp": "2026-09-25T06:23:20-05:00"
         },
         {
-          "source": "backfill-git",
+          "author": "aien-dev",
+          "pr": 121,
           "sha": "1a62ca3",
-          "timestamp": "2026-09-24T21:20:14-05:00",
-          "author": "aien-dev",
+          "source": "backfill-git",
           "subject": "Merge pull request #121 from aien-dev/phase2/binary-artifact-v0",
-          "pr": 121
+          "timestamp": "2026-09-24T21:20:14-05:00"
         },
         {
-          "source": "backfill-git",
-          "sha": "952e53e",
-          "timestamp": "2026-09-24T21:05:20-05:00",
           "author": "aien-dev",
+          "pr": 120,
+          "sha": "952e53e",
+          "source": "backfill-git",
           "subject": "Merge pull request #120 from aien-dev/phase2/binary-artifact-v0",
-          "pr": 120
+          "timestamp": "2026-09-24T21:05:20-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 7
+    },
+    "seed": {
+      "files": [
+        "Cargo.toml",
+        "README.md"
+      ],
+      "purpose_auto": "Directory crates/aienos-artifact-tool. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-artifact-tool",
+  "name": "crates/aienos-artifact-tool",
+  "purpose": "Directory crates/aienos-artifact-tool. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

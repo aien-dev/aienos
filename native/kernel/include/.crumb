@@ -1,98 +1,110 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/kernel/include",
-  "layer": "native/kernel/include",
-  "purpose": "Directory native/kernel/include. Purpose not yet described by a human.",
   "above": {
     "name": "native/kernel",
     "path": ".."
   },
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory native/kernel/include. Purpose not yet described by a human.",
-      "files": [
-        "ck.h"
-      ]
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:dd460494a52e8cc9d2b05d75f86d71e8c387090c04ebcb7c448730dc765d39f1",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 1,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:94644cca5eb6c6dbdbbd31b954883579277abb6c0c2f25fcf822c625971deba0"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 3,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "ff57d33",
-          "timestamp": "2026-10-01T04:18:33-05:00",
           "author": "aien-dev",
+          "pr": 198,
+          "sha": "ff57d33",
+          "source": "backfill-git",
           "subject": "ck: NVMe normal shutdown before bus-master disable + NVME_SHUTDOWN gate (QEMU) (#198)",
-          "pr": 198
+          "timestamp": "2026-10-01T04:18:33-05:00"
         },
         {
-          "source": "backfill-lane-report",
           "lane": "lane25",
-          "sha": "ff57d33",
-          "pr": 198,
           "note": "PR #198, squash-merged as ff57d33.",
-          "ref": "2026-10-01-push-lane25-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane25",
-          "sha": "ff57d33",
           "pr": 198,
-          "note": "09:21Z Lane 25 interim: aienos #197 e9f5b3a (SMMUv3 stage-1 confined NVMe, bypass test-only), #198 ff57d33 (NVMe CC.SHN shutdown gate); ck_gates 6 PASS/7 NOT_RUN of 13; item 3 M3 isolation port conti",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
+          "ref": "2026-10-01-push-lane25-report.md",
+          "sha": "ff57d33",
+          "source": "backfill-lane-report"
         },
         {
-          "source": "backfill-git",
-          "sha": "e9f5b3a",
-          "timestamp": "2026-10-01T03:54:52-05:00",
+          "lane": "lane25",
+          "note": "09:21Z Lane 25 interim: aienos #197 e9f5b3a (SMMUv3 stage-1 confined NVMe, bypass test-only), #198 ff57d33 (NVMe CC.SHN shutdown gate); ck_gates 6 PASS/7 NOT_RUN of 13; item 3 M3 isolation port conti",
+          "pr": 198,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "ff57d33",
+          "source": "backfill-lane-report"
+        },
+        {
           "author": "aien-dev",
+          "pr": 197,
+          "sha": "e9f5b3a",
+          "source": "backfill-git",
           "subject": "native/kernel: SMMUv3 service; NVMe Store path SMMU-confined in QEMU (#197)",
-          "pr": 197
+          "timestamp": "2026-10-01T03:54:52-05:00"
         },
         {
-          "source": "backfill-lane-report",
           "lane": "lane25",
-          "sha": "e9f5b3a",
-          "pr": 197,
           "note": "PR #197, squash-merged as e9f5b3a.",
-          "ref": "2026-10-01-push-lane25-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane25",
-          "sha": "e9f5b3a",
           "pr": 197,
+          "ref": "2026-10-01-push-lane25-report.md",
+          "sha": "e9f5b3a",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane25",
           "note": "09:21Z Lane 25 interim: aienos #197 e9f5b3a (SMMUv3 stage-1 confined NVMe, bypass test-only), #198 ff57d33 (NVMe CC.SHN shutdown gate); ck_gates 6 PASS/7 NOT_RUN of 13; item 3 M3 isolation port conti",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
+          "pr": 197,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "e9f5b3a",
+          "source": "backfill-lane-report"
         },
         {
-          "source": "backfill-git",
-          "sha": "34c6053",
-          "timestamp": "2026-10-01T02:17:36-05:00",
           "author": "aien-dev",
+          "pr": 194,
+          "sha": "34c6053",
+          "source": "backfill-git",
           "subject": "Merge pull request #194 from aien-dev/lane18/native-kernel-core",
-          "pr": 194
+          "timestamp": "2026-10-01T02:17:36-05:00"
         },
         {
-          "source": "backfill-lane-report",
           "lane": "lane18",
-          "sha": "34c6053",
-          "pr": 194,
           "note": "#194 C kernel core + UEFI entry stub + memory/exceptions + host tests: merge 34c60536da7a95d8b782b13e52495730578c83ba",
-          "ref": "2026-10-01-push-lane18-report.md"
+          "pr": 194,
+          "ref": "2026-10-01-push-lane18-report.md",
+          "sha": "34c6053",
+          "source": "backfill-lane-report"
         },
         {
-          "source": "backfill-lane-report",
           "lane": "lane18",
-          "sha": "34c6053",
-          "pr": 194,
           "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
+          "pr": 194,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "34c6053",
+          "source": "backfill-lane-report"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 3
+    },
+    "seed": {
+      "files": [
+        "ck.h"
+      ],
+      "purpose_auto": "Directory native/kernel/include. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/kernel/include",
+  "name": "native/kernel/include",
+  "purpose": "Directory native/kernel/include. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

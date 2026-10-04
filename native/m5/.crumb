@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/m5",
-  "layer": "native/m5",
-  "purpose": "Directory native/m5. Purpose not yet described by a human.",
   "above": {
     "name": "native",
     "path": ".."
@@ -18,8 +14,128 @@
     }
   ],
   "extensions": {
+    "generated": {
+      "children": [
+        {
+          "digest": "90460ee7f9dd6e3e0a930d07ca84ab3e97ee714e368f24c3c87ab78c1a84f65d",
+          "last_commit": "ec6ebd6",
+          "name": "tests",
+          "purpose": "Directory native/m5/tests. Purpose not yet described by a human."
+        },
+        {
+          "digest": "0cfa96047a78c70ea597daf37fb756f310424080491969f3e38802e71b60c994",
+          "last_commit": "ec6ebd6",
+          "name": "tools",
+          "purpose": "Directory native/m5/tools. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:ccde2eab22cf4aead63c14ac3127e3dfca7ba0984ca8443cce3cc8b915f19b23",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:2a90bf4a27e33298c83bd86fe20ea532f113e4162f10dce8f37130afef0eeefd",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 13,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:09944d5ca7d06b84e7fed9769ca9da221bb1f052daa9cca0fced521e184396d7"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 206,
+          "sha": "ace3889",
+          "source": "backfill-git",
+          "subject": "Merge pull request #206 from aien-dev/docs/lane33-reconcile",
+          "timestamp": "2026-10-01T07:41:50-05:00"
+        },
+        {
+          "lane": "lane33",
+          "note": "| aienos | #206 (Sonnet worker) | ace3889 | Codex: no findings | QEMU + CodeQL green |",
+          "pr": 206,
+          "ref": "2026-10-01-push-lane33-report.md",
+          "sha": "ace3889",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane33",
+          "note": "aienos #206:**",
+          "pr": 206,
+          "ref": "2026-10-01-push-lane33-report.md",
+          "sha": "ace3889",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane33",
+          "note": "12:51Z Lane 33 DONE: arch #82, omega #155, aienos #206 MERGED (docs truthful: E1 2/6, kernel 9/14 QEMU, TRUST-1 not qualified, R16 merged-with-failing-check noted; Gate 5 failed receipt added to omeg",
+          "pr": 206,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "ace3889",
+          "source": "backfill-lane-report"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 189,
+          "sha": "6bcef8a",
+          "source": "backfill-git",
+          "subject": "Merge pull request #189 from aien-dev/lane12/m5-migration-sig",
+          "timestamp": "2026-10-01T00:24:04-05:00"
+        },
+        {
+          "lane": "lane12",
+          "note": "PR aienos #189 MERGED, merge commit 6bcef8a. CodeQL checks all pass.",
+          "pr": 189,
+          "ref": "2026-10-01-push-lane12-report.md",
+          "sha": "6bcef8a",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane23",
+          "note": "§2 new \"later merges\" addendum: aienos #189 6bcef8a, #190 811bbc0, #191 697391f, #192 08cb905, #193 8d511d6; omega #128 ee89461, #129 d78fd11, #130 7fb59d3, #131 f7b22f1, #132 ff2af05, #133 c6cf052,",
+          "pr": 189,
+          "ref": "2026-10-01-push-lane23-report.md",
+          "sha": "6bcef8a",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane12",
+          "note": "~09:20Z Lane 12 DONE: aienos#189 6bcef8a (M5 migration sig, TEST keys; receipt f21f2c03… NOT_QUALIFIED pass15 blocked11 missing5 not_run0; QEMU checks ran), omega#130 7fb59d3 (G3 commitment signing",
+          "pr": 189,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "6bcef8a",
+          "source": "backfill-lane-report"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 186,
+          "sha": "4492ca9",
+          "source": "backfill-git",
+          "subject": "Merge pull request #186 from aien-dev/lane1/native-m5",
+          "timestamp": "2026-09-30T22:46:38-05:00"
+        },
+        {
+          "lane": "lane1",
+          "note": "WP-C native M5: #186 merged 4492ca9. native/m5 49 tests / M5_NATIVE: PASS, ASan/UBSan PASS, 36/36 mutants. Corruption matrix (header, first/middle/last chunk, commit record, anchor, key gen, store ge",
+          "pr": 186,
+          "ref": "2026-10-01-push-lane1-report.md",
+          "sha": "4492ca9",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane1",
+          "note": "~06:05Z Lane 1 DONE. aienos #182 2d9a368 (qualify harness), #183 84de088 (C crypto), #185 513d653 (Gate 5 swTPM sim), #186 4492ca9 (C M5 envelope), #187 929a720 (matrix+receipt NOT_QUALIFIED pass10/b",
+          "pr": 186,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "4492ca9",
+          "source": "backfill-lane-report"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 3
+    },
     "seed": {
-      "purpose_auto": "Directory native/m5. Purpose not yet described by a human.",
       "files": [
         "Makefile",
         "README.md",
@@ -29,103 +145,12 @@
         "m5_keys.c",
         "m5_owner_sig.c",
         "m5_state.c"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 3,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "ace3889",
-          "timestamp": "2026-10-01T07:41:50-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #206 from aien-dev/docs/lane33-reconcile",
-          "pr": 206
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane33",
-          "sha": "ace3889",
-          "pr": 206,
-          "note": "| aienos | #206 (Sonnet worker) | ace3889 | Codex: no findings | QEMU + CodeQL green |",
-          "ref": "2026-10-01-push-lane33-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane33",
-          "sha": "ace3889",
-          "pr": 206,
-          "note": "aienos #206:**",
-          "ref": "2026-10-01-push-lane33-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane33",
-          "sha": "ace3889",
-          "pr": 206,
-          "note": "12:51Z Lane 33 DONE: arch #82, omega #155, aienos #206 MERGED (docs truthful: E1 2/6, kernel 9/14 QEMU, TRUST-1 not qualified, R16 merged-with-failing-check noted; Gate 5 failed receipt added to omeg",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "6bcef8a",
-          "timestamp": "2026-10-01T00:24:04-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #189 from aien-dev/lane12/m5-migration-sig",
-          "pr": 189
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane12",
-          "sha": "6bcef8a",
-          "pr": 189,
-          "note": "PR aienos #189 MERGED, merge commit 6bcef8a. CodeQL checks all pass.",
-          "ref": "2026-10-01-push-lane12-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane23",
-          "sha": "6bcef8a",
-          "pr": 189,
-          "note": "§2 new \"later merges\" addendum: aienos #189 6bcef8a, #190 811bbc0, #191 697391f, #192 08cb905, #193 8d511d6; omega #128 ee89461, #129 d78fd11, #130 7fb59d3, #131 f7b22f1, #132 ff2af05, #133 c6cf052,",
-          "ref": "2026-10-01-push-lane23-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane12",
-          "sha": "6bcef8a",
-          "pr": 189,
-          "note": "~09:20Z Lane 12 DONE: aienos#189 6bcef8a (M5 migration sig, TEST keys; receipt f21f2c03… NOT_QUALIFIED pass15 blocked11 missing5 not_run0; QEMU checks ran), omega#130 7fb59d3 (G3 commitment signing",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "4492ca9",
-          "timestamp": "2026-09-30T22:46:38-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #186 from aien-dev/lane1/native-m5",
-          "pr": 186
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane1",
-          "sha": "4492ca9",
-          "pr": 186,
-          "note": "WP-C native M5: #186 merged 4492ca9. native/m5 49 tests / M5_NATIVE: PASS, ASan/UBSan PASS, 36/36 mutants. Corruption matrix (header, first/middle/last chunk, commit record, anchor, key gen, store ge",
-          "ref": "2026-10-01-push-lane1-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane1",
-          "sha": "4492ca9",
-          "pr": 186,
-          "note": "~06:05Z Lane 1 DONE. aienos #182 2d9a368 (qualify harness), #183 84de088 (C crypto), #185 513d653 (Gate 5 swTPM sim), #186 4492ca9 (C M5 envelope), #187 929a720 (matrix+receipt NOT_QUALIFIED pass10/b",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        }
-      ]
+      ],
+      "purpose_auto": "Directory native/m5. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/m5",
+  "name": "native/m5",
+  "purpose": "Directory native/m5. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

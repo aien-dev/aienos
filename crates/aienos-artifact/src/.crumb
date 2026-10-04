@@ -1,15 +1,62 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-artifact/src",
-  "layer": "crates/aienos-artifact/src",
-  "purpose": "Directory crates/aienos-artifact/src. Purpose not yet described by a human.",
   "above": {
     "name": "crates/aienos-artifact",
     "path": ".."
   },
   "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:e7ed37a16332ed63780e226496a4bf449cddeb4a4ae93655acf7e64fbe426871",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 12,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:c6ff1082c58fdb6b276cb2be93020d362ae0420c41437c1b62cd25ec98074af5"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 124,
+          "sha": "4dd5726",
+          "source": "backfill-git",
+          "subject": "P2-6A: Admission Receipt v0 (canonical encoding, strict decode, TEST-ONLY signing, CLI) (#124)",
+          "timestamp": "2026-09-25T07:02:01-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 121,
+          "sha": "1a62ca3",
+          "source": "backfill-git",
+          "subject": "Merge pull request #121 from aien-dev/phase2/binary-artifact-v0",
+          "timestamp": "2026-09-24T21:20:14-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 120,
+          "sha": "952e53e",
+          "source": "backfill-git",
+          "subject": "Merge pull request #120 from aien-dev/phase2/binary-artifact-v0",
+          "timestamp": "2026-09-24T21:05:20-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 119,
+          "sha": "7604b6e",
+          "source": "backfill-git",
+          "subject": "Merge pull request #119 from aien-dev/phase2/binary-artifact-v0",
+          "timestamp": "2026-09-24T20:41:08-05:00"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 4
+    },
     "seed": {
-      "purpose_auto": "Directory crates/aienos-artifact/src. Purpose not yet described by a human.",
       "files": [
         "canonical.rs",
         "capability.rs",
@@ -23,47 +70,12 @@
         "signature.rs",
         "tests.rs",
         "verify.rs"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 4,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "4dd5726",
-          "timestamp": "2026-09-25T07:02:01-05:00",
-          "author": "aien-dev",
-          "subject": "P2-6A: Admission Receipt v0 (canonical encoding, strict decode, TEST-ONLY signing, CLI) (#124)",
-          "pr": 124
-        },
-        {
-          "source": "backfill-git",
-          "sha": "1a62ca3",
-          "timestamp": "2026-09-24T21:20:14-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #121 from aien-dev/phase2/binary-artifact-v0",
-          "pr": 121
-        },
-        {
-          "source": "backfill-git",
-          "sha": "952e53e",
-          "timestamp": "2026-09-24T21:05:20-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #120 from aien-dev/phase2/binary-artifact-v0",
-          "pr": 120
-        },
-        {
-          "source": "backfill-git",
-          "sha": "7604b6e",
-          "timestamp": "2026-09-24T20:41:08-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #119 from aien-dev/phase2/binary-artifact-v0",
-          "pr": 119
-        }
-      ]
+      ],
+      "purpose_auto": "Directory crates/aienos-artifact/src. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-artifact/src",
+  "name": "crates/aienos-artifact/src",
+  "purpose": "Directory crates/aienos-artifact/src. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

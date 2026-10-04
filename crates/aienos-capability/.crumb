@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "crates/aienos-capability",
-  "layer": "crates/aienos-capability",
-  "purpose": "Directory crates/aienos-capability. Purpose not yet described by a human.",
   "above": {
     "name": "crates",
     "path": ".."
@@ -14,35 +10,58 @@
     }
   ],
   "extensions": {
-    "seed": {
-      "purpose_auto": "Directory crates/aienos-capability. Purpose not yet described by a human.",
-      "files": [
-        "Cargo.toml"
-      ]
+    "generated": {
+      "children": [
+        {
+          "digest": "3e3db7622e53c339ff0383af982b4e0bf2e7bea7e091ff8d904d56331a68ee5a",
+          "last_commit": "187ecdf",
+          "name": "src",
+          "purpose": "Directory crates/aienos-capability/src. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:537644e2825d52dd152f8d50494da370526066bdb3e5f6fb6067a01edc260a93",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:8a0463de3e20f4781afc41b8f7b354a29a3b819b2a88a8588b62c2ae3a29ebef",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 2,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:7582bb17e3282716c415dfd155b62aa4d26f69ce48ed028ab19671bbceb15da0"
     },
     "owner_lane": "",
     "provenance": {
-      "source": "backfill",
-      "total_commits": 2,
-      "ledger_cap": 20,
       "entries": [
         {
-          "source": "backfill-git",
-          "sha": "18caa07",
-          "timestamp": "2026-09-27T15:55:55-05:00",
           "author": "aien-dev",
+          "pr": 155,
+          "sha": "18caa07",
+          "source": "backfill-git",
           "subject": "Merge pull request #155 from aien-dev/feat/r9-generation-barrier",
-          "pr": 155
+          "timestamp": "2026-09-27T15:55:55-05:00"
         },
         {
-          "source": "backfill-git",
-          "sha": "24f1593",
-          "timestamp": "2026-09-27T15:50:43-05:00",
           "author": "aien-dev",
+          "pr": 154,
+          "sha": "24f1593",
+          "source": "backfill-git",
           "subject": "Merge pull request #154 from aien-dev/feat/r7-native-authority",
-          "pr": 154
+          "timestamp": "2026-09-27T15:50:43-05:00"
         }
-      ]
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 2
+    },
+    "seed": {
+      "files": [
+        "Cargo.toml"
+      ],
+      "purpose_auto": "Directory crates/aienos-capability. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "crates/aienos-capability",
+  "name": "crates/aienos-capability",
+  "purpose": "Directory crates/aienos-capability. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }

@@ -1,8 +1,4 @@
 {
-  "schema_version": "1.0.0",
-  "name": "native/kernel",
-  "layer": "native/kernel",
-  "purpose": "Directory native/kernel. Purpose not yet described by a human.",
   "above": {
     "name": "native",
     "path": ".."
@@ -46,246 +42,317 @@
     }
   ],
   "extensions": {
+    "generated": {
+      "children": [
+        {
+          "digest": "4c9da3fdaf762c784403ae3281c3a7e49b891596ed52ab27aaf62f2ea66c5502",
+          "last_commit": "2ee61b4",
+          "name": "arch",
+          "purpose": "Directory native/kernel/arch. Purpose not yet described by a human."
+        },
+        {
+          "digest": "efd08e41584e2cbb282cea72e620fa2db42c423c6b3211a91585affb92e34893",
+          "last_commit": "c3878bb",
+          "name": "artifact",
+          "purpose": "Directory native/kernel/artifact. Purpose not yet described by a human."
+        },
+        {
+          "digest": "9eeeb7fd4d3f985de10e008c8f80ed12c14cb4d4e19822c60b2960670c723fc5",
+          "last_commit": "a863d5c",
+          "name": "core",
+          "purpose": "Directory native/kernel/core. Purpose not yet described by a human."
+        },
+        {
+          "digest": "23eaffd404d1c16455030fd1c27ba14fa3311714528b336db3f59451e880819e",
+          "last_commit": "44de11f",
+          "name": "dev",
+          "purpose": "Directory native/kernel/dev. Purpose not yet described by a human."
+        },
+        {
+          "digest": "dd460494a52e8cc9d2b05d75f86d71e8c387090c04ebcb7c448730dc765d39f1",
+          "last_commit": "9daa5e1",
+          "name": "include",
+          "purpose": "Directory native/kernel/include. Purpose not yet described by a human."
+        },
+        {
+          "digest": "cba1518c92fbce170777d62b2656e6d4609353c3e6a72967500305d35ef1b92f",
+          "last_commit": "c3878bb",
+          "name": "mm",
+          "purpose": "Directory native/kernel/mm. Purpose not yet described by a human."
+        },
+        {
+          "digest": "01691254cbd24b1c92b6d1b38fc69d76f21a15d9b3069b5b02e88b52833a5e55",
+          "last_commit": "31ed9f8",
+          "name": "svc",
+          "purpose": "Directory native/kernel/svc. Purpose not yet described by a human."
+        },
+        {
+          "digest": "e2b639bfcd6cd597a2ab7a6eec99f7654c43006093ede303ad74509dbc6e6f5f",
+          "last_commit": "4cfc9d3",
+          "name": "tests",
+          "purpose": "Directory native/kernel/tests. Purpose not yet described by a human."
+        },
+        {
+          "digest": "41b629dd4561303b5383e23b3d5f0348c89d786032fb3076aea03a5da686e0f6",
+          "last_commit": "31ed9f8",
+          "name": "tools",
+          "purpose": "Directory native/kernel/tools. Purpose not yet described by a human."
+        }
+      ],
+      "children_root": "sha256:f6f120f9f913181d64951b5f2eb0487d8b7d7601bec19217410f73a1b878adf0",
+      "compiled_at": "2026-10-04T13:47:18Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:541e7184c7281b549aac9b8dba20fc8c6d648e6135638fc10e00da0ea8c30d33",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 130,
+      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "source_tree": "sha256:d9d6f511f6706f6e21343186dd3eb1e1113d75fae3da641378b54d992a9c625b"
+    },
+    "owner_lane": "",
+    "provenance": {
+      "entries": [
+        {
+          "author": "aien-dev",
+          "pr": 206,
+          "sha": "ace3889",
+          "source": "backfill-git",
+          "subject": "Merge pull request #206 from aien-dev/docs/lane33-reconcile",
+          "timestamp": "2026-10-01T07:41:50-05:00"
+        },
+        {
+          "lane": "lane33",
+          "note": "| aienos | #206 (Sonnet worker) | ace3889 | Codex: no findings | QEMU + CodeQL green |",
+          "pr": 206,
+          "ref": "2026-10-01-push-lane33-report.md",
+          "sha": "ace3889",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane33",
+          "note": "aienos #206:**",
+          "pr": 206,
+          "ref": "2026-10-01-push-lane33-report.md",
+          "sha": "ace3889",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane33",
+          "note": "12:51Z Lane 33 DONE: arch #82, omega #155, aienos #206 MERGED (docs truthful: E1 2/6, kernel 9/14 QEMU, TRUST-1 not qualified, R16 merged-with-failing-check noted; Gate 5 failed receipt added to omeg",
+          "pr": 206,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "ace3889",
+          "source": "backfill-lane-report"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 204,
+          "sha": "c3878bb",
+          "source": "backfill-git",
+          "subject": "ck: P2_ARTIFACT loader and M0_ROLLBACK gates in the C kernel (QEMU) (#204)",
+          "timestamp": "2026-10-01T07:21:10-05:00"
+        },
+        {
+          "lane": "lane29",
+          "note": "Triggers: native/**, scripts/ck_gates.sh, scripts/qemu_ck_*.sh, scripts/lib_ck_m1_checks.sh, the workflow. Green on PR and on main after every merge (last: c3878bb success).",
+          "pr": 204,
+          "ref": "2026-10-01-push-lane29-report.md",
+          "sha": "c3878bb",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane29",
+          "note": "PR #204, squash-merged c3878bb. Receipt evidence/ck_gates_bb4040322b026f5f561733fdcaf900770070f2281800b0e3603c2aa2c670b7ff.json: M1, M3, SMMU, NVME_SHUTDOWN, P2_ARTIFACT, M4_NVME, M4_STORE, ARGUS1_RE",
+          "pr": 204,
+          "ref": "2026-10-01-push-lane29-report.md",
+          "sha": "c3878bb",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane31",
+          "note": "Start: origin/main c3878bb, ck_gates 9 PASS / 5 NOT_RUN of 14 (receipt bb40403...).",
+          "pr": 204,
+          "ref": "2026-10-01-push-lane31-report.md",
+          "sha": "c3878bb",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane33",
+          "note": "12:33Z Review track 1 DONE (track1-repos-drift.md): omega 7e713e3, aienos c3878bb, arch 921797b, physics 006e426, sovereign-core 7011f2b; #152 green, #153 red for stale head, #136 never ran checks; h",
+          "pr": 204,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "c3878bb",
+          "source": "backfill-lane-report"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 203,
+          "sha": "9807281",
+          "source": "backfill-git",
+          "subject": "ck: virtio-net driver hook and AIENOS_CK_NET gate (QEMU slirp) (#203)",
+          "timestamp": "2026-10-01T06:54:12-05:00"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 201,
+          "sha": "0d0efa5",
+          "source": "backfill-git",
+          "subject": "ck: port M3 isolation (threads, EL0, preemption, placement, typed IPC) to the C kernel (QEMU) (#201)",
+          "timestamp": "2026-10-01T04:58:30-05:00"
+        },
+        {
+          "lane": "lane25",
+          "note": "PR #201, squash-merged as 0d0efa5. Built by an Opus worker; the lead verified it, fixed the review findings and produced the receipt.",
+          "pr": 201,
+          "ref": "2026-10-01-push-lane25-report.md",
+          "sha": "0d0efa5",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane25",
+          "note": "09:59Z Lane 25 DONE: aienos #201 (M3 isolation port: tasks, preempt, EL0 lockout, fault isolation, IPC w/ narrowable caps; single core). ck_gates 7 PASS/6 NOT_RUN of 13, QEMU only. Follow-ups: virtio",
+          "pr": 201,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "0d0efa5",
+          "source": "backfill-lane-report"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 198,
+          "sha": "ff57d33",
+          "source": "backfill-git",
+          "subject": "ck: NVMe normal shutdown before bus-master disable + NVME_SHUTDOWN gate (QEMU) (#198)",
+          "timestamp": "2026-10-01T04:18:33-05:00"
+        },
+        {
+          "lane": "lane25",
+          "note": "PR #198, squash-merged as ff57d33.",
+          "pr": 198,
+          "ref": "2026-10-01-push-lane25-report.md",
+          "sha": "ff57d33",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane25",
+          "note": "09:21Z Lane 25 interim: aienos #197 e9f5b3a (SMMUv3 stage-1 confined NVMe, bypass test-only), #198 ff57d33 (NVMe CC.SHN shutdown gate); ck_gates 6 PASS/7 NOT_RUN of 13; item 3 M3 isolation port conti",
+          "pr": 198,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "ff57d33",
+          "source": "backfill-lane-report"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 197,
+          "sha": "e9f5b3a",
+          "source": "backfill-git",
+          "subject": "native/kernel: SMMUv3 service; NVMe Store path SMMU-confined in QEMU (#197)",
+          "timestamp": "2026-10-01T03:54:52-05:00"
+        },
+        {
+          "lane": "lane25",
+          "note": "PR #197, squash-merged as e9f5b3a.",
+          "pr": 197,
+          "ref": "2026-10-01-push-lane25-report.md",
+          "sha": "e9f5b3a",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane25",
+          "note": "09:21Z Lane 25 interim: aienos #197 e9f5b3a (SMMUv3 stage-1 confined NVMe, bypass test-only), #198 ff57d33 (NVMe CC.SHN shutdown gate); ck_gates 6 PASS/7 NOT_RUN of 13; item 3 M3 isolation port conti",
+          "pr": 197,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "e9f5b3a",
+          "source": "backfill-lane-report"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 196,
+          "sha": "4d9bdb2",
+          "source": "backfill-git",
+          "subject": "Merge pull request #196 from aien-dev/lane18/native-kernel-gates",
+          "timestamp": "2026-10-01T03:23:21-05:00"
+        },
+        {
+          "lane": "lane18",
+          "note": "#196 gate runner scripts/ck_gates.sh, parity table native/kernel/GATES.md, receipts, TRUST-1 QEMU rows, matrix: merge 4d9bdb2ea98ff4fe08f735857cdb8a7b77e7484e",
+          "pr": 196,
+          "ref": "2026-10-01-push-lane18-report.md",
+          "sha": "4d9bdb2",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane18",
+          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
+          "pr": 196,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "4d9bdb2",
+          "source": "backfill-lane-report"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 195,
+          "sha": "ba7b75d",
+          "source": "backfill-git",
+          "subject": "Merge pull request #195 from aien-dev/lane18/native-kernel-devstore",
+          "timestamp": "2026-10-01T02:33:01-05:00"
+        },
+        {
+          "lane": "lane18",
+          "note": "#195 devices (PCI/NVMe), capability+ARGUS, sealed C Store in the boot path: merge ba7b75deba7fdcbdf1e28a26c1ad8b6331aaf799",
+          "pr": 195,
+          "ref": "2026-10-01-push-lane18-report.md",
+          "sha": "ba7b75d",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane18",
+          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
+          "pr": 195,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "ba7b75d",
+          "source": "backfill-lane-report"
+        },
+        {
+          "author": "aien-dev",
+          "pr": 194,
+          "sha": "34c6053",
+          "source": "backfill-git",
+          "subject": "Merge pull request #194 from aien-dev/lane18/native-kernel-core",
+          "timestamp": "2026-10-01T02:17:36-05:00"
+        },
+        {
+          "lane": "lane18",
+          "note": "#194 C kernel core + UEFI entry stub + memory/exceptions + host tests: merge 34c60536da7a95d8b782b13e52495730578c83ba",
+          "pr": 194,
+          "ref": "2026-10-01-push-lane18-report.md",
+          "sha": "34c6053",
+          "source": "backfill-lane-report"
+        },
+        {
+          "lane": "lane18",
+          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
+          "pr": 194,
+          "ref": "2026-10-01-next-major-push-orchestrator.md",
+          "sha": "34c6053",
+          "source": "backfill-lane-report"
+        }
+      ],
+      "ledger_cap": 20,
+      "source": "backfill",
+      "total_commits": 9
+    },
     "seed": {
-      "purpose_auto": "Directory native/kernel. Purpose not yet described by a human.",
       "files": [
         "GATES.md",
         "Makefile",
         "README.md",
         "stage.mk"
-      ]
-    },
-    "owner_lane": "",
-    "provenance": {
-      "source": "backfill",
-      "total_commits": 9,
-      "ledger_cap": 20,
-      "entries": [
-        {
-          "source": "backfill-git",
-          "sha": "ace3889",
-          "timestamp": "2026-10-01T07:41:50-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #206 from aien-dev/docs/lane33-reconcile",
-          "pr": 206
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane33",
-          "sha": "ace3889",
-          "pr": 206,
-          "note": "| aienos | #206 (Sonnet worker) | ace3889 | Codex: no findings | QEMU + CodeQL green |",
-          "ref": "2026-10-01-push-lane33-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane33",
-          "sha": "ace3889",
-          "pr": 206,
-          "note": "aienos #206:**",
-          "ref": "2026-10-01-push-lane33-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane33",
-          "sha": "ace3889",
-          "pr": 206,
-          "note": "12:51Z Lane 33 DONE: arch #82, omega #155, aienos #206 MERGED (docs truthful: E1 2/6, kernel 9/14 QEMU, TRUST-1 not qualified, R16 merged-with-failing-check noted; Gate 5 failed receipt added to omeg",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "c3878bb",
-          "timestamp": "2026-10-01T07:21:10-05:00",
-          "author": "aien-dev",
-          "subject": "ck: P2_ARTIFACT loader and M0_ROLLBACK gates in the C kernel (QEMU) (#204)",
-          "pr": 204
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane29",
-          "sha": "c3878bb",
-          "pr": 204,
-          "note": "Triggers: native/**, scripts/ck_gates.sh, scripts/qemu_ck_*.sh, scripts/lib_ck_m1_checks.sh, the workflow. Green on PR and on main after every merge (last: c3878bb success).",
-          "ref": "2026-10-01-push-lane29-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane29",
-          "sha": "c3878bb",
-          "pr": 204,
-          "note": "PR #204, squash-merged c3878bb. Receipt evidence/ck_gates_bb4040322b026f5f561733fdcaf900770070f2281800b0e3603c2aa2c670b7ff.json: M1, M3, SMMU, NVME_SHUTDOWN, P2_ARTIFACT, M4_NVME, M4_STORE, ARGUS1_RE",
-          "ref": "2026-10-01-push-lane29-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane31",
-          "sha": "c3878bb",
-          "pr": 204,
-          "note": "Start: origin/main c3878bb, ck_gates 9 PASS / 5 NOT_RUN of 14 (receipt bb40403...).",
-          "ref": "2026-10-01-push-lane31-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane33",
-          "sha": "c3878bb",
-          "pr": 204,
-          "note": "12:33Z Review track 1 DONE (track1-repos-drift.md): omega 7e713e3, aienos c3878bb, arch 921797b, physics 006e426, sovereign-core 7011f2b; #152 green, #153 red for stale head, #136 never ran checks; h",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "9807281",
-          "timestamp": "2026-10-01T06:54:12-05:00",
-          "author": "aien-dev",
-          "subject": "ck: virtio-net driver hook and AIENOS_CK_NET gate (QEMU slirp) (#203)",
-          "pr": 203
-        },
-        {
-          "source": "backfill-git",
-          "sha": "0d0efa5",
-          "timestamp": "2026-10-01T04:58:30-05:00",
-          "author": "aien-dev",
-          "subject": "ck: port M3 isolation (threads, EL0, preemption, placement, typed IPC) to the C kernel (QEMU) (#201)",
-          "pr": 201
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane25",
-          "sha": "0d0efa5",
-          "pr": 201,
-          "note": "PR #201, squash-merged as 0d0efa5. Built by an Opus worker; the lead verified it, fixed the review findings and produced the receipt.",
-          "ref": "2026-10-01-push-lane25-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane25",
-          "sha": "0d0efa5",
-          "pr": 201,
-          "note": "09:59Z Lane 25 DONE: aienos #201 (M3 isolation port: tasks, preempt, EL0 lockout, fault isolation, IPC w/ narrowable caps; single core). ck_gates 7 PASS/6 NOT_RUN of 13, QEMU only. Follow-ups: virtio",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "ff57d33",
-          "timestamp": "2026-10-01T04:18:33-05:00",
-          "author": "aien-dev",
-          "subject": "ck: NVMe normal shutdown before bus-master disable + NVME_SHUTDOWN gate (QEMU) (#198)",
-          "pr": 198
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane25",
-          "sha": "ff57d33",
-          "pr": 198,
-          "note": "PR #198, squash-merged as ff57d33.",
-          "ref": "2026-10-01-push-lane25-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane25",
-          "sha": "ff57d33",
-          "pr": 198,
-          "note": "09:21Z Lane 25 interim: aienos #197 e9f5b3a (SMMUv3 stage-1 confined NVMe, bypass test-only), #198 ff57d33 (NVMe CC.SHN shutdown gate); ck_gates 6 PASS/7 NOT_RUN of 13; item 3 M3 isolation port conti",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "e9f5b3a",
-          "timestamp": "2026-10-01T03:54:52-05:00",
-          "author": "aien-dev",
-          "subject": "native/kernel: SMMUv3 service; NVMe Store path SMMU-confined in QEMU (#197)",
-          "pr": 197
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane25",
-          "sha": "e9f5b3a",
-          "pr": 197,
-          "note": "PR #197, squash-merged as e9f5b3a.",
-          "ref": "2026-10-01-push-lane25-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane25",
-          "sha": "e9f5b3a",
-          "pr": 197,
-          "note": "09:21Z Lane 25 interim: aienos #197 e9f5b3a (SMMUv3 stage-1 confined NVMe, bypass test-only), #198 ff57d33 (NVMe CC.SHN shutdown gate); ck_gates 6 PASS/7 NOT_RUN of 13; item 3 M3 isolation port conti",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "4d9bdb2",
-          "timestamp": "2026-10-01T03:23:21-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #196 from aien-dev/lane18/native-kernel-gates",
-          "pr": 196
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane18",
-          "sha": "4d9bdb2",
-          "pr": 196,
-          "note": "#196 gate runner scripts/ck_gates.sh, parity table native/kernel/GATES.md, receipts, TRUST-1 QEMU rows, matrix: merge 4d9bdb2ea98ff4fe08f735857cdb8a7b77e7484e",
-          "ref": "2026-10-01-push-lane18-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane18",
-          "sha": "4d9bdb2",
-          "pr": 196,
-          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "ba7b75d",
-          "timestamp": "2026-10-01T02:33:01-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #195 from aien-dev/lane18/native-kernel-devstore",
-          "pr": 195
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane18",
-          "sha": "ba7b75d",
-          "pr": 195,
-          "note": "#195 devices (PCI/NVMe), capability+ARGUS, sealed C Store in the boot path: merge ba7b75deba7fdcbdf1e28a26c1ad8b6331aaf799",
-          "ref": "2026-10-01-push-lane18-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane18",
-          "sha": "ba7b75d",
-          "pr": 195,
-          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        },
-        {
-          "source": "backfill-git",
-          "sha": "34c6053",
-          "timestamp": "2026-10-01T02:17:36-05:00",
-          "author": "aien-dev",
-          "subject": "Merge pull request #194 from aien-dev/lane18/native-kernel-core",
-          "pr": 194
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane18",
-          "sha": "34c6053",
-          "pr": 194,
-          "note": "#194 C kernel core + UEFI entry stub + memory/exceptions + host tests: merge 34c60536da7a95d8b782b13e52495730578c83ba",
-          "ref": "2026-10-01-push-lane18-report.md"
-        },
-        {
-          "source": "backfill-lane-report",
-          "lane": "lane18",
-          "sha": "34c6053",
-          "pr": 194,
-          "note": "~15:50Z Lane 18 report: aienos #194 34c6053, #195 ba7b75d, #196 4d9bdb2 (C kernel core: boot EL2->EL1, MMU, GICv3, timer; PCI/NVMe; capability+ARGUS; sealed C Store in boot path; ck_gates 4 PASS/8 NO",
-          "ref": "2026-10-01-next-major-push-orchestrator.md"
-        }
-      ]
+      ],
+      "purpose_auto": "Directory native/kernel. Purpose not yet described by a human."
     }
-  }
+  },
+  "layer": "native/kernel",
+  "name": "native/kernel",
+  "purpose": "Directory native/kernel. Purpose not yet described by a human.",
+  "schema_version": "1.0.0"
 }
