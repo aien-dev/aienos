@@ -57,4 +57,4 @@ Start with [issues labelled `good first issue`](https://github.com/aien-dev/aien
 
 ## License
 
-Apache-2.0 WITH LLVM-exception. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Contact: aien@aienos.com.
+Licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See [LICENSE](LICENSE) and [NOTICE](NOTICE). Contact: aien@aienos.com.

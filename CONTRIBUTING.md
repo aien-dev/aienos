@@ -69,7 +69,7 @@ Report vulnerabilities privately through GitHub's "Report a vulnerability"
 
 ## License
 
-AIENOS is licensed under Apache-2.0 WITH LLVM-exception. By submitting a
+AIENOS is licensed under AGPL-3.0-or-later. By submitting a
 contribution you agree that it is licensed under the same terms.
 
 ## Crumbs

@@ -4,7 +4,7 @@
 name = "aienos-infer-kernel"
 version = "0.1.0"
 edition = "2021"
-license = "Apache-2.0 WITH LLVM-exception"
+license = "AGPL-3.0-or-later"
 description = "Links aienos-infer into the general-regs-only C kernel: bump allocator, ingest, prefill + greedy decode (aienos#34 lanes 4-5)."
 
 [lib]

@@ -4,7 +4,7 @@
 name = "aienos-fpu-probe"
 version = "0.1.0"
 edition = "2021"
-license = "Apache-2.0 WITH LLVM-exception"
+license = "AGPL-3.0-or-later"
 description = "One FP/SIMD-enabled Rust unit called from the general-regs-only C kernel (aienos#34 lane 0)."
 
 [lib]

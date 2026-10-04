@@ -7,6 +7,6 @@ partnership with AIEN.
 Website: https://github.com/aien-dev/aienos
 Lead Architect: Drake Stapleton <drake@aienos.com>
 
-Licensed under the Apache License, Version 2.0, with LLVM Exceptions
-(SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception). The full, unmodified
-license text is in LICENSE, taken verbatim from the LLVM Project's LICENSE.TXT.
+Licensed under the GNU Affero General Public License v3.0 or later
+(SPDX-License-Identifier: AGPL-3.0-or-later). The full, unmodified
+license text is in LICENSE, taken verbatim from https://www.gnu.org/licenses/agpl-3.0.txt.
