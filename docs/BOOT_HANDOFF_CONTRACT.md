@@ -45,7 +45,7 @@ There is **no Rust loader to C kernel handoff in the code**. Three facts:
    exists anywhere (ADR 0024 Q3).
 
 So this contract freezes the record the C kernel already accepts
-(`ck_handoff`, magic `CHANDOF1`) as the **one** entry ABI. Any loader (the C
+(`ck_handoff`, magic `CHANDOF2`) as the **one** entry ABI. Any loader (the C
 stub today; the Rust loader only if Q3 is reopened; Atlas later) must produce
 exactly this record. The Rust loader is not extended by this document.
 
@@ -60,7 +60,7 @@ exactly this record. The Rust loader is not extended by this document.
 | Record location | inside the loaded image BSS (`static struct ck_handoff handoff`, `efi_main.c:20`); memory map copy in the image BSS too (`efi_main.c:19`) | CODE |
 | Separate kernel binary entry | **MISSING.** A loader that is not linked into the kernel image has no symbol to call and no load format for the kernel. PROPOSED: not added while Q3 freezes loader expansion. | |
 
-## 3. Record layout (`struct ck_handoff`, `native/boot/handoff.h:11-28`)
+## 3. Record layout (`struct ck_handoff`, `native/boot/handoff.h`)
 
 Offsets below are derived by hand from AAPCS64 natural alignment (LP64,
 little endian). **They are not compiler-checked**: the code cut in section
@@ -68,7 +68,7 @@ little endian). **They are not compiler-checked**: the code cut in section
 
 | Off | Size | Field | Meaning | Producer | Kernel reads it? |
 | --- | --- | --- | --- | --- | --- |
-| 0 | 8 | `magic` | `CK_HANDOFF_MAGIC` = `0x31464f444e414843`, ASCII `CHANDOF1` little endian (`handoff.h:9`) | `efi_main.c:62` | yes, `kmain.c:174` |
+| 0 | 8 | `magic` | `CK_HANDOFF_MAGIC` = `0x32464f444e414843`, ASCII `CHANDOF2` little endian (`handoff.h`). `CK_HANDOFF_MAGIC_V1` (`CHANDOF1`, the 112-byte layout) is refused | `efi_main.c` | yes, `kmain.c`, `core/handoff_check.c` |
 | 8 | 4 | `firmware_el` | `CurrentEL` at UEFI entry | `efi_main.c:61,63` | yes, report only `kmain.c:57` |
 | 12 | 4 | `desc_version` | UEFI memory descriptor version from `GetMemoryMap` | `efi_main.c:128` | **no** (never checked) |
 | 16 | 8 | `firmware_ttbr0` | `TTBR0_EL2` (or EL1) of the firmware regime | `efi_main.c:67,70` | yes, report only `kmain.c:53` |
@@ -84,20 +84,29 @@ little endian). **They are not compiler-checked**: the code cut in section
 | 96 | 4 | `exit_attempts` | `ExitBootServices` calls until success (1..8) | `efi_main.c:129` | yes, report only `kmain.c:66` |
 | 100 | 4 | `reserved0` | zero (BSS) | `efi_main.c:20` (static, zeroed by `efi_entry.S` BSS clear) | **no** (not checked to be zero) |
 | 104 | 8 | `commit` | pointer to the build commit string | `efi_main.c:75` | **no** (kernel calls `ck_commit()` directly, `core/report.c` `ck_report_header`) |
-| 112 | | end | total size 112 bytes (hand derived) | | |
+| 112 | 8 | `model_base` | physical base of the model bytes the stub read from the boot disk (EfiLoaderData, 4 KiB aligned); 0 without a model | `efi_model.c` | yes, `core/infer.c` (disk path), reserved `mm/mmu.c` |
+| 120 | 8 | `model_len` | model bytes | `efi_model.c` | yes, `core/infer.c`, `core/handoff_check.c` |
+| 128 | 32 | `model_sha256` | SHA-256 declared by `MODEL.MAP`; the kernel recomputes it over the loaded bytes and refuses to decode on mismatch | `efi_model.c` | yes, `core/infer.c` |
+| 160 | 4 | `model_flags` | bit 0 `CK_HANDOFF_MODEL_PRESENT`, bit 1 `CK_HANDOFF_MODEL_BLOCKIO` (read through the firmware Block I/O before `ExitBootServices`); other bits refused | `efi_model.c` | yes, `core/handoff_check.c`, `core/infer.c` |
+| 164 | 4 | `model_extents` | extents listed in `MODEL.MAP` (1..128) | `efi_model.c` | yes (range check), report |
+| 168 | 8 | `model_read_us` | wall time of the Block I/O read, microseconds | `efi_model.c` | report only |
+| 176 | 8 | `model_disk_last_block` | `EFI_BLOCK_IO_MEDIA.LastBlock` of the matched whole disk | `efi_model.c` | report only |
+| 184 | 4 | `model_block_size` | 512 or 4096 | `efi_model.c` | yes, `core/handoff_check.c` |
+| 188 | 4 | `reserved1` | zero; refused if nonzero | zero (BSS) | yes, `core/handoff_check.c` |
+| 192 | | end | total size 192 bytes (`_Static_assert` in `handoff.h`) | | |
 
 ### 3.1 Inputs the task asked about that are not in the record
 
 | Input | Status today | Where it comes from instead |
 | --- | --- | --- |
-| Version field | **MISSING** as a field. The version is the trailing `1` inside the magic `CHANDOF1` (`handoff.h:9`). PROPOSED rule: a new layout gets a new magic (`CHANDOF2`, ...); there is no separate version number. | |
-| Record size field | **MISSING.** PROPOSED: not added in v1 (adding it changes the frozen layout); the magic fixes the size at 112. | |
+| Version field | The version is the trailing digit inside the magic (`CHANDOF2`, `handoff.h`); a new layout gets a new magic, there is no separate version number. `CHANDOF2` (2026-10-04) appended the boot-disk model block (offsets 112..192, section 3). `CHANDOF1` records are refused (`handoff_check.c`, `test_handoff.c` case 2). | |
+| Record size field | **MISSING.** The magic fixes the size: `CHANDOF1` = 112 bytes, `CHANDOF2` = 192 bytes (`_Static_assert` in `handoff.h`). | |
 | DTB pointer | **MISSING.** The C kernel is ACPI only (no `fdt`/`dtb` symbol anywhere in `native/`). Not part of v1. | |
 | Framebuffer (GOP) | **MISSING** in `ck_handoff`. The Rust loader captures one (`crates/aienos-boot/src/handoff.rs:1170-1178`, type `crates/aienos-kernel/src/display/mod.rs:22-30`), the C stub does not. Not part of v1. | |
 | Console UART | Not in the record. The stub parses SPCR and configures the console **inside the shared image** (`efi_main.c:91-95`); the kernel inherits that state through static variables, not through the record. A separately linked kernel would get no console. **MISSING** for that case. | |
 | Entropy | Not in the record. The kernel probes `RNDR` itself and fails closed (`kmain.c:121-132`, `arch/rndr.c`). No loader-supplied seed; PROPOSED: never accept one (a loader seed would be an unverified input). | |
 | Owner key material (after #215) | Not in the record. Owner **public** keys and machine id are compiled into the hardware staging image at build time (`native/kernel/Makefile:97-125`, `CK_OWNER_PUBKEYS`, `CK_MACHINE_ID`). PROPOSED: the handoff never carries key material. | |
-| Boot disk identity | **MISSING.** The kernel binds the first PCI function of class `0x010802` (`native/kernel/dev/nvme_bind.c:141`) and calls it the boot disk (`dev/devices.c:12`). The loader does not tell the kernel which disk it booted from. | |
+| Boot disk identity | **Partly.** With a model, `model_disk_last_block` / `model_block_size` describe the whole disk the stub read the model from, and `MODEL.MAP` (`\EFI\AIENOS\MODEL.MAP`, `native/boot/model_map.h`) binds the GPT disk GUID that the stub matched at LBA 1 (`native/boot/efi_model.c`). The GUID itself is not in the record. Without a model the kernel still binds the first PCI function of class `0x010802` (`native/kernel/dev/nvme_bind.c`) and calls it the boot disk. | |
 | Image / artifact info | Image range only (`image_base`/`image_end`). Artifacts are read by the kernel from the boot disk Store (`kmain.c:141-144`), not passed by the loader. | |
 | Boot attempt / rollback state | **MISSING**, and PROPOSED to stay out of the record (section 7). | |
 
@@ -180,6 +189,11 @@ panic: <reason>
 | record, map copy or image overlaps `EfiConventionalMemory` | **not checked** (survived by reservation, `mm/mmu.c:118-120`) | PROPOSED `panic: handoff: record region in free memory` |
 | `rsdp == 0` | **not refused**: boot continues, then panics later `gic: no usable ACPI MADT` (`kmain.c:87-90`) | PROPOSED `panic: handoff: missing rsdp` |
 | `firmware_el` not 1 or 2 | CODE `kmain.c:186` uses live `CurrentEL`, not the field | PROPOSED `panic: handoff: firmware_el mismatch` when the field disagrees with live `CurrentEL` |
+| `model_flags` has bits other than `CK_HANDOFF_MODEL_PRESENT` / `CK_HANDOFF_MODEL_BLOCKIO` | CODE `core/handoff_check.c` | `handoff: bad model flags <n>` |
+| model present with `model_len == 0`, `model_base` not 4 KiB aligned, base+len overflow, `model_block_size` not 512/4096, or `model_extents` 0 or > 128 | CODE `core/handoff_check.c`, `tests/test_handoff.c` case 7 | `handoff: bad model range` / `model base unaligned` / `model range overflow` / `bad model block size` / `bad model extents` |
+| no model (`model_flags == 0`) but any model field or `model_sha256` byte nonzero | CODE `core/handoff_check.c` | `handoff: model fields without model` |
+| `reserved1 != 0` | CODE `core/handoff_check.c` | `handoff: reserved1 field nonzero` |
+| declared `model_sha256` differs from the SHA-256 of the loaded bytes | CODE `core/infer.c` (not a panic: the kernel refuses to decode and reports `AIENOS_CK_INFER: FAIL`) | `infer: sha256 mismatch declared=<hex>` |
 
 Every PROPOSED check runs **before** `ck_mm_build` (before the first frame
 is handed out) and after the vectors are installed, so a refusal can print.
@@ -259,15 +273,15 @@ QEMU only; Machine 1 is NOT_RUN.
 
 ## 8. Frozen forever vs extensible
 
-**Frozen (v1, `CHANDOF1`):** the magic value; the 112-byte layout and every
+**Frozen (v2, `CHANDOF2`; v1 `CHANDOF1` is superseded and refused):** the magic value; the 192-byte layout and every
 offset in section 3; the meaning of every field; `x0` = record address;
 `ExitBootServices` done before the call; the reserved-range rules in
 section 5; the `panic: handoff: bad magic` line; "no rollback state and no
 key material in the record".
 
 **Extensible only by a new magic (PROPOSED):** any added field (framebuffer,
-boot disk identity, UART, a record size field) means a new struct with a new
-magic `CHANDOF2`; the kernel accepts exactly the magics it was built for and
+UART, a record size field) means a new struct with a new
+magic (`CHANDOF3`, ...); the kernel accepts exactly the magic it was built for and
 refuses the rest with the `unsupported version` line. No in-place growth of
 v1, no use of `reserved0` for data (it must stay zero).
 
@@ -277,7 +291,7 @@ Host unit tests (no QEMU) against a PROPOSED pure validator, each with the
 exact refusal line from section 6:
 
 1. NULL record.
-2. Magic off by one bit; magic `CHANDOF2`.
+2. Magic off by one bit; the old magic `CHANDOF1` (DONE: `tests/test_handoff.c` case 2).
 3. `reserved0 = 1`.
 4. `desc_size` 0, 39, 41 (not a multiple of 8).
 5. `desc_version` 0 and 2.

@@ -358,7 +358,7 @@ KCFLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -nostdlib -fno-bu
 KLDFLAGS := -nostdlib -pie --no-dynamic-linker -z norelro -z noexecstack -z max-page-size=4096 --no-warn-rwx-segments \
 	-T $(BOOT)/image.ld
 
-CORE_C := $(BOOT)/efi_main.c \
+CORE_C := $(BOOT)/efi_main.c $(BOOT)/efi_model.c \
 	$(KDIR)/arch/exception.c $(KDIR)/arch/gic.c $(KDIR)/arch/timer.c \
 	$(KDIR)/core/acpi.c $(KDIR)/core/console.c $(KDIR)/core/fmt.c \
 	$(KDIR)/core/kmain.c $(KDIR)/core/handoff_check.c $(KDIR)/core/libc_min.c $(KDIR)/core/report.c \
@@ -889,6 +889,14 @@ $(GPT_IMG_TOOL): $(GPT_IMG_SRCS) $(KDIR)/dev/disk_part.h $(KDIR)/tools/gpt_write
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -I$(KDIR)/dev -I$(KDIR)/tools -I$(NATIVE)/disk -o $@ $(GPT_IMG_SRCS)
 gpt-image: $(GPT_IMG_TOOL)
+
+# MODEL.MAP tool (model ingest gate + the attended-boot staging; hosted, never
+# part of an image). SHA-256 is the kernel's own (argus).
+MODEL_MAP_TOOL := $(OUT)/host/ck_model_map
+$(MODEL_MAP_TOOL): $(KDIR)/tools/ck_model_map.c $(NATIVE)/argus/sha256.c $(BOOT)/model_map.h $(NATIVE)/argus/sha256.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -I$(BOOT) -I$(NATIVE)/argus -o $@ $(KDIR)/tools/ck_model_map.c $(NATIVE)/argus/sha256.c
+model-map: $(MODEL_MAP_TOOL)
 
 # Owner provisioning generator (hosted; never part of an image) and the
 # generated header for the hardware staging image.

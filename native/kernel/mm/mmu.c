@@ -118,6 +118,11 @@ uint64_t ck_mm_build(const struct ck_handoff *h)
     ck_frames_reserve(&frames, h->image_base, h->image_end);
     ck_frames_reserve(&frames, (uint64_t)(uintptr_t)h, (uint64_t)(uintptr_t)h + sizeof *h);
     ck_frames_reserve(&frames, h->memory_map, h->memory_map + h->map_size);
+    /* CHANDOF2: the model the stub read from the boot disk (EfiLoaderData,
+     * never handed out anyway); whole pages, explicit like the image. */
+    if (h->model_flags & CK_HANDOFF_MODEL_PRESENT)
+        ck_frames_reserve(&frames, h->model_base,
+                          (h->model_base + h->model_len + CK_PAGE - 1) & ~(uint64_t)(CK_PAGE - 1));
     /* ACPI: the RSDP, the XSDT/RSDT and every table the root lists, whole
      * pages, before the first allocation. UEFI keeps them out of
      * EfiConventionalMemory already; this holds even if a firmware does not. */

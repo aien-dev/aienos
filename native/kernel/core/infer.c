@@ -6,7 +6,10 @@
  * Only compiled into the probe build: Makefile CK_INFER_LIB=<.a> adds
  * -DCK_INFER_PROBE=1; the default image carries none of this.
  *
- * Ingest path (the smallest that works today): QEMU fw_cfg. The C kernel has
+ * Ingest paths: (1) the boot disk, read by the UEFI stub through the
+ * firmware Block I/O driver before ExitBootServices and handed over in
+ * CHANDOF2 (native/boot/efi_model.c; the hardware path, lane 6); (2) QEMU
+ * fw_cfg, TEST-ONLY, when the stub found no MODEL.MAP. The C kernel has
  * no virtio-blk driver (only NVMe store, virtio-net) and the C boot stub reads
  * no files, but fw_cfg is already used by the TEST-ONLY artifact source
  * (artifact_loader.c). The traditional byte-at-a-time data register would need
@@ -206,9 +209,18 @@ static void hex(char *out, const uint8_t *b, unsigned n)
 void ck_infer_run(void)
 {
     const char *why = 0;
-    uint64_t base = fwcfg_from_dsdt(&why);
+    /* Source 1, the boot disk: the UEFI stub read the model through the
+     * firmware's Block I/O driver before ExitBootServices and recorded it in
+     * CHANDOF2 (native/boot/efi_model.c, native/boot/model_map.h). The bytes
+     * live in EfiLoaderData the frame allocator never hands out (mm/mmu.c
+     * reserves the range). This is the path that exists on hardware.
+     * Source 2, QEMU fw_cfg: TEST-ONLY, below, when the stub found no map. */
+    const struct ck_handoff *h = ck_handoff_get();
+    int from_disk = h && (h->model_flags & CK_HANDOFF_MODEL_PRESENT);
+    uint64_t base = from_disk ? 0 : fwcfg_from_dsdt(&why);
     uint16_t sel = 0;
     uint32_t size = 0;
+    if (!from_disk) {
     if (base && !ck_mm_mmio_try_map(base, 0x18)) {
         why = "fw_cfg window not mappable";
         base = 0;
@@ -237,36 +249,70 @@ void ck_infer_run(void)
     ck_printf("infer: fw_cfg base=0x%llx dma=yes file=%s size=%u\n", (unsigned long long)base,
               MODEL_FILE, size);
 
+    }
+    uint64_t msize = from_disk ? h->model_len : (uint64_t)size;
+    uint64_t mpa = from_disk ? h->model_base : 0, hpa = 0, mpages = 0;
+    if (from_disk) {
+        ck_puts("infer_source_mode: boot-disk model (MODEL.MAP read by the UEFI stub through the firmware's Block I/O before ExitBootServices); the path that exists on hardware\n");
+        ck_printf("infer: disk base=0x%llx size=%llu extents=%u read_us=%llu block_size=%u\n",
+                  (unsigned long long)mpa, (unsigned long long)msize, h->model_extents,
+                  (unsigned long long)h->model_read_us, h->model_block_size);
+        if (!ck_mm_mapped(mpa, msize)) {
+            ck_puts("infer: ingest FAIL (disk model range not mapped)\nAIENOS_CK_INFER: FAIL\n");
+            return;
+        }
+    }
+
     uint64_t frames_before = ck_mm_free_frames();
-    uint64_t mpages = ((uint64_t)size + PAGE - 1) / PAGE, mpa = 0, hpa = 0;
-    if (ck_mm_frames_alloc(mpages, &mpa) || ck_mm_frames_alloc(HEAP_BYTES / PAGE, &hpa)) {
-        ck_printf("infer: ingest FAIL (no frames: need %llu + %llu pages, %llu free)\nAIENOS_CK_INFER: FAIL\n",
-                  (unsigned long long)mpages, (unsigned long long)(HEAP_BYTES / PAGE),
-                  (unsigned long long)ck_mm_free_frames());
+    if (!from_disk) {
+        mpages = (msize + PAGE - 1) / PAGE;
+        if (ck_mm_frames_alloc(mpages, &mpa)) {
+            ck_printf("infer: ingest FAIL (no frames: need %llu + %llu pages, %llu free)\nAIENOS_CK_INFER: FAIL\n",
+                      (unsigned long long)mpages, (unsigned long long)(HEAP_BYTES / PAGE),
+                      (unsigned long long)ck_mm_free_frames());
+            return;
+        }
+    }
+    if (ck_mm_frames_alloc(HEAP_BYTES / PAGE, &hpa)) {
+        if (mpages)
+            ck_mm_frames_free(mpa, mpages);
+        ck_printf("infer: ingest FAIL (no frames for the %llu-page heap, %llu free)\nAIENOS_CK_INFER: FAIL\n",
+                  (unsigned long long)(HEAP_BYTES / PAGE), (unsigned long long)ck_mm_free_frames());
         return;
     }
 
-    uint64_t t0 = ck_time_us();
-    int rc = 0;
-    for (uint64_t off = 0; off < size && !rc; off += DMA_CHUNK) {
-        uint64_t n = size - off < DMA_CHUNK ? size - off : DMA_CHUNK;
-        rc = fw_dma_read(off == 0 ? (int)sel : -1, mpa + off, (uint32_t)n);
+    if (!from_disk) {
+        uint64_t t0 = ck_time_us();
+        int rc = 0;
+        for (uint64_t off = 0; off < msize && !rc; off += DMA_CHUNK) {
+            uint64_t n = msize - off < DMA_CHUNK ? msize - off : DMA_CHUNK;
+            rc = fw_dma_read(off == 0 ? (int)sel : -1, mpa + off, (uint32_t)n);
+        }
+        if (rc) {
+            ck_printf("infer: ingest FAIL (fw_cfg DMA rc=%d)\nAIENOS_CK_INFER: FAIL\n", rc);
+            return;
+        }
+        ck_printf("infer: ingest bytes=%llu dma_us=%llu\n", (unsigned long long)msize,
+                  (unsigned long long)(ck_time_us() - t0));
     }
+
     uint64_t t1 = ck_time_us();
-    if (rc) {
-        ck_printf("infer: ingest FAIL (fw_cfg DMA rc=%d)\nAIENOS_CK_INFER: FAIL\n", rc);
-        return;
-    }
-    ck_printf("infer: ingest bytes=%u dma_us=%llu\n", size, (unsigned long long)(t1 - t0));
-
     sha256_ctx ctx;
     uint8_t dg[SHA256_DIGEST_SIZE];
     char dh[2 * SHA256_DIGEST_SIZE + 1];
     sha256_init(&ctx);
-    sha256_update(&ctx, (const uint8_t *)(uintptr_t)mpa, size);
+    sha256_update(&ctx, (const uint8_t *)(uintptr_t)mpa, msize);
     sha256_final(&ctx, dg);
     hex(dh, dg, SHA256_DIGEST_SIZE);
     ck_printf("infer: sha256=%s sha_us=%llu\n", dh, (unsigned long long)(ck_time_us() - t1));
+    if (from_disk && memcmp(dg, h->model_sha256, SHA256_DIGEST_SIZE) != 0) {
+        /* The bytes the firmware read are not the declared model: a wrong
+         * LBA, a short read or a stale file. Refuse to decode. */
+        hex(dh, h->model_sha256, SHA256_DIGEST_SIZE);
+        ck_printf("infer: sha256 mismatch declared=%s\nAIENOS_CK_INFER: FAIL\n", dh);
+        ck_mm_frames_free(hpa, HEAP_BYTES / PAGE);
+        return;
+    }
 
     /* FP/SIMD on, every exception masked for the Rust unit (see core/fpu.c).
      * The FP registers are left dirty afterwards (nothing else in the kernel
@@ -281,7 +327,7 @@ void ck_infer_run(void)
     uint64_t daif = ck_rd(daif);
     __asm__ volatile("msr daifset, #0xf" ::: "memory");
     uint64_t t2 = ck_time_us();
-    int32_t prc = aienos_infer_run((const uint8_t *)(uintptr_t)mpa, size, &res);
+    int32_t prc = aienos_infer_run((const uint8_t *)(uintptr_t)mpa, msize, &res);
     uint64_t t3 = ck_time_us();
     ck_wr(daif, daif);
     const uint32_t *out = res.words;
@@ -315,10 +361,11 @@ void ck_infer_run(void)
         ok = ok && res.tokens[i] == expect_gen[i];
 
     /* Unload: the Rust unit kept nothing (its objects died at return); forget
-     * its heap region, then return every frame of the model and the heap. The
-     * free-frame count must come back to what it was before the ingest. */
+     * its heap region, then return every frame of the heap (and of the model
+     * when it came over fw_cfg; the disk model stays in LoaderData, never a
+     * frame). The free-frame count must come back to what it was before. */
     aienos_infer_heap_init(0, 0);
-    int f1 = ck_mm_frames_free(mpa, mpages), f2 = ck_mm_frames_free(hpa, HEAP_BYTES / PAGE);
+    int f1 = mpages ? ck_mm_frames_free(mpa, mpages) : 0, f2 = ck_mm_frames_free(hpa, HEAP_BYTES / PAGE);
     uint64_t frames_after = ck_mm_free_frames();
     struct ck_mm_usage mu;
     ck_mm_usage(&mu);

@@ -49,6 +49,7 @@ struct ck_mm_report {
 /* EL2/firmware phase: frames from the map, our tables, stack, heap, DMA pool.
  * Returns the stack top for the EL1 entry. */
 uint64_t ck_mm_build(const struct ck_handoff *h);
+const struct ck_handoff *ck_handoff_get(void); /* the record the stub passed (kmain.c) */
 /* EL1 phase: heap ready after the MMU is on. */
 void ck_mm_el1_ready(void);
 const struct ck_mm_report *ck_mm_report(void);
