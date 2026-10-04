@@ -25,7 +25,7 @@ C gates (one line each from `ck_gates.sh`): `M1` and `M3` (from
 `scripts/qemu_ck_net_test.sh`; rows 102-106 and 110-112; the script now also checks the virtio-net SMMU fence (ACCESS_PLATFORM required, out-of-window device DMA refused), rows 102 and 110-112 are QEMU PASS on this branch from the committed forge log `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`, hardware NOT_RUN), the kernel entropy rows 107-109 (M1 via `scripts/lib_ck_m1_checks.sh`, ARGUS1_REVOKE and M4_STORE via the Store gate boot 7),
 `DISK_LAYOUT` (C-only, from `scripts/qemu_ck_disk_layout_test.sh`, rows 118-123: QEMU PASS at 741b2b8 before the merge with main 8555049, rerun pending at the merged head; row 123 host test), and the NOT_RUN gates
 `SMP` (C-only, from `scripts/qemu_ck_smp_test.sh`, rows 113-117, NOT_RUN pending forge receipt), `M0_ROLLBACK`, `M4_STORE_CRASH` (now read from `scripts/qemu_ck_store_crash_test.sh`, rows 73-80; NOT_RUN until a forge receipt exists),
-`M4_CONTINUITY`, `M4_RECOVERY`, `KEYBOARD`, `FPU` (C-only, from `scripts/qemu_ck_fpu_test.sh`, rows 124-128; QEMU PASS, hardware NOT_RUN), and `INFER` (C-only, from `scripts/qemu_ck_infer_test.sh`, rows 129-139; QEMU PASS, hardware NOT_RUN).
+`M4_CONTINUITY`, `M4_RECOVERY`, `KEYBOARD`, `FPU` (C-only, from `scripts/qemu_ck_fpu_test.sh`, rows 124-128; QEMU PASS, hardware NOT_RUN), `INFER` (C-only, from `scripts/qemu_ck_infer_test.sh`, rows 129-139; QEMU PASS, hardware NOT_RUN), and `SCREEN` (C-only, from `scripts/qemu_ck_screen_test.sh`, rows 140-145; hardware NOT_RUN).
 
 `M4_NVME` and `SMMU` PASS in the SMMU-confined mode (default `make full`
 image, QEMU `iommu=smmuv3`). The unconfined bypass build
@@ -575,3 +575,31 @@ required in CI (the runner has neither the model nor the target).
 | 137 | per-token timing line present: 7 decode forwards, mean > 0 us. First native CPU number: 40.40 s per decode token, prefill 553.9 s for 17 tokens, whole Rust call 837.8 s, under QEMU TCG single core (not hardware; host test on one Grace core is 0.59 s per forward) | INFER | QEMU PASS (hardware NOT_RUN) |
 | 138 | clean unload: `infer: unloaded` line present before the final report, frame-return rc 0,0, free frames after = before the ingest (1021097 = 1021097; 262728 frames returned), kernel then reaches M3, stages, final report, PSCI reset (QEMU exit 0) | INFER | QEMU PASS (hardware NOT_RUN) |
 | 139 | live control: the same serial log re-checked against a mutated expected-id list (second-to-last id + 1) must FAIL on the token check, else the gate FAILs; `--self-test` also covers wrong/short/swapped tokens, missing tokens/text/timing/unload lines, missing "Paris", leaked frames, refused frame return, unload after the final report | INFER | QEMU PASS (control caught; hardware NOT_RUN) |
+
+## SCREEN: scripts/qemu_ck_screen_test.sh -> CK `SCREEN` (L6-C prerequisite, C-only, no Rust-kernel counterpart)
+
+The UEFI stub finds the Graphics Output Protocol (UEFI 2.10 section 12.9) before ExitBootServices and passes the
+linear framebuffer (base, size, width, height, pitch in pixels, format RGBX or BGRX) in the CHANDOF3 handoff
+(`docs/BOOT_HANDOFF_CONTRACT.md`, offsets 192-231). The kernel refuses older records (`unsupported version N`),
+maps the framebuffer with `ck_mmio_map` (Device-nGnRE) unless it overlaps RAM, and mirrors every console byte on
+screen in white on black with the public-domain 8x8 font (`core/font8x8.h`, cell 8x10 times a scale of
+height/540 clamped to 1..4 and lowered until 80 columns fit). Scrolling mode is half-scroll: when the screen is
+full, it is cleared and the newest half of the rows is redrawn from a text copy (no read-back of device memory).
+Without a GOP the kernel still boots and says `screen: none` on the UART.
+
+The gate boots the default image under QEMU with `-device ramfb` (AAVMF gives an 800x600 BGRX GOP on it), lets the
+PSCI reset pause the VM (`-action reboot=shutdown,shutdown=pause`) and takes a QMP `screendump`. The host tool
+`ck_fb_check` (`make -C native/kernel fb-check`) renders the serial log from the `screen: gop` line onward with the
+same `core/fbcon.c` code and compares every pixel with the dump, then decodes every cell back to text. The gate is
+NOT_RUN (never a silent pass) when QEMU, AAVMF, socat or the cross compiler is missing.
+
+| # | check | gate | status |
+|---|---|---|---|
+| 140 | stub prints a `gop: ok` line; the kernel prints exactly one `screen: gop` line whose geometry equals the screendump (800x600 BGRX on ramfb), reaches `kernel: alive`, no panic or fault | SCREEN | QEMU PASS pending (see the SCREEN evidence line below; hardware NOT_RUN) |
+| 141 | screendump = the expected rendering of the serial log, pixel for pixel (`mismatched=0`), every cell decodes to a font glyph (`undecodable=0`) | SCREEN | QEMU PASS pending (hardware NOT_RUN) |
+| 142 | the decoded screen holds the final verdict rows `report_kind: final` and `note: QEMU qualifies nothing physical` | SCREEN | QEMU PASS pending (hardware NOT_RUN) |
+| 143 | negative boot: the TEST-ONLY stale image (`make CK_TEST_STALE_HANDOFF=2`, announces itself, refused with `CK_HARDWARE_STAGING`) passes a CHANDOF2 record; the kernel panics with `handoff: unsupported version 2 (kernel reads CHANDOF3 only)`, draws nothing, and the pixel check on its dump FAILs; the default image contains no stale text | SCREEN | QEMU PASS pending (control caught; hardware NOT_RUN) |
+| 144 | host tests: `test_handoff` framebuffer cases (Spark-like 1920x1080 BGRX, padded pitch, every refusal reason, version refusals) and `test_fbcon` (glyphs, scale, refusals, pixels, lazy newline, wrap, half-scroll, unprintable bytes) | SCREEN (host, `make test`) | PASS (host test, `CK_CORE_HOST: PASS`) |
+| 145 | `--self-test`: 12 canned logs, each wrong or missing line rejected by its own FAIL | SCREEN | PASS (script self-test) |
+
+Evidence: pending the run at the branch head (`~/workspace/evidence-out/L6C/`).

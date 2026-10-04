@@ -62,7 +62,7 @@ jobs:
       - name: Install toolchain, QEMU and AAVMF firmware
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential qemu-system-arm qemu-efi-aarch64
+          sudo apt-get install -y build-essential qemu-system-arm qemu-efi-aarch64 socat
           uname -m
           gcc --version | head -1
           qemu-system-aarch64 --version | head -1
@@ -103,6 +103,7 @@ jobs:
           # FPU and INFER are not required: they need the Rust target aarch64-unknown-none (and INFER the 800 MB model file), which this
           # runner image is not known to have, so it prints NOT_RUN there (aienos#34 lanes 0, 4 and 5; INFER now also
           # requires the exact llama.cpp token sequence, "Paris" in the decoded text and a clean unload).
+          # SCREEN is required: it needs only QEMU (ramfb), AAVMF and socat (installed above) for the QMP screendump.
           # Every gate with a C implementation (source != missing in the
           # ck_gates.sh table) must be PASS.
           required=$(sed -n "/^CK_GATE_TABLE='/,/^'/p" scripts/ck_gates.sh | awk -F'|' 'NF==3 && $2!="missing" && $1!="FPU" && $1!="INFER" {print $1}')

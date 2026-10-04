@@ -11,6 +11,13 @@
 #include "../kernel/arch/arch.h"
 #include "../kernel/core/ck_internal.h"
 
+/* TEST-ONLY (AIENOS_CK_SCREEN negative control, native/kernel/Makefile
+ * CK_TEST_STALE_HANDOFF=2): hand the kernel a CHANDOF2 magic. Never in a
+ * hardware staging image. */
+#if defined(CK_TEST_STALE_HANDOFF) && defined(CK_HARDWARE_STAGING)
+#error "CK_TEST_STALE_HANDOFF is TEST-only and cannot be combined with CK_HARDWARE_STAGING"
+#endif
+
 #define MAP_BYTES (64u << 10)
 #define EXIT_TRIES 8
 
@@ -101,6 +108,9 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     ck_report_header("pre_exit");
     /* The GOP framebuffer for the kernel's screen console (efi_gop.c, CHANDOF3). */
     ck_boot_gop_find(st, h);
+#ifdef CK_TEST_STALE_HANDOFF
+    ck_puts("handoff: TEST-ONLY stale handoff image: the kernel gets a CHANDOF2 record; never counts toward a PASS\n");
+#endif
     /* The yardstick model from the boot disk, while the firmware drivers are
      * still up (efi_model.c). Absent map: boot continues without a model. */
     ck_boot_model_load(image, st, h);
@@ -149,5 +159,8 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     /* Boot services are gone: ConOut too. */
     ck_console_set_efi(0);
     ck_set_stage("kernel_entry");
+#ifdef CK_TEST_STALE_HANDOFF
+    h->magic = CK_HANDOFF_MAGIC_V2;
+#endif
     ck_kernel_entry(h);
 }

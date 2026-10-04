@@ -136,6 +136,22 @@ SMP_TEST_FLAGS := -DCK_TEST_SMP_SKIP_CPU=1
 else
 SMP_TEST_FLAGS :=
 endif
+# TEST-ONLY stale handoff (AIENOS_CK_SCREEN negative control,
+# scripts/qemu_ck_screen_test.sh): the stub hands the kernel a CHANDOF2 magic;
+# the kernel must refuse it ("panic: handoff: unsupported version 2 ...").
+# Own OUT; announces itself; refused with CK_HARDWARE_STAGING. The default
+# image is checked to carry no trace of it ($(ELF) rule).
+CK_TEST_STALE_HANDOFF ?=
+ifneq ($(strip $(CK_TEST_STALE_HANDOFF)),)
+ifneq ($(strip $(CK_TEST_STALE_HANDOFF)),2)
+$(error CK_TEST_STALE_HANDOFF must be empty or 2)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_TEST_STALE_HANDOFF (TEST-only stale handoff) cannot be combined with CK_HARDWARE_STAGING)
+endif
+OUT ?= $(REPO)/target/native-kernel-test-stale-handoff
+SMP_TEST_FLAGS += -DCK_TEST_STALE_HANDOFF=2
+endif
 OUT ?= $(REPO)/target/native-kernel
 AIENOS_COMMIT ?= $(shell git -C $(REPO) rev-parse HEAD 2>/dev/null || echo unknown)
 
@@ -595,6 +611,8 @@ endef
 
 $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
 	$(call link_image,$@,$(CORE_OBJS) $(CK_RUST_LIBS) $(CK_INFER_LIB))
+	@if [ -z "$(strip $(CK_TEST_STALE_HANDOFF))" ] && grep -aqF "TEST-ONLY stale handoff" $@; then \
+	  echo "default image carries the TEST-only stale handoff"; rm -f $@; exit 1; fi
 	@s=$$($(KNM) $@ | grep -E ' [TtDdBbWwVv] ck_stage_(devices|security|store|quiesce)$$' || true); \
 	if [ -n "$$s" ]; then echo "core image defines stage symbols: $$s"; rm -f $@; exit 1; fi
 	$(call fwcfg_check,$@)
@@ -907,6 +925,13 @@ $(MODEL_MAP_TOOL): $(KDIR)/tools/ck_model_map.c $(NATIVE)/argus/sha256.c $(BOOT)
 	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -I$(BOOT) -I$(NATIVE)/argus -o $@ $(KDIR)/tools/ck_model_map.c $(NATIVE)/argus/sha256.c
 model-map: $(MODEL_MAP_TOOL)
 
+# ---- host checker for the AIENOS_CK_SCREEN gate (scripts/qemu_ck_screen_test.sh) ----
+FB_CHECK_TOOL := $(OUT)/host/ck_fb_check
+$(FB_CHECK_TOOL): $(KDIR)/tools/ck_fb_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/fbcon.h $(KDIR)/core/font8x8.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -o $@ $(KDIR)/tools/ck_fb_check.c $(KDIR)/core/fbcon.c
+fb-check: $(FB_CHECK_TOOL)
+
 # Owner provisioning generator (hosted; never part of an image) and the
 # generated header for the hardware staging image.
 OWNER_GEN := $(OUT)/host/ck_owner_gen
@@ -924,4 +949,4 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize handoff-mutant clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full test sanitize handoff-mutant clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
