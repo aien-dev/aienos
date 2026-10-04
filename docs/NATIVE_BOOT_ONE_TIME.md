@@ -75,6 +75,14 @@ The staging script:
 3. Creates/verifies non-default boot entry `Boot0000 "AIENOS handoff (one-time)"`.
 4. Sets `BootNext = 0000`.
 
+#### Step 2 (C kernel variant, L6 / L6-C): `scripts/stage_one_time_boot_ck.sh`
+For the C kernel infer image plus `MODEL.MAP` (the yardstick model read through the firmware's Block I/O, aienos#34 lane 6), with its console mirrored on the GOP framebuffer (CHANDOF3) and held on screen for 120 s before the reset:
+```bash
+scripts/stage_one_time_boot_ck.sh --dry-run   # prints every command, touches nothing
+scripts/stage_one_time_boot_ck.sh --apply     # operator only, attended boot follows
+```
+One of the two flags is required. `--apply` stops before touching anything if the tree is dirty, the model or the ESP is not on `/dev/nvme0n1`, Secure Boot is on, `BootNext` is already set, or `Boot0004 AIENOSRECOV` is absent. In order it: builds the image (`CK_INFER_LIB`, `CK_FB_HOLD_S=120`) and `ck_model_map`; `chattr +i` on the model (first, so its blocks cannot move after the map is made); `ck_model_map make --fiemap --part-start auto --disk /dev/nvme0n1`, then `ck_model_map check` (re-reads every extent by LBA and recomputes the SHA-256) and requires the pinned model hash; `verify_native_rollback.sh --capture-pre`; copies `aienos-ck.efi`, `MODEL.MAP` and `STAGED-CK.TXT` to `\EFI\AIENOS`; creates a create-only boot entry, restores `BootOrder` if it changed, checks `Boot0004 AIENOSRECOV` is still present, and sets `BootNext` once. It never reboots. After the return to Linux: `--capture-post`, then `sudo chattr -i` on the model.
+
 ### Step 3: Candidate Boot & Observation
 1. Reboot the machine:
    ```bash
