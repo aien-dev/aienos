@@ -315,3 +315,140 @@ pub fn q8k_round(x: &mut [f32]) {
         }
     }
 }
+
+#[cfg(test)]
+mod rope_tests {
+    //! AO-1 (Drake's attention hardening cut): RoPE relative-position qualification through
+    //! this crate's own `rope_cache` + `rope_apply` (ggml adjacent-pair convention), with no
+    //! dependency on any other repo's implementation.
+    use super::*;
+
+    const HD: usize = 8;
+    const BASE: f32 = 10000.0;
+
+    fn absf(x: f32) -> f32 {
+        if x < 0.0 {
+            -x
+        } else {
+            x
+        }
+    }
+
+    fn lcg(seed: &mut u64) -> f32 {
+        *seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((*seed >> 33) as f32 / (1u64 << 31) as f32) * 2.0 - 1.0
+    }
+
+    fn rot(x: &[f32; HD], pos: usize) -> [f32; HD] {
+        let (mut c, mut s) = ([0.0f32; HD / 2], [0.0f32; HD / 2]);
+        rope_cache(pos, BASE, &[], &mut c, &mut s);
+        let mut y = *x;
+        rope_apply(&mut y, HD, &c, &s);
+        y
+    }
+
+    fn dot(a: &[f32], b: &[f32]) -> f32 {
+        a.iter().zip(b).map(|(x, y)| x * y).sum()
+    }
+
+    #[test]
+    fn pair_zero_rotates_by_the_position_angle() {
+        // pair 0 has theta = pos exactly (ggml: theta starts at pos), so e_0 -> (cos pos, sin pos)
+        let mut x = [0.0f32; HD];
+        x[0] = 1.0;
+        let y = rot(&x, 1);
+        let (s, c) = math::sin_cos(1.0);
+        assert!(absf(y[0] - c) < 1e-6 && absf(y[1] - s) < 1e-6, "{y:?}");
+        assert!(y[2..].iter().all(|v| *v == 0.0), "other pairs untouched");
+        assert_eq!(rot(&x, 0), x, "position 0 is the identity");
+    }
+
+    #[test]
+    fn score_depends_on_relative_position_only() {
+        let mut seed = 0x5eed_u64;
+        let mut q = [0.0f32; HD];
+        let mut k = [0.0f32; HD];
+        for v in q.iter_mut().chain(k.iter_mut()) {
+            *v = lcg(&mut seed);
+        }
+        let same = dot(&rot(&q, 11), &rot(&k, 11));
+        assert!(absf(same - dot(&q, &k)) < 1e-5, "same position must cancel");
+        let a = dot(&rot(&q, 5), &rot(&k, 2));
+        let b = dot(&rot(&q, 13), &rot(&k, 10));
+        let c = dot(&rot(&q, 5), &rot(&k, 3));
+        assert!(absf(a - b) < 1e-4, "offset 3 at two bases: {a} vs {b}");
+        assert!(
+            absf(a - c) > 1e-3,
+            "offsets 3 and 2 must differ: {a} vs {c}"
+        );
+        // the rotation is a rotation: norms are preserved
+        assert!(absf(dot(&rot(&q, 97), &rot(&q, 97)) - dot(&q, &q)) < 1e-4);
+    }
+
+    #[test]
+    fn every_head_is_rotated_independently_with_the_same_table() {
+        let mut seed = 7u64;
+        let mut x = [0.0f32; 3 * HD];
+        for v in x.iter_mut() {
+            *v = lcg(&mut seed);
+        }
+        // head 1 copies head 0, head 2 differs
+        for d in 0..HD {
+            x[HD + d] = x[d];
+        }
+        let (mut c, mut s) = ([0.0f32; HD / 2], [0.0f32; HD / 2]);
+        rope_cache(9, BASE, &[], &mut c, &mut s);
+        let before = x;
+        rope_apply(&mut x, HD, &c, &s);
+        assert_eq!(x[..HD], x[HD..2 * HD], "equal heads must rotate equally");
+        assert!(x[..HD] != before[..HD], "position 9 must change the head");
+        let mut diff = false;
+        for d in 0..HD {
+            diff |= absf(x[2 * HD + d] - x[d]) > 1e-3;
+        }
+        assert!(diff, "a different head must come out different");
+    }
+
+    #[test]
+    fn softmax_weights_are_shift_invariant_and_position_sensitive() {
+        const T: usize = 5;
+        let mut seed = 99u64;
+        let mut q = [0.0f32; HD];
+        let mut k0 = [0.0f32; HD];
+        for v in q.iter_mut().chain(k0.iter_mut()) {
+            *v = lcg(&mut seed) * 3.0;
+        }
+        // K for token t is k0 shifted by t so tokens are distinguishable before rope
+        let weights = |base: usize, q_pos: usize| -> [f32; T] {
+            let mut w = [0.0f32; T];
+            let rq = rot(&q, base + q_pos);
+            for (t, wt) in w.iter_mut().enumerate() {
+                let mut kt = k0;
+                kt[t % HD] += 1.0;
+                *wt = dot(&rq, &rot(&kt, base + t)) / math::sqrt(HD as f32);
+            }
+            softmax(&mut w);
+            w
+        };
+        let w0 = weights(0, T - 1);
+        let w23 = weights(23, T - 1);
+        let sum: f32 = w0.iter().sum();
+        assert!(absf(sum - 1.0) < 1e-5);
+        for t in 0..T {
+            assert!(
+                absf(w0[t] - w23[t]) < 1e-4,
+                "token {t}: {} vs {}",
+                w0[t],
+                w23[t]
+            );
+        }
+        let w_moved = weights(0, T + 4);
+        let mut changed = false;
+        for t in 0..T {
+            changed |= absf(w0[t] - w_moved[t]) > 1e-3;
+        }
+        assert!(changed, "moving q relative to K must change the weights");
+    }
+}
