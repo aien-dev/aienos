@@ -59,31 +59,42 @@ fn sha256_hex(data: &[u8]) -> String {
             let s0 = v[0].rotate_right(2) ^ v[0].rotate_right(13) ^ v[0].rotate_right(22);
             let maj = (v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]);
             let t2 = s0.wrapping_add(maj);
-            v = [t1.wrapping_add(t2), v[0], v[1], v[2], v[3].wrapping_add(t1), v[4], v[5], v[6]];
+            v = [
+                t1.wrapping_add(t2),
+                v[0],
+                v[1],
+                v[2],
+                v[3].wrapping_add(t1),
+                v[4],
+                v[5],
+                v[6],
+            ];
         }
         for i in 0..8 {
             h[i] = h[i].wrapping_add(v[i]);
         }
     };
-    let mut chunks = data.chunks_exact(64);
-    for c in &mut chunks {
+    let (blocks, rem) = data.as_chunks::<64>();
+    for c in blocks {
         block(c);
     }
-    let rem = chunks.remainder();
     let mut tail = rem.to_vec();
     tail.push(0x80);
     while tail.len() % 64 != 56 {
         tail.push(0);
     }
     tail.extend_from_slice(&((data.len() as u64) * 8).to_be_bytes());
-    for c in tail.chunks_exact(64) {
+    for c in tail.as_chunks::<64>().0 {
         block(c);
     }
     h.iter().map(|x| format!("{x:08x}")).collect()
 }
 
 fn join(v: &[impl ToString]) -> String {
-    v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")
+    v.iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn main() {
@@ -102,7 +113,10 @@ fn main() {
         std::process::exit(2);
     });
     let sha = sha256_hex(&bytes);
-    println!("commit: {}", std::env::var("AIENOS_COMMIT").unwrap_or_else(|_| "unknown".into()));
+    println!(
+        "commit: {}",
+        std::env::var("AIENOS_COMMIT").unwrap_or_else(|_| "unknown".into())
+    );
     println!("model_path: {path}");
     println!("model_sha256: {sha}");
     println!("model_size_bytes: {}", bytes.len());
@@ -143,7 +157,10 @@ fn main() {
     println!("decode_tokens: {}", tok_us.len());
     println!("mean_tok_us: {mean:.1}");
     println!("tok_per_s: {:.3}", 1e6 / mean);
-    println!("text: {}", String::from_utf8_lossy(&tok.decode(&out).expect("decode")).escape_debug());
+    println!(
+        "text: {}",
+        String::from_utf8_lossy(&tok.decode(&out).expect("decode")).escape_debug()
+    );
 
     let pass = out.len() >= GOLDEN.len() && out[..GOLDEN.len()] == GOLDEN;
     println!("golden_ids: {}", join(&GOLDEN));
