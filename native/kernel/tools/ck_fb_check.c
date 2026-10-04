@@ -219,7 +219,7 @@ int main(int argc, char **argv)
             int bad = 0;
             for (uint32_t cy = 0; cy < chh && !bad; cy++)
                 for (uint32_t cx = 0; cx < cw; cx++) {
-                    uint64_t i = (uint64_t)(r * chh + cy) * w + k * cw + cx;
+                    uint64_t i = ((uint64_t)r * chh + cy) * w + (uint64_t)k * cw + cx;
                     uint32_t v = to_pixel(px + 3 * i, format);
                     if (v != CK_FBCON_FG && v != CK_FBCON_BG) {
                         bad = 1;

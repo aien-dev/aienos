@@ -65,7 +65,7 @@ static void glyph(struct ck_fbcon *c, uint32_t col, uint32_t row, unsigned char 
     uint64_t y0 = (uint64_t)row * CK_FBCON_CELL_H * s;
     for (uint32_t gy = 0; gy < CK_FONT_H; gy++) {
         for (uint32_t sy = 0; sy < s; sy++) {
-            volatile uint32_t *p = c->px + (y0 + gy * s + sy) * c->pitch + x0;
+            volatile uint32_t *p = c->px + (y0 + (uint64_t)gy * s + sy) * c->pitch + x0;
             for (uint32_t gx = 0; gx < CK_FONT_W; gx++) {
                 uint32_t v = (g[gy] >> gx) & 1 ? CK_FBCON_FG : CK_FBCON_BG;
                 for (uint32_t sx = 0; sx < s; sx++)
