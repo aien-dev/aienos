@@ -90,6 +90,9 @@ jobs:
       - name: QEMU TCG gates
         env:
           AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
+          # The FPU, INFER and SCREEN children take the QEMU gate lock by exclusive create;
+          # its default home (~/workspace) does not exist on the runner.
+          AIENOS_GATE_LOCK: ${{ runner.temp }}/qemu-gate-lock
         run: |
           mkdir -p "${RUNNER_TEMP}/ck-receipt"
           set +e
