@@ -21,8 +21,8 @@
     "generated": {
       "children": [
         {
-          "digest": "47db7207bd2114bc32a884c9622396da82f78421adda6ddcd1f050c061844506",
-          "last_commit": "733a841",
+          "digest": "01210bd71bb028e239a12e613785e4a897a1dbf78c92ea2aa756a4e5e1aee1b5",
+          "last_commit": "79456d0",
           "name": "crates",
           "purpose": "Directory crates. Purpose not yet described by a human."
         },
@@ -45,15 +45,15 @@
           "purpose": "Directory scripts. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:ededa657374b00886f4da68fa0aabc684d8940654b465a8c84647449dc0100f5",
-      "compiled_at": "2026-10-04T18:14:54Z",
+      "children_root": "sha256:4656658f00ea0688f18513e5621e8dc091ef984eebd57677d764fef7418a5ae4",
+      "compiled_at": "2026-10-04T20:01:05Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:7b09f2142211b9a4ead3620595260cea6f008ced7c83ed86995dd877ca58c84f",
+      "digest": "sha256:2774cc061230d03bdb35b8b75f2e9f2954c7a8be4ecd3b014a3f4d1ac25d65e0",
       "evidence_files": 143,
       "evidence_root": "sha256:3a3cbeef2e097d532b986e4579accee3f65ae5815e78716aefe3fd5f569812cf",
       "files": 2841,
-      "generated_at_commit": "46f22fec83dfacaa806dea055afba5303699c6bd",
-      "source_tree": "sha256:07888f575cf5e723d2ae6c6232058631d4f2cfccb8eaa66cb0f600a1a9032a3f"
+      "generated_at_commit": "79456d09c1e2aaf0c84f853f0e3d76b864475bb7",
+      "source_tree": "sha256:3380ba3eb06746169747754aa27952438fc7f5b0b31226301b2ec011c23c1d09"
     },
     "owner_lane": "",
     "provenance": {

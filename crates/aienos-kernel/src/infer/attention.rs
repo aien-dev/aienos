@@ -224,4 +224,179 @@ mod tests {
         kv.append(&[0.0; 2], &[0.0; 2]).unwrap();
         assert_eq!(kv.append(&[0.0; 2], &[0.0; 2]), Err(KernelError::Shape));
     }
+
+    // ---- AO-1 (Drake.s attention hardening cut): independent oracle coverage. Values carry
+    // head-distinct bands: token t, kv head j, dim d -> 1000 (j+1) + 20 t + d, so every output
+    // value decodes back to where it came from.
+    fn banded(t: usize, j: usize, d: usize) -> f32 {
+        (1000 * (j + 1) + 20 * t + d) as f32
+    }
+    fn absf(x: f32) -> f32 {
+        if x < 0.0 {
+            -x
+        } else {
+            x
+        }
+    }
+    fn lcg(seed: &mut u64) -> f32 {
+        *seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((*seed >> 33) as f32 / (1u64 << 31) as f32) * 2.0 - 1.0
+    }
+
+    const D: usize = 4;
+    const KV: usize = 2;
+    const H: usize = 8;
+    const T: usize = 4;
+
+    /// Query head h points at token h % T (K is `10 e_t`, so the match scores 50 and the
+    /// rest 0); fills `out` with the decode result.
+    fn banded_decode(out: &mut [f32; H * D]) {
+        let mut keys = [0.0f32; T * KV * D];
+        let mut values = [0.0f32; T * KV * D];
+        let mut kv = cache(&mut keys, &mut values, T, KV, D);
+        for t in 0..T {
+            let mut k = [0.0f32; KV * D];
+            let mut v = [0.0f32; KV * D];
+            for j in 0..KV {
+                k[j * D + t] = 10.0;
+                for d in 0..D {
+                    v[j * D + d] = banded(t, j, d);
+                }
+            }
+            kv.append(&k, &v).unwrap();
+        }
+        let mut q = [0.0f32; H * D];
+        for h in 0..H {
+            q[h * D + (h % T)] = 10.0;
+        }
+        let mut scores = [0.0f32; T];
+        decode(&q, out, &kv, H, T - 1, &mut scores).unwrap();
+    }
+
+    #[test]
+    fn query_rows_kv_groups_and_head_major_output_decode_from_bands() {
+        let mut out = [0.0f32; H * D];
+        banded_decode(&mut out);
+        let group = H / KV;
+        for h in 0..H {
+            for d in 0..D {
+                let x = out[h * D + d];
+                let want = banded(h % T, h / group, d);
+                assert!(absf(x - want) < 1e-2, "head {h} dim {d}: {x} vs {want}");
+                let n = (x + 0.5) as usize;
+                assert_eq!(n / 1000 - 1, h / group, "kv head band of head {h}");
+                assert_eq!((n % 1000) / 20, h % T, "token digit of head {h}");
+                assert_eq!(n % 20, d, "dim digit of head {h}");
+            }
+        }
+        // negatives: the h ^ 1 query row, the h ^ 1 output row and the modulo kv mapping are
+        // all different answers by at least one band step
+        for h in 0..H {
+            let j = h / group;
+            assert!(absf(out[h * D] - banded((h ^ 1) % T, j, 0)) >= 19.0);
+            assert!(absf(out[(h ^ 1) * D] - banded(h % T, j, 0)) >= 19.0);
+            if h % KV != j {
+                assert!(absf(out[h * D] - banded(h % T, h % KV, 0)) >= 999.0);
+            }
+        }
+        // dim-major reinterpretation is not the same vector
+        let mut worst = 0.0f32;
+        for h in 0..H {
+            for d in 0..D {
+                worst = worst.max(absf(out[d * H + h] - banded(h % T, h / group, d)));
+            }
+        }
+        assert!(worst >= 19.0, "a dim-major output would have passed");
+    }
+
+    #[test]
+    fn dense_output_projection_mixes_heads_and_catches_a_permutation() {
+        let mut attn = [0.0f32; H * D];
+        banded_decode(&mut attn);
+        for x in attn.iter_mut() {
+            *x /= 100.0;
+        }
+        const ROWS: usize = 6; // hidden width deliberately != H * D
+        let mut seed = 0xd0u64;
+        let mut w = [0.0f32; ROWS * H * D];
+        for x in w.iter_mut() {
+            *x = lcg(&mut seed);
+        }
+        let mut y = [0.0f32; ROWS];
+        gemm::matvec_ref(&w, &attn, &mut y, ROWS, H * D, H * D, 1, 1).unwrap();
+        for (r, yr) in y.iter().enumerate() {
+            let mut hand = 0.0f32;
+            let mut heads = 0;
+            for h in 0..H {
+                let mut part = 0.0f32;
+                for d in 0..D {
+                    part += w[r * H * D + h * D + d] * attn[h * D + d];
+                }
+                if part != 0.0 {
+                    heads += 1;
+                }
+                hand += part;
+            }
+            assert!(heads >= 2, "row {r} mixes one head only");
+            assert!(absf(yr - hand) < 1e-4, "row {r}: {yr} vs {hand}");
+        }
+        let mut perm = attn;
+        for d in 0..D {
+            perm.swap(d, D + d);
+        }
+        let mut y_perm = [0.0f32; ROWS];
+        gemm::matvec_ref(&w, &perm, &mut y_perm, ROWS, H * D, H * D, 1, 1).unwrap();
+        let mut worst = 0.0f32;
+        for r in 0..ROWS {
+            worst = worst.max(absf(y[r] - y_perm[r]));
+        }
+        assert!(
+            worst > 0.05,
+            "swapping two heads before W_o changed nothing"
+        );
+    }
+
+    #[test]
+    fn decode_refuses_wrong_shapes_and_head_counts() {
+        let (mut keys, mut values) = ([0.0f32; 2 * KV * D], [0.0f32; 2 * KV * D]);
+        let mut kv = cache(&mut keys, &mut values, 2, KV, D);
+        kv.append(&[0.0; KV * D], &[1.0; KV * D]).unwrap();
+        let q = [0.0f32; H * D];
+        let mut out = [0.0f32; H * D];
+        let mut scores = [0.0f32; 2];
+        assert_eq!(
+            decode(&q[..5 * D], &mut out[..5 * D], &kv, 5, 0, &mut scores),
+            Err(KernelError::InvalidParameter),
+            "5 heads over 2 kv heads"
+        );
+        assert_eq!(
+            decode(&q, &mut out, &kv, 0, 0, &mut scores),
+            Err(KernelError::InvalidParameter)
+        );
+        assert_eq!(
+            decode(&q[..H * D - 1], &mut out, &kv, H, 0, &mut scores),
+            Err(KernelError::Shape),
+            "short query"
+        );
+        assert_eq!(
+            decode(&q, &mut out[..H * D - D], &kv, H, 0, &mut scores),
+            Err(KernelError::Shape),
+            "short output"
+        );
+        assert_eq!(
+            decode(&q, &mut out, &kv, H, 1, &mut scores),
+            Err(KernelError::Shape),
+            "position past the appended tokens"
+        );
+        assert_eq!(
+            decode(&q, &mut out, &kv, H, 0, &mut scores[..0]),
+            Err(KernelError::Shape),
+            "no score scratch"
+        );
+        // and the good call still works: one token, output is exactly V per kv group
+        decode(&q, &mut out, &kv, H, 0, &mut scores).unwrap();
+        assert!(out.iter().all(|x| *x == 1.0));
+    }
 }

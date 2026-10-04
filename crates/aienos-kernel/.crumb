@@ -17,7 +17,7 @@
     "generated": {
       "children": [
         {
-          "digest": "c8479454349cac0517294b189d38cbbf48dd66cd30af4ad954e895d5835fb51f",
+          "digest": "dc58e3f2037a115f459c3f4c8aa3e20ff4d7d5bb553bd857aa2cd0a52b9e01a1",
           "last_commit": "3e283fa",
           "name": "src",
           "purpose": "Directory crates/aienos-kernel/src. Purpose not yet described by a human."
@@ -29,15 +29,15 @@
           "purpose": "Directory crates/aienos-kernel/tests. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:0b10b76965723fc0aeb4dfbac9a08a139acc53295322e7bc5d8c9181e0702473",
-      "compiled_at": "2026-10-04T13:47:18Z",
+      "children_root": "sha256:196c600ce0e30dab16ae402f00bd50bc47efd14f99e02f3f2b323a52e16b6556",
+      "compiled_at": "2026-10-04T20:01:05Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:c3497f62d54b67e7408a2c3a66c6ccc4e01b08d0b3263dc0741d728cf80ac973",
+      "digest": "sha256:300f31a0ce9337241a05c7572903142461ffe712a01b65a10fa5b4908e22b898",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 85,
-      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
-      "source_tree": "sha256:0c902bb0117023f5bda3027129d738caaa05f5635d05c02434ad28aba2adf0e1"
+      "generated_at_commit": "79456d09c1e2aaf0c84f853f0e3d76b864475bb7",
+      "source_tree": "sha256:8aa498aa58d66b6262a290eba5dedb0d7f98d3aed70ef41d562b62b4712595de"
     },
     "owner_lane": "",
     "provenance": {
