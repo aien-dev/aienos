@@ -77,12 +77,12 @@ int main(void)
     /* 1. NULL record */
     expect(0, "handoff: null record");
 
-    /* 2. bad magic: one bit off; CHANDOF2 (refused as bad magic in this cut) */
+    /* 2. bad magic: one bit off; CHANDOF1 (the previous layout) and 0 */
     h = good();
     h.magic ^= 1;
     expect(&h, "handoff: bad magic");
     h = good();
-    h.magic = 0x32464f444e414843ull;
+    h.magic = CK_HANDOFF_MAGIC_V1;
     expect(&h, "handoff: bad magic");
     h = good();
     h.magic = 0;
@@ -131,6 +131,56 @@ int main(void)
     h.desc_size = 65544; /* stride larger than 64 KiB: one descriptor cannot fit */
     h.map_size = 65544;
     expect(&h, "handoff: bad map size 65544");
+
+    /* 7. CHANDOF2 model fields (docs/BOOT_HANDOFF_CONTRACT.md 3.2): reserved1,
+     * unknown flags, fields set without the present flag, and the range/
+     * geometry checks on a well-formed disk model (the Spark numbers). */
+    h = good();
+    h.reserved1 = 1;
+    expect(&h, "handoff: reserved1 field nonzero");
+    h = good();
+    h.model_flags = 4;
+    expect(&h, "handoff: bad model flags 4");
+    h = good();
+    h.model_len = 100;
+    expect(&h, "handoff: model fields without model");
+    h = good();
+    h.model_sha256[31] = 1;
+    expect(&h, "handoff: model fields without model");
+    h = good();
+    h.model_flags = CK_HANDOFF_MODEL_BLOCKIO;
+    expect(&h, "handoff: model fields without model");
+    struct ck_handoff m = good();
+    m.model_flags = CK_HANDOFF_MODEL_PRESENT | CK_HANDOFF_MODEL_BLOCKIO;
+    m.model_base = 0x140000000ull;
+    m.model_len = 807694368ull;
+    m.model_extents = 24;
+    m.model_block_size = 512;
+    m.model_disk_last_block = 8001573551ull;
+    m.model_read_us = 1234567;
+    m.model_sha256[0] = 0x3f;
+    expect(&m, "");
+    h = m;
+    h.model_base = 0;
+    expect(&h, "handoff: bad model range 807694368");
+    h = m;
+    h.model_len = 0;
+    expect(&h, "handoff: bad model range 0");
+    h = m;
+    h.model_base = 0x140000800ull;
+    expect(&h, "handoff: model base unaligned 5368711168");
+    h = m;
+    h.model_len = ~0ull;
+    expect(&h, "handoff: model range overflow 18446744073709551615");
+    h = m;
+    h.model_block_size = 1024;
+    expect(&h, "handoff: bad model block size 1024");
+    h = m;
+    h.model_extents = 0;
+    expect(&h, "handoff: bad model extents 0");
+    h = m;
+    h.model_flags = CK_HANDOFF_MODEL_PRESENT;
+    expect(&h, "");
 
     /* Check order: the first failing field is reported. */
     h = good();

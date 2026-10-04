@@ -12,6 +12,8 @@
  *         aienos-outside  sentinel-a, AIENOS [9, M+1): ends past the disk
  *         aienos-overlap  sentinel-a [1,9), AIENOS [5,M-7), sentinel-b
  *         no-gpt          sentinel fills only: no protective MBR, no GPT
+ *         esp-model ESP_MIB MODEL_FILE   ESP + model in 3 out-of-order
+ *                         extents (see esp_model below; model ingest gate)
  *       CORRUPTION: bad-primary-crc bad-backup-crc bad-primary-entries
  *         bad-backup-entries no-pmbr
  *       Prints one line: "gpt_image bs=B blocks=N aienos_first_lba=F
@@ -21,7 +23,10 @@
  *       Runs the kernel's own parser (dev/disk_part.c) read-only; prints
  *       "aienos first_lba=F last_lba=L blocks=K" (exit 0) or
  *       "refused: <reason> rc=N" (exit 1). */
+#define _GNU_SOURCE
 #include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include "disk_file.h"
@@ -34,15 +39,81 @@ static int usage(void)
     return 2;
 }
 
+/* esp-model (model ingest gate, scripts/qemu_ck_infer_test.sh --disk):
+ *   ck_gpt_image create IMG BS MIB esp-model ESP_MIB MODEL_FILE
+ * p0 = EFI System Partition [1, 1+ESP_MIB) MiB, left zero (the script formats
+ * it with mkfs.vfat --offset and fills it with mtools); p1 = Linux type
+ * [1+ESP_MIB, MIB-1) MiB holding MODEL_FILE in THREE extents written OUT OF
+ * FILE ORDER with 1 MiB gaps (disk order C, A, B for file thirds A, B, C), so a
+ * reader that ignores the map order or the gaps cannot produce the right
+ * bytes. Prints: "gpt_image bs=B blocks=N esp_first_lba=F esp_last_lba=L
+ * model_len=M model_extents=LBA:COUNT,LBA:COUNT,LBA:COUNT" (file order). */
+static int esp_model(int argc, char **argv, uint32_t bs, uint64_t blocks, uint64_t per, unsigned flags)
+{
+    if (argc != 8) return usage();
+    uint64_t esp_mib = strtoull(argv[6], NULL, 10);
+    const char *mpath = argv[7];
+    uint64_t mib = blocks / per;
+    if (esp_mib < 16 || esp_mib + 4 >= mib) return usage();
+    FILE *mf = fopen(mpath, "rb");
+    if (!mf) { fprintf(stderr, "cannot open %s\n", mpath); return 1; }
+    fseeko(mf, 0, SEEK_END);
+    uint64_t mlen = (uint64_t)ftello(mf);
+    fseeko(mf, 0, SEEK_SET);
+    uint64_t sectors = (mlen + bs - 1) / bs, gap = (1u << 20) / bs;
+    uint64_t a = sectors / 3, b = sectors / 3, c = sectors - a - b;
+    uint64_t p1_first = (1 + esp_mib) * per, p1_last = (mib - 1u) * per - 1u;
+    if (p1_first + 3 * gap + sectors > p1_last + 1) {
+        fprintf(stderr, "image too small for the model: need %llu more MiB\n",
+                (unsigned long long)((p1_first + 3 * gap + sectors - p1_last) / per + 1));
+        fclose(mf);
+        return 1;
+    }
+    /* disk order: C, A, B */
+    uint64_t lba_c = p1_first + gap, lba_a = lba_c + c + gap, lba_b = lba_a + a + gap;
+    gw_part p[2];
+    p[0] = (gw_part){gw_esp_type, 1 * per, (1 + esp_mib) * per - 1u, "ESP", 0};
+    p[1] = (gw_part){gw_linux_type, p1_first, p1_last, "model-home", 0};
+    if (gw_write(argv[2], bs, blocks, p, 2, flags)) { fclose(mf); return 1; }
+    int fd = open(argv[2], O_WRONLY);
+    if (fd < 0) { fclose(mf); fprintf(stderr, "cannot reopen %s\n", argv[2]); return 1; }
+    struct { uint64_t lba, count; } ext[3] = {{lba_a, a}, {lba_b, b}, {lba_c, c}};
+    static uint8_t buf[1u << 20];
+    int rc = 0;
+    for (int i = 0; i < 3 && !rc; i++) {
+        uint64_t left = ext[i].count * bs, off = ext[i].lba * bs;
+        while (left && !rc) {
+            size_t want = left < sizeof buf ? (size_t)left : sizeof buf;
+            memset(buf, 0, want);
+            size_t got = fread(buf, 1, want, mf); /* short only on the final partial sector */
+            if (got == 0) { rc = 1; break; }
+            if (pwrite(fd, buf, want, (off_t)off) != (ssize_t)want) rc = 1;
+            left -= want;
+            off += want;
+        }
+    }
+    close(fd);
+    fclose(mf);
+    if (rc) { fprintf(stderr, "model write failed\n"); return 1; }
+    printf("gpt_image bs=%u blocks=%llu esp_first_lba=%llu esp_last_lba=%llu model_len=%llu "
+           "model_extents=%llu:%llu,%llu:%llu,%llu:%llu\n",
+           bs, (unsigned long long)blocks, (unsigned long long)p[0].first, (unsigned long long)p[0].last,
+           (unsigned long long)mlen, (unsigned long long)lba_a, (unsigned long long)a,
+           (unsigned long long)lba_b, (unsigned long long)b, (unsigned long long)lba_c, (unsigned long long)c);
+    return 0;
+}
+
 static int cmd_create(int argc, char **argv)
 {
     if (argc < 6) return usage();
+    if (argc > 6 && strcmp(argv[5], "esp-model") != 0) return usage();
     uint32_t bs = (uint32_t)strtoul(argv[3], NULL, 10);
     uint64_t mib = strtoull(argv[4], NULL, 10);
     if ((bs != 512 && bs != 4096) || mib < 16 || mib > 1048576) return usage();
     uint64_t per = (1024u * 1024u) / bs, blocks = mib * per;
     const char *lay = argv[5];
     unsigned flags = 0;
+    if (!strcmp(lay, "esp-model")) return esp_model(argc, argv, bs, blocks, per, flags);
     for (int i = 6; i < argc; i++) {
         if (!strcmp(argv[i], "bad-primary-crc")) flags |= GW_BAD_PRIMARY_CRC;
         else if (!strcmp(argv[i], "bad-backup-crc")) flags |= GW_BAD_BACKUP_CRC;

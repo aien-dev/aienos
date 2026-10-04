@@ -20,6 +20,8 @@ static uint64_t map_buf[MAP_BYTES / 8];
 static struct ck_handoff handoff;
 static EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *conout;
 
+int ck_boot_model_load(EFI_HANDLE image, EFI_SYSTEM_TABLE *st, struct ck_handoff *h);
+
 static void efi_write(const char *s, size_t n)
 {
     CHAR16 buf[130];
@@ -96,6 +98,9 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 
     ck_puts("\n");
     ck_report_header("pre_exit");
+    /* The yardstick model from the boot disk, while the firmware drivers are
+     * still up (efi_model.c). Absent map: boot continues without a model. */
+    ck_boot_model_load(image, st, h);
     ck_puts("kernel_impl: c (native/kernel, Lane 18)\n");
     vendor_print(st->FirmwareVendor);
     ck_printf("firmware_revision: 0x%x\n", st->FirmwareRevision);

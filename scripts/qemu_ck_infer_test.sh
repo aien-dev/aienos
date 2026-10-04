@@ -39,6 +39,11 @@
 #        bash scripts/qemu_ck_infer_test.sh --negative-control  corrupt the GGUF
 #             magic; the gate checks must FAIL (rc=-2) -> prints
 #             AIENOS_CK_INFER_NEGATIVE_CONTROL: PASS when they do
+#        bash scripts/qemu_ck_infer_test.sh --disk              model on a GPT/NVMe
+#             image via MODEL.MAP + firmware Block I/O (the hardware path)
+#        bash scripts/qemu_ck_infer_test.sh --disk-negative-control  corrupt the
+#             declared sha256 in MODEL.MAP; the kernel must refuse to decode ->
+#             AIENOS_CK_INFER_DISK_NEGATIVE_CONTROL: PASS when it does
 #        bash scripts/qemu_ck_infer_test.sh --self-test         canned logs, no QEMU/build
 # Environment: AIENOS_MODEL (the GGUF), AIENOS_QEMU_TIMEOUT (3600 s: TCG runs
 # the 25 forward passes at roughly 20-30 s each), AIENOS_GATE_LOCK /
@@ -49,6 +54,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 verdict_name=AIENOS_CK_INFER
+source_mode=fwcfg disk_negctl=0
 model="${AIENOS_MODEL:-${HOME}/models/aien-mail/Llama-3.2-1B-Instruct-Q4_K_M.gguf}"
 ref_file=crates/aienos-infer/tests/fixtures/ref_fr.txt
 # Pinned model hash: evidence/config_a_reference_bundle.json and
@@ -74,6 +80,17 @@ infer_check_log() {
     local re_txt='^infer: text=(.*)$'
     local re_un='^infer: unloaded heap_live_kib=([0-9]+) frames_free_before=([0-9]+) frames_free_after=([0-9]+) frames_returned=([0-9]+) rc=(-?[0-9]+),(-?[0-9]+)$'
     local n sz
+    if [[ "${source_mode:-fwcfg}" == disk ]]; then
+        local re_dk='^infer: disk base=0x[0-9a-f]+ size=([0-9]+) extents=([0-9]+) read_us=([0-9]+) block_size=(512|4096)$'
+        n="$(grep -cE "${re_dk}" "${f}" || true)"
+        if [[ "${n}" == 1 ]]; then
+            local dl; dl="$(grep -E "${re_dk}" "${f}")"; [[ "${dl}" =~ ${re_dk} ]]; sz="${BASH_REMATCH[1]}"
+            [[ "${sz}" == "${want_size}" ]] && ok "boot-disk model size ${sz} = host file size" || bad "boot-disk model size ${sz}, host file is ${want_size}"
+            grep -qE '^model_map: ok len='"${want_size}"' extents=[0-9]+ sector=(512|4096) disk=[0-9a-f]{32}$' "${f}" && ok "stub accepted MODEL.MAP (len ${want_size})" || bad "no well-formed model_map: ok line from the stub"
+            grep -qE '^model: base=0x[0-9a-f]+ len='"${want_size}"' extents=[0-9]+ read_us=[0-9]+ declared_sha256=[0-9a-f]{64}$' "${f}" && ok "stub read the model through firmware Block I/O" || bad "no well-formed model: base line from the stub"
+        else bad "exactly one well-formed infer: disk line (found ${n})"; fi
+        if grep -qE "${re_fw}|${re_in}|^infer_source_mode: TEST-ONLY" "${f}"; then bad "the TEST-ONLY fw_cfg path ran in disk mode"; else ok "TEST-ONLY fw_cfg path did not run"; fi
+    else
     n="$(grep -cE "${re_fw}" "${f}" || true)"
     if [[ "${n}" == 1 ]]; then
         sz="$(sed -nE "s|${re_fw}|\\1|p" "${f}")"
@@ -84,6 +101,7 @@ infer_check_log() {
         sz="$(sed -nE "s|${re_in}|\\1|p" "${f}")"
         [[ "${sz}" == "${want_size}" ]] && ok "kernel ingested ${sz} bytes = host file size" || bad "kernel ingested ${sz} bytes, host file is ${want_size}"
     else bad "exactly one well-formed ingest line (found ${n})"; fi
+    fi
     n="$(grep -cE "${re_sha}" "${f}" || true)"
     if [[ "${n}" == 1 ]]; then
         sz="$(sed -nE "s|${re_sha}|\\1|p" "${f}")"
@@ -218,7 +236,16 @@ fi
 
 negctl=0
 [[ "${1:-}" == --negative-control ]] && negctl=1
+# Model source: fwcfg (default, TEST-ONLY QEMU channel) or disk (MODEL.MAP on a
+# GPT image, read by the stub through the firmware Block I/O: the hardware
+# path, proven here under QEMU). --disk-negative-control corrupts the declared
+# SHA-256 in MODEL.MAP: the stub reads fine, the kernel must refuse to decode.
+case "${1:-}" in
+    --disk) source_mode=disk ;;
+    --disk-negative-control) source_mode=disk disk_negctl=1 ;;
+esac
 if [[ ${negctl} == 1 ]]; then verdict_name=AIENOS_CK_INFER_NEGATIVE_CONTROL; fi
+if [[ ${disk_negctl} == 1 ]]; then verdict_name=AIENOS_CK_INFER_DISK_NEGATIVE_CONTROL; fi
 
 notrun() { echo "NOT_RUN  $*"; echo "${verdict_name}: NOT_RUN ($*)"; exit 2; }
 [[ -r "${model}" ]] || notrun "model file ${model} not found"
@@ -241,6 +268,7 @@ lib="${repo_root}/target/infer-kernel/aarch64-unknown-none/release/libaienos_inf
 CARGO_TARGET_DIR="${repo_root}/target/infer-kernel" cargo build -q --release --target aarch64-unknown-none \
     --manifest-path crates/aienos-infer-kernel/Cargo.toml
 make -s -C native/kernel CROSS="${cross}" OUT="${out}" AIENOS_COMMIT="${commit}" CK_INFER_LIB="${lib}" >/dev/null
+[[ "${source_mode}" != disk ]] || make -s -C native/kernel OUT="${out}" gpt-image model-map >/dev/null
 
 # Machine-wide quiet flag: read only, never written here. If someone holds
 # it, a CPU-heavy TCG run would disturb their measurement: NOT_RUN.
@@ -286,6 +314,39 @@ mkdir -p "${work}/esp/EFI/BOOT" "${work}/esp/EFI/AIENOS"
 touch "${work}/esp/EFI/AIENOS/BOOTREPORT.TXT"
 cp "${out}/BOOTAA64.EFI" "${work}/esp/EFI/BOOT/BOOTAA64.EFI"
 cp "${vars_fd}" "${work}/vars.fd"
+# Boot media. disk: a GPT image with the ESP (BOOTAA64.EFI + MODEL.MAP) and the
+# model in three out-of-order extents, on an NVMe controller; the stub reads
+# the model through the firmware Block I/O driver (native/boot/efi_model.c).
+# fwcfg: the TEST-ONLY channel, unchanged.
+if [[ "${source_mode}" == disk ]]; then
+    img="${work}/disk.img"
+    esp_mib=64
+    model_bytes="$(stat -c %s "${use_model}")"
+    total_mib=$(( (model_bytes + 1048575) / 1048576 + esp_mib + 16 ))
+    gpt_line="$("${out}/host/ck_gpt_image" create "${img}" 512 "${total_mib}" esp-model "${esp_mib}" "${use_model}")"
+    echo "${gpt_line}"
+    esp_first="$(sed -nE 's/.* esp_first_lba=([0-9]+).*/\1/p' <<<"${gpt_line}")"
+    extents="$(sed -nE 's/.* model_extents=([0-9:,]+).*/\1/p' <<<"${gpt_line}")"
+    [[ -n "${esp_first}" && -n "${extents}" ]] || { echo "FAIL  ck_gpt_image esp-model gave no geometry"; echo "${verdict_name}: FAIL"; exit 1; }
+    mkfs.vfat -F 32 -s 1 -S 512 --offset "${esp_first}" "${img}" $(( esp_mib * 1024 )) >/dev/null 2>&1
+    mo="${img}@@$(( esp_first * 512 ))"
+    mmd -i "${mo}" ::/EFI ::/EFI/BOOT ::/EFI/AIENOS
+    mcopy -i "${mo}" "${out}/BOOTAA64.EFI" ::/EFI/BOOT/BOOTAA64.EFI
+    map_args=()
+    IFS=, read -ra exts <<<"${extents}"
+    for e in "${exts[@]}"; do map_args+=(--extent "${e}"); done
+    corrupt=()
+    [[ "${disk_negctl}" == 1 ]] && corrupt=(--corrupt-sha)
+    "${out}/host/ck_model_map" make "${work}/MODEL.MAP" --file "${use_model}" --disk "${img}" "${map_args[@]}" "${corrupt[@]}"
+    if [[ "${disk_negctl}" == 0 ]]; then
+        "${out}/host/ck_model_map" check "${work}/MODEL.MAP" --disk "${img}" || { echo "FAIL  host-side map check"; echo "${verdict_name}: FAIL"; exit 1; }
+    fi
+    mcopy -i "${mo}" "${work}/MODEL.MAP" ::/EFI/AIENOS/MODEL.MAP
+    drive_args=(-drive if=none,id=disk,format=raw,file="${img}" -device nvme,drive=disk,serial=aienos0001)
+else
+    drive_args=(-drive if=none,id=esp,format=raw,file=fat:rw:"${work}/esp" -device virtio-blk-pci,drive=esp
+                -fw_cfg name=opt/aienos/model,file="${use_model}")
+fi
 log="${work}/serial.log"
 
 started=$(date +%s)
@@ -294,9 +355,7 @@ timeout "${AIENOS_QEMU_TIMEOUT:-3600}" qemu-system-aarch64 \
     -M virt,virtualization=on,gic-version=3 -accel tcg,thread=single -cpu max -smp 2 -m 4096 \
     -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
     -drive if=pflash,format=raw,file="${work}/vars.fd" \
-    -drive if=none,id=esp,format=raw,file=fat:rw:"${work}/esp" \
-    -device virtio-blk-pci,drive=esp \
-    -fw_cfg name=opt/aienos/model,file="${use_model}" \
+    "${drive_args[@]}" \
     -device ramfb -display none -nic none \
     -serial file:"${log}" -no-reboot
 qemu_status=$?
@@ -321,6 +380,18 @@ if [[ ${negctl} == 1 ]]; then
         echo "AIENOS_CK_INFER_NEGATIVE_CONTROL: PASS (corrupt GGUF magic -> probe rc=-2 -> gate FAIL)"; exit 0
     fi
     echo "AIENOS_CK_INFER_NEGATIVE_CONTROL: FAIL (corrupt magic was not caught as probe rc=-2)"; exit 1
+fi
+if [[ ${disk_negctl} == 1 ]]; then
+    # The control passes only when the corrupted declared SHA-256 is what made
+    # the gate fail: the stub read the model, the kernel hashed it, refused to
+    # decode (no probe line), and reported FAIL itself.
+    s="${work}/serial.txt"
+    if [[ ${infer_failed} == 1 ]] && grep -q '^infer: sha256 mismatch declared=' "${s}" \
+       && ! grep -q '^infer: probe' "${s}" && grep -q '^AIENOS_CK_INFER: FAIL' "${s}" \
+       && grep -q '^model: base=0x' "${s}" && grep -q 'kernel: alive' "${s}"; then
+        echo "AIENOS_CK_INFER_DISK_NEGATIVE_CONTROL: PASS (corrupt MODEL.MAP sha256 -> kernel refused to decode -> gate FAIL)"; exit 0
+    fi
+    echo "AIENOS_CK_INFER_DISK_NEGATIVE_CONTROL: FAIL (corrupt declared sha256 was not refused by the kernel)"; exit 1
 fi
 # Live control on the same serial log: a mutated expected-id list must FAIL.
 mut="$(infer_check_log "${work}/serial.txt" "${want_size}" "${want_sha}" "${want_ids}" 1 "$(mutate_gen "${want_gen}")")" || true

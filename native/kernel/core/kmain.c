@@ -16,6 +16,7 @@
 #define TTBR_BADDR_MASK 0x0000fffffffffffeull
 
 static struct ck_handoff *hand;
+const struct ck_handoff *ck_handoff_get(void) { return hand; }
 
 const void *ck_acpi_find(const char sig[4])
 {

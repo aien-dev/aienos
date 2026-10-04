@@ -19,6 +19,9 @@
 /* Linux filesystem data type GUID 0FC63DAF-8483-4772-8E79-3D69D8477DE4
  * (on-disk byte order): used for the sentinel partitions. */
 extern const uint8_t gw_linux_type[16];
+/* EFI System Partition type GUID C12A7328-F81F-11D2-BA4B-00A0C93EC93B (on-disk
+ * byte order): used by the esp-model layout. */
+extern const uint8_t gw_esp_type[16];
 
 typedef struct {
     const uint8_t *type;  /* 16 on-disk bytes */
