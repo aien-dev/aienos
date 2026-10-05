@@ -294,6 +294,308 @@ live):
    manifest, the record) goes back to the Spark. The `private` folder stays
    on the ceremony machine and the two backups.
 
+## Gate 2 attended run (written 2026-10-05, aienos main 9d41efc)
+
+Companion to `docs/TRUST-1-GATE2-EXPERIMENTS.md` (the why and the expected effects) and to
+Steps 1, 2 and 7 above (the baseline, already done on 2026-10-03). This is the exact
+runbook for the next three sittings: Experiment 1, Experiment 2 and Experiment 4, the three
+that need no extra hardware. Experiments 3 (USB stick) and 5 (boot order) wait for their own
+written steps and are not part of this run.
+
+**Where we are.** On 2026-10-03 four boots were captured with Secure Boot OFF
+(`evidence/trust1_gate2_baseline_2026-10-03/`). Two cold boots were identical on all 35
+items [OBSERVED]. One warm restart (`sudo reboot`) differed in PCR1 and PCR10 [OBSERVED].
+A "PCR" is one numbered logbook slot in the TPM chip that records what started up.
+Nothing has been decided about which slots a security policy may use, and this page does not
+decide it.
+
+What this run does and does not change: it never changes firmware settings, Secure Boot,
+keys or the TPM. It only restarts the machine, reads measurements, and (Experiment 2) turns
+one Ubuntu timer on and off. Experiment 4 opens the firmware setup screen and leaves
+without saving. The Spark stays in its current Secure Boot OFF state for the whole run.
+Results therefore describe Secure Boot OFF only (see "What would decide the TPM policy").
+
+### Before the first sitting (once, about 5 minutes)
+
+Type each command in a terminal window on the Spark, logged in as yourself. None of them
+changes anything.
+
+1. Go to the repository copy and look at it. Do NOT run `git pull` here: this copy sits on a
+   work branch, and a pull would move it.
+
+   ```bash
+   cd ~/workspace/aienos-recovery-gate
+   sha256sum scripts/tpm_measurement_campaign.sh
+   ```
+
+   *You should see:* `aac103774858f2d4ff1c302883f7784f3948d50b640faa20e2b2c870c3824529`
+   followed by the file name. That is the same script as on `main`. A different number:
+   stop and tell the orchestrator.
+
+2. Check the machine is in the state the baseline had:
+
+   ```bash
+   mokutil --sb-state
+   systemctl is-enabled fwupd-refresh.timer
+   id -nG | tr ' ' '\n' | grep -x tss
+   command -v tpm2_pcrread tpm2_eventlog
+   ```
+
+   *You should see:* `SecureBoot disabled`, `disabled`, `tss`, then two tool paths. Anything
+   else (especially `SecureBoot enabled`): stop and tell the orchestrator; the campaign state
+   has changed.
+
+3. Make sure the evidence folder exists and show what is already in it:
+
+   ```bash
+   mkdir -p ~/trust1-evidence
+   ls ~/trust1-evidence
+   ```
+
+   *You should see:* the four baseline folders (`boot0-before` to `boot3-after`) and some
+   files. The capture tool refuses to overwrite a folder, so every folder name below is new
+   (they start with `g2-`).
+
+**Evidence destination:** `~/trust1-evidence/` on the Spark, one folder per capture. When a
+sitting ends, tell the orchestrator the folder names and paste the `compare` lines. The
+orchestrator copies the folders into the repository under
+`evidence/trust1_gate2_experiments_<date>/` in a pull request. You do not commit anything.
+
+**Stop rules for every sitting.** Stop, do not retry, do not improvise, and send the
+orchestrator the last command and everything it printed, if any of these happens:
+
+- a command prints `FAIL`, `Error`, or something other than "What you should see";
+- Ubuntu does not start normally after a restart, or the encrypted private storage or the
+  vault does not unlock afterwards (a plain power-off, a 30 second wait and the power
+  button once is allowed; nothing else);
+- any PCR other than 1 and 10 changes where the sitting says only those may move,
+  and in particular **any change in PCR 7**: three Ubuntu credentials are sealed to PCR 7
+  alone (`evidence/trust1_gate0_addendum_v1.json`), so a moved PCR 7 means they may refuse
+  to unseal;
+- a firmware update appears to have been installed;
+- a rollback `compare` still shows a PCR different from the "before" capture. That is the
+  plan's UnexpectedState case: no PCR policy is chosen and the orchestrator writes it up.
+
+`compare` ends with `compared=35 changed=N`. It exits with code 3 whenever something
+differs. That is normal and is not an error.
+
+### Sitting 1. Experiment 1: is the warm-restart value stable?
+
+Question: the warm restart changed PCR1 and PCR10 once. Is the warm value always the same?
+This resolves the one [UNKNOWN] of the baseline. The one change to the machine: none. This
+sitting restarts it warm twice and cold once. Four boots.
+
+1. Start from a cold boot so the reference is cold by construction. Save your work, then:
+
+   ```bash
+   sudo poweroff
+   ```
+
+   Wait 30 seconds, press the power button, wait for Ubuntu to start and log in.
+
+2. Reference capture (a cold boot, nothing changed yet):
+
+   ```bash
+   cd ~/workspace/aienos-recovery-gate
+   bash scripts/tpm_measurement_campaign.sh capture ~/trust1-evidence/g2-exp1-before g2-exp1-before
+   ```
+
+   *You should see:* a short summary ending without `FAIL`. *Changes:* nothing on the
+   machine; it only writes the new folder.
+
+3. First warm restart. Do not touch the keyboard during startup:
+
+   ```bash
+   sudo reboot
+   ```
+
+   After Ubuntu is back:
+
+   ```bash
+   cd ~/workspace/aienos-recovery-gate
+   bash scripts/tpm_measurement_campaign.sh capture ~/trust1-evidence/g2-exp1-warmA g2-exp1-warmA
+   ```
+
+4. Second warm restart, same way:
+
+   ```bash
+   sudo reboot
+   ```
+
+   ```bash
+   cd ~/workspace/aienos-recovery-gate
+   bash scripts/tpm_measurement_campaign.sh capture ~/trust1-evidence/g2-exp1-warmB g2-exp1-warmB
+   ```
+
+5. Back to a cold boot (this is the rollback). `sudo poweroff`, wait 30 seconds, power
+   button, then:
+
+   ```bash
+   cd ~/workspace/aienos-recovery-gate
+   bash scripts/tpm_measurement_campaign.sh capture ~/trust1-evidence/g2-exp1-rollback g2-exp1-rollback
+   ```
+
+6. Compare (nothing here changes the machine):
+
+   ```bash
+   cd ~/workspace/aienos-recovery-gate
+   bash scripts/tpm_measurement_campaign.sh compare ~/trust1-evidence/g2-exp1-warmA ~/trust1-evidence/g2-exp1-warmB
+   bash scripts/tpm_measurement_campaign.sh compare ~/trust1-evidence/g2-exp1-before ~/trust1-evidence/g2-exp1-warmA
+   bash scripts/tpm_measurement_campaign.sh compare ~/trust1-evidence/g2-exp1-before ~/trust1-evidence/g2-exp1-rollback
+   ```
+
+*Expected observations (tags show how much is known):*
+
+- `before` vs `warmA`: PCR1, PCR10 and the event log differ, nothing else [OBSERVED once on
+  2026-10-03, so a repeat is expected, not guaranteed].
+- `warmA` vs `warmB`: UNKNOWN, this is the question. Either answer is useful: `changed=0`
+  would mean the warm value is stable and PCR1 could get its own warm baseline; a difference
+  would mean PCR1 cannot be promised after a warm restart.
+- `before` vs `rollback` (cold vs cold): all PCRs identical [OBSERVED on 2026-10-03,
+  `boot2` vs `boot3` changed=0]. The event log bytes may differ even when every PCR is the
+  same [OBSERVED once, `boot0` vs `boot3`].
+
+*Stop conditions:* the common rules above; also any PCR other than 1 and 10 differing
+between `before` and a warm capture.
+*Rollback:* nothing was changed, so nothing to undo. Step 5 returns to a cold boot and its
+`compare` against `g2-exp1-before` is the proof.
+
+### Sitting 2. Experiment 2: turn the firmware-update checker back on
+
+Question: does Ubuntu's background check for new firmware change any measurement? The one
+change: `sudo systemctl enable --now fwupd-refresh.timer`, the undo of Step 2. *Changes:*
+one Ubuntu setting; no firmware is touched. Three boots. Risk: if a firmware update were
+actually installed during this window it would spoil the campaign; step 6 checks.
+
+1. Cold boot: `sudo poweroff`, wait 30 seconds, power button, log in.
+2. Before capture:
+
+   ```bash
+   cd ~/workspace/aienos-recovery-gate
+   bash scripts/tpm_measurement_campaign.sh capture ~/trust1-evidence/g2-exp2-before g2-exp2-before
+   ```
+
+3. The one change:
+
+   ```bash
+   sudo systemctl enable --now fwupd-refresh.timer
+   ```
+
+   *You should see:* a line saying a link was created.
+
+4. Cold boot again: `sudo poweroff`, wait 30 seconds, power button, log in. Then:
+
+   ```bash
+   cd ~/workspace/aienos-recovery-gate
+   bash scripts/tpm_measurement_campaign.sh capture ~/trust1-evidence/g2-exp2-after g2-exp2-after
+   bash scripts/tpm_measurement_campaign.sh compare ~/trust1-evidence/g2-exp2-before ~/trust1-evidence/g2-exp2-after
+   ```
+
+5. Undo and prove it:
+
+   ```bash
+   sudo systemctl disable --now fwupd-refresh.timer
+   ```
+
+   Cold boot (`sudo poweroff`, 30 seconds, power button), log in, then:
+
+   ```bash
+   cd ~/workspace/aienos-recovery-gate
+   bash scripts/tpm_measurement_campaign.sh capture ~/trust1-evidence/g2-exp2-rollback g2-exp2-rollback
+   bash scripts/tpm_measurement_campaign.sh compare ~/trust1-evidence/g2-exp2-before ~/trust1-evidence/g2-exp2-rollback
+   ```
+
+6. Firmware-update check, if the tool is installed (UNVERIFIED that it is):
+
+   ```bash
+   command -v fwupdmgr && fwupdmgr get-history
+   ```
+
+   *You should see:* no update recorded for the last few days. A recorded update: stop and
+   tell the orchestrator.
+
+*Expected observations:* `before` vs `after`: only the `fwupd_refresh_timer` item flips from
+disabled to enabled; every PCR identical [expected from the `boot0` vs `boot3` result, where
+that timer was the only non-event-log difference and all PCRs matched; OBSERVED]. `before` vs
+`rollback`: `changed=0` on every PCR.
+*Stop conditions:* any PCR differs; a firmware update shows in step 6.
+*Rollback:* step 5 (`disable --now`), plus the proving capture.
+
+### Sitting 3. Experiment 4: visit the firmware setup screen and leave without saving
+
+Question: does only entering the firmware setup screen change a measurement? The one
+change: entering the setup screen at startup and exiting with "discard changes" or "exit
+without saving". Three boots. **This is the only sitting where you touch the firmware
+screen. Change nothing there. Do not open any Secure Boot, key or TPM menu.**
+
+1. Cold boot, log in, then before capture:
+
+   ```bash
+   cd ~/workspace/aienos-recovery-gate
+   bash scripts/tpm_measurement_campaign.sh capture ~/trust1-evidence/g2-exp4-before g2-exp4-before
+   ```
+
+2. `sudo poweroff`, wait 30 seconds, press the power button, and press the setup key shown
+   on the startup screen (typically Delete or F2; UNVERIFIED for this machine, read what
+   the screen says). Look. Change NOTHING. Choose exit without saving. If you are unsure
+   whether you changed something, power the machine off, do not boot, and tell the
+   orchestrator.
+3. After Ubuntu starts and you log in:
+
+   ```bash
+   cd ~/workspace/aienos-recovery-gate
+   bash scripts/tpm_measurement_campaign.sh capture ~/trust1-evidence/g2-exp4-after g2-exp4-after
+   bash scripts/tpm_measurement_campaign.sh compare ~/trust1-evidence/g2-exp4-before ~/trust1-evidence/g2-exp4-after
+   ```
+
+4. Rollback proof (nothing was changed, so this only proves it): `sudo poweroff`, 30
+   seconds, power button, log in, then:
+
+   ```bash
+   cd ~/workspace/aienos-recovery-gate
+   bash scripts/tpm_measurement_campaign.sh capture ~/trust1-evidence/g2-exp4-rollback g2-exp4-rollback
+   bash scripts/tpm_measurement_campaign.sh compare ~/trust1-evidence/g2-exp4-before ~/trust1-evidence/g2-exp4-rollback
+   ```
+
+*Expected observations:* UNKNOWN. Some firmware measures its configuration into PCR1 after a
+setup visit, so PCR1 is the one to watch; no change is also a normal answer [guess,
+confidence low, to be checked against the result]. `before` vs `rollback`: `changed=0` on
+every PCR.
+*Stop conditions:* the common rules; PCR 7 moves; the screen shows anything about
+Secure Boot keys being modified.
+*Rollback:* nothing was changed; Step 4 is the proof. If a setting was changed by mistake,
+restore it by hand to what it was and tell the orchestrator before the next boot.
+
+### What would decide the TPM policy (and why this run does not)
+
+This run does not choose, and must not be read as choosing, any PCR for a policy. Missing
+experiment evidence, in the order it is needed:
+
+1. **Secure Boot ON baseline.** Every capture so far is Secure Boot OFF. PCR 7 holds the
+   Secure Boot state, so its OFF value is not the value a Secure-Boot-ON policy would see.
+   The deciding experiment is at least three cold boots with Secure Boot ON and nothing else
+   changed (the plan's Gate 0 and Gate 2 precondition). Turning Secure Boot ON changes PCR 7
+   and may stop three Ubuntu credentials from unsealing, so it is a firmware-policy change
+   that needs its own written approval, a tested fallback and the recovery stick first. It
+   is NOT part of this run and no agent may do it.
+2. **Warm-restart stability** (Experiment 1 above) decides whether PCR1 may be in a policy
+   at all.
+3. **One-variable experiments with Secure Boot ON** from the plan's Q15 list (kernel, init
+   image, boot order, db addition, owner certificate addition, loader version, loader
+   rehash, signer rotation, recovery boot, tampered image). A PCR becomes a candidate only if
+   it is identical across the cold boots, moves under a security-relevant change, and does
+   not move under harmless ones. This acceptance rule is PROPOSED here; the plan's own text
+   is "no PCR selected by convention" and gives no numeric line (see the
+   `docs/TRUST-1-GATE2-EXPERIMENTS.md` proposal).
+
+Facts that already bound the choice [OBSERVED in the baseline]: PCR 11 is all zero on this
+machine, so the placeholder PCR 11 in the Gate 5 simulation has nothing to measure today;
+PCR 0, 2, 3, 4, 5 and 7 were identical in all four boots; PCR 1 and PCR 10 moved on the one
+warm restart. Which of these mean something for security is exactly what is not yet
+explained.
+
+---
+
 ## Known hardware risk: do not boot the C kernel on a disk that holds data
 
 **Do not boot the C kernel on a disk holding data until CK gate `DISK_LAYOUT`
@@ -322,6 +624,12 @@ own partition table:
 Source: `~/handoffs/2026-10-01-review/track4-aienos-trust.md`, row R2.
 This entry is documentation only. It was not tested, and no hardware result is
 claimed. Host, QEMU and hardware status of the fix: all NOT_RUN.
+
+Update 2026-10-05: the CK gate `DISK_LAYOUT` is now PASS in a QEMU-only receipt
+(`evidence/ck_gates_1ecf5bcd303bf88422dd0542f14851c931f5d52276838fa182c812f3c73f3c1b.json`,
+commit 640522a, code identical to 9d41efc), so the "NOT_RUN" wording above is out of date for
+QEMU. Nothing changes for hardware: it is still NOT_RUN on a real disk, and no step in this
+document boots the C kernel on Machine 1.
 
 ## Later gates (no action from you yet)
 
