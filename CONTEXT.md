@@ -11,7 +11,7 @@ The sovereign human user who owns the hardware, sets ultimate policy, and holds 
 _Avoid_: User, admin, root, consumer
 
 **AIEN Agent**:
-The persistent logical intelligence entity that acts as the primary interface, planner, and coordinator for the machine across reboots and hardware changes.
+The continuous logical intelligence organism that acts as the primary interface, planner, and coordinator for the machine across reboots and hardware changes. Its durable subject (the same agent identity, standing intents and memory lineage, resolved from the Store after any restart) is named ALLEN ([ARCH-0035](https://github.com/aien-dev/aien-architecture/blob/main/docs/adr/0035-persistent-cognitive-entity-boundary-allen.md), PROPOSED; [ADR 0018](docs/adr/0018-allen-subject-state-object.md)).
 _Avoid_: Assistant, bot, chatbot, process
 
 **Logical Agent Identity**:
