@@ -84,6 +84,7 @@ m5_production_store_512b|missing|-|-|-|M5: production Store on 512-byte geometry
 t1_gate4_manifest_ab|missing|-|-|-|Gate 4: signed boot manifest + A/B slot selection in the loader (awaits the C/asm loader)
 m5_migration_sig_test_key|auto|run_native_m5_migsig|-|^AIENOS_M5_MIGRATION_SIG: PASS$|M5: owner-signed migration record (native/m5 + native/sig Ed25519), host test with TEST keys only
 m5_migration_owner_signature|operator|-|-|-|M5: migration signed by the real owner key (needs the Gate 3 offline key ceremony)
+t1_attended_evidence_checker|software|run_attended_evidence_checker|2|^TRUST1_ATTENDED_EVIDENCE_CHECK self-test \(HOST VALIDATION ONLY\): ALL PASS$|HOST VALIDATION ONLY: attended-evidence checker rejects missing, wrong-digest, partial and failing records (fixtures; proves no physical event, gate rows stay NOT_RUN)
 '
 # ===========================================================================
 
@@ -162,6 +163,7 @@ run_key_ceremony() {
 }
 run_gate7_preflight()   { bash "${repo_root}/scripts/trust1_gate7_preflight.sh"; }
 run_recovery_tools()    { bash "${repo_root}/scripts/verify_recovery_tools.sh"; }
+run_attended_evidence_checker() { bash "${repo_root}/scripts/test_trust1_attended_evidence_check.sh"; }
 # The native Makefiles run ./$(TEST), so OUT must be relative to the
 # Makefile folder; it still points outside the tree.
 native_make_test() {
