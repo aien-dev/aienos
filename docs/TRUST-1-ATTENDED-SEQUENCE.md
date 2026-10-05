@@ -21,7 +21,7 @@ Status: documentation only. Machine-independent companion to
 [TRUST-1-M5-GATE-MATRIX.md](TRUST-1-M5-GATE-MATRIX.md). Written 2026-10-05 against aienos main
 bbad5e4 (CAND-1 TRUST receipt: pass 20, fail 1, blocked 11, missing 5, NOT_QUALIFIED). It records no
 live machine state; the live preflight results and the request to the operator live in the
-operator's private handoff, not here. Nothing in this page was run on Machine 1.
+operator's private handoff, not here. Nothing in this page was run on Machine 1. The single in-person document, with live-checked prerequisites and corrections to this page, is [TRUST-1-ATTENDED-PACKAGE.md](TRUST-1-ATTENDED-PACKAGE.md).
 
 Secure Boot has been OFF since 2026-10-01. The one software FAIL, `t1_gate7_preflight`, reports that
 state and is not a code regression.
