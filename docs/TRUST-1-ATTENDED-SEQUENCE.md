@@ -1,5 +1,21 @@
 # TRUST-1 attended sequence, missing implementations and gate unlock map
 
+## In plain words first (for the operator, who is not a programmer)
+
+This page is the order of the hands-on jobs that remain for the Spark's security plan, what each one
+unlocks, and what has not been built yet. Terms, each in one everyday sentence:
+
+- **Secure Boot**: a firmware switch that makes the computer start only software signed by a trusted key. It is OFF now.
+- **TPM**: a small security chip on the board that keeps secrets and locks them to the machine's startup state.
+- **PCR**: one numbered logbook slot inside the TPM that records what started up (PCR 7 records the Secure Boot state).
+- **Unseal**: the TPM handing a locked secret back, which only works if the logbook matches what it was locked to.
+- **Relock script**: our helper that re-locks the three stored passwords to the current Secure Boot state, using spare copies kept on the MacBook.
+- **Shim**: the small signed starter program Ubuntu uses to boot under Secure Boot.
+- **BootNext**: a one-time firmware instruction "start from this entry next time only".
+- **MOK**: the extra list of trusted keys that Ubuntu's shim keeps beside the firmware's own list.
+- **db and KEK**: the firmware's list of allowed signers (db) and the keys allowed to edit that list (KEK).
+- **PolicyAuthorize**: a TPM rule that unlocks a secret for any software release the owner has signed, instead of one fixed fingerprint.
+
 Status: documentation only. Machine-independent companion to
 [TRUST-1-OPERATOR-STEPS.md](TRUST-1-OPERATOR-STEPS.md) and
 [TRUST-1-M5-GATE-MATRIX.md](TRUST-1-M5-GATE-MATRIX.md). Written 2026-10-05 against aienos main
@@ -10,7 +26,7 @@ operator's private handoff, not here. Nothing in this page was run on Machine 1.
 Secure Boot has been OFF since 2026-10-01. The one software FAIL, `t1_gate7_preflight`, reports that
 state and is not a code regression.
 
-Important reading rule: the 11 blocked rows have no runner in the gate table
+Important reading rule: the 16 rows that are blocked or missing (11 blocked, 5 missing) have no runner in the gate table
 (`scripts/trust1_m5_qualify.sh`, runner column `-`), so `trust1_m5_qualify.sh` cannot run them even
 after the attended action. An attended action produces evidence; turning it into PASS needs a
 runner or a recorded-receipt check added to the table (a recommendation, no design exists).
@@ -29,7 +45,7 @@ General rules: one step at a time; anything unexpected stops the run (plan, "Une
   Sitting 2 (3 boots, one Ubuntu timer turned on then off), Sitting 3 (3 boots, firmware screen visit). In
   Sitting 3 the screen's setup key is UNVERIFIED for this machine ("typically Delete or F2"); alternative that is
   OBSERVED to be supported: `sudo systemctl reboot --firmware-setup`. Change NOTHING on that screen; choose exit
-  without saving.
+  without saving. Look and photograph only: no setting may be changed there, not even by accident, and no Secure Boot, key or TPM menu may be opened.
 - Expected: `compare` lines per runbook (`changed=0` for cold vs cold; PCR1 and PCR10 may differ on warm).
 - Evidence afterwards: folders `~/trust1-evidence/g2-exp1-*`, `g2-exp2-*`, `g2-exp4-*` and the `compare` text.
   The orchestrator copies them to `evidence/trust1_gate2_experiments_<date>/` in a PR. Receipt per experiment:
@@ -62,6 +78,7 @@ General rules: one step at a time; anything unexpected stops the run (plan, "Une
 
 - Purpose: put the machine in the state Gates 0, 1, 2 and 7 all assume (plan, Gate 0 "Preconditions: Secure Boot
   enabled"). It is the single largest unlock (Part 4).
+- HARD PRECONDITIONS (all four must be true or Action 3 does not start): (a) Action 1 Sitting 3 has been done and the firmware setup key and the exact Secure Boot menu names are written down, so nobody hunts through menus; (b) the AIENOSRECOV recovery stick is plugged in; (c) the MacBook is on and the relock path is confirmed by a dry check that the spares match their manifest; (d) Drake's written approval is recorded. Plainly: when Secure Boot flips, the private storage and the password vault stop unlocking, because their locks are tied to the Secure Boot state. The recovery step is the relock script, or turning Secure Boot back off and running it again.
 - Why risky: turning Secure Boot off changed PCR 7 on 2026-09-24 and the three sealed credentials (private
   storage, forge storage, vault) stopped unsealing (aienos #40, memory). Turning it on changes PCR 7 again.
   Runbook: this "needs its own written approval, a tested fallback and the recovery stick first". The fallback
@@ -148,7 +165,7 @@ General rules: one step at a time; anything unexpected stops the run (plan, "Une
 # Part 3. Missing implementations
 
 The five `MISSING_IMPLEMENTATION` rows (all NOT_RUN, "the gate table lists no implementation to run",
-`scripts/trust1_m5_qualify.sh` lines 79 to 84):
+`scripts/trust1_m5_qualify.sh` lines 79, 81, 82, 83 and 84; line 80 is a software row that passes):
 
 | # | Row id | What is missing | Where it is specified or stubbed |
 |---|---|---|---|
@@ -178,7 +195,7 @@ Other gaps found (not rows in the table):
 
 # Part 4. Gate unlock map
 
-Reading rule. The qualify script marks a row PASS only if it has a runner. These 12 rows have none, so even
+Reading rule. The qualify script marks a row PASS only if it has a runner. These 16 rows (the 11 blocked rows and the 5 missing rows) have none, so even
 after the action below, `bash scripts/trust1_m5_qualify.sh` will still print them as NOT_RUN. What each action
 really produces is evidence (capture folders, collector output, ceremony record). Turning that evidence into a
 PASS needs a small agent change: add a runner or a recorded-receipt check to the gate table (UNVERIFIED that a
@@ -186,7 +203,7 @@ design exists; this is a recommendation). Exception: `t1_gate7_preflight` has a 
 
 | After this action | Row | What changes | Command to run afterwards |
 |---|---|---|---|
-| Action 3 (Secure Boot ON, steps 1 to 6) | `t1_gate7_preflight` (the FAIL) | Flips to PASS if the 2 "Secure Boot ON" checks now pass and the rest stay PASS (they did in the 05:44Z run) | `bash scripts/trust1_gate7_preflight.sh` then, for the receipt, `bash scripts/trust1_m5_qualify.sh --out evidence/` (no `--with-qemu`) |
+| Action 3 (Secure Boot ON, steps 1 to 6) | `t1_gate7_preflight` (the FAIL) | Expected to pass after Action 3 (its two Secure Boot checks are inferred, not yet observed; the other checks passed in the 05:44Z run) | `bash scripts/trust1_gate7_preflight.sh` then, for the receipt, `bash scripts/trust1_m5_qualify.sh --out evidence/` (no `--with-qemu`) |
 | Action 3 step 7 (3 SB-ON cold boots) | `t1_gate0_cold_boot_pcr_stability` (hardware) | Evidence to answer it; plan says Secure Boot ON precondition. Today only an OFF repeat exists (`evidence/trust1_gate2_baseline_2026-10-03/`) | `bash scripts/tpm_measurement_campaign.sh compare ~/trust1-evidence/sb-on-boot1 ~/trust1-evidence/sb-on-boot2` (and 2 vs 3). Needs a runner to count |
 | Action 1 (Experiments 1, 2, 4) | `t1_gate2_reboot_campaign` (hardware) | Some experiments done, not all, and OFF only. Does NOT go PASS | `bash scripts/tpm_measurement_campaign.sh receipt ...` per experiment (arguments UNVERIFIED) |
 | Action 1 (Experiment 2 end state: timer disabled) plus a written approval note | `t1_gate0_firmware_refresh_pause` (operator) | Pause is observed (`disabled` at 2026-10-05T03:25Z and 12:55Z). Owed: the written approval and a service baseline (matrix Gate 0 row) | `systemctl is-enabled fwupd-refresh.timer`; the approval is an agent note, no command |
