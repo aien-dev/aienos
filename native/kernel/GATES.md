@@ -25,7 +25,7 @@ C gates (one line each from `ck_gates.sh`): `M1` and `M3` (from
 `scripts/qemu_ck_net_test.sh`; rows 102-106 and 110-112; the script now also checks the virtio-net SMMU fence (ACCESS_PLATFORM required, out-of-window device DMA refused), rows 102 and 110-112 are QEMU PASS on this branch from the committed forge log `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`, hardware NOT_RUN), the kernel entropy rows 107-109 (M1 via `scripts/lib_ck_m1_checks.sh`, ARGUS1_REVOKE and M4_STORE via the Store gate boot 7),
 `DISK_LAYOUT` (C-only, from `scripts/qemu_ck_disk_layout_test.sh`, rows 118-123: QEMU PASS at 741b2b8 before the merge with main 8555049, rerun pending at the merged head; row 123 host test), and the NOT_RUN gates
 `SMP` (C-only, from `scripts/qemu_ck_smp_test.sh`, rows 113-117, NOT_RUN pending forge receipt), `M0_ROLLBACK`, `M4_STORE_CRASH` (now read from `scripts/qemu_ck_store_crash_test.sh`, rows 73-80; NOT_RUN until a forge receipt exists),
-`M4_CONTINUITY`, `M4_RECOVERY`, `KEYBOARD`, `FPU` (C-only, from `scripts/qemu_ck_fpu_test.sh`, rows 124-128; QEMU PASS, hardware NOT_RUN), `INFER` (C-only, from `scripts/qemu_ck_infer_test.sh`, rows 129-139; QEMU PASS, hardware NOT_RUN), and `SCREEN` (C-only, from `scripts/qemu_ck_screen_test.sh`, rows 140-145; QEMU PASS, hardware NOT_RUN).
+`M4_CONTINUITY`, `M4_RECOVERY`, `M4_ALLEN` (C-only, from `scripts/qemu_ck_allen_test.sh`, rows A1-A30; QEMU PASS, hardware NOT_RUN), `KEYBOARD`, `FPU` (C-only, from `scripts/qemu_ck_fpu_test.sh`, rows 124-128; QEMU PASS, hardware NOT_RUN), `INFER` (C-only, from `scripts/qemu_ck_infer_test.sh`, rows 129-139; QEMU PASS, hardware NOT_RUN), and `SCREEN` (C-only, from `scripts/qemu_ck_screen_test.sh`, rows 140-145; QEMU PASS, hardware NOT_RUN).
 
 `M4_NVME` and `SMMU` PASS in the SMMU-confined mode (default `make full`
 image, QEMU `iommu=smmuv3`). The unconfined bypass build
@@ -405,6 +405,25 @@ C-only rows are as stated. Operator key is TEST-ONLY in the oracle.
 | 91n | host `operator_auth_rejects_any_single_bit_flip` (recovery.rs:269) | M4_RECOVERY (host) | HOST PASS (cut 3, `test_continuity_resolve` (`make -C native/kernel test`, real sealed Store in a file): every single-bit flip of response, challenge and key is refused; mutant MR-4 `CR_MUTANT_COMPARE_16` killed); gate NOT_RUN |
 | 91o | host `operator_auth_rejects_legacy_bare_sha256_response` (recovery.rs:299) | M4_RECOVERY (host) | HOST PASS (cut 3, `test_continuity_resolve` (`make -C native/kernel test`, real sealed Store in a file): bare SHA-256 response refused; mutant MR-8 `CR_MUTANT_BARE_SHA256` killed); gate NOT_RUN |
 | 91p | host `operator_auth_rejects_undomained_hmac_and_zero_response` (recovery.rs:311) | M4_RECOVERY (host) | HOST PASS (cut 3, `test_continuity_resolve` (`make -C native/kernel test`, real sealed Store in a file): undomained HMAC and zero response refused; mutant MR-8 `CR_MUTANT_NO_DOMAIN` killed); gate NOT_RUN |
+
+## M4 ALLEN: C-only -> CK `M4_ALLEN` (scripts/qemu_ck_allen_test.sh; OS-0018 / ARCH-0035, both PROPOSED)
+
+No Rust-kernel counterpart. The TEST continuity image (`make full CK_TEST_CONTINUITY=1`), a 4096-byte-LBA emulated NVMe image, one new `qemu-system-aarch64` process per boot (ESP folder and UEFI vars rebuilt every boot; only the image carries state). Plan mode 5 with `lineage=` provisions identity and genesis subject in one sealed Store transaction; `intent=` adds one standing intent; mode 6 restores. Status for every row: QEMU PASS (receipt `RCPT_PATH`), hardware NOT_RUN. QEMU is not a physical cold reboot.
+
+| row | check | gate | status |
+|---|---|---|---|
+| A1 | default image carries no ALLEN TEST markers | M4_ALLEN | QEMU PASS |
+| A2 | G7 blank image, then kernel provisioning prints `PROVISIONED` and `ALLEN: GENESIS subject=<64> sequence=1 agent=<that agent> lineage=<request lineage>` | M4_ALLEN | QEMU PASS |
+| A3 | G7 standing intent: `ALLEN: INTENDED .. sequence=2 .. intents=1 active=1` and `ALLEN: INTENT .. kind=1 regime=7 target_ns=1000 since=2` | M4_ALLEN | QEMU PASS |
+| A4 | G7 independent host reader (`ck_cont_tool subject-dump`, on a copy) finds one genesis and one successor on the image, head = serial head | M4_ALLEN | QEMU PASS |
+| A5 | G8 provisioning a provisioned image: `CONTINUITY: STOP (AlreadyProvisioned)`, no genesis, image unchanged | M4_ALLEN | QEMU PASS |
+| A6-A8 | G9 two cold restores (new QEMU process each): `ALLEN: RESTORED` with the same subject, intent and lineage, incarnation 2 then 3; afterwards still one genesis, head object byte-identical | M4_ALLEN | QEMU PASS |
+| A9-A11 | G10 restore plan is only `AIENCONT v1 mode=6`; a second image restores its own, different subject; the host reader decodes the head from the sealed Store | M4_ALLEN | QEMU PASS |
+| A12-A14 | G11a forked chain (second genesis planted): `ALLEN: CORRUPT (subject chain fork)` on two boots, no resume, nothing minted, image unchanged | M4_ALLEN | QEMU PASS |
+| A15 | G11b flipped byte in a subject envelope: refused by the Store, nothing restored or minted, image unchanged | M4_ALLEN | QEMU PASS |
+| A16-A18 | G11c identity provisioned without a subject: `ALLEN: ABSENT` on two boots, none minted (kills `subject_restore_mints`) | M4_ALLEN | QEMU PASS |
+| A19-A20 | G12 another installation's subject chain, beside ours or on a subjectless identity: `ALLEN: CORRUPT (subject object belongs to another agent)`, never adopted (kills `subject_accept_foreign`) | M4_ALLEN | QEMU PASS |
+| A21-A30 | power loss: SIGKILL at each of the 9 Store checkpoints of the genesis transaction, then a cold boot finds unprovisioned with no subject (before_first_write .. after_first_flush), either (after_inactive_superblock), or identity with its genesis subject (after_final_flush, before_anchor, after_anchor); never identity without subject; an interrupted provisioning that committed nothing provisions again | M4_ALLEN | QEMU PASS |
 
 ## TRUST-1 Gate 4: scripts/qemu_security_suite.sh, scripts/qemu_secureboot_signing_test.sh
 

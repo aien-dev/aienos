@@ -66,6 +66,15 @@ The subject object is state, not authority. Nothing in `continuity_subject.c` mi
 
 Four mutants (`CS_MUTANT_ACCEPT_FOREIGN`, `CS_MUTANT_ACCEPT_TWO_ACTIVE`, `CS_MUTANT_SKIP_INTENT_ID`, `CS_MUTANT_ACCEPT_FORK`) are test-only, each must turn the host test red, and each is refused by `#error` under `CK_HARDWARE_STAGING`.
 
+
+### 2.7 Native genesis and restore (two paths)
+
+**PROVISION** is the only path that creates a subject. `cs_provision` (`native/kernel/svc/continuity_subject_provision.c`) wraps the Store sink that `cr_provision` (ADR 0016) already uses: inside that single `cr_sink.transact` call it decodes the AgentRoot being written, builds the genesis subject (sequence 1, provenance, origin, the Cortex lineage reference from the provisioning request) and appends it as one more object of the **same** transaction. The barrier is the existing sealed Store commit (`ss_transact`, ADR 0017: payload objects, catalog, commit record, flush, inactive superblock, flush, anchor); there is no second WAL, no second database and no other write path. A crash anywhere leaves either an unprovisioned Store or an identity with exactly one genesis subject; "identity without subject" cannot be produced by a power cut. After the commit it resolves the Store again and refuses unless the subject on media is the genesis it sent. A Store that is already provisioned is refused (`AlreadyProvisioned`, nothing written); an image with subject objects but no root is CORRUPT. A standing intent given at provisioning is written afterwards with `cs_commit` (sequence 2), through the same Store.
+
+**RESTORE** never creates one. On every resume the kernel resolves identity read-only, then `cs_resolve`: RESOLVED prints the subject and resume continues; ABSENT is reported and resume continues with no subject minted; CORRUPT (fork, gap, foreign root or agent, undecodable object) stops before anything is written, so a damaged subject is never replaced by a fresh one. The restore plan carries only the mode: the subject, its intents and its lineage come from the disk.
+
+In the kernel the two paths live in the TEST continuity image (`make full CK_TEST_CONTINUITY=1`), the only image that provisions an identity today; the default image provisions no identity and therefore no subject. Two more TEST-only mutants (`CS_MUTANT_RESTORE_MINTS`, `CS_MUTANT_ACCEPT_FOREIGN` in the kernel image) and one host mutant (`CS_MUTANT_PROVISION_SPLIT_TXN`) must be killed by the gates; each is refused under `CK_HARDWARE_STAGING`.
+
 ## 3. Qualification
 
 Status vocabulary: IMPLEMENTED / TESTED / QUALIFIED / NOT_RUN / FUTURE.
@@ -79,8 +88,9 @@ Status vocabulary: IMPLEMENTED / TESTED / QUALIFIED / NOT_RUN / FUTURE.
 | **process restart over one sealed Store image** (writer process exits; a second process resolves the same subject id, sequence 2, one intent regime 7 / 1000 ns) | TESTED (host) | `make -C native/kernel test-continuity-subject-restart`: `CK_CONTINUITY_SUBJECT_RESTART: PASS` |
 | mutants load-bearing and refused in hardware staging | TESTED | `make -C native/kernel continuity-subject-mutants`: `CK_CONTINUITY_SUBJECT_MUTANTS: PASS` |
 | sanitizer build | TESTED | host-san target of the same test |
-| QEMU cold restart over NVMe (ADR 0016 §Qualification shape) | NOT_RUN | no QEMU run was made for kind 24 |
-| hardware (Spark NVMe, Secure Boot chain) | NOT_RUN | host tests are not hardware qualification |
+| native genesis inside the provisioning transaction; exactly once; refusals; power cut at 9 checkpoints and every block boundary (4096 and 512 byte blocks) leaves unprovisioned or identity + one genesis, never one without the other | IMPLEMENTED, TESTED (host) | `make -C native/kernel test`: `test_continuity_subject_provision: PASS`; `make -C native/kernel continuity-mutants`: `CK_CONTINUITY_SUBJECT_PROVISION_MUTANTS: PASS` (split-transaction mutant killed) |
+| **QEMU cold restart over emulated NVMe** (gate `M4_ALLEN`, `scripts/qemu_ck_allen_test.sh`): G7 kernel genesis + one standing intent during provisioning; G8 second provisioning refused; G9 two restores, each a new QEMU process with the same image, same subject, intent and lineage; G10 the subject comes from the disk only; G11 fork, flipped envelope and missing subject never re-provision; G12 a foreign subject chain is refused; SIGKILL at all 9 checkpoints of the genesis transaction then a cold boot | TESTED (QEMU) | receipt `RCPT_PATH`; mutants `subject_restore_mints` and `subject_accept_foreign` KILLED |
+| hardware (Spark NVMe, Secure Boot chain, physical cold reboot) | NOT_RUN | host tests and an emulator are not hardware qualification |
 | OS reboot, machine migration | NOT_RUN | not claimed |
 | multi-subject Stores | FUTURE | the format does not preclude it (root + agent per object); v0 resolves one chain per root |
 | manifest link to the subject head | FUTURE | the manifest (kind 17) is frozen; v0 resolves the subject chain by scan |
@@ -94,5 +104,5 @@ Status vocabulary: IMPLEMENTED / TESTED / QUALIFIED / NOT_RUN / FUTURE.
 
 ## 5. Open questions for the operator
 
-1. Freeze format_version 0 of kind 24 together with ADR 0016, or keep both open until a QEMU cold-restart run has been made for kind 24.
+1. Freeze format_version 0 of kind 24 together with ADR 0016, or keep both open until hardware qualification (the QEMU cold-restart run for kind 24 now exists, §3).
 2. Whether `origin = promoted` (a subject object written from a Cortex promotion rather than by the operator) is allowed before AEGIS review of the promotion path.

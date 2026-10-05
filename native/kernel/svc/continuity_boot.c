@@ -22,10 +22,12 @@
 
 #include "ck.h"
 #include "continuity_recovery.h"
+#include "continuity_subject_provision.h"
 #include "disk_layout.h"
 #include "entropy.h"
 #include "fmt.h"
 #include "m5.h"
+#include "sha256.h"
 #include "store_boot.h"
 
 #define PLAN_MAGIC "AIENCONT v1 "
@@ -40,6 +42,11 @@ struct plan {
     int cp; /* -1 none */
     int have_response;
     uint8_t response[32];
+    int have_lineage; /* mode 5: provision WITH the ALLEN subject (OS-0018) */
+    uint8_t lineage[32];
+    int have_intent; /* mode 5 with lineage: one standing intent after genesis */
+    uint64_t intent[2];
+    uint8_t request[32]; /* SHA-256 of the plan line: the provisioning request */
 };
 
 static const int k_cps[] = {ST_CP_BEFORE_FIRST_WRITE, ST_CP_AFTER_PAYLOAD_OBJECTS, ST_CP_AFTER_CATALOG,
@@ -101,12 +108,45 @@ static int parse_plan(const char *p, size_t len, struct plan *out)
                 out->response[k] = (uint8_t)(hi << 4 | lo);
             }
             out->have_response = 1;
+        } else if (n == 8 + 64 && !memcmp(w, "lineage=", 8)) {
+            for (size_t k = 0; k < 32; k++) {
+                int hi = hexv(w[8 + 2 * k]), lo = hexv(w[9 + 2 * k]);
+                if (hi < 0 || lo < 0) return -1;
+                out->lineage[k] = (uint8_t)(hi << 4 | lo);
+            }
+            out->have_lineage = 1;
+        } else if (n > 7 && !memcmp(w, "intent=", 7)) {
+            /* intent=<regime>,<target ns>: one CS_INTENT_GOAL_LATENCY intent. */
+            size_t k = 7;
+            for (int f = 0; f < 2; f++) {
+                uint64_t v = 0;
+                size_t d = 0;
+                while (k < n && w[k] >= '0' && w[k] <= '9' && d < 19) {
+                    v = v * 10 + (uint64_t)(w[k] - '0');
+                    k++;
+                    d++;
+                }
+                if (!d) return -1;
+                out->intent[f] = v;
+                if (f == 0) {
+                    if (k >= n || w[k] != ',') return -1;
+                    k++;
+                }
+            }
+            if (k != n) return -1;
+            out->have_intent = 1;
         } else {
             return -1;
         }
         if (i < len && p[i] == ' ') i++;
     }
     if (!have_mode || i >= len) return -1;
+    {
+        sha256_ctx h; /* the provisioning request: the plan line up to its newline */
+        sha256_init(&h);
+        sha256_update(&h, (const uint8_t *)p, i);
+        sha256_final(&h, out->request);
+    }
     for (i = i + 1; i < len; i++)
         if (p[i]) return -1;
     return 0;
@@ -136,6 +176,7 @@ static struct {
     struct cr_txwork *tw;
     struct cr_view *v, *v2;
     struct cc_state *st;
+    struct cs_subject *subj, *subj2; /* ALLEN (OS-0018) */
     st_disk sd;
     st_dev sdev;
     ts_device tdev;
@@ -153,7 +194,9 @@ static int alloc_all(void)
     g.v = ck_alloc(sizeof *g.v);
     g.v2 = ck_alloc(sizeof *g.v2);
     g.st = ck_alloc(sizeof *g.st);
-    return g.ws && g.s && g.w && g.tw && g.v && g.v2 && g.st ? 0 : -1;
+    g.subj = ck_alloc(sizeof *g.subj);
+    g.subj2 = ck_alloc(sizeof *g.subj2);
+    return g.ws && g.s && g.w && g.tw && g.v && g.v2 && g.st && g.subj && g.subj2 ? 0 : -1;
 }
 
 static void line(const char *s)
@@ -297,6 +340,115 @@ static void recovery_phase(const disk_dev *d, const struct plan *p)
     }
 }
 
+/* ---- ALLEN (ARCH-0035 / OS-0018, PROPOSED) ----
+ * Provision (mode 5 with lineage=): identity and the genesis subject in ONE
+ * Store transaction (cs_provision), then, if intent= is given, one standing
+ * intent as subject sequence 2 through cs_commit (its own transaction).
+ * Restore (modes 6..8): the subject is resolved read-only BEFORE anything is
+ * written. RESOLVED is reported; ABSENT is reported and never minted;
+ * anything else (corrupt, forked, foreign, unreadable) stops the boot with
+ * nothing written. Markers:
+ *   ALLEN: GENESIS|INTENDED|RESTORED subject=<64> sequence=<n> agent=<64> lineage=<64> intents=<n> active=<n>
+ *   ALLEN: INTENT id=<64> kind=<k> regime=<r> target_ns=<t> since=<s>    (each ACTIVE intent)
+ *   ALLEN: ABSENT (...)   ALLEN: CORRUPT (<why>)   ALLEN: STOP (<outcome>) */
+static void allen_lines(const char *word, const struct cs_subject *s, const uint8_t id[32])
+{
+    char b[400], sub[65], ag[65], ln[65];
+    uint32_t active = 0;
+    for (uint32_t i = 0; i < s->n_intents; i++) active += s->in[i].state == CS_ACTIVE;
+    hex_into(sub, id, 32);
+    hex_into(ag, s->agent, 32);
+    hex_into(ln, s->cortex, 32);
+    ck_snprintf(b, sizeof b, "ALLEN: %s subject=%s sequence=%llu agent=%s lineage=%s intents=%u active=%u", word, sub,
+                (unsigned long long)s->sequence, ag, ln, (unsigned)s->n_intents, (unsigned)active);
+    line(b);
+    for (uint32_t i = 0; i < s->n_intents; i++) {
+        const struct cs_intent *a = &s->in[i];
+        if (a->state != CS_ACTIVE) continue;
+        hex_into(sub, a->id, 32);
+        ck_snprintf(b, sizeof b, "ALLEN: INTENT id=%s kind=%u regime=%llu target_ns=%llu since=%llu", sub,
+                    (unsigned)a->kind, (unsigned long long)a->payload[0], (unsigned long long)a->payload[1],
+                    (unsigned long long)a->since);
+        line(b);
+    }
+}
+
+static void allen_stop(int o, const char *why)
+{
+    char b[256];
+    if (o == CR_CORRUPT) ck_snprintf(b, sizeof b, "ALLEN: CORRUPT (%s)", why ? why : "-");
+    else ck_snprintf(b, sizeof b, "ALLEN: STOP (%s%s%s)", cr_outcome_name(o), why ? ": " : "", why ? why : "");
+    line(b);
+}
+
+static void allen_provision(const struct cr_source *src, const struct cr_sink *snk, struct cr_sealed_sink *sk,
+                            const struct plan *p, struct ck_rng *rng)
+{
+    static struct cs_genesis gen;
+    uint8_t sid[32], sid2[32], iid[32];
+    const char *why = 0;
+    int store_rc = 0;
+    memcpy(gen.provenance, p->request, 32);
+    gen.origin = CS_ORIGIN_OPERATOR;
+    memcpy(gen.cortex, p->lineage, 32);
+    if (p->cp >= 0) {
+        sk->hook = cont_hook;
+        sk->hook_arg = (void *)p;
+    }
+    int o = cs_provision(src, snk, g.w, g.tw, rng, ck_store_test_uuid, CC_SOURCE_QUALIFICATION, &gen, g.v, g.subj,
+                         sid, &why, &store_rc);
+    sk->hook = 0;
+    if (o != CR_RESOLVED) {
+        print_outcome(o, why, store_rc);
+        allen_stop(o, why);
+        return;
+    }
+    print_view("PROVISIONED", g.v);
+    allen_lines("GENESIS", g.subj, sid);
+    if (!p->have_intent) return;
+    memcpy(g.subj2, g.subj, sizeof *g.subj2);
+    cs_subject_advance(g.subj2, sid, p->request, CS_ORIGIN_OPERATOR);
+    if (cs_subject_intend(g.subj2, CS_INTENT_GOAL_LATENCY, p->intent, iid, &why) != CC_OK) {
+        allen_stop(CR_E_ARG, why);
+        return;
+    }
+    o = cs_commit(src, snk, g.w, g.v, g.subj2, sid2, &why, &store_rc);
+    if (o != CS_RESOLVED) {
+        allen_stop(o, why);
+        return;
+    }
+    allen_lines("INTENDED", g.subj2, sid2);
+}
+
+/* 1 = go on with the resume, 0 = stop (nothing written). */
+static int allen_restore(const struct cr_source *src, const struct cr_sink *snk, const struct plan *p)
+{
+    uint8_t sid[32];
+    const char *why = 0;
+    int store_rc = 0;
+    (void)snk;
+    (void)p;
+    if (cr_resolve(src, g.w, g.v2, &why, &store_rc) != CR_RESOLVED) return 1; /* cr_resume reports it */
+    int s = cs_resolve(src, g.w, g.v2, g.subj, sid, &why, &store_rc);
+#ifdef CS_MUTANT_RESTORE_MINTS
+    if (s == CS_ABSENT) { /* MUTANT: restore mints a fresh subject */
+        cs_subject_genesis(g.subj, g.v2, p->request, CS_ORIGIN_OPERATOR);
+        if (cs_commit(src, snk, g.w, g.v2, g.subj, sid, &why, &store_rc) == CS_RESOLVED)
+            s = cs_resolve(src, g.w, g.v2, g.subj, sid, &why, &store_rc);
+    }
+#endif
+    if (s == CS_RESOLVED) {
+        allen_lines("RESTORED", g.subj, sid);
+        return 1;
+    }
+    if (s == CS_ABSENT) {
+        line("ALLEN: ABSENT (provisioned without a subject; restore never mints one)");
+        return 1;
+    }
+    allen_stop(s, why);
+    return 0;
+}
+
 static void continuity_phase(const disk_dev *d, const struct plan *p)
 {
     struct cr_source src;
@@ -315,6 +467,10 @@ static void continuity_phase(const disk_dev *d, const struct plan *p)
             line("CONTINUITY: NO_ENTROPY");
             return;
         }
+        if (p->have_lineage) {
+            allen_provision(&src, &snk, &sk, p, &rng);
+            return;
+        }
         int o = cr_provision(&src, &snk, g.w, g.tw, &rng, ck_store_test_uuid, CC_SOURCE_QUALIFICATION, g.v, &why,
                              &store_rc);
         if (o == CR_RESOLVED) print_view("PROVISIONED", g.v);
@@ -322,6 +478,7 @@ static void continuity_phase(const disk_dev *d, const struct plan *p)
         return;
     }
 
+    if (!allen_restore(&src, &snk, p)) return;
     int committed = 0;
     int o = cr_resume(&src, &snk, g.w, g.tw, g.v, &committed, &why, &store_rc);
     if (o != CR_RESOLVED) {
@@ -374,6 +531,12 @@ int ck_cont_boot_stage(const disk_dev *d, int *rc)
 #endif
 #ifdef CR_MUTANT_BARE_SHA256
     ck_puts("continuity: TEST-ONLY MUTANT bare_sha256: operator response is a bare SHA-256\n");
+#endif
+#ifdef CS_MUTANT_RESTORE_MINTS
+    ck_puts("continuity: TEST-ONLY MUTANT subject_restore_mints: restore mints an ALLEN subject when it finds none\n");
+#endif
+#ifdef CS_MUTANT_ACCEPT_FOREIGN
+    ck_puts("continuity: TEST-ONLY MUTANT subject_accept_foreign: restore accepts a subject of another agent\n");
 #endif
     if (!d || (d->block_size != 512 && d->block_size != 4096)) return 0;
     uint32_t bpu = CK_LAYOUT_UNIT / d->block_size;
