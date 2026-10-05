@@ -640,7 +640,8 @@ HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
 	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c
 TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy test_handoff test_fbcon \
-	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry
+	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
+	test_continuity_subject
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -664,8 +665,8 @@ handoff-mutant: $(OUT)/host/test_handoff_mutant
 	@if $< > $<.log 2>&1; then cat $<.log; echo "test_handoff mutant (reserved0 check removed): PASSED, test does not catch it"; exit 1; \
 	else grep -F "test_handoff: FAIL" $<.log && echo "test_handoff mutant (reserved0 check removed): FAILS as required"; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant
-	@fail=0; for t in $(filter-out handoff-mutant,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant test-continuity-subject-restart
+	@fail=0; for t in $(filter-out handoff-mutant test-continuity-subject-restart,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -720,7 +721,7 @@ $(OUT)/host-san/test_continuity_codec: $(KDIR)/tests/test_continuity_codec.c $(C
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CC_HOST_INC) $(CC_FIXTURE_DEF) -o $@ $< $(CC_HOST_SRCS)
 
-continuity-mutants: $(OUT)/host/test_continuity_codec continuity-resolve-mutants continuity-commit-mutants continuity-recovery-mutants
+continuity-mutants: $(OUT)/host/test_continuity_codec continuity-resolve-mutants continuity-commit-mutants continuity-recovery-mutants continuity-subject-mutants
 	@mkdir -p $(OUT)/host-mut; fail=0; \
 	$(OUT)/host/test_continuity_codec > $(OUT)/host-mut/base.log 2>&1 || { echo "unmutated test_continuity_codec fails"; fail=1; }; \
 	for m in $(CC_MUTANTS); do \
@@ -829,6 +830,56 @@ continuity-commit-mutants: $(OUT)/host/test_continuity_commit
 	  else echo "mutant flag $$m refused under CK_HARDWARE_STAGING"; fi; \
 	done; \
 	if [ $$fail = 0 ]; then echo "CK_CONTINUITY_COMMIT_MUTANTS: PASS"; else echo "CK_CONTINUITY_COMMIT_MUTANTS: FAIL"; exit 1; fi
+
+# ALLEN subject state (continuity object kind 24; ARCH-0035 / OS-0018, PROPOSED):
+# host test over the REAL sealed Store in a file, a two-process restart proof
+# (test-continuity-subject-restart) and TEST-only -D mutants, each of which must
+# make the test print its FAIL verdict. Mutant flags are refused under
+# CK_HARDWARE_STAGING (svc/continuity_subject.h).
+CS_HOST_SRCS := $(KDIR)/svc/continuity_subject.c $(CM_HOST_SRCS)
+CS_HOST_DEPS := $(CS_HOST_SRCS) $(wildcard $(KDIR)/svc/continuity_*.h) $(KDIR)/core/entropy.h \
+	$(wildcard $(NATIVE)/store/*.h $(NATIVE)/m5/*.h $(NATIVE)/disk/*.h $(NATIVE)/crypto/*.h) $(KDIR)/tests/ck_test.h
+# MS-1 foreign root/agent accepted at resolve, MS-2 two active intents in one slot
+# accepted, MS-3 intent id derivation not checked, MS-4 chain fork accepted.
+CS_MUTANTS := CS_MUTANT_ACCEPT_FOREIGN CS_MUTANT_ACCEPT_TWO_ACTIVE CS_MUTANT_SKIP_INTENT_ID CS_MUTANT_ACCEPT_FORK
+
+$(OUT)/host/test_continuity_subject: $(KDIR)/tests/test_continuity_subject.c $(CS_HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(CM_HOST_INC) -o $@ $< $(CS_HOST_SRCS)
+
+$(OUT)/host-san/test_continuity_subject: $(KDIR)/tests/test_continuity_subject.c $(CS_HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CM_HOST_INC) -o $@ $< $(CS_HOST_SRCS)
+
+# ALLEN-G2 on the host: the writer process provisions and commits a subject with
+# one standing intent and exits; a second process reopens the same Store image,
+# resolves the same subject object and finds the same intent.
+.PHONY: test-continuity-subject-restart
+test-continuity-subject-restart: $(OUT)/host/test_continuity_subject
+	@mkdir -p $(OUT)/host-subject; img=$(OUT)/host-subject/allen.img; rm -f $$img; \
+	$(OUT)/host/test_continuity_subject --write $$img > $(OUT)/host-subject/write.log || { cat $(OUT)/host-subject/write.log; exit 1; }; \
+	id=$$(sed -n 's/^ALLEN subject id: //p' $(OUT)/host-subject/write.log); \
+	test -n "$$id" || { echo "no subject id from the writer"; exit 1; }; \
+	$(OUT)/host/test_continuity_subject --restore $$img $$id > $(OUT)/host-subject/restore.log || { cat $(OUT)/host-subject/restore.log; exit 1; }; \
+	grep -h '^ALLEN' $(OUT)/host-subject/write.log $(OUT)/host-subject/restore.log; \
+	echo "CK_CONTINUITY_SUBJECT_RESTART: PASS (two processes, sealed Store image $$img)"
+
+continuity-subject-mutants: $(OUT)/host/test_continuity_subject
+	@mkdir -p $(OUT)/host-mut; fail=0; \
+	$(OUT)/host/test_continuity_subject > $(OUT)/host-mut/subject_base.log 2>&1 || { echo "unmutated test_continuity_subject fails"; fail=1; }; \
+	for m in $(CS_MUTANTS); do \
+	  b=$(OUT)/host-mut/test_continuity_subject_$$m; \
+	  if ! $(HOSTCC) $(HCFLAGS) $(CM_HOST_INC) -D$$m -o $$b $(KDIR)/tests/test_continuity_subject.c $(CS_HOST_SRCS); then \
+	    echo "mutant $$m does not build (FAIL)"; fail=1; continue; fi; \
+	  $$b > $$b.log 2>&1; \
+	  if grep -q "^test_continuity_subject: FAIL" $$b.log; then echo "mutant $$m caught"; \
+	  else echo "mutant $$m NOT caught (FAIL)"; fail=1; fi; \
+	  if $(HOSTCC) $(HCFLAGS) $(CM_HOST_INC) -DCK_HARDWARE_STAGING=1 -D$$m \
+	      -fsyntax-only $(KDIR)/svc/continuity_subject.c 2>/dev/null; then \
+	    echo "mutant flag $$m accepted under CK_HARDWARE_STAGING (FAIL)"; fail=1; \
+	  else echo "mutant flag $$m refused under CK_HARDWARE_STAGING"; fi; \
+	done; \
+	if [ $$fail = 0 ]; then echo "CK_CONTINUITY_SUBJECT_MUTANTS: PASS"; else echo "CK_CONTINUITY_SUBJECT_MUTANTS: FAIL"; exit 1; fi
 
 # Continuity Recovery Core (C port cut 5): host test over the REAL sealed Store in a
 # file, TEST-only -D mutants, each of which must make the test print its FAIL verdict.

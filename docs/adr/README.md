@@ -22,6 +22,7 @@ This directory documents the key architectural decisions and formal technical sp
 | [ADR 0014](0014-binary-artifact-v0-and-native-admission.md) | Binary Artifact v0 and Native Admission | Proposed | 2026-09-25 | [ADR 0012](0012-self-construction-capability-growth-and-generations.md); [ADR 0013](0013-aienos-abi-v1.md); SEED-0B qualification |
 | [ADR 0015](0015-system-store-v1-format.md) | AIENOS System Store v1 Format | Accepted for P3-1 format freeze | 2026-09-25 | [ADR 0003](0003-bootstrap-firmware-handoff-and-minimal-object-store.md); P3 Native Persistence & Continuity |
 | [ADR 0016](0016-continuity-objects-over-store-v1.md) | Continuity objects over System Store v1 | Proposed (format freeze needs operator approval) | 2026-09-25 | [ADR 0007](0007-continuous-existence-provisioning-once.md), [ADR 0015](0015-system-store-v1-format.md); M4 continuity |
+| [ADR 0018](0018-allen-subject-state-object.md) | ALLEN Subject State Object (continuity kind 24) | Proposed (companion to ARCH-0035; format freeze needs operator approval) | 2026-10-04 | [ADR 0016](0016-continuity-objects-over-store-v1.md); omega ARCH-0022 Cortex; R16 |
 
 ---
 
