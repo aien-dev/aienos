@@ -3,13 +3,148 @@
 Snapshot of every TRUST-1 gate (docs/TRUST-1-IMPLEMENTATION-PLAN.md) and every
 M5 requirement (aien-architecture CURRENT_EXECUTION_PLAN.md section D1, ADR
 0017) against what is actually on `main`. Base commit for this snapshot:
-`a3be1b0` (2026-10-01, after #180). Verdict vocabulary only: PASS, FAIL,
+`a3be1b0` (2026-10-01, after #180); the 2026-10-05 refresh below re-checks it against 9d41efc. Verdict vocabulary only: PASS, FAIL,
 NOT_RUN, BLOCKED_HARDWARE, BLOCKED_OPERATOR, MISSING_IMPLEMENTATION. A gate is
 PASS only when every acceptance assertion in the plan is true; a gate with
 some items done and others open carries the verdict of its worst open item.
 QEMU, swTPM and host tests never count as Machine 1 hardware qualification.
 
 Overall: **TRUST-1 NOT QUALIFIED. M5 NOT QUALIFIED.**
+
+## Refresh 2026-10-05 against aienos main 9d41efc (read this section first)
+
+Authority for this section: lane L4-TRUST of the overnight campaign, candidate CAND-0
+(`9d41efc9d1bea31be0640ca70eeeec9d1d000fad`, ALLEN native #260). It re-reads every row of the
+tables below against current main. The tables further down are history: their
+"Base commit" and "newest receipt" sentences are superseded by this section.
+Overall is unchanged: **TRUST-1 NOT QUALIFIED. M5 NOT QUALIFIED.** No row became PASS in
+this refresh and nothing here was run on Machine 1 by an agent.
+
+Tags: OBSERVED (read in a file or command output named here), INFERRED (follows from
+observed facts, reasoning given), UNVERIFIED (not checked in this refresh).
+
+### Receipts used and how fresh they are
+
+| Receipt | Commit | Tier | Counts | Status for 9d41efc |
+|---|---|---|---|---|
+| `evidence/trust1_m5_qualification_3f9d07f50196b4ad741b03c353ed3c45c268a72f04c32f00a0ddfab5294a3eee.json` (in repo) | 44de11f, 2026-10-02 | host + QEMU | pass 19, fail 1, not_run 1, blocked 11, missing 5 | older, kept as history |
+| `~/workspace/evidence-out/TRUST1-M5-20261003-130aa20/trust1_m5_qualification_c992277b5396191ba6fe74d6022b8c3bbbceb7588fe01def99c1d7a493317540.json` (NOT in repo; lane TR-02; started 2026-10-03T17:02:32Z) | 130aa20 | host + QEMU | pass 20, fail 1, not_run 0, blocked 11, missing 5 (37 rows) | newest TRUST-1/M5 receipt that exists; see staleness below |
+| `evidence/ck_gates_1ecf5bcd303bf88422dd0542f14851c931f5d52276838fa182c812f3c73f3c1b.json` (in repo, from #260) | 640522a, 2026-10-05 | QEMU only | 20 gates: pass 15, fail 0, not_run 5 | binds 9d41efc, see "Binding" below |
+| `evidence/allen_native_qemu_cfe9aecffb8b20e0c1ff51fad54c46c522ec7d6c56c6cba7661e4b8cda1ee25a.json` (in repo, from #260) | 640522a | QEMU only | 3 results PASS | binds 9d41efc, see ALLEN section |
+| New receipt at 9d41efc | 9d41efc | host + QEMU | QUEUED, NOT_RUN at the time of writing | owed, see "Owed" |
+
+The one FAIL in both newest TRUST-1/M5 receipts is `t1_gate7_preflight`. It reads live
+operator state and Secure Boot is off on the Spark (`secure_boot=0` in every Gate 2
+baseline `capture.env`; OBSERVED), so the pre-flight correctly refuses. It is a software
+FAIL that reports operator state, not a code regression, and it stays FAIL until Secure Boot
+is on again.
+
+Binding of the 640522a receipts to 9d41efc (OBSERVED, `git diff` in this worktree):
+`197206c` (the PR head that added the receipts) has git tree `5b9615818287e1369dd87ce82c428c188f3db699`, identical
+to the tree of 9d41efc. Between `640522a` (the commit the receipts name) and 9d41efc the
+only non-evidence, non-crumb files that differ are `docs/adr/0018-allen-subject-state-object.md`
+and `native/kernel/GATES.md`. So every C kernel, boot, Store, M5 and script byte the QEMU
+runs used is the code of 9d41efc.
+
+Staleness test applied to the 130aa20 receipt (OBSERVED, `git diff --stat 130aa20 HEAD` with
+crumb files excluded): no change at all in `native/crypto`, `native/m5`, `native/sig`,
+`native/store`, `native/disk`, `native/net`, `crates/aienos-crypto`,
+`crates/aienos-kernel/src/crypto`, `crates/aienos-kernel/src/store`, `crates/aienos-boot`,
+`crates/aienos-store-tool`, nor in any `scripts/trust1_*`, `tpm_measurement_campaign.sh`,
+`qemu_secureboot_signing_test.sh`, `qemu_security_suite.sh`, `qemu_store_512b_crash_test.sh`,
+`build_standalone_recovery_initrd.sh` or `verify_recovery_tools.sh`. Changed since 130aa20:
+`native/boot` (GOP console, model load), `native/kernel` (FPU, infer, screen, ALLEN) and
+the `ck_gates.sh` gate list. So the host and Rust rows of the 130aa20 receipt are current
+for 9d41efc; its three C-kernel QEMU rows (`ck_m1_boot_qemu`, `ck_store_kernel_qemu`,
+`ck_argus1_revoke_qemu`) are STALE and are replaced by the same gates in the 640522a
+`ck_gates` receipt (rows M1, M4_STORE, ARGUS1_REVOKE all PASS there).
+
+GitHub CI on 9d41efc (OBSERVED, `gh run list -R aien-dev/aienos -b main`): Native suites,
+Crypto boundary, Crumb compiler, Push on main and "C kernel (CK) gates" (run 37257444148)
+all concluded success (CK gates checked again at 03:29Z on 2026-10-05; it was still in
+progress at 03:23Z). The CK run is a QEMU-only check.
+
+### TRUST-1 gates, classified
+
+Classes: DONE (every acceptance item has evidence at the stated tier), MISSING_IMPLEMENTATION,
+software FAIL, BLOCKED_OPERATOR, BLOCKED_HARDWARE, STALE. A gate carries the class of its
+worst open item.
+
+| Gate | Class now | Evidence and tier | Fresh for 9d41efc? | What is still owed |
+|---|---|---|---|---|
+| 0 Freeze baseline | BLOCKED_OPERATOR | Gate 0 addendum (2026-09-30, Secure Boot ON capture) keeps Gate 0 OPEN. New since: two cold boots compared identical, `boot2` vs `boot3` changed=0 of 35 (physical Machine 1, 130aa20, Secure Boot OFF; `evidence/trust1_gate2_baseline_2026-10-03/`); `fwupd-refresh.timer` observed paused (`boot0` vs `boot3`: enabled to disabled; `systemctl is-enabled` printed `disabled` at 2026-10-05T03:25Z) | Tools unchanged, evidence not stale. The addendum's operator facts are 5 days old (UNVERIFIED now) | Second independent place for the offline material (addendum: identity has one copy and no passphrase); cold-boot stability with Secure Boot ON (the plan's precondition is Secure Boot ON, the only repeat is OFF); a written approval for the firmware pause; service baseline (Forgejo loop, backup script) |
+| 1 Recovery media | BLOCKED_OPERATOR | `t1_recovery_tools` PASS (host, 130aa20). The 2026-09-24 QEMU zero-disk receipt is amended to NOT_RUN by `gate1_zero_disk_recovery_receipt_addendum_v1.json`. Stick boot-and-return partial per #53/#59 (UNVERIFIED here) | Recovery scripts unchanged since 3156c33, not stale | Operator Steps 3 to 6: test file, stick rebuild (approval), attended Secure Boot ON boot with unlock round trip |
+| 2 TPM measurement campaign | BLOCKED_OPERATOR (reboots are BLOCKED_HARDWARE) | Tooling self-test `t1_measurement_tools` PASS (host). Baseline of 4 physical boots 2026-10-03 (Secure Boot OFF). Experiments 1 to 5 not run, no Gate 2 per-experiment receipt exists | Not stale | The one-change experiments, the report, and the Secure Boot ON repeat. Attended steps: `docs/TRUST-1-OPERATOR-STEPS.md`, "Gate 2 attended run" |
+| 3 Owner Root ceremony | BLOCKED_OPERATOR | `t1_key_ceremony` PASS (host, throwaway keys) | Not stale | Offline ceremony (Operator Step 8), two backups. Precondition Gates 0 and 1 |
+| 4 Emulator security suite | MISSING_IMPLEMENTATION | Signed accepted, unsigned and tampered refused, QEMU: `qemu_secureboot_signing` PASS (130aa20, snakeoil TEST key). 100 of 100 boots plus tamper rejection, QEMU + swTPM, 2026-10-02 (log only, `~/workspace/test-queue-logs/C5-SOAK-005901.log`) | Signing test not stale. The soak is STALE against #243 (`qemu_security_suite.sh` changed after it ran: the tamper check now also needs the firmware banner). A 5-boot rerun is queued | Signed boot manifest, manifest accept and alter, A/B selection, failed-candidate fallback: no code (see next section). Build and emulator receipts for the gate are not produced. Firmware dbx revocation is not tested |
+| 5 TPM policy simulation | BLOCKED_OPERATOR | `t1_gate5_policy_sim` PASS on swTPM (130aa20). Simulation only | Not stale | Preconditions Gates 2 to 4. PCR 7 and 11 in the simulation are placeholders. PCR 11 is all zero on the live Spark (OBSERVED in every baseline capture) |
+| 6 Storage migration prep | BLOCKED_OPERATOR | none | n/a | Gates 0 to 5, own written steps |
+| 7 Hardware validation | BLOCKED_OPERATOR and BLOCKED_HARDWARE; `t1_gate7_preflight` is a software FAIL (reads live state, Secure Boot off) | preflight script only | Not stale | Gates 0 to 6, approval receipt, Secure Boot ON |
+| 8 Observation | BLOCKED_OPERATOR | none | n/a | Gate 7 |
+| 9 Retire legacy policy | BLOCKED_OPERATOR | none | n/a | Gate 8 and approval |
+
+### M5 rows, classified
+
+| Requirement | Class now | Evidence and tier | Still owed |
+|---|---|---|---|
+| Owner-controlled key hierarchy | BLOCKED_OPERATOR | `m5_native_test` PASS (host; sources unchanged since 130aa20; CI Native suites success at 9d41efc) | Gate 3 ceremony and the real Owner Root |
+| Sealed volume keys | MISSING_IMPLEMENTATION (the real TPM part is BLOCKED_HARDWARE) | swTPM policy model only. The kernel's production key source `ck_store_production_keys` is a refusing seam that returns `CK_SB_E_BLOCKED_OPERATOR` (`native/kernel/svc/store_boot.c`) | Product seal/unseal of K_vol; Gate 6 on real TPM |
+| AES-256-GCM-SIV object envelopes | MISSING_IMPLEMENTATION for the production row; mechanism DONE on host and in QEMU with TEST keys | Host: `m5_store_encrypted_objects` PASS. QEMU: `M4_STORE` PASS (640522a `ck_gates`) | Real device, real keys |
+| Anti-rollback anchors | MISSING_IMPLEMENTATION | Anchor in its own region, host and QEMU (`M4_STORE`); the kernel opens it at every boot | TPM NV anchor (Gate 6); rolling back Store and anchor regions together still mounts |
+| Migration authorization | BLOCKED_OPERATOR | `m5_migration_sig_test_key` PASS (host, TEST keys) | Real owner signature from Gate 3 |
+| Production/test identity separation | MISSING_IMPLEMENTATION for production | The hardware-staging build refuses TEST identity keys before any disk access (`store_boot.c`, CK_SB_E_TEST_KEYS); host tests for the mechanism; QEMU with TEST class only | A production boot path that enforces it |
+| Deterministic recovery | MISSING_IMPLEMENTATION (Machine 1) | Newer than the older row text: the kernel-path Store crash campaign now exists and passed in QEMU, `M4_STORE_CRASH` PASS (640522a `ck_gates`, `scripts/qemu_ck_store_crash_test.sh`, 709 s). The older sentence "no crash campaign in the kernel path" is superseded. The C Recovery Core has a QEMU gate, `M4_RECOVERY` PASS with a TEST-only operator key (the prose in `native/kernel/GATES.md` rows 88 to 91p still says NOT_RUN: documentation lag, INFERRED from the receipt row and `qemu_ck_recovery_test.sh`) | A Machine 1 run |
+| Owner-signed trust chain on Machine 1 | BLOCKED_OPERATOR | none | Gates 0 to 7 |
+| Production Store on 512-byte geometry | MISSING_IMPLEMENTATION | C engine and driver host and QEMU; partition-aware layout `DISK_LAYOUT` PASS in QEMU (640522a `ck_gates`, 512 B and 4096 B) | Real-device run on the Machine 1 SSD; DISK_LAYOUT on hardware is NOT_RUN |
+
+### Signed boot manifests, A/B, rollback, recovery, production Store wiring: exactly what exists
+
+| Piece | Code that exists | What is missing | Gate that covers it |
+|---|---|---|---|
+| Signed boot manifest | None. The Rust loader has no manifest, the C stub "loads nothing and checks nothing" (`native/boot/efi_main.c`, `native/boot/README.md`, `docs/BOOT_HANDOFF_CONTRACT.md` section 1). Firmware Secure Boot signature checks on the single PE are tested | Manifest format, loader verification, owner signature chain. No spec fixes a manifest format (searched `docs/` and aien-architecture: only the plan's gate text names it) | `t1_gate4_manifest_ab` NOT_RUN (MISSING_IMPLEMENTATION); closest covered item: `qemu_secureboot_signing` (signature on the image, not a manifest) |
+| A/B slot selection | None. Operator decision Q3 (ADR 0024) froze the Rust loader and says no slots will be added to it. The C path replaces slots with firmware one-time BootNext (`docs/BOOT_HANDOFF_CONTRACT.md` section 7) | Everything slot-related. Conflict to decide: Gate 9 acceptance text in `docs/TRUST-1-IMPLEMENTATION-PLAN.md` asks for "AIENOS A/B discipline", Q3 says no A/B in this loader | none (same row) |
+| One-time boot and rollback to the default | Rust: BootNext one-time candidate with return to the default entry, QEMU script `scripts/qemu_native_rollback_test.sh` (ROADMAP records `M0_NATIVE_ROLLBACK_QEMU: PASS`; not rerun in this refresh, rerun queued). C: `CK_HARDWARE_STAGING` image plus `scripts/stage_one_time_boot_ck.sh --dry-run` (from #256) | C rollback rows 42 to 46 (`M0_ROLLBACK` in `ck_gates.sh`) report NOT_RUN: MISSING_IMPLEMENTATION. The spec exists, `docs/BOOT_HANDOFF_CONTRACT.md` section 7.1: rows 42, 45, 46 need script changes only, rows 43 and 44 also need two TEST-only kernel build flags (bad magic, hang) | `M0_ROLLBACK` NOT_RUN. Physical `M0_NATIVE_ROLLBACK_MACHINE1` BLOCKED |
+| Recovery | Recovery media build and tools (`t1_recovery_tools` PASS host). Rust and C Recovery Core, TEST-only operator key, QEMU PASS for the C one (`M4_RECOVERY`) | Real operator key and attended stick boot with Secure Boot ON (Gate 1 steps) | `t1_recovery_tools`, `M4_RECOVERY`, Gate 1 attended |
+| Production Store wiring | C kernel opens the sealed Store at boot, TEST keys, SMMU-confined NVMe DMA, partition-aware layout, crash campaign, ARGUS-1 revoke, ALLEN genesis and restore, all in QEMU (640522a `ck_gates`: M4_NVME, M4_STORE, M4_STORE_CRASH, M4_CONTINUITY, M4_ALLEN, DISK_LAYOUT, ARGUS1_REVOKE PASS) | Production K_vol source (BLOCKED_OPERATOR seam), real TPM seal, real device run, Gate 3 owner keys | `ck_store_kernel_qemu`, `ck_argus1_revoke_qemu`, `m5_store_kernel_binding` (MISSING_IMPLEMENTATION), `m5_production_store_512b` (MISSING_IMPLEMENTATION) |
+
+Decision on a software prerequisite: none was implemented in this refresh. The only
+candidate with an existing spec is the C port of rollback rows 42 to 46 (section 7.1 above).
+It spans a script change plus two new kernel TEST build flags and a labelled second mode,
+and the document that specifies it still marks every part PROPOSED. It is better done as its
+own cut with its own review than folded into a matrix refresh. Cut list for whoever takes it:
+(1) row 42, 45, 46 by pointing `candidate.efi` at the normal C image and grepping
+`report_kind: final`; (2) row 43 with a TEST-only bad-magic flag refused by
+`CK_HARDWARE_STAGING` (the existing `CK_TEST_STALE_HANDOFF=2` flag passes an old magic, so
+check whether it is enough before adding a new flag); (3) row 44 with a TEST-only hang flag.
+
+### ALLEN native continuity (not a TRUST-1 or M5 row; recorded because #260 touched the same kernel)
+
+Every claim in #260 maps to a check in `scripts/qemu_ck_allen_test.sh`:
+
+| #260 claim | Check | Evidence |
+|---|---|---|
+| Genesis is atomic inside the provisioning Store transaction | host `test_continuity_subject_provision`: power cut at 9 checkpoints and every block boundary gives unprovisioned or identity plus one genesis, 0 other, and the split-transaction mutant is caught; QEMU `FI.1` to `FI.9`: SIGKILL at all 9 Store checkpoints, then a cold boot finds old or new state, never identity without subject | Host rerun in this refresh (OBSERVED): `test_continuity_subject_provision: PASS (764 checks)`, mutant `CS_MUTANT_PROVISION_SPLIT_TXN caught (83 checks failed)`, logs in `~/workspace/overnight-1005/reports/L4-TRUST-evidence/host-allen-*-9d41efc.log`. QEMU: receipt `evidence/allen_native_m4_allen_f50447aa35e01c30deaf5508bc88e5fa3e011ae49d34fd2010f6eefe280a35bb.log` PASS lines FI.1 to FI.9 |
+| Exactly-once provisioning | `G8`: provisioning a provisioned image is refused (`AlreadyProvisioned`), no genesis, image unchanged; `FI.1b` re-provision after an uncommitted attempt works | same log |
+| Cold restore never mints | `G9` (two new QEMU processes, no `ALLEN: GENESIS` line, still 1 genesis and 2 subject objects, head object byte-identical); `G11c` identity without subject reports `ALLEN: ABSENT` on two boots and the host reader still finds 0 subject objects | same log |
+| Cold restore is read-only | `G9` shows no new subject object and an identical head object. It does not compare a whole-image hash, because a restore legitimately advances the incarnation. The strict "image unchanged" check is applied to the refusal cases `G8`, `G11a`, `G11b`, `G12a`, `G12b`. So "read-only" holds for the subject, and is INFERRED, not asserted byte for byte, for the whole disk | same log |
+| Foreign-state refusal | `G12a` another installation's chain beside ours and `G12b` on a subjectless identity: `ALLEN: CORRUPT (subject object belongs to another agent)`, nothing restored, nothing minted, image unchanged | same log |
+| Corruption refusal | `G11a` forked chain (2 boots), `G11b` flipped envelope byte: refused, image unchanged | same log |
+| No re-provisioning on restore | `G10` restore plan is only `AIENCONT v1 mode=6`; a second image restores its own subject, not the first image's | same log |
+| QEMU mutants `subject_restore_mints` and `subject_accept_foreign` are KILLED | the script supports `--mutant`; `GATES.md` A16-A20 name which checks kill them | UNVERIFIED in recorded evidence: the receipt and the gate log contain no mutant run. Both runs are queued (below) |
+
+Receipt binding: both ALLEN receipts name `640522a`, whose code equals 9d41efc (see Binding above). Limits stated by #260 and
+kept: QEMU only, no physical cold reboot or NVMe, native genesis exists only in the TEST
+continuity image (the default image does not provision an identity; operator decision, not
+changed here), ADR 0018 stays PROPOSED.
+
+### Owed after this refresh (queued through the shared heavy queue, NOT_RUN when this was written)
+
+- `trust1_m5_qualify.sh --with-qemu` on a pristine 9d41efc worktree (lane `L4-TRUST-qualify`): the missing receipt at current main.
+- `qemu_ck_allen_test.sh` plain (`L4-TRUST-allen`) and the two mutants (`L4-TRUST-allen-mut1`, `-mut2`): ALLEN rerun at 9d41efc and the mutant evidence.
+- `GATE4_SOAK_RUNS=5 qemu_security_suite.sh` (`L4-TRUST-gate4`): Gate 4 under the stricter tamper check.
+- `qemu_native_rollback_test.sh` (`L4-TRUST-rollback`): current Rust BootNext rollback result.
+
+---
 
 ## TRUST-1 gates
 
