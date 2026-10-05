@@ -103,6 +103,8 @@ run_suite() {
     expect reject "gate1 cut-off log (no verdict)" "cut-off log" -- gate1 "${w}/g1-cut.log" --expect-test-sha "${TEST_SHA}"
     sed 's/^PASS  test_artifact_round_trip:.*/FAIL  test_artifact_round_trip: expected x/;s/^RECOVERY_BOOT_GATE: PASS/RECOVERY_BOOT_GATE: FAIL/' "${w}/g1.log" >"${w}/g1-fail.log"
     expect reject "gate1 failing record" "failing checks" -- gate1 "${w}/g1-fail.log" --expect-test-sha "${TEST_SHA}"
+    { cat "${w}/g1.log"; echo "RECOVERY_BOOT_GATE: FAIL"; } >"${w}/g1-both.log"
+    expect reject "gate1 log with both PASS and FAIL verdicts" "contains RECOVERY_BOOT_GATE: FAIL" -- gate1 "${w}/g1-both.log" --expect-test-sha "${TEST_SHA}"
     sed '/recovery_unlock_readonly/d;/test_artifact/d;/^PASS  test_artifact/d' "${w}/g1.log" >"${w}/g1-part.log"
     echo 'recovery_unlock: not authorized for this run (set AIENOS_UNLOCK_CIPHER, AIENOS_UNLOCK_SPARE, AIENOS_UNLOCK_IDENTITY)' >>"${w}/g1-part.log"
     expect reject "gate1 partial (unlock not run)" "partial record" -- gate1 "${w}/g1-part.log" --expect-test-sha "${TEST_SHA}"
@@ -140,6 +142,8 @@ run_suite() {
     local bs; bs="$(sha256sum "${w}/baseline.json" | cut -d' ' -f1)"
     expect accept "gate2 good receipt with folders" "" -- gate2-receipt "${w}/r.json" --expect-baseline-sha "${bs}" --expect-variable timer \
         --before "${w}/before" --after "${w}/after" --post-rollback "${w}/post"
+    expect reject "gate2 good receipt without capture folders" "capture folder not given" -- gate2-receipt "${w}/r.json" --expect-baseline-sha "${bs}" --expect-variable timer
+    expect reject "gate2 good receipt missing post-rollback folder" "post_rollback: capture folder not given" -- gate2-receipt "${w}/r.json" --expect-baseline-sha "${bs}" --expect-variable timer --before "${w}/before" --after "${w}/after"
     expect reject "gate2 missing receipt" "missing or empty" -- gate2-receipt "${w}/none.json"
     echo '{ not json' >"${w}/bad.json"
     expect reject "gate2 garbage receipt" "not valid JSON" -- gate2-receipt "${w}/bad.json"

@@ -23,10 +23,11 @@
 #       scripts/tpm_measurement_campaign.sh capture. The operator must give
 #       cold boots only (a warm restart legitimately moves PCR1); this tool
 #       cannot tell the difference.
-#   gate2-receipt RECEIPT.json [--expect-baseline-sha SHA] [--expect-variable NAME]
-#                 [--before DIR --after DIR --post-rollback DIR]
+#   gate2-receipt RECEIPT.json --before DIR --after DIR --post-rollback DIR
+#                 [--expect-baseline-sha SHA] [--expect-variable NAME]
 #       Gate 2 per-experiment receipt written by tpm_measurement_campaign.sh
-#       receipt. With the three folders, their digests must match the receipt.
+#       receipt. The three capture folders are required; their digests must match
+#       the receipt (a missing folder is a partial record and is rejected).
 #   gate3 PUBLIC_DIR --expect-manifest-sha SHA
 #       Gate 3 key ceremony public folder (ceremony_record.txt, manifest).
 #       Runs scripts/trust1_key_ceremony.sh verify when openssl is usable.
@@ -212,7 +213,7 @@ cmd_gate2_receipt() {
     local pair key dir want got msg
     for pair in "before:${before}" "after:${after}" "post_rollback:${post}"; do
         key="${pair%%:*}"; dir="${pair#*:}"
-        [[ -n "${dir}" ]] || continue
+        if [[ -z "${dir}" ]]; then rej "${key}: capture folder not given (--${key/_/-}); its digest cannot be checked (partial evidence)"; continue; fi
         if [[ ! -f "${dir}/SHA256SUMS" ]]; then rej "${key}: folder ${dir} has no SHA256SUMS"; continue; fi
         want="$(jq -r ".${key}.capture_digest // \"\"" "${rc}")"
         got="$(sha256sum "${dir}/SHA256SUMS" | cut -d' ' -f1)"
