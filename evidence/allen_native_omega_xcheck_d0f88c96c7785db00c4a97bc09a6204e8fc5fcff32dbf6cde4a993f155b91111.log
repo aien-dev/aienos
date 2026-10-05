@@ -1,0 +1,34 @@
+## omega b544d81db1f8d576685a8de19add13c7c59b052a tool 8b05208a74691cb23f05dde76282967e60fde6e7eb667dabdaf9b09382e1e48d
+## head object sha256 dd543b4315deb24073b1cbb34072f8d06c26369d8a9c1780c6097d5c9400912e
+## inspect
+ALLEN subject 2c1d46fad965476dedb6e74e2a4601f0d1438c580a81bbc7a621e4924035b011
+ALLEN agent b7790b84adadf9550c781586b215523dd83598c6a61535500ad827c1397069b4
+ALLEN root e8efb1a747b644397fca48565dd925a29655cba2ba8bba285c3d4b41709f37c9
+ALLEN chain sequence 2 previous 72202492e778f4300c734ee8ac158ed5fd664faaa1475fd27aed65b5a3092704
+ALLEN cortex e3f241da5ea18408653a70e3691653db216b5dcc51169b799827cf4f2699731b
+ALLEN provenance 4d9afd341d68f58e0ac71ed68d0125017a8bd2a16afc3038a0e0e40dfcc5956d origin 1
+ALLEN intents 1 knowledge 0
+ALLEN intent e09a6143f9eabe03d41455b4c4624cdc979f172554a6a107589671e137f2b721 kind 1 state 1 since 2 regime 7 target_ns 1000
+rc=0
+## publish j1 (seed 1)
+ALLEN seeded journal j1.cx record 1 lineage e3f241da5ea18408653a70e3691653db216b5dcc51169b799827cf4f2699731b
+ALLEN subject 2c1d46fad965476dedb6e74e2a4601f0d1438c580a81bbc7a621e4924035b011
+ALLEN agent b7790b84adadf9550c781586b215523dd83598c6a61535500ad827c1397069b4
+ALLEN root e8efb1a747b644397fca48565dd925a29655cba2ba8bba285c3d4b41709f37c9
+ALLEN chain sequence 2 previous 72202492e778f4300c734ee8ac158ed5fd664faaa1475fd27aed65b5a3092704
+ALLEN cortex e3f241da5ea18408653a70e3691653db216b5dcc51169b799827cf4f2699731b
+ALLEN provenance 4d9afd341d68f58e0ac71ed68d0125017a8bd2a16afc3038a0e0e40dfcc5956d origin 1
+ALLEN intents 1 knowledge 0
+ALLEN intent e09a6143f9eabe03d41455b4c4624cdc979f172554a6a107589671e137f2b721 kind 1 state 1 since 2 regime 7 target_ns 1000
+ALLEN binding external_subject 7 agent b7790b84adadf9550c781586b215523dd83598c6a61535500ad827c1397069b4 sequence 2
+ALLEN memory BOUND lineage e3f241da5ea18408653a70e3691653db216b5dcc51169b799827cf4f2699731b journal j1.cx
+ALLEN model none (no model required)
+ALLEN publish intent e09a6143f9eabe03d41455b4c4624cdc979f172554a6a107589671e137f2b721 -> EXTERNAL crumb 12
+ALLEN goal object seq 1 regime 7 target_ns 1000 intent_lo 03beeaf943619ae0
+AIEN assess activations 1 in_episode_of_last_publish 1 assessment goal_seq 1 status 1
+ALLEN published 1 goals_in_world 1 crumbs 14 journal_records 15
+rc=0
+## publish j2 (seed 2, other lineage)
+ALLEN seeded journal j2.cx record 1 lineage 513564b418797e33dedaa4548640db09029c6c0e58dabe2f5686b2bd6883744d
+allen: refused: Cortex lineage mismatch: this journal is not the subject's memory
+rc=3

@@ -1,0 +1,287 @@
+{
+  "schema": "aienos.allen_native.v1",
+  "results": {
+    "ALLEN_V0_HOST": {
+      "verdict": "PASS",
+      "evidence": "omega evidence/ALLEN/18cfa250cee91ce5abe4cba21fa9fb70da4df36b9b593924b86538dcdfdfabef.json (omega b544d81)",
+      "note": "host rig; unchanged, not relabelled"
+    },
+    "ALLEN_NATIVE_PROVISIONING": {
+      "verdict": "PASS",
+      "gates": [
+        "G7",
+        "G8",
+        "G10",
+        "FI"
+      ],
+      "note": "the kernel (TEST continuity image) creates the genesis subject inside the identity provisioning transaction; no host tool creates it"
+    },
+    "ALLEN_QEMU_COLD_RESTART": {
+      "verdict": "PASS",
+      "gates": [
+        "G9",
+        "G10",
+        "G11",
+        "G12"
+      ],
+      "note": "each boot is a new qemu-system-aarch64 process; ESP and UEFI vars rebuilt per boot; only the NVMe image file carries state"
+    }
+  },
+  "gate_M4_ALLEN": {
+    "verdict_in_ck_receipt": "PASS",
+    "pass_lines": 37,
+    "fail_lines": 0,
+    "gate_rows_line": "rows 30/30; M1 failures: 0",
+    "lines": [
+      "PASS  make refuses the continuity test mode with CK_HARDWARE_STAGING",
+      "PASS  make refuses the continuity test mode with CK_QEMU_UNSAFE_DMA",
+      "PASS  make refuses the continuity test mode with the Store crash hook",
+      "PASS  make refuses a continuity mutant without the TEST mode",
+      "PASS  make refuses an unknown continuity mutant",
+      "PASS  default image carries no continuity test strings",
+      "PASS  TEST continuity image announces itself",
+      "PASS  default image carries no ALLEN TEST markers",
+      "PASS  G7 native genesis: blank image (store=Refused) -> kernel provisioning created subject 72202492e778f430.. sequence 1 for agent b7790b84adadf955.., lineage bound",
+      "PASS  G7 standing intent: sequence 2 2c1d46fad965476d.. holds intent e09a6143f9eabe03.. (regime 7, 1000 ns)",
+      "PASS  G7 host reader: the image holds one genesis and one successor, head 2c1d46fad965476d.. (no host tool created them)",
+      "PASS  G8 second provisioning refused: no genesis, image unchanged",
+      "PASS  G9 cold restart 1: new QEMU process (previous exited 0), same subject 2c1d46fad965476d.., same intent, same lineage, incarnation 2",
+      "PASS  G9 cold restart 2: new QEMU process (previous exited 0), same subject 2c1d46fad965476d.., same intent, same lineage, incarnation 3",
+      "PASS  G9 after two restores: still one genesis, two subject objects, head object byte-identical",
+      "PASS  G10 restore plan carries no subject, lineage or intent ('AIENCONT v1 mode=6')",
+      "PASS  G10 a second image restores its own subject 4011427261e5854b.. (agent 1bbc5f49928c51f5..), not 2c1d46fad965476d..: the subject comes from the disk",
+      "PASS  G10 host reader decoded the head object from the sealed Store on the image (2c1d46fad965476d..)",
+      "PASS  G11a forked chain, boot 1: CORRUPT, nothing restored, nothing minted, image unchanged",
+      "PASS  G11a forked chain, boot 2: CORRUPT, nothing restored, nothing minted, image unchanged",
+      "PASS  G11a image still holds exactly the planted objects (3), no replacement",
+      "PASS  G11b corrupted subject envelope: refused ('CONTINUITY: STOP (store Refused(-303))'), nothing restored or minted, image unchanged",
+      "PASS  G11c missing subject, boot 1: ABSENT reported, none minted",
+      "PASS  G11c missing subject, boot 2: ABSENT reported, none minted",
+      "PASS  G11c host reader: still no subject object on the image",
+      "PASS  G12a foreign chain beside our own: CORRUPT (another agent), nothing restored or minted, image unchanged",
+      "PASS  G12b foreign chain on a subjectless identity: refused, never adopted, nothing minted, image unchanged",
+      "PASS  FI.1 SIGKILL at before_first_write: cold boot finds the old state (unprovisioned, no subject)",
+      "PASS  FI.1b interrupted provisioning that committed nothing can be provisioned again",
+      "PASS  FI.2 SIGKILL at after_payload_objects: cold boot finds the old state (unprovisioned, no subject)",
+      "PASS  FI.3 SIGKILL at after_catalog: cold boot finds the old state (unprovisioned, no subject)",
+      "PASS  FI.4 SIGKILL at after_commit_record: cold boot finds the old state (unprovisioned, no subject)",
+      "PASS  FI.5 SIGKILL at after_first_flush: cold boot finds the old state (unprovisioned, no subject)",
+      "PASS  FI.6 SIGKILL at after_inactive_superblock: cold boot finds the new state (identity with its genesis subject)",
+      "PASS  FI.7 SIGKILL at after_final_flush: cold boot finds the new state (identity with its genesis subject)",
+      "PASS  FI.8 SIGKILL at before_anchor: cold boot finds the new state (identity with its genesis subject)",
+      "PASS  FI.9 SIGKILL at after_anchor: cold boot finds the new state (identity with its genesis subject)"
+    ]
+  },
+  "bound_to": {
+    "aienos_commit": "640522a03b9f939d2d07ef0d0fdc08e35ecefc7e",
+    "ck_gates_receipt": "evidence/ck_gates_1ecf5bcd303bf88422dd0542f14851c931f5d52276838fa182c812f3c73f3c1b.json",
+    "ck_gates_receipt_sha256": "1ecf5bcd303bf88422dd0542f14851c931f5d52276838fa182c812f3c73f3c1b",
+    "allen_child": {
+      "name": "allen",
+      "script": "scripts/qemu_ck_allen_test.sh",
+      "present": true,
+      "script_sha256": "0fe58465d5183781b8339f50861fd76f7773051bee939b73fdaede4b7a752355",
+      "exit": "0",
+      "seconds": 212,
+      "log_sha256": "f50447aa35e01c30deaf5508bc88e5fa3e011ae49d34fd2010f6eefe280a35bb",
+      "log_lines": 73
+    },
+    "omega_commit": "b544d81db1f8d576685a8de19add13c7c59b052a",
+    "omega_allen_tool_sha256": "8b05208a74691cb23f05dde76282967e60fde6e7eb667dabdaf9b09382e1e48d"
+  },
+  "qemu": {
+    "version": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)",
+    "machine": "-M virt,virtualization=on,gic-version=3,iommu=smmuv3 -accel tcg,thread=single -cpu max -smp 4 -m 2048",
+    "nvme": "-device nvme,drive=nvme0,serial=aienos-continuity,logical_block_size=4096,physical_block_size=4096 (raw image, 64 MiB GPT)",
+    "boot": "-no-reboot; one process per boot; pflash AAVMF code read-only, vars copied fresh per boot",
+    "firmware": {
+      "aavmf_code": "/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd",
+      "aavmf_code_sha256": "4a4cb7f6d8106bb2a7dd8c763fab14b1810152136fc4304e5b728f0043e84f12",
+      "aavmf_vars": "/usr/share/AAVMF/AAVMF_VARS.fd",
+      "aavmf_vars_sha256": "b3b855c5a80310168051164986855692d1bdb06e67619856177965cd87c6774f"
+    },
+    "host": {
+      "hostname": "spark-b87b",
+      "arch": "aarch64",
+      "kernel": "7.0.0-1019-nvidia",
+      "cpu_model": "Cortex-A725;Cortex-X925"
+    },
+    "quiet_flag": "/home/drakestapleton/.claude/jobs/cb2575c5/tmp/quiet-allen"
+  },
+  "subject": {
+    "agent": "b7790b84adadf9550c781586b215523dd83598c6a61535500ad827c1397069b4",
+    "genesis_subject": "72202492e778f4300c734ee8ac158ed5fd664faaa1475fd27aed65b5a3092704",
+    "head_subject": "2c1d46fad965476dedb6e74e2a4601f0d1438c580a81bbc7a621e4924035b011",
+    "head_sequence": 2,
+    "standing_intent": {
+      "id": "e09a6143f9eabe03d41455b4c4624cdc979f172554a6a107589671e137f2b721",
+      "kind": "GOAL_LATENCY",
+      "regime": 7,
+      "target_ns": 1000
+    },
+    "cortex_lineage": "e3f241da5ea18408653a70e3691653db216b5dcc51169b799827cf4f2699731b",
+    "provisioning_request": "AIENCONT v1 mode=5 lineage=<cortex_lineage> intent=7,1000 (provenance = SHA-256 of this plan line)",
+    "restore_request": "AIENCONT v1 mode=6 (carries no subject, lineage or intent)"
+  },
+  "state_digests": {
+    "pre_blank_image_sha256": "6dd0fa809e4b3a8315309ea389c3051366bdbd8f49dbbd04062a2515f738dba8",
+    "post_provision_image_sha256": "b2f94e53a1abe7b499813a337537f3c0d96d3440b7fc805f524e7774352a5987",
+    "head_object_sha256": "dd543b4315deb24073b1cbb34072f8d06c26369d8a9c1780c6097d5c9400912e",
+    "serial_logs": [
+      {
+        "file": "qemu_ck_allen_0.log",
+        "sha256": "ac7e3e922f8db14513173fc6dd7b4c5d6ef4d507895255624bc520d0bba67ad7"
+      },
+      {
+        "file": "qemu_ck_allen_10.log",
+        "sha256": "954004dd7281b0646d3d5b09da539a6fc4ee690b2e1caaba81bbd53313cf1f50"
+      },
+      {
+        "file": "qemu_ck_allen_11.log",
+        "sha256": "0374e30ded3c449bc8e0f150219b57457c0d809deeca522d9531c50061e0c38e"
+      },
+      {
+        "file": "qemu_ck_allen_12.log",
+        "sha256": "47b8c6860f817d808b2ed5ec48a5d24f353c58fe13b0b8f69051bd386eb71a21"
+      },
+      {
+        "file": "qemu_ck_allen_13.log",
+        "sha256": "b28c188c74d24ec8eeec35ee32b07496d9eb620ce40dff45b69518026e9557ff"
+      },
+      {
+        "file": "qemu_ck_allen_14.log",
+        "sha256": "ed80704523fab63541836ccf2b78e2102eb4d723a59f2cd341aba34e8df425ba"
+      },
+      {
+        "file": "qemu_ck_allen_15.log",
+        "sha256": "17fe1c232f8e3386cafeee9f61fd7aa906095369a8701041790b15c6c1e03318"
+      },
+      {
+        "file": "qemu_ck_allen_16.log",
+        "sha256": "e618caae0f7dda22a8f29b9bd7d5f37bfd3def81f7acf7066fa9ca89c1fb1ace"
+      },
+      {
+        "file": "qemu_ck_allen_17.log",
+        "sha256": "02c66a43d51231ef277542207ae02a90ec32600ac1576a6505eb417696dc1eb5"
+      },
+      {
+        "file": "qemu_ck_allen_18.log",
+        "sha256": "9bcca5c73657120736950bf9986caba4224ece715fdbc8e65f797835288e50d1"
+      },
+      {
+        "file": "qemu_ck_allen_19.log",
+        "sha256": "13299acfadd675a793eceaf44eee84a4411ebad7b3b8e22f40a62083f12cdc78"
+      },
+      {
+        "file": "qemu_ck_allen_1.log",
+        "sha256": "2b24cc1e2085368c1f85afc30e0548a63a58517aab4074b84a4eee1dd1601199"
+      },
+      {
+        "file": "qemu_ck_allen_20.log",
+        "sha256": "c4cb2db4223027bec4da57dcc96fe0e67ebaa8d3bbc7e21515eb53c59163b7dd"
+      },
+      {
+        "file": "qemu_ck_allen_21.log",
+        "sha256": "00e7c482402238e343a38c20f8e256a7cce74b438e862ba561babb754ce27e9a"
+      },
+      {
+        "file": "qemu_ck_allen_22.log",
+        "sha256": "90144e9f1e01cf464d7bc0eb156457fd645d3fc51b017db038843af41a6e2a95"
+      },
+      {
+        "file": "qemu_ck_allen_23.log",
+        "sha256": "9c7599121dad402c90629fe4c813ab6da7b131c37138f7598f6156aac5aaaf7b"
+      },
+      {
+        "file": "qemu_ck_allen_2.log",
+        "sha256": "9f7f54af81c2da0c08b12f9730f170d71d56bfd7d84ca715e3f78d7087b2ef39"
+      },
+      {
+        "file": "qemu_ck_allen_3.log",
+        "sha256": "a4c34245f5d0df1f9ff455d9ad8f70a43a9451aff924a7016551a2c5d2de7343"
+      },
+      {
+        "file": "qemu_ck_allen_4.log",
+        "sha256": "f8945e383e73bf9935f2ee81cf4f1067b96a5bd67713d776d7d2f89da21324b6"
+      },
+      {
+        "file": "qemu_ck_allen_5.log",
+        "sha256": "5ba210589b65552a65bcabe25373f4f85c189e94203a5f731cf3202260b304d1"
+      },
+      {
+        "file": "qemu_ck_allen_6.log",
+        "sha256": "adb921ae190bfebea9744e56d8f12f9d4b669ae5f447af3900e2f205c702110e"
+      },
+      {
+        "file": "qemu_ck_allen_7.log",
+        "sha256": "970b4adb26b0b1702892d8525cfc17dc831e43ff675860ae7d709f5f38b55cd0"
+      },
+      {
+        "file": "qemu_ck_allen_8.log",
+        "sha256": "92a22dbee88b5336ac84c258e2fda8b2ffb7c028716e23a9259d2b36ee2381f3"
+      },
+      {
+        "file": "qemu_ck_allen_9.log",
+        "sha256": "851bb5550edbe4e29506e358477457154abaec9fdb69afaa37086e25b364e361"
+      },
+      {
+        "file": "qemu_ck_allen_kill_after_anchor.log",
+        "sha256": "f8bce50815c485ebf5ab344721db8da9c64509c2bbb3bbb7e926260d8c23627d"
+      },
+      {
+        "file": "qemu_ck_allen_kill_after_catalog.log",
+        "sha256": "9561ac1758b01fde2749af7ca2b2b3935e4f2c6df3a8fccf6deffc699a6fd797"
+      },
+      {
+        "file": "qemu_ck_allen_kill_after_commit_record.log",
+        "sha256": "31c3a9c81ad003e38e595df114db5f5680140aa4793cdbe2891c99d7c762bd2a"
+      },
+      {
+        "file": "qemu_ck_allen_kill_after_final_flush.log",
+        "sha256": "292cee6c626ae2c0b5c483d0a43f8d6aaf283001ab48c922ab8fea2aaec38496"
+      },
+      {
+        "file": "qemu_ck_allen_kill_after_first_flush.log",
+        "sha256": "ba69938b7d559c8b4be1c00034191822f0f9b977e00a8b0cae3111c2d0fd012b"
+      },
+      {
+        "file": "qemu_ck_allen_kill_after_inactive_superblock.log",
+        "sha256": "ed4e667a02f8f1a8b1b7bdc57bcd5b9bed2c638786743df4baf4014cca842c79"
+      },
+      {
+        "file": "qemu_ck_allen_kill_after_payload_objects.log",
+        "sha256": "1f81db56f98def8c9bfe5ceb1feb6bdb7fde70b77d9b1b63e623b240ffab14bd"
+      },
+      {
+        "file": "qemu_ck_allen_kill_before_anchor.log",
+        "sha256": "3e60b210c973a54edda2c9822a4fb4740d9b3e369f4a68a81057b14d98703ff9"
+      },
+      {
+        "file": "qemu_ck_allen_kill_before_first_write.log",
+        "sha256": "6a24b92a8ed90cb65fcde394e448eb7d5f3aa4c3c587642c5e6d9f5e169ee2db"
+      }
+    ]
+  },
+  "omega_cross_check": {
+    "log_sha256": "d0f88c96c7785db00c4a97bc09a6204e8fc5fcff32dbf6cde4a993f155b91111",
+    "claim": "omega allen inspect/publish of the head object the kernel wrote: same subject, intent, lineage; the intent becomes the AIEN goal; a journal of another lineage is refused"
+  },
+  "r16": {
+    "new_semantic_orchestrator": false,
+    "new_allen_loop_sites": 0,
+    "note": "new kernel code holds only bounded data loops; no thread, wait, timer, poll or scheduling; omega unchanged by this work; omega R16 inventory pre-existing FAIL (76 unclassified, 2 stale) is recorded in the omega host receipt and not weakened"
+  },
+  "not_proven": [
+    "physical DGX Spark cold reboot",
+    "physical NVMe",
+    "machine migration",
+    "multi-subject",
+    "default (production) image provisioning: it provisions no identity today",
+    "full lifecycle"
+  ],
+  "adr_status": {
+    "aienos_ADR_0018": "PROPOSED",
+    "ARCH_0035": "PROPOSED",
+    "canonical_creed_changed": false
+  }
+}

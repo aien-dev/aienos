@@ -23,8 +23,8 @@ cq_init() {
         --mutant)
             cq_mode=mutant; cq_mutant="${2:-}"
             case "${cq_mutant}" in
-                resume_no_commit|resume_provisions|degraded_is_unprovisioned|compare_16|bare_sha256) ;;
-                *) echo "usage: $0 [--mutant resume_no_commit|resume_provisions|degraded_is_unprovisioned|compare_16|bare_sha256]" >&2; exit 2 ;;
+                resume_no_commit|resume_provisions|degraded_is_unprovisioned|compare_16|bare_sha256|subject_restore_mints|subject_accept_foreign) ;;
+                *) echo "usage: $0 [--mutant resume_no_commit|resume_provisions|degraded_is_unprovisioned|compare_16|bare_sha256|subject_restore_mints|subject_accept_foreign]" >&2; exit 2 ;;
             esac ;;
         *) echo "usage: $0 [--mutant NAME]" >&2; exit 2 ;;
     esac

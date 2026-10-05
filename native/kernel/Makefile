@@ -266,6 +266,8 @@ endif
 #   degraded_is_unprovisioned    a degraded mount reads as unprovisioned (MR-5)
 #   compare_16                   operator response compared on 16 of 32 bytes
 #   bare_sha256                  operator response is a bare SHA-256, not an HMAC
+#   subject_restore_mints        restore mints an ALLEN subject when it finds none (OS-0018)
+#   subject_accept_foreign       restore accepts a subject bound to another agent (MS-1)
 CK_TEST_CONTINUITY ?=
 CK_TEST_CONTINUITY_MUTANT ?=
 ifneq ($(strip $(CK_TEST_CONTINUITY)),)
@@ -296,8 +298,12 @@ else ifeq ($(strip $(CK_TEST_CONTINUITY_MUTANT)),compare_16)
 CONT_MUTANT_FLAGS := -DCR_MUTANT_COMPARE_16=1
 else ifeq ($(strip $(CK_TEST_CONTINUITY_MUTANT)),bare_sha256)
 CONT_MUTANT_FLAGS := -DCR_MUTANT_BARE_SHA256=1
+else ifeq ($(strip $(CK_TEST_CONTINUITY_MUTANT)),subject_restore_mints)
+CONT_MUTANT_FLAGS := -DCS_MUTANT_RESTORE_MINTS=1
+else ifeq ($(strip $(CK_TEST_CONTINUITY_MUTANT)),subject_accept_foreign)
+CONT_MUTANT_FLAGS := -DCS_MUTANT_ACCEPT_FOREIGN=1
 else
-$(error CK_TEST_CONTINUITY_MUTANT must be resume_no_commit, resume_provisions, degraded_is_unprovisioned, compare_16 or bare_sha256)
+$(error CK_TEST_CONTINUITY_MUTANT must be resume_no_commit, resume_provisions, degraded_is_unprovisioned, compare_16, bare_sha256, subject_restore_mints or subject_accept_foreign)
 endif
 endif
 
@@ -449,7 +455,7 @@ endif
 STAGE_DMA_FLAGS += -DCK_TEST_CONTINUITY=1 $(CONT_MUTANT_FLAGS) -I$(KDIR)/core
 STAGE_SRCS += $(KDIR)/svc/continuity_codec.c $(KDIR)/svc/continuity_resolve.c \
 	$(KDIR)/svc/continuity_resolve_sealed.c $(KDIR)/svc/continuity_commit.c $(KDIR)/svc/continuity_recovery.c \
-	$(KDIR)/svc/continuity_boot.c
+	$(KDIR)/svc/continuity_boot.c $(KDIR)/svc/continuity_subject.c $(KDIR)/svc/continuity_subject_provision.c
 endif
 ifeq ($(strip $(CK_TEST_DISK_XLATE_BYPASS)),1)
 FULL_NAME := $(FULL_NAME)-test-xlate-bypass
@@ -567,11 +573,16 @@ endef
 
 # crash_check(elf): a full image built without CK_TEST_STORE_CRASH must carry
 # no Store crash hook code or strings; a TEST crash image must announce itself.
+# The bare "TEST-ONLY MUTANT" phrase is refused here except in the TEST
+# continuity image, whose own mutants print it (cont_check refuses it in every
+# image built without CK_TEST_CONTINUITY; crash-hook mutants are still caught
+# by their "store_crash:" prefix).
 define crash_check
 	@if [ "$(strip $(CK_TEST_STORE_CRASH))" = 1 ]; then \
 	  grep -aqF "TEST-ONLY Store crash hook image" $(1) || { echo "TEST crash image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
 	else \
-	  s=$$(grep -aoE "store_crash:|AIENCRSH|TEST-ONLY MUTANT" $(1) | sort -u | tr "\n" " "); \
+	  m="|TEST-ONLY MUTANT"; [ "$(strip $(CK_TEST_CONTINUITY))" = 1 ] && m=""; \
+	  s=$$(grep -aoE "store_crash:|AIENCRSH$$m" $(1) | sort -u | tr "\n" " "); \
 	  y=$$($(KNM) $(1) | grep -E " ck_store_crash_[a-z_]+$$" | tr "\n" " "); \
 	  if [ -n "$$s$$y" ]; then echo "default image carries the TEST Store crash hook: $$s$$y"; rm -f $(1); exit 1; fi; \
 	  echo "no Store crash hook code in $(1)"; \
@@ -580,11 +591,16 @@ endef
 
 # cont_check(elf): a full image built without CK_TEST_CONTINUITY must carry no
 # continuity wiring code or strings; a TEST continuity image must announce itself.
+# The bare "TEST-ONLY MUTANT" phrase is refused here except in the TEST Store
+# crash image, whose own mutants print it (crash_check refuses it in every
+# image built without CK_TEST_STORE_CRASH; continuity mutants are still caught
+# by the continuity strings).
 define cont_check
 	@if [ "$(strip $(CK_TEST_CONTINUITY))" = 1 ]; then \
 	  grep -aqF "TEST-ONLY continuity mode selection image" $(1) || { echo "TEST continuity image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
 	else \
-	  s=$$(grep -aoE "AIENCONT|RECOVERY_OPERATOR_KEY|RECOVERY_CORE:|CONTINUITY: |TEST-ONLY MUTANT" $(1) | sort -u | tr "\n" " "); \
+	  m="|TEST-ONLY MUTANT"; [ "$(strip $(CK_TEST_STORE_CRASH))" = 1 ] && m=""; \
+	  s=$$(grep -aoE "AIENCONT|RECOVERY_OPERATOR_KEY|RECOVERY_CORE:|CONTINUITY: $$m" $(1) | sort -u | tr "\n" " "); \
 	  y=$$($(KNM) $(1) | grep -E " (ck_cont_boot_stage|cr_resume|cr_provision|rc_inspect)$$" | tr "\n" " "); \
 	  if [ -n "$$s$$y" ]; then echo "default image carries the TEST continuity wiring: $$s$$y"; rm -f $(1); exit 1; fi; \
 	  echo "no continuity wiring code in $(1)"; \
@@ -641,7 +657,7 @@ HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/
 	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c
 TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy test_handoff test_fbcon \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject
+	test_continuity_subject test_continuity_subject_provision
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -721,7 +737,7 @@ $(OUT)/host-san/test_continuity_codec: $(KDIR)/tests/test_continuity_codec.c $(C
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CC_HOST_INC) $(CC_FIXTURE_DEF) -o $@ $< $(CC_HOST_SRCS)
 
-continuity-mutants: $(OUT)/host/test_continuity_codec continuity-resolve-mutants continuity-commit-mutants continuity-recovery-mutants continuity-subject-mutants
+continuity-mutants: $(OUT)/host/test_continuity_codec continuity-resolve-mutants continuity-commit-mutants continuity-recovery-mutants continuity-subject-mutants continuity-subject-provision-mutants
 	@mkdir -p $(OUT)/host-mut; fail=0; \
 	$(OUT)/host/test_continuity_codec > $(OUT)/host-mut/base.log 2>&1 || { echo "unmutated test_continuity_codec fails"; fail=1; }; \
 	for m in $(CC_MUTANTS); do \
@@ -881,6 +897,40 @@ continuity-subject-mutants: $(OUT)/host/test_continuity_subject
 	done; \
 	if [ $$fail = 0 ]; then echo "CK_CONTINUITY_SUBJECT_MUTANTS: PASS"; else echo "CK_CONTINUITY_SUBJECT_MUTANTS: FAIL"; exit 1; fi
 
+# ALLEN genesis at identity provisioning (svc/continuity_subject_provision.c;
+# ARCH-0035 / OS-0018, PROPOSED): identity and genesis subject in ONE Store
+# transaction, power cuts at every checkpoint and block boundary, and the
+# TEST-only split-transaction mutant (MSP-1), which the test must catch. The
+# mutant flag is refused under CK_HARDWARE_STAGING.
+CSP_HOST_SRCS := $(KDIR)/svc/continuity_subject_provision.c $(CS_HOST_SRCS)
+CSP_HOST_DEPS := $(CSP_HOST_SRCS) $(CS_HOST_DEPS)
+CSP_MUTANTS := CS_MUTANT_PROVISION_SPLIT_TXN
+
+$(OUT)/host/test_continuity_subject_provision: $(KDIR)/tests/test_continuity_subject_provision.c $(CSP_HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(CM_HOST_INC) -o $@ $< $(CSP_HOST_SRCS)
+
+$(OUT)/host-san/test_continuity_subject_provision: $(KDIR)/tests/test_continuity_subject_provision.c $(CSP_HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(CM_HOST_INC) -o $@ $< $(CSP_HOST_SRCS)
+
+continuity-subject-provision-mutants: $(OUT)/host/test_continuity_subject_provision
+	@mkdir -p $(OUT)/host-mut; fail=0; \
+	$(OUT)/host/test_continuity_subject_provision > $(OUT)/host-mut/subject_provision_base.log 2>&1 || { echo "unmutated test_continuity_subject_provision fails"; fail=1; }; \
+	for m in $(CSP_MUTANTS); do \
+	  b=$(OUT)/host-mut/test_continuity_subject_provision_$$m; \
+	  if ! $(HOSTCC) $(HCFLAGS) $(CM_HOST_INC) -D$$m -o $$b $(KDIR)/tests/test_continuity_subject_provision.c $(CSP_HOST_SRCS); then \
+	    echo "mutant $$m does not build (FAIL)"; fail=1; continue; fi; \
+	  $$b > $$b.log 2>&1; \
+	  if grep -q "^test_continuity_subject_provision: FAIL" $$b.log; then echo "mutant $$m caught ($$(grep -c '^  FAIL ' $$b.log) checks failed)"; \
+	  else echo "mutant $$m NOT caught (FAIL)"; fail=1; fi; \
+	  if $(HOSTCC) $(HCFLAGS) $(CM_HOST_INC) -DCK_HARDWARE_STAGING=1 -D$$m \
+	      -fsyntax-only $(KDIR)/svc/continuity_subject_provision.c 2>/dev/null; then \
+	    echo "mutant flag $$m accepted under CK_HARDWARE_STAGING (FAIL)"; fail=1; \
+	  else echo "mutant flag $$m refused under CK_HARDWARE_STAGING"; fi; \
+	done; \
+	if [ $$fail = 0 ]; then echo "CK_CONTINUITY_SUBJECT_PROVISION_MUTANTS: PASS"; else echo "CK_CONTINUITY_SUBJECT_PROVISION_MUTANTS: FAIL"; exit 1; fi
+
 # Continuity Recovery Core (C port cut 5): host test over the REAL sealed Store in a
 # file, TEST-only -D mutants, each of which must make the test print its FAIL verdict.
 # Mutant flags are refused under CK_HARDWARE_STAGING (svc/continuity_recovery.h).
@@ -953,10 +1003,11 @@ store-image: $(STORE_IMG_TOOL)
 CONT_TOOL := $(OUT)/host/ck_cont_tool
 CONT_TOOL_SRCS := $(STAGE_OWN_SRCS) $(STAGE_NATIVE_SRCS) $(NATIVE)/disk/disk_file.c \
 	$(KDIR)/svc/tests/ck_host.c $(KDIR)/svc/continuity_resolve.c $(KDIR)/svc/continuity_codec.c \
+	$(KDIR)/svc/continuity_resolve_sealed.c $(KDIR)/svc/continuity_subject.c \
 	$(KDIR)/tools/ck_cont_tool.c
 $(CONT_TOOL): $(CONT_TOOL_SRCS) $(STAGE_HDRS)
 	@mkdir -p $(dir $@)
-	$(HOSTCC) $(STAGE_HOST_FLAGS) $(STAGE_INC) -o $@ $(CONT_TOOL_SRCS)
+	$(HOSTCC) $(STAGE_HOST_FLAGS) $(STAGE_INC) -idirafter $(KDIR)/core -o $@ $(CONT_TOOL_SRCS)
 cont-tool: $(CONT_TOOL)
 
 # GPT boot-disk image tool (QEMU gates; hosted, never part of an image).
