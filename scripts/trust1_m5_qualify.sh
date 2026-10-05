@@ -113,10 +113,53 @@ refuse_if_dirty() {
     fi
 }
 
+# ------------------------------------------------- prerequisite host builds
+# Some checks need a binary this script used to expect to exist already. A
+# fresh checkout has none, so the check reported NOT_RUN ("a required tool is
+# missing") even though cargo could build it. These helpers build the binary
+# for THIS commit into the run's work folder. Return codes follow the row's
+# notrun_rc: 0 ready; the NOTRUN code (cargo or the UEFI target is absent, the
+# check cannot run, NOT_RUN and the verdict stays NOT_QUALIFIED); 1 the build
+# itself failed (a real FAIL: the code at this commit does not build).
+QUAL_CARGO="${QUAL_CARGO:-cargo}"
+QUAL_RUSTC="${QUAL_RUSTC:-rustc}"
+STORE_TOOL_BIN=""; LOADER_EFI=""
+prereq_store_tool() { # prereq_store_tool NOTRUN_RC
+    if [[ -n "${RUST_STORE_TOOL:-}" ]]; then STORE_TOOL_BIN="${RUST_STORE_TOOL}"; return 0; fi
+    command -v "${QUAL_CARGO}" >/dev/null 2>&1 || { echo "prerequisite: cargo not found, cannot build aienos-store-tool"; return "$1"; }
+    local td="${work_dir}/build/cargo-store-tool"
+    echo "prerequisite: building aienos-store-tool at $(git -C "${repo_root}" rev-parse --short HEAD) into ${td}"
+    (cd "${repo_root}" && "${QUAL_CARGO}" build --quiet --release -p aienos-store-tool --target-dir "${td}") \
+        || { echo "prerequisite build FAILED: aienos-store-tool"; return 1; }
+    STORE_TOOL_BIN="${td}/release/aienos-store-tool"
+    [[ -x "${STORE_TOOL_BIN}" ]] || { echo "prerequisite build FAILED: ${STORE_TOOL_BIN} not produced"; return 1; }
+}
+prereq_loader() { # prereq_loader NOTRUN_RC
+    if [[ -n "${AIENOS_KEY_CEREMONY_EFI:-}" ]]; then LOADER_EFI="${AIENOS_KEY_CEREMONY_EFI}"; return 0; fi
+    command -v "${QUAL_CARGO}" >/dev/null 2>&1 || { echo "prerequisite: cargo not found, cannot build the EFI loader"; return "$1"; }
+    local libdir; libdir="$("${QUAL_RUSTC}" --print target-libdir --target aarch64-unknown-uefi 2>/dev/null)"
+    [[ -n "${libdir}" && -d "${libdir}" ]] || { echo "prerequisite: rust target aarch64-unknown-uefi not installed, cannot build the EFI loader"; return "$1"; }
+    local td="${work_dir}/build/cargo-loader"
+    echo "prerequisite: building aienos-handoff.efi at $(git -C "${repo_root}" rev-parse --short HEAD) into ${td}"
+    (cd "${repo_root}" && AIENOS_COMMIT="$(git rev-parse HEAD)" AIENOS_RESTART_SECS=1 "${QUAL_CARGO}" build --quiet --release \
+        -p aienos-boot --target aarch64-unknown-uefi --features handoff --bin aienos-handoff --target-dir "${td}") \
+        || { echo "prerequisite build FAILED: aienos-handoff.efi"; return 1; }
+    LOADER_EFI="${td}/aarch64-unknown-uefi/release/aienos-handoff.efi"
+    [[ -f "${LOADER_EFI}" ]] || { echo "prerequisite build FAILED: ${LOADER_EFI} not produced"; return 1; }
+}
+
 # --------------------------------------------------------------- gate runners
 # Each runner writes everything to stdout/stderr; the caller logs it.
 run_measurement_tools() { bash "${repo_root}/scripts/test_trust1_measurement_tools.sh"; }
-run_key_ceremony()      { bash "${repo_root}/scripts/test_trust1_key_ceremony.sh"; }
+run_key_ceremony() {
+    # The Boot Signer check needs a built EFI loader. Build one into this run's
+    # own work folder (never the repo's target/, so a stale prebuilt loader
+    # from another commit cannot stand in) unless AIENOS_KEY_CEREMONY_EFI
+    # names one. Exit 3 (NOT_RUN) only if the tools to build it are missing.
+    prereq_loader 3 || return $?
+    AIENOS_KEY_CEREMONY_EFI="${AIENOS_KEY_CEREMONY_EFI:-${LOADER_EFI}}" \
+        bash "${repo_root}/scripts/test_trust1_key_ceremony.sh"
+}
 run_gate7_preflight()   { bash "${repo_root}/scripts/trust1_gate7_preflight.sh"; }
 run_recovery_tools()    { bash "${repo_root}/scripts/verify_recovery_tools.sh"; }
 # The native Makefiles run ./$(TEST), so OUT must be relative to the
@@ -127,14 +170,16 @@ native_make_test() {
     make -C "${dir}" OUT="$(realpath --relative-to="${dir}" "${out}")" test
 }
 run_store_c()           { native_make_test store; }
-# Rust cross-check of C-written stores: needs a built aienos-store-tool
-# (RUST_STORE_TOOL, else target/release/aienos-store-tool); exit 2 = NOT_RUN.
+# Rust cross-check of C-written stores: builds aienos-store-tool for this
+# commit into the work folder (RUST_STORE_TOOL overrides); exit 2 = NOT_RUN only
+# if cargo is absent, 1 if the build fails.
 run_store_rust_xcheck() {
+    prereq_store_tool 2 || return $?
     local dir="${repo_root}/native/store" out="${work_dir}/build/store-xcheck"
     mkdir -p "${out}"
     local rel; rel="$(realpath --relative-to="${dir}" "${out}")"
     make -C "${dir}" OUT="${rel}" "${rel}/store_xcheck" || return 1
-    (cd "${dir}" && sh tests/rust_crosscheck.sh "./${rel}/store_xcheck" "${rel}")
+    (cd "${dir}" && RUST_STORE_TOOL="${STORE_TOOL_BIN}" sh tests/rust_crosscheck.sh "./${rel}/store_xcheck" "${rel}")
 }
 run_cargo_crypto()      { (cd "${repo_root}" && cargo test -p aienos-crypto); }
 run_cargo_kernel()      { (cd "${repo_root}" && cargo test -p aienos-kernel --lib -- crypto:: security::); }
@@ -524,6 +569,51 @@ self_test() {
     expect_why op_never_pass BLOCKED_OPERATOR; expect_why hw_never_pass BLOCKED_HARDWARE
     expect qemu_quiet NOT_RUN; expect qemu_off NOT_RUN
     [[ ! -e "${sentinel}" ]] && ok "blocked/missing/vetoed gates never ran their runner" || bad "a blocked/missing/vetoed runner ran"
+
+    # Prerequisite builds (no real cargo): a missing tool is the row's NOT_RUN
+    # code, a failed build is FAIL (1), a built artifact is ready (0), and an
+    # override skips the build. Never a silent pass.
+    fake_cargo_build_ok() { # fake cargo: create what the real build would, under --target-dir
+        local td="" a; while [[ $# -gt 0 ]]; do [[ "$1" == --target-dir ]] && td="$2"; shift; done
+        mkdir -p "${td}/release" "${td}/aarch64-unknown-uefi/release"
+        : >"${td}/release/aienos-store-tool"; chmod +x "${td}/release/aienos-store-tool"
+        : >"${td}/aarch64-unknown-uefi/release/aienos-handoff.efi"
+    }
+    fake_cargo_build_bad() { return 101; }
+    fake_cargo_build_none() { return 0; }
+    fake_rustc_has_uefi() { echo "${tmp}"; }
+    fake_rustc_no_uefi() { echo "${tmp}/no-such-libdir"; }
+    prc() { # prc WANTED_RC DESCRIPTION CMD...
+        local want="$1" desc="$2" got; shift 2
+        "$@" >/dev/null 2>&1; got=$?
+        [[ "${got}" == "${want}" ]] && ok "prereq: ${desc} -> exit ${want}" || bad "prereq: ${desc} -> exit ${got}, expected ${want}"
+    }
+    local saved_cargo="${QUAL_CARGO}" saved_rustc="${QUAL_RUSTC}" saved_tool="${RUST_STORE_TOOL:-}" saved_efi="${AIENOS_KEY_CEREMONY_EFI:-}"
+    unset RUST_STORE_TOOL AIENOS_KEY_CEREMONY_EFI
+    QUAL_CARGO=cargo_that_does_not_exist_anywhere; QUAL_RUSTC=fake_rustc_has_uefi
+    prc 2 "no cargo, store tool is NOT_RUN" prereq_store_tool 2
+    prc 3 "no cargo, loader is NOT_RUN" prereq_loader 3
+    QUAL_CARGO=fake_cargo_build_bad
+    prc 1 "failed store tool build is FAIL, not NOT_RUN" prereq_store_tool 2
+    prc 1 "failed loader build is FAIL, not NOT_RUN" prereq_loader 3
+    QUAL_CARGO=fake_cargo_build_none
+    prc 1 "build that produced no store tool is FAIL" prereq_store_tool 2
+    prc 1 "build that produced no loader is FAIL" prereq_loader 3
+    QUAL_CARGO=fake_cargo_build_ok; QUAL_RUSTC=fake_rustc_no_uefi
+    prc 3 "UEFI rust target absent, loader is NOT_RUN" prereq_loader 3
+    QUAL_RUSTC=fake_rustc_has_uefi
+    prc 0 "store tool built" prereq_store_tool 2
+    [[ -x "${STORE_TOOL_BIN}" && "${STORE_TOOL_BIN}" == "${work_dir}"/* ]] && ok "prereq: store tool lives in the work folder, not the repo target/" || bad "prereq: store tool path ${STORE_TOOL_BIN}"
+    prc 0 "loader built" prereq_loader 3
+    [[ -f "${LOADER_EFI}" && "${LOADER_EFI}" == "${work_dir}"/* ]] && ok "prereq: loader lives in the work folder, not the repo target/" || bad "prereq: loader path ${LOADER_EFI}"
+    QUAL_CARGO=cargo_that_does_not_exist_anywhere
+    RUST_STORE_TOOL=/some/tool AIENOS_KEY_CEREMONY_EFI=/some/loader.efi
+    prc 0 "RUST_STORE_TOOL override skips the build" prereq_store_tool 2
+    prc 0 "AIENOS_KEY_CEREMONY_EFI override skips the build" prereq_loader 3
+    QUAL_CARGO="${saved_cargo}"; QUAL_RUSTC="${saved_rustc}"
+    unset RUST_STORE_TOOL AIENOS_KEY_CEREMONY_EFI
+    [[ -n "${saved_tool}" ]] && export RUST_STORE_TOOL="${saved_tool}"
+    [[ -n "${saved_efi}" ]] && export AIENOS_KEY_CEREMONY_EFI="${saved_efi}"
 
     # Counts come only from the table: 2 PASS, 5 FAIL, 3 NOT_RUN, 2 blocked, 2 missing.
     count_results
