@@ -126,6 +126,7 @@ static int add_func(pci_system *s, uint8_t bus, uint8_t dev, uint8_t fn, volatil
     if (s->n >= PCI_MAX_FUNCS) return PCI_E_FULL;
     pci_func *f = &s->f[s->n++];
     uint32_t id = pci_r32(c, CFG_VENDOR);
+    f->segment = s->ecam.segment;
     f->bus = bus;
     f->dev = dev;
     f->fn = fn;

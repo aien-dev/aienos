@@ -87,9 +87,16 @@ int ck_fadt_arm_boot_arch(const void *fadt, uint16_t *flags);
 
 /* IORT (Arm IO Remapping Table): the first SMMUv3 node and the PCI root
  * complex ID mappings that point at it (ported from the Rust
- * aienos-kernel acpi::iort_smmuv3). */
-#define CK_IORT_MAX_MAPS 8
+ * aienos-kernel acpi::iort_smmuv3). Each mapping keeps the PCI segment of
+ * its root complex: a requester id (bus<<8 | dev<<3 | fn) only means
+ * something inside one segment, so a lookup is (segment, rid).
+ * The mapping array is sized by the table: a parse counts the mappings
+ * that point at the SMMU and refuses the whole table (-1) when there are
+ * more than CK_IORT_MAX_MAPS. 32 covers the DGX Spark (MEASURED: 15 root
+ * complexes, one mapping each, to the first SMMUv3) with headroom. */
+#define CK_IORT_MAX_MAPS 32
 struct ck_iort_map {
+    uint32_t segment;   /* PCI segment number of the root complex */
     uint32_t input_base, id_count, output_base; /* id_count = number of IDs - 1 */
 };
 struct ck_iort_smmu {
@@ -99,12 +106,16 @@ struct ck_iort_smmu {
     struct ck_iort_map map[CK_IORT_MAX_MAPS];
 };
 /* 1 found, 0 no SMMUv3 node, -1 malformed (bad signature, truncation, a
- * node or mapping array outside the table, base 0, more than
- * CK_IORT_MAX_MAPS mappings to the SMMU). */
+ * node or mapping array outside the table, base 0, a root complex node
+ * too short to carry its segment number, more than CK_IORT_MAX_MAPS
+ * mappings to the SMMU, or two mappings to the SMMU whose input ranges
+ * overlap in the same segment: an ambiguous requester id is refused, not
+ * resolved by table order). */
 int ck_iort_parse(const void *iort, struct ck_iort_smmu *out);
-/* Stream ID for PCI requester id `rid` (bus<<8 | dev<<3 | fn); 0 ok, -1 if
- * no mapping covers it. */
-int ck_iort_stream_id(const struct ck_iort_smmu *s, uint32_t rid, uint32_t *sid);
+/* Stream ID for PCI requester id `rid` (bus<<8 | dev<<3 | fn) in PCI
+ * segment `segment`; 0 ok, -1 if no mapping of that segment covers it. A
+ * mapping of another segment never matches. */
+int ck_iort_stream_id(const struct ck_iort_smmu *s, uint32_t segment, uint32_t rid, uint32_t *sid);
 
 /* IORT named component (node type 1) whose device object name has the same
  * final segment as `name` ("USB0" matches "\\_SB_.USB0"). out gets the node

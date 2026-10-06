@@ -692,8 +692,32 @@ acpi-dev-mutant: $(KDIR)/tests/test_acpi_dev.c $(HOST_SRCS) $(KDIR)/tests/ck_tes
 	  if $$b > $$b.log 2>&1; then cat $$b.log; echo "test_acpi_dev mutant $$m: PASSED, test does not catch it"; exit 1; \
 	  else grep -F "test_acpi_dev: FAIL" $$b.log >/dev/null && echo "test_acpi_dev mutant $$m: FAILS as required" || { cat $$b.log; exit 1; }; fi; done
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant test-continuity-subject-restart
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant test-continuity-subject-restart,$^); do $$t || fail=1; done; \
+# TEST-ONLY mutants of the IORT parse/lookup in core/acpi.c: test_smmu must
+# FAIL against each (TRUNCATE: extra mappings dropped instead of the table
+# refused; SEGMENT_BLIND: lookup ignores the PCI segment; OVERLAP_OK:
+# overlapping input ranges in one segment accepted). Host only (acpi.c
+# refuses them freestanding and with CK_HARDWARE_STAGING).
+IORT_MUTANTS := CK_IORT_MUTANT_TRUNCATE CK_IORT_MUTANT_SEGMENT_BLIND CK_IORT_MUTANT_OVERLAP_OK
+iort-mutants: $(OUT)/host/test_smmu
+	@mkdir -p $(OUT)/host-mut; fail=0; \
+	$(OUT)/host/test_smmu > $(OUT)/host-mut/iort-base.log 2>&1 || { echo "unmutated test_smmu fails"; fail=1; }; \
+	for m in $(IORT_MUTANTS); do \
+	  b=$(OUT)/host-mut/test_smmu_$$m; \
+	  if ! $(HOSTCC) $(HCFLAGS) -D$$m -o $$b $(KDIR)/tests/test_smmu.c $(HOST_SRCS); then \
+	    echo "mutant $$m: does not build (FAIL)"; fail=1; continue; fi; \
+	  if $$b > $$b.log 2>&1; then echo "mutant $$m: SURVIVED (FAIL)"; fail=1; \
+	  elif grep -q "^test_smmu: FAIL" $$b.log; then \
+	    echo "mutant $$m: killed ($$(grep -c '^  FAIL ' $$b.log) checks failed)"; \
+	  else echo "mutant $$m: no FAIL verdict (crashed?) (FAIL)"; fail=1; fi; \
+	done; \
+	if $(HOSTCC) $(HCFLAGS) -DCK_HARDWARE_STAGING=1 -DCK_IORT_MUTANT_SEGMENT_BLIND \
+	    -fsyntax-only $(KDIR)/core/acpi.c 2>/dev/null; then \
+	  echo "mutant flag accepted under CK_HARDWARE_STAGING (FAIL)"; fail=1; \
+	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
+	if [ $$fail = 0 ]; then echo "CK_IORT_MUTANTS: PASS"; else echo "CK_IORT_MUTANTS: FAIL"; exit 1; fi
+
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants test-continuity-subject-restart
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants test-continuity-subject-restart,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -1074,4 +1098,4 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize handoff-mutant acpi-dev-mutant acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full test sanitize handoff-mutant acpi-dev-mutant iort-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE

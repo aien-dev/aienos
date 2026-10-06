@@ -351,9 +351,9 @@ static void test_iort(void)
     build_iort(t, 1);
     CHECK(ck_iort_parse(t, &s) == 1);
     CHECK(s.base == 0x09050000ull && s.nmaps == 1 && s.map[0].id_count == 0xffff);
-    CHECK(ck_iort_stream_id(&s, 0x0010, &sid) == 0 && sid == 0x10);
-    CHECK(ck_iort_stream_id(&s, 0xffff, &sid) == 0 && sid == 0xffff);
-    CHECK(ck_iort_stream_id(&s, 0x10000, &sid) == -1); /* the ITS-only mapping is not an SMMU stream */
+    CHECK(ck_iort_stream_id(&s, 0, 0x0010, &sid) == 0 && sid == 0x10);
+    CHECK(ck_iort_stream_id(&s, 0, 0xffff, &sid) == 0 && sid == 0xffff);
+    CHECK(ck_iort_stream_id(&s, 0, 0x10000, &sid) == -1); /* the ITS-only mapping is not an SMMU stream */
     build_iort(t, 0);
     CHECK(ck_iort_parse(t, &s) == 0);
     /* Malformed: node length past the table, mapping array past the node,
@@ -377,8 +377,128 @@ static void test_iort(void)
     w32(t + 40, 40); /* node array inside the 48-byte IORT header */
     CHECK(ck_iort_parse(t, &s) == -1);
     /* A mapping whose output would wrap is never a stream. */
-    struct ck_iort_smmu w = { 1, 0, 1, { { 0, 0xffff, 0xfffffff0u } } };
-    CHECK(ck_iort_stream_id(&w, 0x20, &sid) == -1);
+    struct ck_iort_smmu w = { 1, 0, 1, { { 0, 0, 0xffff, 0xfffffff0u } } };
+    CHECK(ck_iort_stream_id(&w, 0, 0x20, &sid) == -1);
+}
+
+/* ---- IORT on the DGX Spark's shape (MEASURED from its IORT, 2026-10-06:
+ * 15 root complexes for PCI segments 0..14, each mapping requester ids
+ * 0..0xffff to streams 0x10000*(segment+1) on the first SMMUv3
+ * (0x13800000); segment 15's root complex maps to the second SMMUv3
+ * (0x13000000) instead). ------------------------------------------------ */
+static uint32_t iort_begin(uint8_t *t, size_t cap)
+{
+    memset(t, 0, cap);
+    memcpy(t, "IORT", 4);
+    w32(t + 40, 48);
+    return 48;
+}
+static uint32_t iort_smmu(uint8_t *t, uint32_t at, uint64_t base)
+{
+    t[at] = 4; w16(t + at + 1, 88);
+    w64(t + at + 16, base);
+    return at + 88;
+}
+/* Root complex for `seg` with `n` mappings: mapping i covers
+ * [in + i*step, in + i*step + cnt] -> out + i*step, to node `ref`. */
+static uint32_t iort_rc(uint8_t *t, uint32_t at, uint32_t seg, uint32_t n, uint32_t in, uint32_t cnt, uint32_t step,
+                        uint32_t out, uint32_t ref)
+{
+    t[at] = 2; w16(t + at + 1, (uint16_t)(36 + 20 * n));
+    w32(t + at + 8, n); w32(t + at + 12, 36);
+    w32(t + at + 28, seg);
+    for (uint32_t i = 0; i < n; i++) {
+        uint8_t *e = t + at + 36 + 20 * i;
+        w32(e, in + i * step); w32(e + 4, cnt); w32(e + 8, out + i * step); w32(e + 12, ref);
+    }
+    return at + 36 + 20 * n;
+}
+static void iort_end(uint8_t *t, uint32_t at, uint32_t nodes)
+{
+    w32(t + 4, at);
+    w32(t + 36, nodes);
+}
+
+static void test_iort_spark_shape(void)
+{
+    static uint8_t t[2048];
+    struct ck_iort_smmu s;
+    uint32_t sid = 0;
+    uint32_t at = iort_begin(t, sizeof t), a = at;
+    at = iort_smmu(t, at, 0x13800000ull);
+    uint32_t b = at;
+    at = iort_smmu(t, at, 0x13000000ull);
+    for (uint32_t seg = 0; seg < 15; seg++)
+        at = iort_rc(t, at, seg, 1, 0, 0xffff, 0, 0x10000u * (seg + 1), a);
+    uint32_t rc15 = at;
+    at = iort_rc(t, at, 15, 1, 0, 0xffff, 0, 0, b);
+    iort_end(t, at, 18);
+    CHECK(ck_iort_parse(t, &s) == 1);
+    CHECK(s.base == 0x13800000ull && s.node_off == a && s.nmaps == 15);
+    CHECK(s.map[4].segment == 4 && s.map[4].output_base == 0x50000);
+    /* NVMe 0004:01:00.0 (MEASURED: segment 4, behind smmu 0x13800000):
+     * rid = bus 1 << 8 | dev 0 << 3 | fn 0 = 0x100; segment 4's mapping
+     * starts at stream 0x50000, so 0x50000 + 0x100 = 0x50100. */
+    CHECK(ck_iort_stream_id(&s, 4, 0x100, &sid) == 0 && sid == 0x50100);
+    CHECK(ck_iort_stream_id(&s, 0, 0x100, &sid) == 0 && sid == 0x10100);
+    CHECK(ck_iort_stream_id(&s, 0, 0x0, &sid) == 0 && sid == 0x10000);
+    CHECK(ck_iort_stream_id(&s, 14, 0xffff, &sid) == 0 && sid == 0xfffff);
+    /* Wrong segment: segment 15 belongs to the second SMMU, segment 16
+     * does not exist; a segment-blind lookup would hand out segment 0's
+     * stream 0x10000 / 0x10100 here. */
+    sid = 0xdead;
+    CHECK(ck_iort_stream_id(&s, 15, 0x0, &sid) == -1 && sid == 0xdead);
+    CHECK(ck_iort_stream_id(&s, 16, 0x100, &sid) == -1);
+    CHECK(ck_iort_stream_id(&s, 4, 0x10000, &sid) == -1);
+    /* Segment 15's mappings never land on the first SMMU's list. */
+    for (uint32_t i = 0; i < s.nmaps; i++)
+        CHECK(s.map[i].segment != 15);
+    /* A root complex node too short to carry its segment is refused. */
+    w16(t + rc15 + 1, 24); w32(t + rc15 + 8, 0); w32(t + rc15 + 12, 0);
+    iort_end(t, rc15 + 24, 18);
+    CHECK(ck_iort_parse(t, &s) == -1);
+}
+
+static void test_iort_cap_overlap(void)
+{
+    static uint8_t t[2048];
+    struct ck_iort_smmu s;
+    uint32_t sid = 0;
+    /* Exactly CK_IORT_MAX_MAPS mappings: accepted, all kept. */
+    uint32_t at = iort_begin(t, sizeof t), a = at;
+    at = iort_smmu(t, at, 0x13800000ull);
+    at = iort_rc(t, at, 0, CK_IORT_MAX_MAPS, 0, 0xff, 0x100, 0x1000, a);
+    iort_end(t, at, 2);
+    CHECK(ck_iort_parse(t, &s) == 1 && s.nmaps == CK_IORT_MAX_MAPS);
+    CHECK(ck_iort_stream_id(&s, 0, 0x1f05, &sid) == 0 && sid == 0x2f05);
+    /* One more: the whole table is refused, not truncated. */
+    at = iort_begin(t, sizeof t);
+    at = iort_smmu(t, at, 0x13800000ull);
+    at = iort_rc(t, at, 0, CK_IORT_MAX_MAPS + 1, 0, 0xff, 0x100, 0x1000, a);
+    iort_end(t, at, 2);
+    CHECK(ck_iort_parse(t, &s) == -1);
+    /* Overlapping input ranges in one segment: refused. */
+    at = iort_begin(t, sizeof t);
+    at = iort_smmu(t, at, 0x13800000ull);
+    at = iort_rc(t, at, 0, 2, 0, 0xff, 0x80, 0x1000, a);
+    iort_end(t, at, 2);
+    CHECK(ck_iort_parse(t, &s) == -1);
+    /* Overlap split over two root complexes of the same segment: refused. */
+    at = iort_begin(t, sizeof t);
+    at = iort_smmu(t, at, 0x13800000ull);
+    at = iort_rc(t, at, 3, 1, 0x10, 0xff, 0, 0x1000, a);
+    at = iort_rc(t, at, 3, 1, 0x10f, 0, 0, 0x2000, a);
+    iort_end(t, at, 3);
+    CHECK(ck_iort_parse(t, &s) == -1);
+    /* Adjacent ranges, and the same range in two segments: accepted. */
+    at = iort_begin(t, sizeof t);
+    at = iort_smmu(t, at, 0x13800000ull);
+    at = iort_rc(t, at, 0, 2, 0, 0xff, 0x100, 0x1000, a);
+    at = iort_rc(t, at, 1, 1, 0, 0xff, 0, 0x5000, a);
+    iort_end(t, at, 3);
+    CHECK(ck_iort_parse(t, &s) == 1 && s.nmaps == 3);
+    CHECK(ck_iort_stream_id(&s, 0, 0x100, &sid) == 0 && sid == 0x1100);
+    CHECK(ck_iort_stream_id(&s, 1, 0x10, &sid) == 0 && sid == 0x5010);
 }
 
 int main(void)
@@ -391,5 +511,7 @@ int main(void)
     test_queue_wrap();
     test_events();
     test_iort();
+    test_iort_spark_shape();
+    test_iort_cap_overlap();
     return ck_t_verdict("test_smmu");
 }

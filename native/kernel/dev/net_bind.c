@@ -360,7 +360,7 @@ int ck_net_bind_selftest(const pci_func *f, const virtio_pci_caps *caps)
     }
     uint32_t rid = ((uint32_t)f->bus << 8) | ((uint32_t)f->dev << 3) | (uint32_t)f->fn;
     struct ck_dma_confinement cf;
-    int src = ck_dma_confine(rid, phys, win, &cf);
+    int src = ck_dma_confine(f->segment, rid, phys, win, &cf);
     if (src != 0) {
         ck_printf("dma_gate: virtio_net denied (%s rc=%d), bus master stays off\n",
                   src == CK_SMMU_ABSENT ? "NoSmmu" : "SmmuNotReady", src);
