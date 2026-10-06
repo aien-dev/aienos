@@ -17,10 +17,13 @@ NOT_RUN, BLOCKED_HARDWARE, BLOCKED_OPERATOR, MISSING_IMPLEMENTATION.
 C kernel series  #194 34c6053 .. #204 c3878bb   IMPLEMENTED / NOT QUALIFIED
     evidence class: QEMU, plus GitHub ARM64 CI (which is still QEMU).
     No physical boot of the C kernel has happened ("physical": NOT_RUN).
-    newest ck_gates receipt: evidence/ck_gates_bb4040322b026f5f561733fdcaf900770070f2281800b0e3603c2aa2c670b7ff.json
-        run at 4f56a96; verdict NOT_ALL_GATES_PASS
-        9 PASS / 0 FAIL / 5 NOT_RUN of 14 gates
-        NOT_RUN: M0_ROLLBACK, M4_STORE_CRASH, M4_CONTINUITY, M4_RECOVERY, KEYBOARD
+    newest ck_gates receipt: evidence/ck_gates_bc306a04d8ba513b2364fbee644f37375dc686ccead97c8759191b76ebec94eb.json
+        run at f921666 (NEXT-PHASE-3 cut 1, C keyboard + recovery access); verdict NOT_ALL_GATES_PASS
+        19 PASS / 0 FAIL / 1 NOT_RUN of 20 gates
+        NOT_RUN: M0_ROLLBACK
+        KEYBOARD PASS in QEMU only; the Spark's USB controllers are ACPI platform
+        xHCI devices, not PCI, so the C driver does not reach them yet
+        (native/kernel/README.md, "Operator input and recovery access").
     M0_ROLLBACK is still MISSING_IMPLEMENTATION in the C kernel (the C loader
         BootNext / A-B / rollback is parked, native/boot/README.md), despite
         the title of #204 ("P2_ARTIFACT loader and M0_ROLLBACK gates"). #204

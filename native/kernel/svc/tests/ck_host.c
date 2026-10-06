@@ -71,6 +71,8 @@ uint64_t ck_time_us(void)
 }
 void ck_udelay(uint32_t us) { (void)us; }
 const char *ck_commit(void) { return "host-test-commit"; }
+unsigned ck_exception_level(void) { return 1; }
+uint64_t ck_conventional_memory_kb(void) { return 42; }
 uint32_t ck_boot_count_hint(void) { return 0; }
 
 /* Host: the capability library reads the real /dev/urandom. */

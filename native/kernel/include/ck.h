@@ -59,6 +59,12 @@ void ck_udelay(uint32_t us);
 /* Boot facts. */
 const char *ck_commit(void);  /* git commit the image was built from */
 uint32_t ck_boot_count_hint(void); /* 0; Store keeps the real count */
+/* Operator shell facts (added for the keyboard cut, NEXT-PHASE-3): the
+ * exception level the kernel runs at now, and the UEFI conventional memory
+ * (type 7) the firmware memory map reported at entry, in KiB (Rust shell
+ * "mem" / "el"). */
+unsigned ck_exception_level(void);
+uint64_t ck_conventional_memory_kb(void);
 
 /* Interrupts (added by core, Lane 18). GICv3, group 1, routed to the boot
  * CPU. Handlers run in IRQ context with interrupts masked; the core

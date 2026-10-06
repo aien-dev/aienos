@@ -7,7 +7,8 @@
 # scripts/qemu_ck_net_test.sh, scripts/qemu_ck_artifact_test.sh,
 # scripts/qemu_ck_smp_test.sh, scripts/qemu_ck_store_crash_test.sh,
 # scripts/qemu_ck_disk_layout_test.sh, scripts/qemu_ck_continuity_test.sh,
-# scripts/qemu_ck_recovery_test.sh, scripts/qemu_ck_allen_test.sh, scripts/qemu_ck_fpu_test.sh,
+# scripts/qemu_ck_recovery_test.sh, scripts/qemu_ck_allen_test.sh,
+# scripts/qemu_ck_keyboard_test.sh, scripts/qemu_ck_fpu_test.sh,
 # scripts/qemu_ck_infer_test.sh, scripts/qemu_ck_screen_test.sh), and prints
 # one line per gate:
 #     AIENOS_CK_<gate>: PASS|FAIL|NOT_RUN [(reason)]
@@ -21,7 +22,7 @@
 #
 # QEMU is an emulator: a PASS here qualifies nothing physical (the receipt
 # says "physical": "NOT_RUN"). The child scripts serialise themselves: the
-# FPU, INFER and SCREEN children take the QEMU gate lock (~/workspace/.qemu-gate-lock,
+# KEYBOARD, FPU, INFER and SCREEN children take the QEMU gate lock (~/workspace/.qemu-gate-lock,
 # exclusive create) and report NOT_RUN while another gate run holds it or
 # while the machine quiet flag (~/workspace/.spark-quiet) exists, which they
 # only read (no agent raises the quiet flag without Drake's approval); the
@@ -54,6 +55,7 @@ set -uo pipefail
 #         cont  -> verdict line from scripts/qemu_ck_continuity_test.sh
 #         recov -> verdict line from scripts/qemu_ck_recovery_test.sh
 #         allen -> verdict line from scripts/qemu_ck_allen_test.sh (ALLEN genesis/restore, OS-0018 PROPOSED)
+#         kbd   -> verdict line from scripts/qemu_ck_keyboard_test.sh (xHCI keyboard, recovery access; keys from QEMU sendkey)
 #         fpu   -> verdict line from scripts/qemu_ck_fpu_test.sh (NOT_RUN without the Rust target)
 #         infer -> verdict line from scripts/qemu_ck_infer_test.sh (NOT_RUN without the model file or the Rust target)
 #         screen -> verdict line from scripts/qemu_ck_screen_test.sh (GOP framebuffer console vs a QMP screendump)
@@ -73,7 +75,7 @@ M4_CONTINUITY|cont|-
 M4_RECOVERY|recov|-
 M4_ALLEN|allen|-
 ARGUS1_REVOKE|store|-
-KEYBOARD|missing|no xHCI/USB HID keyboard driver in the C kernel
+KEYBOARD|kbd|-
 NET|net|-
 SMP|smp|-
 DISK_LAYOUT|disk|-
@@ -81,7 +83,7 @@ FPU|fpu|-
 INFER|infer|-
 SCREEN|screen|-
 '
-CHILDREN=(boot store net artifact smp crash disk cont recov allen fpu infer screen)
+CHILDREN=(boot store net artifact smp crash disk cont recov allen kbd fpu infer screen)
 # ===========================================================================
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -129,6 +131,7 @@ set_default_children() {
         [cont]="${repo_root}/scripts/qemu_ck_continuity_test.sh"
         [recov]="${repo_root}/scripts/qemu_ck_recovery_test.sh"
         [allen]="${repo_root}/scripts/qemu_ck_allen_test.sh"
+        [kbd]="${repo_root}/scripts/qemu_ck_keyboard_test.sh"
         [fpu]="${repo_root}/scripts/qemu_ck_fpu_test.sh"
         [infer]="${repo_root}/scripts/qemu_ck_infer_test.sh"
         [screen]="${repo_root}/scripts/qemu_ck_screen_test.sh"
@@ -365,7 +368,7 @@ self_test() {
     }
     scenario() { # NAME BOOT_SCRIPT STORE_SCRIPT [NET_SCRIPT] [ARTIFACT_SCRIPT] [SMP_SCRIPT] [CRASH_SCRIPT] [DISK_SCRIPT] (absent: missing)
         scen="$1"
-        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}" [smp]="${6:-${tmp}/kids/no_smp_child.sh}" [crash]="${7:-${tmp}/kids/no_crash_child.sh}" [disk]="${8:-${tmp}/kids/no_disk_child.sh}" [cont]="${tmp}/kids/no_cont_child.sh" [recov]="${tmp}/kids/no_recov_child.sh" [allen]="${tmp}/kids/no_allen_child.sh" [fpu]="${tmp}/kids/no_fpu_child.sh" [infer]="${tmp}/kids/no_infer_child.sh" [screen]="${tmp}/kids/no_screen_child.sh")
+        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}" [smp]="${6:-${tmp}/kids/no_smp_child.sh}" [crash]="${7:-${tmp}/kids/no_crash_child.sh}" [disk]="${8:-${tmp}/kids/no_disk_child.sh}" [cont]="${tmp}/kids/no_cont_child.sh" [recov]="${tmp}/kids/no_recov_child.sh" [allen]="${tmp}/kids/no_allen_child.sh" [kbd]="${kbd_kid:-${tmp}/kids/no_kbd_child.sh}" [fpu]="${tmp}/kids/no_fpu_child.sh" [infer]="${tmp}/kids/no_infer_child.sh" [screen]="${tmp}/kids/no_screen_child.sh")
         run_children 2>/dev/null
         evaluate_table >"${tmp}/${scen}.out"
     }
@@ -388,8 +391,10 @@ self_test() {
         && ok "A: M4_NVME PASS line carries the confined-mode note" || bad "A: M4_NVME PASS line lacks the note"
     grep -qxF "AIENOS_CK_NET: PASS (${NET_PASS_NOTE})" "${tmp}/A.out" \
         && ok "A: NET PASS line carries the QEMU slirp / SMMU fence note" || bad "A: NET PASS line lacks the note"
-    grep -qx 'AIENOS_CK_KEYBOARD: NOT_RUN (MISSING_IMPLEMENTATION: no xHCI/USB HID keyboard driver in the C kernel)' "${tmp}/A.out" \
-        && ok "A: missing gate prints NOT_RUN (MISSING_IMPLEMENTATION: reason)" || bad "A: KEYBOARD line wrong"
+    grep -qxF 'AIENOS_CK_M0_ROLLBACK: NOT_RUN (MISSING_IMPLEMENTATION: C loader signatures, A/B, BootNext and rollback are parked (native/boot/README.md))' "${tmp}/A.out" \
+        && ok "A: missing gate prints NOT_RUN (MISSING_IMPLEMENTATION: reason)" || bad "A: M0_ROLLBACK line wrong"
+    grep -q '^AIENOS_CK_KEYBOARD: NOT_RUN' "${tmp}/A.out" \
+        && ok "A: KEYBOARD claimed PASS by the store child stays NOT_RUN without its own child" || bad "A: KEYBOARD line wrong"
     [[ "$(grep -c '^AIENOS_CK_[A-Z0-9_]*: ' "${tmp}/A.out")" == 20 ]] && ok "A: exactly 20 verdict lines" || bad "A: verdict line count"
 
     # B: boot FAIL; store script missing -> its three gates NOT_RUN, never PASS.
@@ -481,6 +486,18 @@ self_test() {
     scenario V "$(fake bootV 0 'AIENOS_CK_M1: PASS')" "$(fake storeV 0 'AIENOS_CK_M4_NVME: PASS')" "" "" "" "" \
         "$(fake diskV 1 'AIENOS_CK_DISK_LAYOUT: PASS')"
     expect DISK_LAYOUT FAIL
+    # W, X, Y: KEYBOARD comes only from its own child (scripts/qemu_ck_keyboard_test.sh):
+    # PASS with exit 0 is PASS, a FAIL verdict is FAIL, exit 3 (lock or quiet flag) is NOT_RUN.
+    kbd_kid="$(fake kbdW 0 'ROW 30 PASS  smmu: overflow line refused' 'AIENOS_CK_KEYBOARD_DMA: PASS' 'AIENOS_CK_KEYBOARD: PASS (rows 25-32)')"
+    scenario W "$(fake bootW 0 'AIENOS_CK_M1: PASS')" "$(fake storeW 0 'AIENOS_CK_KEYBOARD: FAIL')"
+    expect KEYBOARD PASS
+    kbd_kid="$(fake kbdX 1 'ROW 29 FAIL  smmu: shell line missing' 'AIENOS_CK_KEYBOARD: FAIL')"
+    scenario X "$(fake bootX 0 'AIENOS_CK_M1: PASS')" "$(fake storeX 0 'AIENOS_CK_KEYBOARD: PASS')"
+    expect KEYBOARD FAIL
+    kbd_kid="$(fake kbdY 3 'NOT_RUN  QEMU gate lock held' 'AIENOS_CK_KEYBOARD: NOT_RUN (gate lock held)')"
+    scenario Y "$(fake bootY 0 'AIENOS_CK_M1: PASS')" "$(fake storeY 0 'AIENOS_CK_M4_NVME: PASS')"
+    expect KEYBOARD NOT_RUN
+    unset kbd_kid
 
     # Receipt: named by its content hash, valid JSON, physical NOT_RUN, never overwritten.
     scenario R "$(fake bootR 0 'AIENOS_CK_M1: PASS')" "$(fake storeR 0 'AIENOS_CK_M4_NVME: PASS')"
@@ -506,7 +523,7 @@ self_test() {
         jq -e '.physical == "NOT_RUN" and (.gates | length) == 20 and .verdict == "NOT_ALL_GATES_PASS"
                and ([.gates[] | select(.id == "M1")][0].verdict == "PASS")
                and ([.gates[] | select(.id == "ARGUS1_REVOKE")][0].verdict == "FAIL")
-               and (.children | length) == 13 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
+               and (.children | length) == 14 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
             && ok "receipt is valid JSON (jq) with expected fields" || bad "receipt JSON invalid or fields wrong"
     else
         echo "NOT_RUN  jq not installed; JSON validity not machine-checked"; jq_skipped=1
@@ -525,7 +542,7 @@ self_test() {
         [[ -n "${g}" ]] || continue
         rows=$((rows + 1))
         case "${s}" in
-            boot|store|net|artifact|smp|crash|disk|cont|recov|allen|fpu|infer|screen) [[ "${w}" == - ]] || tbad=1 ;;
+            boot|store|net|artifact|smp|crash|disk|cont|recov|allen|kbd|fpu|infer|screen) [[ "${w}" == - ]] || tbad=1 ;;
             missing) [[ -n "${w}" && "${w}" != - ]] || tbad=1 ;;
             *) tbad=1 ;;
         esac

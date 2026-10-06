@@ -20,9 +20,9 @@
  *      isolation not active)". There is no unconfined bypass for the xHCI,
  *      not even in the TEST-ONLY CK_QEMU_UNSAFE_DMA=1 build;
  *   4. with the grant: map BAR0 and make sure the controller is halted
- *      (USBCMD.R/S = 0, USBSTS.HCH = 1, bounded wait); nothing is put on the
- *      controller's rings: there is NO USB HID driver and no console shell in
- *      the C kernel yet (rows 29-30 stay NOT_RUN, MISSING_IMPLEMENTATION);
+ *      (USBCMD.R/S = 0, USBSTS.HCH = 1, bounded wait); then, only if it
+ *      halted, the operator phase of usb_kbd.c runs on this DMA region: HID
+ *      boot keyboard, recovery-access hook and console shell (rows 29-30);
  *   5. release, in the NVMe halt order: controller halted while it can
  *      still DMA, bus master off with read-back ("dma_gate: xhci bus master
  *      revoked"), the controller's COMMAND register read back again
@@ -42,9 +42,9 @@
 #define AIENOS_CK_XHCI_FENCE_H
 #include "pci.h"
 
-/* DMA region the controller is confined to (its only SMMU window). Sized for
- * the HID cut that will follow (DCBAA, command/event rings, ERST, device and
- * input contexts, one interrupt-IN buffer); nothing uses it yet. */
+/* DMA region the controller is confined to (its only SMMU window): the 16
+ * pages of usb_kbd.c (DCBAA, device and input contexts, command and event
+ * rings, ERST, EP0 and interrupt-IN rings, buffer, up to 6 scratchpads). */
 #define CK_XHCI_DMA_BYTES (64u * 1024u)
 #define CK_XHCI_CLASS 0x0c0330u
 /* xHCI 1.2 section 5.4.1: the controller halts within 16 ms of R/S = 0. */

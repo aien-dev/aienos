@@ -21,6 +21,8 @@
 #include "net_bind.h"
 #include "net_udp.h"
 #include "xhci_fence.h"
+#include "usb_hid.h"
+#include <stdarg.h>
 
 static int checks, failures;
 #define CHECK(c)                                                                 \
@@ -845,6 +847,126 @@ static void test_artifact_store(void)
     unlink(aimg);
 }
 
+/* ---------------- operator input pure logic (dev/usb_hid.c) ---------------- */
+
+static char g_echo[256];
+static size_t g_echo_n;
+static void t_echo(char c) { if (g_echo_n < sizeof g_echo - 1) g_echo[g_echo_n++] = c; }
+static char g_sh[512];
+static void t_out(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    size_t n = strlen(g_sh);
+    vsnprintf(g_sh + n, sizeof g_sh - n, fmt, ap);
+    va_end(ap);
+}
+
+static void test_usb_hid(void)
+{
+    /* keymap */
+    CHECK(ck_hid_usage(0x04, 0).kind == CK_KEY_CHAR && ck_hid_usage(0x04, 0).c == 'a');
+    CHECK(ck_hid_usage(0x1d, 1).c == 'Z');
+    CHECK(ck_hid_usage(0x1e, 0).c == '1' && ck_hid_usage(0x27, 0).c == '0');
+    CHECK(ck_hid_usage(0x1e, 1).kind == CK_KEY_NONE); /* shifted digit: not in the keymap */
+    CHECK(ck_hid_usage(0x28, 0).kind == CK_KEY_ENTER && ck_hid_usage(0x2a, 0).kind == CK_KEY_BACKSPACE);
+    CHECK(ck_hid_usage(0x29, 0).kind == CK_KEY_ESCAPE && ck_hid_usage(0x2c, 0).c == ' ');
+    CHECK(ck_hid_usage(0x3a, 0).kind == CK_KEY_NONE); /* F1 */
+
+    /* decode: new usages only, rollover ignored, wrong length ignored */
+    ck_hid_decoder d = {{0}};
+    ck_key_event ev[CK_HID_MAX_KEYS];
+    uint8_t r1[8] = {0, 0, 0x04, 0, 0, 0, 0, 0};
+    CHECK(ck_hid_decode(&d, r1, 8, ev) == 1 && ev[0].c == 'a');
+    CHECK(ck_hid_decode(&d, r1, 8, ev) == 0); /* still held: no repeat */
+    uint8_t r2[8] = {0x02, 0, 0x04, 0x05, 0, 0, 0, 0};
+    CHECK(ck_hid_decode(&d, r2, 8, ev) == 1 && ev[0].c == 'B');
+    uint8_t roll[8] = {0, 0, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01};
+    CHECK(ck_hid_decode(&d, roll, 8, ev) == 0);
+    CHECK(ck_hid_decode(&d, r2, 8, ev) == 0); /* rollover kept the previous state */
+    uint8_t up[8] = {0};
+    CHECK(ck_hid_decode(&d, up, 8, ev) == 0);
+    CHECK(ck_hid_decode(&d, r1, 8, ev) == 1 && ev[0].c == 'a'); /* pressed again after release */
+    CHECK(ck_hid_decode(&d, r1, 7, ev) == 0);
+
+    /* configuration descriptor (same fixtures as the Rust descriptor.rs tests) */
+    static const uint8_t kbd[34] = {9, 2, 34, 0, 1, 1, 8, 0xa0, 50, 9, 4, 0, 0, 1, 3, 1, 1, 0,
+                                    9, 0x21, 0x11, 0x01, 0, 1, 0x22, 63, 0, 7, 5, 0x81, 3, 8, 0, 7};
+    ck_boot_kbd bk;
+    CHECK(ck_usb_find_boot_kbd(kbd, sizeof kbd, &bk) == 0 && bk.configuration == 1 && bk.interface == 0 &&
+          bk.endpoint == 0x81 && bk.max_packet == 8 && bk.interval == 7);
+    static const uint8_t comp[50] = {9, 2, 50, 0, 2, 2, 0, 0xa0, 50, 9, 4, 0, 0, 1, 3, 1, 2, 0, 7, 5, 0x81, 3, 4, 0, 10,
+                                     9, 4, 1, 0, 2, 3, 1, 1, 0, 7, 5, 0x02, 3, 8, 0, 10, 7, 5, 0x83, 3, 8, 0, 4, 0, 0};
+    CHECK(ck_usb_find_boot_kbd(comp, sizeof comp, &bk) == 0 && bk.interface == 1 && bk.endpoint == 0x83 && bk.interval == 4);
+    uint8_t bad[34];
+    memcpy(bad, kbd, sizeof bad);
+    bad[27] = 40; /* endpoint length runs past wTotalLength */
+    CHECK(ck_usb_find_boot_kbd(bad, sizeof bad, &bk) == -1);
+    memcpy(bad, kbd, sizeof bad);
+    bad[16] = 2; /* protocol mouse: no keyboard */
+    CHECK(ck_usb_find_boot_kbd(bad, sizeof bad, &bk) == -1);
+    CHECK(ck_usb_find_boot_kbd(kbd, 8, &bk) == -1);
+    memcpy(bad, kbd, sizeof bad);
+    bad[9] = 1; /* zero-progress descriptor length */
+    CHECK(ck_usb_find_boot_kbd(bad, sizeof bad, &bk) == -1);
+
+    /* line editor: echo, backspace, Enter, fail closed on overflow */
+    ck_line l;
+    ck_line_reset(&l);
+    g_echo_n = 0;
+    ck_key_event a = {CK_KEY_CHAR, 'a'}, b = {CK_KEY_CHAR, 'b'}, bs = {CK_KEY_BACKSPACE, 0}, en = {CK_KEY_ENTER, 0};
+    CHECK(ck_line_feed(&l, a, t_echo) == CK_LINE_MORE && ck_line_feed(&l, b, t_echo) == CK_LINE_MORE);
+    CHECK(ck_line_feed(&l, bs, t_echo) == CK_LINE_MORE && l.len == 1);
+    CHECK(ck_line_feed(&l, en, t_echo) == CK_LINE_DONE && strcmp(l.buf, "a") == 0);
+    CHECK(g_echo_n == 3 && g_echo[0] == 'a' && g_echo[1] == 'b' && g_echo[2] == '\b');
+    ck_line_reset(&l);
+    ck_key_event x = {CK_KEY_CHAR, 'x'};
+    for (unsigned i = 0; i < CK_LINE_CAP; i++) CHECK(ck_line_feed(&l, x, 0) == CK_LINE_MORE);
+    CHECK(l.len == CK_LINE_CAP && !l.overflow);
+    CHECK(ck_line_feed(&l, x, 0) == CK_LINE_MORE && l.overflow && l.len == CK_LINE_CAP);
+    CHECK(ck_line_feed(&l, bs, 0) == CK_LINE_MORE && l.len == CK_LINE_CAP); /* no backing out of an overflow */
+    CHECK(ck_line_feed(&l, en, 0) == CK_LINE_OVERFLOW && l.len == 0 && l.buf[0] == 0 && l.typed == CK_LINE_CAP + 1);
+    ck_line_reset(&l);
+    for (unsigned i = 0; i < CK_LINE_CAP; i++) (void)ck_line_feed(&l, x, 0);
+    CHECK(ck_line_feed(&l, en, 0) == CK_LINE_DONE && l.len == CK_LINE_CAP); /* exactly at the bound is accepted */
+
+    /* shell (Rust shell.rs texts) */
+    ck_shell_ctx ctx = {42, 1, 7, "c0ffee"};
+    g_sh[0] = 0;
+    CHECK(ck_shell_run("help", &ctx, t_out) == 0 && strcmp(g_sh, "commands: help mem el report uptime exit\n") == 0);
+    g_sh[0] = 0;
+    CHECK(ck_shell_run("el", &ctx, t_out) == 0 && strcmp(g_sh, "EL1\n") == 0);
+    g_sh[0] = 0;
+    CHECK(ck_shell_run(" mem ", &ctx, t_out) == 0 && strcmp(g_sh, "conventional_memory_kb: 42\n") == 0);
+    g_sh[0] = 0;
+    CHECK(ck_shell_run("uptime", &ctx, t_out) == 0 && strcmp(g_sh, "uptime_ms: 7\n") == 0);
+    g_sh[0] = 0;
+    CHECK(ck_shell_run("report", &ctx, t_out) == 0 && strstr(g_sh, "aienos_commit: c0ffee") != NULL);
+    g_sh[0] = 0;
+    CHECK(ck_shell_run("wat", &ctx, t_out) == 0 && strcmp(g_sh, "unknown command: wat\n") == 0);
+    g_sh[0] = 0;
+    CHECK(ck_shell_run("x a b", &ctx, t_out) == 0 && strcmp(g_sh, "invalid command line\n") == 0);
+    g_sh[0] = 0;
+    CHECK(ck_shell_run("x 12345678901234567", &ctx, t_out) == 0 && strcmp(g_sh, "invalid command line\n") == 0);
+    g_sh[0] = 0;
+    CHECK(ck_shell_run("exit", &ctx, t_out) == 1 && g_sh[0] == 0);
+    CHECK(ck_shell_parse("", 0) == CK_SH_EMPTY && ck_shell_parse("unknown abc", 11) == CK_SH_UNKNOWN);
+
+    /* recovery decision and identity digest */
+    ck_key_event r = {CK_KEY_CHAR, 'r'}, R = {CK_KEY_CHAR, 'R'};
+    CHECK(ck_recovery_decide(0, r) == CK_RECOVERY_NORMAL_TIMEOUT);
+    CHECK(ck_recovery_decide(1, r) == CK_RECOVERY_CONSOLE && ck_recovery_decide(1, R) == CK_RECOVERY_CONSOLE);
+    CHECK(ck_recovery_decide(1, a) == CK_RECOVERY_NORMAL_KEY && ck_recovery_decide(1, en) == CK_RECOVERY_NORMAL_KEY);
+    CHECK(strcmp(ck_recovery_name(CK_RECOVERY_CONSOLE), "recovery reason=key-r") == 0);
+    uint8_t id[32], want[32];
+    static const char msg[] = "AIENOS-CK-RECOVERY-IDENTITY-V1\0abc";
+    sha256_hash((const uint8_t *)msg, sizeof msg - 1, want);
+    ck_recovery_identity("abc", id);
+    CHECK(memcmp(id, want, 32) == 0);
+    ck_recovery_identity("abd", want);
+    CHECK(memcmp(id, want, 32) != 0);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -858,6 +980,7 @@ int main(void)
     test_nvme_shutdown();
     test_net_udp();
     test_xhci_fence();
+    test_usb_hid();
     printf("CK_STAGE_HOST: %s checks=%d failures=%d\n", failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;
 }

@@ -12,11 +12,28 @@
 #include "ck_internal.h"
 #include "entropy.h"
 #include "handoff_check.h"
+#include "frames.h"
 
 #define TTBR_BADDR_MASK 0x0000fffffffffffeull
 
 static struct ck_handoff *hand;
 const struct ck_handoff *ck_handoff_get(void) { return hand; }
+
+/* ck.h operator shell facts. The conventional-memory total is summed once at
+ * kernel entry, while the firmware memory-map copy is still reachable. */
+static uint64_t conventional_kb;
+unsigned ck_exception_level(void) { return ck_current_el(); }
+uint64_t ck_conventional_memory_kb(void) { return conventional_kb; }
+static void sum_conventional(const struct ck_handoff *h)
+{
+    uint64_t pages = 0;
+    if (!h->memory_map || h->desc_size < sizeof(struct ck_efi_desc)) return;
+    for (uint64_t off = 0; off + h->desc_size <= h->map_size; off += h->desc_size) {
+        const struct ck_efi_desc *d = (const struct ck_efi_desc *)(uintptr_t)(h->memory_map + off);
+        if (d->type == CK_EFI_CONVENTIONAL && d->pages <= (1ull << 36)) pages += d->pages;
+    }
+    conventional_kb = pages * 4u;
+}
 
 const void *ck_acpi_find(const char sig[4])
 {
@@ -224,6 +241,7 @@ void ck_kernel_entry(struct ck_handoff *h)
     const char *why;
     if (ck_handoff_check(h, &why) != 0)
         ck_panic("handoff: %s", why);
+    sum_conventional(h);
     ck_psci_configure(ck_acpi_find("FACP"));
     ck_set_stage("mm_build");
     uint64_t sp = ck_mm_build(h);

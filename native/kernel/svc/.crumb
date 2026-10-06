@@ -18,26 +18,26 @@
       "children": [
         {
           "digest": "17d9c9eba5fe222af0e8700ac3baa3461eb217a372f16a5e79e00a19cc5df6f5",
-          "last_commit": "fbbfc9c",
+          "last_commit": "31ed9f8",
           "name": "compat",
           "purpose": "Directory native/kernel/svc/compat. Purpose not yet described by a human."
         },
         {
-          "digest": "2815a08ee2c689d59a24bc81ec578a1068cd2bbc34737bb16418e0ebd8ecb3f9",
-          "last_commit": "fbbfc9c",
+          "digest": "c64e9742262522ca9b9a0b76ec28beb02a1ab7a3b9284bd85f5710391d143dcf",
+          "last_commit": "2f393a4",
           "name": "tests",
           "purpose": "Directory native/kernel/svc/tests. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:9e2977ce5ea7f74952e26dfb57f3703ab65c5ccbe933e2f5135ab1a5496e0af7",
-      "compiled_at": "2026-10-05T02:01:59Z",
+      "children_root": "sha256:556579a3c48b50e544dc026c1a4300a68b8fc92f4b7b4ebad24a74341178f62f",
+      "compiled_at": "2026-10-06T01:02:05Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:f24db6711bf88a0d7c48375f6f979fd589306a9266c697c5f25d4e8a2dbdb90d",
+      "digest": "sha256:2c634b363be2e02a04c0fdb3cf56c88bebf0a86ee172f3416989df3764ea7a0d",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 35,
-      "generated_at_commit": "71d5b326eea6a330f3cc1c4377fc4bc2d134d5aa",
-      "source_tree": "sha256:947429839de94404d11be4fef56449e2d79c1c4a1d0fe51f95c0bb9b1c18b73b"
+      "generated_at_commit": "20587476bf0d4b7577cc3b62857a9166300681bf",
+      "source_tree": "sha256:a49f575fb80438c30583914ccbe3149a5fb9c12e625392ffcf76fe42844723fb"
     },
     "owner_lane": "",
     "provenance": {

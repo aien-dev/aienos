@@ -21,6 +21,7 @@ STAGE_OUT ?= $(abspath $(STAGE_DIR)/../../target/stage)
 # Own sources (image).
 STAGE_OWN_SRCS := $(STAGE_DIR)/dev/pci.c $(STAGE_DIR)/dev/disk_part.c $(STAGE_DIR)/dev/nvme_bind.c $(STAGE_DIR)/dev/nvme_shutdown.c $(STAGE_DIR)/dev/virtio_net.c \
                   $(STAGE_DIR)/dev/net_bind.c $(STAGE_DIR)/dev/net_udp.c $(STAGE_DIR)/dev/xhci_fence.c \
+                  $(STAGE_DIR)/dev/usb_hid.c $(STAGE_DIR)/dev/usb_kbd.c \
                   $(STAGE_DIR)/dev/devices.c $(STAGE_DIR)/svc/security.c $(STAGE_DIR)/svc/store_boot.c \
                   $(STAGE_DIR)/svc/artifact_store.c $(STAGE_DIR)/svc/store_crash.c
 # Native modules, compiled unmodified.
@@ -60,7 +61,7 @@ STAGE_FREE_FLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -nostdli
 # The only undefined symbols the stages may leave for the core: ck.h services.
 STAGE_ALLOWED_U := ck_puts ck_printf ck_vprintf ck_panic ck_alloc ck_free ck_dma_alloc ck_mmio_map \
   ck_dma_confine ck_dma_unconfine ck_dma_faults \
-  ck_mb ck_acpi_find ck_time_us ck_udelay ck_commit \
+  ck_mb ck_acpi_find ck_time_us ck_udelay ck_commit ck_exception_level ck_conventional_memory_kb \
   ck_entropy_fill ck_entropy_status ck_entropy_reason
 
 STAGE_FREE_OBJS := $(foreach s,$(STAGE_SRCS),$(STAGE_OUT)/free/$(subst /,_,$(subst $(STAGE_NATIVE)/,,$(s:.c=.o))))

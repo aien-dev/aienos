@@ -1,6 +1,7 @@
 /* xhci_fence.c -- xHCI DMA fence (see xhci_fence.h). Freestanding. */
 #include "xhci_fence.h"
 #include "ck.h"
+#include "usb_kbd.h"
 
 #if defined(CK_TEST_XHCI_MUTATION) && defined(CK_HARDWARE_STAGING)
 #error "CK_TEST_XHCI_MUTATION (TEST-ONLY xHCI DMA fence mutation) cannot be combined with CK_HARDWARE_STAGING"
@@ -200,8 +201,11 @@ int ck_xhci_fence(const pci_system *pci)
     ck_printf("xhci: caplength=0x%02x hciversion=0x%04x dma_window=0x%llx+0x%x\n", cap & 0xffu, cap >> 16,
               (unsigned long long)g_dma_phys, (unsigned)CK_XHCI_DMA_BYTES);
     int hrc = halt("halted after grant");
-    /* Rows 29-30 (USB HID attach, typed line, console shell) are not built. */
-    ck_printf("keyboard: hid NOT_IMPLEMENTED (no USB HID driver or console shell in the C kernel; DMA fence only)\n");
+    /* Rows 29-30 and the recovery-access hook (usb_kbd.c): the polled HID
+     * boot-keyboard driver runs only here, inside the confined grant, on the
+     * fence's DMA region; the release below halts and revokes whatever it
+     * returns. A controller that would not halt is never driven. */
+    if (hrc == 0) (void)ck_kbd_phase(x->bar0, g_dma_mem, g_dma_phys, CK_XHCI_DMA_BYTES);
     x->state = hrc ? "halt-failed" : "fenced";
     ck_xhci_release();
     return hrc ? CK_XHCI_E_HALT : CK_XHCI_OK;
