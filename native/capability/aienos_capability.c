@@ -201,7 +201,10 @@ static uint32_t ancestor_hops(const CapState *s, uint32_t entry_id) {
 }
 
 /* The caller must present a delivered, live, current reference that holds
- * every right in `need`. */
+ * every right in `need`. A privileged right is an authority-office right:
+ * it is honored only on an entry whose resource is AIENOS_CAP_RES_AUTHORITY,
+ * so a capability that carries (say) the epoch right on some other resource,
+ * such as an operator control resource, cannot step the authority (#266). */
 static int auth_use(const CapState *s, AienosCapRef authority, uint32_t need, uint32_t *index) {
     if (authority.cap_id >= AIENOS_CAP_MAX) return AIENOS_CAP_ERR_UNAUTHORIZED;
     uint32_t i = authority.cap_id;
@@ -214,6 +217,8 @@ static int auth_use(const CapState *s, AienosCapRef authority, uint32_t need, ui
     int rc = chain_ok(s, i);
     if (rc != AIENOS_CAP_OK) return rc;
     if ((e->rights & need) != need) return AIENOS_CAP_ERR_UNAUTHORIZED;
+    if ((need & AIENOS_CAP_RIGHT_PRIVILEGED) && e->resource != AIENOS_CAP_RES_AUTHORITY)
+        return AIENOS_CAP_ERR_RESOURCE;
     *index = i;
     return AIENOS_CAP_OK;
 }
