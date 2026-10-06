@@ -170,7 +170,7 @@ int ck_nvme_bind(ck_nvme *n, const pci_system *pci)
     uint32_t rid = ((uint32_t)f->bus << 8) | ((uint32_t)f->dev << 3) | (uint32_t)f->fn;
     uint64_t win = ((uint64_t)CK_NVME_DMA_BYTES + NVME_PAGE - 1u) & ~(uint64_t)(NVME_PAGE - 1u);
     struct ck_dma_confinement cf;
-    int src = ck_dma_confine(rid, phys, win, &cf);
+    int src = ck_dma_confine(f->segment, rid, phys, win, &cf);
     if (src == 0) {
         n->confined = 1;
         n->stream_id = cf.stream_id;

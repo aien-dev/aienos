@@ -93,7 +93,7 @@ static int bring_up(void)
     return 0;
 }
 
-int ck_dma_confine(uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
+int ck_dma_confine(uint32_t segment, uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
 {
     if (!len || (phys & 0xfffu) || (len & 0xfffu) || phys + len < phys)
         return CK_SMMU_EARG;
@@ -101,7 +101,7 @@ int ck_dma_confine(uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_conf
     if (rc)
         return rc;
     uint32_t sid;
-    if (ck_iort_stream_id(&g.iort, rid, &sid))
+    if (ck_iort_stream_id(&g.iort, segment, rid, &sid))
         return CK_SMMU_NOSTREAM;
     if (sid >= STE_N)
         return CK_SMMU_NOSTREAM;

@@ -65,6 +65,7 @@ typedef struct {
 
 typedef struct {
     uint8_t bus, dev, fn;
+    uint16_t segment;    /* PCI segment of the ECAM it was found in (IORT lookup key) */
     uint16_t vendor, device;
     uint32_t class_code; /* class << 16 | subclass << 8 | progif */
     uint8_t header_type;

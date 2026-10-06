@@ -168,7 +168,7 @@ int ck_xhci_fence(const pci_system *pci)
     }
     uint32_t rid = ((uint32_t)f->bus << 8) | ((uint32_t)f->dev << 3) | (uint32_t)f->fn;
     struct ck_dma_confinement cf;
-    int src = ck_dma_confine(rid, g_dma_phys, CK_XHCI_DMA_BYTES, &cf);
+    int src = ck_dma_confine(f->segment, rid, g_dma_phys, CK_XHCI_DMA_BYTES, &cf);
     if (src == 0) {
         x->confined = 1;
         x->stream_id = cf.stream_id;

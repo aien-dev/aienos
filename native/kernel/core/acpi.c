@@ -312,6 +312,17 @@ int ck_acpi_spans(uint64_t rsdp, void (*fn)(uint64_t lo, uint64_t hi, void *ctx)
     return n;
 }
 
+/* TEST-only IORT mutants (make iort-mutants): each must make test_smmu
+ * FAIL. Host builds only; never part of an image. */
+#if defined(CK_IORT_MUTANT_TRUNCATE) || defined(CK_IORT_MUTANT_SEGMENT_BLIND) || defined(CK_IORT_MUTANT_OVERLAP_OK)
+#if !__STDC_HOSTED__
+#error "CK_IORT_MUTANT_* are host test mutants only"
+#endif
+#ifdef CK_HARDWARE_STAGING
+#error "CK_IORT_MUTANT_* cannot be combined with CK_HARDWARE_STAGING"
+#endif
+#endif
+
 /* IORT walk: calls back for every node after checking its header, length
  * and ID-mapping array bounds. -1 on any malformed node. */
 #define IORT_NODE_HDR 16u
@@ -319,6 +330,7 @@ int ck_acpi_spans(uint64_t rsdp, void (*fn)(uint64_t lo, uint64_t hi, void *ctx)
 #define IORT_NODE_SMMUV3 4u
 #define IORT_MAP_BYTES 20u
 #define IORT_TABLE_HDR 48u /* SDT header + node count, node array offset, reserved */
+#define IORT_RC_SEGMENT 28u /* root complex node: pci_segment_number */
 
 static int iort_nodes(const uint8_t *t, uint32_t len, uint32_t *count, uint32_t *first)
 {
@@ -363,16 +375,34 @@ int ck_iort_parse(const void *iort, struct ck_iort_smmu *out)
                 found = 1;
             }
             if (pass == 1 && type == IORT_NODE_ROOT_COMPLEX) {
+                /* Root complex node: PCI segment number at +28 (ACPICA
+                 * actbl2.h acpi_iort_root_complex: memory_properties u64
+                 * @16, ats_attribute u32 @24, pci_segment_number u32 @28). */
+                if (nlen < IORT_RC_SEGMENT + 4)
+                    return -1;
+                uint32_t seg = rd32(n + IORT_RC_SEGMENT);
                 for (uint32_t m = 0; m < mcount; m++) {
                     const uint8_t *e = n + moff + m * IORT_MAP_BYTES;
                     if (rd32(e + 12) != s.node_off)
                         continue;
-                    if (s.nmaps >= CK_IORT_MAX_MAPS)
+                    if (s.nmaps >= CK_IORT_MAX_MAPS) {
+#ifdef CK_IORT_MUTANT_TRUNCATE
+                        continue; /* TEST mutant: drop the extra mappings silently */
+#else
                         return -1;
-                    s.map[s.nmaps].input_base = rd32(e);
-                    s.map[s.nmaps].id_count = rd32(e + 4);
-                    s.map[s.nmaps].output_base = rd32(e + 8);
-                    s.nmaps++;
+#endif
+                    }
+                    struct ck_iort_map nm = { seg, rd32(e), rd32(e + 4), rd32(e + 8) };
+#ifndef CK_IORT_MUTANT_OVERLAP_OK
+                    for (uint32_t k = 0; k < s.nmaps; k++) {
+                        const struct ck_iort_map *o = &s.map[k];
+                        if (o->segment == seg &&
+                            (uint64_t)nm.input_base <= (uint64_t)o->input_base + o->id_count &&
+                            (uint64_t)o->input_base <= (uint64_t)nm.input_base + nm.id_count)
+                            return -1;
+                    }
+#endif
+                    s.map[s.nmaps++] = nm;
                 }
             }
             off += nlen;
@@ -384,10 +414,16 @@ int ck_iort_parse(const void *iort, struct ck_iort_smmu *out)
     return 1;
 }
 
-int ck_iort_stream_id(const struct ck_iort_smmu *s, uint32_t rid, uint32_t *sid)
+int ck_iort_stream_id(const struct ck_iort_smmu *s, uint32_t segment, uint32_t rid, uint32_t *sid)
 {
     for (uint32_t i = 0; i < s->nmaps; i++) {
         const struct ck_iort_map *m = &s->map[i];
+#ifndef CK_IORT_MUTANT_SEGMENT_BLIND
+        if (m->segment != segment)
+            continue;
+#else
+        (void)segment; /* TEST mutant: the pre-fix segment-blind lookup */
+#endif
         if (rid < m->input_base)
             continue;
         uint32_t rel = rid - m->input_base;

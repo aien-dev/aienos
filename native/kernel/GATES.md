@@ -108,7 +108,12 @@ The C SMMU service is `core/smmu.c` (port of `crates/aienos-kernel/src/smmu.rs`:
 linear stream table, stage 1 only, global abort set first and never cleared,
 every stream in abort until installed) plus `core/smmu_svc.c` (IORT lookup,
 per-stream page tables, `ck_dma_confine` / `ck_dma_unconfine` /
-`ck_dma_faults` in ck.h); host tests in `tests/test_smmu.c`.
+`ck_dma_faults` in ck.h); host tests in `tests/test_smmu.c`. The IORT
+lookup is per PCI segment (HOST tests on the DGX Spark's measured IORT shape:
+15 root complexes, segment 4 requester 0x100 -> stream 0x50100, segment 15
+not on the first SMMU) and `make iort-mutants` (run by `make test`) checks
+that test_smmu fails against a segment-blind lookup, a truncating parse and
+an accepted overlap. Hardware NOT_RUN.
 
 | # | Rust check (pattern) | CK gate | Status |
 | --- | --- | --- | --- |

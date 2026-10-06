@@ -100,7 +100,10 @@ struct ck_dma_confinement {
     uint32_t stream_id;
     uint64_t iova, len;
 };
-int ck_dma_confine(uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out);
+/* `segment` is the PCI segment of the device and `rid` its requester id
+ * (bus<<8 | dev<<3 | fn) inside that segment: the IORT resolves the stream
+ * id within that segment's root complex only. */
+int ck_dma_confine(uint32_t segment, uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out);
 /* Return a confined stream to abort (after the device's bus mastering is
  * off). 0 ok, CK_SMMU_EARG if not confined, CK_SMMU_FAILED on a command
  * timeout. */

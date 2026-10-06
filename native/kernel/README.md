@@ -297,6 +297,23 @@ low-water free bytes.
   DMA is refused. `CK_QEMU_UNSAFE_DMA=1` (TEST-ONLY, QEMU only, refused with
   `CK_HARDWARE_STAGING`) builds the unconfined bypass used only when no SMMU
   exists, and prints the `WARNING: UNSAFE NVME DMA BYPASS` lines.
+- The IORT stream id of a PCI device is resolved within its PCI segment
+  (`ck_dma_confine(segment, rid, ...)`, `ck_iort_stream_id(s, segment, rid,
+  ...)`): each root-complex mapping keeps the root complex's
+  `pci_segment_number` (IORT root complex node offset 28, ACPICA
+  `actbl2.h`), and a mapping of another segment never matches. The parse
+  keeps at most `CK_IORT_MAX_MAPS` (32) mappings to the SMMU and refuses the
+  whole table beyond that, and refuses two mappings whose input ranges
+  overlap in one segment. The DGX Spark's IORT (MEASURED, read under Ubuntu
+  2026-10-05) has 15 root complexes, segment n mapping requester ids
+  0-0xffff to streams `0x10000*(n+1)` on the first SMMUv3 (0x13800000), and
+  segment 15 on the second SMMUv3. Its NVMe (MEASURED: PCI 0004:01:00.0,
+  behind that first SMMU) resolves to stream 0x50000 + (bus 1 << 8 | dev 0
+  << 3 | fn 0 = 0x100) = 0x50100. The linear stream table holds streams
+  0x0-0xfff only, so `ck_dma_confine` still refuses that stream with
+  `CK_SMMU_NOSTREAM` until the two-level stream table lands. The PCI walk
+  itself (`dev/pci.c`) still covers segment 0 only, so every `pci_func`
+  carries segment 0 today.
 
 - The kernel writes only inside the AIENOS partition of the boot disk
   (`dev/disk_part.h`, gate `DISK_LAYOUT`). The GPT is parsed read-only:

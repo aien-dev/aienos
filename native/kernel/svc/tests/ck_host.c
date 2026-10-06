@@ -82,9 +82,9 @@ int ck_entropy_status(void) { return 0; }
 const char *ck_entropy_reason(void) { return "host-urandom"; }
 
 /* Host: no IORT, so no SMMU (the NVMe gate stays fail-closed). */
-int ck_dma_confine(uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
+int ck_dma_confine(uint32_t segment, uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
 {
-    (void)rid; (void)phys; (void)len; (void)out;
+    (void)segment; (void)rid; (void)phys; (void)len; (void)out;
     return CK_SMMU_ABSENT;
 }
 int ck_dma_unconfine(uint32_t stream_id) { (void)stream_id; return CK_SMMU_EARG; }
