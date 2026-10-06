@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# KEYBOARD gate for the AIENOS C kernel: rows 25-32 of native/kernel/GATES.md
+# KEYBOARD gate for the AIENOS C kernel: rows 25-32 (C-only 30a-30c, 32a, 32b) of native/kernel/GATES.md
 # "SEED-0A keyboard" (Rust oracle: scripts/qemu_keyboard_test.sh with SMMU=1
 # and SMMU=0) plus the C-only rows 30a-30c (recovery access, line overflow).
 # QEMU is not hardware: a PASS here qualifies nothing physical.
@@ -37,8 +37,19 @@
 #           stream 0x.. returned to abort (rc=0)", in that order, all before
 #           the "devices: xhci=fenced (rc=0)" line
 #   row 32  no "report_kind: (panic|fault)", "report_kind: final", QEMU exit 0
+#   row 32a (C only, every boot; NEXT-PHASE-3 cut 2) the ACPI platform walker runs on
+#           QEMU's own tables: "acpi_scan: tables=N refused=0
+#           first_refusal=0 devices=M" with N, M > 0, the positive control
+#           "acpi_scan: control ARMH0011 <name> mmio=0x9000000+0x1000" (the
+#           QEMU virt PL011 UART), "xhci_acpi: 0 platform controller(s)" (QEMU
+#           virt describes no platform xHCI), and the PCI path is kept: no
+#           "xhci_plat:" line and no fallback to platform controllers
+#   row 32b (C only) hardware expectation, always NOT_RUN here: the exact lines the
+#           DGX Spark should print, predicted by tools/ck_acpi_scan.c from
+#           its firmware tables (native/kernel/tests/fixtures/
+#           spark_xhci_acpi_expected.txt); never counted toward the verdict
 #  boot kbd-nosmmu    no SMMU (Rust SMMU=0), same image, no keys:
-#   rows 25, 26, 27, 32 as above
+#   rows 25, 26, 27, 32, 32a as above
 #   row 28  "dma_gate: xhci denied (NoSmmu), bus master stays off", "keyboard:
 #           unavailable (SMMU DMA isolation not active)", COMMAND read back
 #           after the deny with bus_master=off, no "dma_gate: xhci granted",
@@ -246,7 +257,7 @@ boot() {
 
 # Row bookkeeping: rowfail[n]=1 once any check of row n failed in this
 # evaluation; rowmodes[n] lists the boots that checked it.
-all_rows=(25 26 27 28 29 30 30a 30b 30c 31 32)
+all_rows=(25 26 27 28 29 30 30a 30b 30c 31 32 32a)
 declare -A rowfail rowmodes
 reset_rows() { local r; for r in "${all_rows[@]}"; do rowfail[$r]=0; rowmodes[$r]=""; done; }
 reset_rows
@@ -273,6 +284,7 @@ evaluate_dma() {
     mode="$1"
     rcheck 25 "xHCI found on the ECAM walk (Rust: keyboard: xhci )" \
         '^keyboard: xhci 0000:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7] mmio 0x[0-9a-f]+ '
+    evaluate_acpi
     rcheck 26 "post-exit bus-master sweep of the segment" \
         '^dma_sweep: seg 0000 bus [0-9a-f]{2}-[0-9a-f]{2} functions=[1-9][0-9]* bridges=[0-9]+ bridges_bme=[0-9]+ endpoints_bme_found=[0-9]+ still_enabled=0$'
     rabsent 26 "no endpoint left with bus master stuck on" '^dma_sweep: bme STUCK'
@@ -305,6 +317,18 @@ evaluate_dma() {
         before 31 "order: stream abort < end of the xHCI phase (not a reset-time revoke)" \
             '^smmu: xhci stream .* returned to abort' '^devices: xhci=fenced \(rc=0\)$'
     fi
+}
+
+# evaluate_acpi: row 32a (every boot). QEMU virt has no platform xHCI, so the
+# walker must find its tables, the UART control and zero controllers, and the
+# PCI xHCI path must not fall back to the platform list.
+evaluate_acpi() {
+    rcheck 32a "ACPI walker read QEMU's DSDT/SSDTs with no refusal" \
+        '^acpi_scan: tables=[1-9][0-9]* refused=0 first_refusal=0 devices=[1-9][0-9]* \(static scan; _STA not evaluated\)$'
+    rcheck 32a "positive control: QEMU virt UART ARMH0011 at 0x9000000" \
+        '^acpi_scan: control ARMH0011 [A-Z0-9_]{1,4} mmio=0x9000000\+0x1000$'
+    rcheck 32a "no ACPI platform xHCI on QEMU virt" '^xhci_acpi: 0 platform controller\(s\)$'
+    rabsent 32a "PCI path kept: no platform controller tried" '^(xhci_plat: |keyboard: (no PCI xHCI controller|none on the PCI xHCI))'
 }
 
 # evaluate_final smmu|nosmmu: row 32 for a boot that must end with the final report.
@@ -434,17 +458,18 @@ if [[ "${mutation_run}" == 0 ]]; then
             case "${r}" in 25|26|27|28|31|32) dma_fail=1 ;; esac
         fi
     done
+    echo "KEYBOARD_ROW 32b: NOT_RUN (hardware only; expected DGX Spark lines: native/kernel/tests/fixtures/spark_xhci_acpi_expected.txt)"
     [[ "${m1_fail}" == 0 ]] || echo "M1 checks failed on at least one boot: no row can pass"
     [[ "${other_fail}" == 0 ]] || echo "image checks failed (mutation banner, unsafe bypass, HID marker or commit)"
     if [[ "${dma_fail}" == 0 ]]; then echo "AIENOS_CK_KEYBOARD_DMA: PASS (rows 25-28,31,32; modes ${modes[*]})"; else echo "AIENOS_CK_KEYBOARD_DMA: FAIL (rows 25-28,31,32; modes ${modes[*]})"; fi
     if [[ "${gate_fail}" != 0 ]]; then
-        echo "${final_tag}: FAIL (rows 25-32,30a-30c; modes ${modes[*]}; QEMU only)"
+        echo "${final_tag}: FAIL (rows 25-32,30a-30c,32a; modes ${modes[*]}; QEMU only)"
         exit 1
     elif [[ "${partial}" != 0 ]]; then
         echo "${final_tag}: NOT_RUN (partial run, modes ${modes[*]}; every boot is needed for the gate)"
         exit 3
     fi
-    echo "${final_tag}: PASS (rows 25-32,30a-30c; boots kbd-smmu kbd-nosmmu kbd-recovery; QEMU only, hardware NOT_RUN)"
+    echo "${final_tag}: PASS (rows 25-32,30a-30c,32a; boots kbd-smmu kbd-nosmmu kbd-recovery; QEMU only, hardware NOT_RUN)"
     exit 0
 fi
 

@@ -391,7 +391,7 @@ KLDFLAGS := -nostdlib -pie --no-dynamic-linker -z norelro -z noexecstack -z max-
 
 CORE_C := $(BOOT)/efi_main.c $(BOOT)/efi_model.c $(BOOT)/efi_gop.c \
 	$(KDIR)/arch/exception.c $(KDIR)/arch/gic.c $(KDIR)/arch/timer.c \
-	$(KDIR)/core/acpi.c $(KDIR)/core/console.c $(KDIR)/core/fbcon.c $(KDIR)/core/fmt.c \
+	$(KDIR)/core/acpi.c $(KDIR)/core/acpi_dev.c $(KDIR)/core/acpi_platform.c $(KDIR)/core/console.c $(KDIR)/core/fbcon.c $(KDIR)/core/fmt.c \
 	$(KDIR)/core/kmain.c $(KDIR)/core/handoff_check.c $(KDIR)/core/libc_min.c $(KDIR)/core/report.c \
 	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c \
 	$(KDIR)/core/fpu.c $(KDIR)/core/infer.c $(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c $(KDIR)/core/smp.c \
@@ -654,8 +654,8 @@ $(FULL_EFI): $(FULL_ELF)
 # ---- host unit tests ----
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
-	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c
-TESTS := test_fmt test_frames test_pt test_acpi test_heap test_smmu test_sched test_ipc test_artifact test_entropy test_handoff test_fbcon \
+	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/acpi_dev.c
+TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_entropy test_handoff test_fbcon \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
 	test_continuity_subject test_continuity_subject_provision
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
@@ -681,6 +681,17 @@ handoff-mutant: $(OUT)/host/test_handoff_mutant
 	@if $< > $<.log 2>&1; then cat $<.log; echo "test_handoff mutant (reserved0 check removed): PASSED, test does not catch it"; exit 1; \
 	else grep -F "test_handoff: FAIL" $<.log && echo "test_handoff mutant (reserved0 check removed): FAILS as required"; fi
 
+# TEST-ONLY mutants of core/acpi_dev.c (NEXT-PHASE-3 cut 2): 1 = table
+# signature check removed, 2 = checksum check removed, 3 = length-versus-
+# buffer check removed (truncated table trusted). test_acpi_dev must FAIL
+# against each. Host only (acpi_dev.c refuses CK_AML_MUTANT freestanding).
+acpi-dev-mutant: $(KDIR)/tests/test_acpi_dev.c $(HOST_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
+	@mkdir -p $(OUT)/host
+	@for m in 1 2 3; do b=$(OUT)/host/test_acpi_dev_mutant$$m; \
+	  $(HOSTCC) $(HCFLAGS) -DCK_AML_MUTANT=$$m -o $$b $(KDIR)/tests/test_acpi_dev.c $(HOST_SRCS) || exit 1; \
+	  if $$b > $$b.log 2>&1; then cat $$b.log; echo "test_acpi_dev mutant $$m: PASSED, test does not catch it"; exit 1; \
+	  else grep -F "test_acpi_dev: FAIL" $$b.log >/dev/null && echo "test_acpi_dev mutant $$m: FAILS as required" || { cat $$b.log; exit 1; }; fi; done
+
 # TEST-ONLY mutants of the IORT parse/lookup in core/acpi.c: test_smmu must
 # FAIL against each (TRUNCATE: extra mappings dropped instead of the table
 # refused; SEGMENT_BLIND: lookup ignores the PCI segment; OVERLAP_OK:
@@ -705,8 +716,8 @@ iort-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_IORT_MUTANTS: PASS"; else echo "CK_IORT_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant iort-mutants test-continuity-subject-restart
-	@fail=0; for t in $(filter-out handoff-mutant iort-mutants test-continuity-subject-restart,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants test-continuity-subject-restart
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants test-continuity-subject-restart,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -1058,6 +1069,18 @@ $(FB_CHECK_TOOL): $(KDIR)/tools/ck_fb_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/
 	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -o $@ $(KDIR)/tools/ck_fb_check.c $(KDIR)/core/fbcon.c
 fb-check: $(FB_CHECK_TOOL)
 
+# ---- platform xHCI discovery over dumped firmware tables (NEXT-PHASE-3 cut 2) ----
+# Runs the kernel scan (core/acpi_dev.c) and IORT lookup (core/acpi.c) over
+# DSDT/SSDT/IORT files read under Linux and prints the lines the kernel
+# fence prints (dev/xhci_acpi_fmt.h). Hosted; never part of an image.
+ACPI_SCAN_TOOL := $(OUT)/host/ck_acpi_scan
+$(ACPI_SCAN_TOOL): $(KDIR)/tools/ck_acpi_scan.c $(KDIR)/core/acpi_dev.c $(KDIR)/core/acpi.c \
+	$(KDIR)/core/acpi_dev.h $(KDIR)/core/acpi.h $(KDIR)/dev/xhci_acpi_fmt.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/dev -I$(BOOT) -o $@ \
+	  $(KDIR)/tools/ck_acpi_scan.c $(KDIR)/core/acpi_dev.c $(KDIR)/core/acpi.c
+acpi-scan: $(ACPI_SCAN_TOOL)
+
 # Owner provisioning generator (hosted; never part of an image) and the
 # generated header for the hardware staging image.
 OWNER_GEN := $(OUT)/host/ck_owner_gen
@@ -1075,4 +1098,4 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize handoff-mutant iort-mutants clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full test sanitize handoff-mutant acpi-dev-mutant iort-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE

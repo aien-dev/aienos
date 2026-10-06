@@ -57,6 +57,20 @@ volatile void *ck_mmio_map(uint64_t phys, size_t len)
     (void)len;
     return (volatile void *)(uintptr_t)phys;
 }
+/* Host: no platform MMIO (the ACPI platform xHCI list is always empty). */
+volatile void *ck_mmio_try_map(uint64_t phys, size_t len)
+{
+    (void)phys; (void)len;
+    return NULL;
+}
+/* Host: no DSDT reachable (no FADT in ck_acpi_find). */
+int ck_acpi_platform_devices(const char *const *ids, unsigned nids, struct ck_platform_dev *out, unsigned max,
+                             struct ck_acpi_scan_info *info)
+{
+    (void)ids; (void)nids; (void)out; (void)max;
+    if (info) info->tables = info->refused = info->devices = 0, info->first_refusal = 0;
+    return -1;
+}
 void ck_mb(void) { __sync_synchronize(); }
 const void *ck_acpi_find(const char sig[4])
 {
@@ -85,6 +99,11 @@ const char *ck_entropy_reason(void) { return "host-urandom"; }
 int ck_dma_confine(uint32_t segment, uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
 {
     (void)segment; (void)rid; (void)phys; (void)len; (void)out;
+    return CK_SMMU_ABSENT;
+}
+int ck_dma_confine_named(const char *acpi_name, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
+{
+    (void)acpi_name; (void)phys; (void)len; (void)out;
     return CK_SMMU_ABSENT;
 }
 int ck_dma_unconfine(uint32_t stream_id) { (void)stream_id; return CK_SMMU_EARG; }

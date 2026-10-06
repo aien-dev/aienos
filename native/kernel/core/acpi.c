@@ -434,3 +434,92 @@ int ck_iort_stream_id(const struct ck_iort_smmu *s, uint32_t segment, uint32_t r
     }
     return -1;
 }
+
+/* ---- IORT named components (platform devices such as the DGX Spark USB
+ * controllers, ACPI ids NVDA8000/NVDA8001) ---- */
+#define IORT_NODE_NAMED 1u
+#define IORT_NAMED_NAME_OFF 29u /* flags u32 @16, memory properties u64 @20, address size u8 @28, name @29 */
+#define IORT_MAP_SINGLE 0x1u
+
+/* Final segment of an ASCII object path, padded to 4 with '_'; -1 if a
+ * segment is longer than 4 or the path is empty. */
+static int last_seg4(const char *p, const char *end, char seg[4])
+{
+    const char *s = p;
+    for (const char *q = p; q < end && *q; q++)
+        if (*q == '.' || *q == '\\' || *q == '^') s = q + 1;
+    int i = 0;
+    for (; s < end && *s && i < 4; i++, s++) seg[i] = *s;
+    if (i == 0 || (s < end && *s)) return -1;
+    for (; i < 4; i++) seg[i] = '_';
+    return 0;
+}
+
+int ck_iort_named(const void *iort, const char *name, struct ck_iort_named *out)
+{
+    const uint8_t *t = iort;
+    uint32_t len = rd32(t + 4), count, at;
+    if (!name || iort_nodes(t, len, &count, &at))
+        return -1;
+    char want[4];
+    if (last_seg4(name, name + 64, want))
+        return -1;
+    int found = 0;
+    struct ck_iort_named r = { 0 };
+    uint32_t off = at;
+    for (uint32_t i = 0; i < count; i++) {
+        if (off < IORT_TABLE_HDR || off > len || len - off < IORT_NODE_HDR)
+            return -1;
+        const uint8_t *n = t + off;
+        uint32_t nlen = (uint32_t)n[1] | (uint32_t)n[2] << 8;
+        if (nlen < IORT_NODE_HDR || nlen > len - off)
+            return -1;
+        uint32_t mcount = rd32(n + 8), moff = rd32(n + 12);
+        if (mcount && (mcount > nlen / IORT_MAP_BYTES || moff < IORT_NODE_HDR || moff > nlen ||
+                       (uint64_t)mcount * IORT_MAP_BYTES > (uint64_t)(nlen - moff)))
+            return -1;
+        if (n[0] == IORT_NODE_NAMED) {
+            if (nlen <= IORT_NAMED_NAME_OFF)
+                return -1;
+            const char *nm = (const char *)(n + IORT_NAMED_NAME_OFF);
+            const char *nend = (const char *)(n + (mcount ? moff : nlen));
+            if (nend <= nm)
+                return -1;
+            char seg[4];
+            if (last_seg4(nm, nend, seg) == 0 && seg[0] == want[0] && seg[1] == want[1] && seg[2] == want[2] &&
+                seg[3] == want[3]) {
+                if (found)
+                    return -2; /* two named components carry this name: refuse */
+                found = 1;
+                r.node_off = off;
+                uint32_t k = 0;
+                for (; k < sizeof r.name - 1 && nm + k < nend && nm[k]; k++)
+                    r.name[k] = nm[k];
+                r.name[k] = 0;
+                r.nmaps = mcount;
+                /* The stream: a single mapping, else a mapping of exactly one id. */
+                r.target_off = 0;
+                for (uint32_t m = 0; m < mcount; m++) {
+                    const uint8_t *e = n + moff + m * IORT_MAP_BYTES;
+                    uint32_t ref = rd32(e + 12);
+                    if (ref < IORT_TABLE_HDR || ref > len || len - ref < IORT_NODE_HDR)
+                        return -1;
+                    if (t[ref] != IORT_NODE_SMMUV3)
+                        continue;
+                    if ((rd32(e + 16) & IORT_MAP_SINGLE) || rd32(e + 4) == 0) {
+                        r.stream_id = rd32(e + 8);
+                        r.target_off = ref;
+                        uint32_t tlen = (uint32_t)t[ref + 1] | (uint32_t)t[ref + 2] << 8;
+                        r.target_base = tlen >= 24 && tlen <= len - ref ? rd64(t + ref + 16) : 0;
+                        break;
+                    }
+                }
+            }
+        }
+        off += nlen;
+    }
+    if (!found)
+        return 0;
+    *out = r;
+    return 1;
+}

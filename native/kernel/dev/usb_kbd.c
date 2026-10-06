@@ -373,6 +373,8 @@ static int poll_report(uint8_t rep[CK_HID_REPORT_LEN])
 
 static int start(volatile uint8_t *bar0, uint8_t *mem, uint64_t phys, size_t bytes)
 {
+    /* Fresh state per controller (the fence may try several, cut 2). */
+    for (size_t i = 0; i < sizeof g_k; i++) ((volatile uint8_t *)&g_k)[i] = 0;
     g_k.base = bar0;
     g_k.mem = mem;
     g_k.phys = phys;

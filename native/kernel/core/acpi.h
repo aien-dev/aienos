@@ -117,4 +117,20 @@ int ck_iort_parse(const void *iort, struct ck_iort_smmu *out);
  * mapping of another segment never matches. */
 int ck_iort_stream_id(const struct ck_iort_smmu *s, uint32_t segment, uint32_t rid, uint32_t *sid);
 
+/* IORT named component (node type 1) whose device object name has the same
+ * final segment as `name` ("USB0" matches "\\_SB_.USB0"). out gets the node
+ * name, the stream id of its single (or one-id) mapping to an SMMUv3 node,
+ * and that SMMUv3 node (offset, register base). target_off == 0: no such
+ * mapping (no stream for this device). Returns 1 found, 0 no such node, -1
+ * malformed (signature, truncation, node, name or mapping outside the
+ * table), -2 ambiguous (two named components with that final segment). */
+struct ck_iort_named {
+    char name[48];
+    uint32_t node_off, nmaps;
+    uint32_t stream_id;
+    uint32_t target_off; /* SMMUv3 node the stream belongs to, 0 if none */
+    uint64_t target_base;
+};
+int ck_iort_named(const void *iort, const char *name, struct ck_iort_named *out);
+
 #endif
