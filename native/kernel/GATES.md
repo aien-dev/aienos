@@ -25,7 +25,7 @@ C gates (one line each from `ck_gates.sh`): `M1` and `M3` (from
 `scripts/qemu_ck_net_test.sh`; rows 102-106 and 110-112; the script now also checks the virtio-net SMMU fence (ACCESS_PLATFORM required, out-of-window device DMA refused), rows 102 and 110-112 are QEMU PASS on this branch from the committed forge log `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`, hardware NOT_RUN), the kernel entropy rows 107-109 (M1 via `scripts/lib_ck_m1_checks.sh`, ARGUS1_REVOKE and M4_STORE via the Store gate boot 7),
 `DISK_LAYOUT` (C-only, from `scripts/qemu_ck_disk_layout_test.sh`, rows 118-123: QEMU PASS at 741b2b8 before the merge with main 8555049, rerun pending at the merged head; row 123 host test), and the NOT_RUN gates
 `SMP` (C-only, from `scripts/qemu_ck_smp_test.sh`, rows 113-117, NOT_RUN pending forge receipt), `M0_ROLLBACK`, `M4_STORE_CRASH` (now read from `scripts/qemu_ck_store_crash_test.sh`, rows 73-80; NOT_RUN until a forge receipt exists),
-`M4_CONTINUITY`, `M4_RECOVERY`, `M4_ALLEN` (C-only, from `scripts/qemu_ck_allen_test.sh`, rows A1-A30; QEMU PASS, hardware NOT_RUN), `KEYBOARD` (from `scripts/qemu_ck_keyboard_test.sh`, rows 25-32 and C-only 30a-30c; QEMU PASS, hardware NOT_RUN), `FPU` (C-only, from `scripts/qemu_ck_fpu_test.sh`, rows 124-128; QEMU PASS, hardware NOT_RUN), `INFER` (C-only, from `scripts/qemu_ck_infer_test.sh`, rows 129-139; QEMU PASS, hardware NOT_RUN), and `SCREEN` (C-only, from `scripts/qemu_ck_screen_test.sh`, rows 140-145; QEMU PASS, hardware NOT_RUN).
+`M4_CONTINUITY`, `M4_RECOVERY`, `M4_ALLEN` (C-only, from `scripts/qemu_ck_allen_test.sh`, rows A1-A30; QEMU PASS, hardware NOT_RUN), `KEYBOARD` (from `scripts/qemu_ck_keyboard_test.sh`, rows 25-32 and C-only 30a-30c and 32a; QEMU PASS; C-only row 32b and all hardware NOT_RUN), `FPU` (C-only, from `scripts/qemu_ck_fpu_test.sh`, rows 124-128; QEMU PASS, hardware NOT_RUN), `INFER` (C-only, from `scripts/qemu_ck_infer_test.sh`, rows 129-139; QEMU PASS, hardware NOT_RUN), and `SCREEN` (C-only, from `scripts/qemu_ck_screen_test.sh`, rows 140-145; QEMU PASS, hardware NOT_RUN).
 
 `M4_NVME` and `SMMU` PASS in the SMMU-confined mode (default `make full`
 image, QEMU `iommu=smmuv3`). The unconfined bypass build
@@ -169,6 +169,23 @@ digest). One deliberate difference from Rust: the Rust shell drops keys past
 its 64-byte line; the C editor refuses the whole line (row 30c). Hardware
 NOT_RUN: no physical xHCI, keyboard or SMMU run.
 
+Platform xHCI (NEXT-PHASE-3 cut 2, C only): when no PCI xHCI exists, or the
+PCI one has no keyboard, the fence tries the ACPI platform controllers that
+`native/kernel/core/acpi_dev.c` finds in the DSDT/SSDTs (`_HID`/`_CID`
+NVDA8000, NVDA8001, PNP0D10, PNP0D15), each confined by its IORT named
+component stream (`ck_dma_confine_named`), fail closed otherwise. QEMU virt
+has no such controller, so QEMU proves the walker on QEMU's own tables (row
+32a) and that the PCI path is unchanged (rows 25-32); the platform grant path
+itself has no QEMU run. Host tests: `tests/test_acpi_dev.c` (string and
+EisaId ids, Name and Method `_CRS`, Memory32Fixed and QWord ranges, nested
+devices, malformed packages and descriptors, IORT named components found,
+absent, ambiguous, malformed, behind another SMMU), and `make acpi-dev-mutant`
+requires it to FAIL against three walker mutants (table signature check,
+checksum check, length-versus-buffer check removed). `make acpi-scan` builds
+`tools/ck_acpi_scan.c`, which runs the same scan over firmware tables dumped
+under Linux and prints the kernel's lines; its output for this Spark is
+`tests/fixtures/spark_xhci_acpi_expected.txt` (row 32b).
+
 | # | Rust check (pattern) | CK gate | Status |
 | --- | --- | --- | --- |
 | 25 | xHCI found before exit (`keyboard: xhci `) | KEYBOARD | QEMU PASS, DIFFERS: found after exit on the ECAM walk, class 0x0c0330, `keyboard: xhci 0000:BB:DD.F mmio 0x.. (found post-exit on the ECAM walk)`, all three boots |
@@ -182,6 +199,8 @@ NOT_RUN: no physical xHCI, keyboard or SMMU run.
 | 30c | (C only) overlong line fails closed | KEYBOARD | C only, QEMU PASS: 65 keys then Enter gives `keyboard_line: overflow (line refused: 65 keys typed, limit 64)` and `keyboard: done (overflow)`; no `keyboard_line:` with that text and no command run from it; boot kbd-smmu (Rust silently truncates instead) |
 | 31 | xHCI bus master revoked after the phase (`dma_gate: xhci bus master revoked`) | KEYBOARD | QEMU PASS, DIFFERS (stronger): the same line after `smmu_dma_window: xhci only, translation active ...` and `dma_gate: xhci granted (Confined), bus master on`, controller halted first (`xhci: halt before revoke ... halted=yes`), COMMAND read back `xhci_pci: after phase command=0x.... bus_master=off`, `smmu: xhci stream 0x.. returned to abort (rc=0)`, in that order and before the end of the xHCI phase; boots kbd-smmu and kbd-recovery; mutation no-revoke |
 | 32 | no panic or fault | KEYBOARD | QEMU PASS, IDENTICAL: `report_kind: (panic\|fault)` absent, plus `report_kind: final`, QEMU exit 0 and every M1 check of scripts/lib_ck_m1_checks.sh; boots kbd-smmu and kbd-nosmmu |
+| 32a | (C only) ACPI platform walker on QEMU's own tables, PCI path kept | KEYBOARD | C only, QEMU PASS: `acpi_scan: tables=N refused=0 first_refusal=0 devices=M (static scan; _STA not evaluated)` with N, M > 0 (QEMU: tables=1 devices=46), positive control `acpi_scan: control ARMH0011 COM0 mmio=0x9000000+0x1000` (the QEMU virt UART), `xhci_acpi: 0 platform controller(s)`, and no `xhci_plat:` line or platform fallback; all three boots |
+| 32b | (C only) DGX Spark platform xHCI expectation | KEYBOARD | C only, hardware NOT_RUN (never counted): the lines in `native/kernel/tests/fixtures/spark_xhci_acpi_expected.txt`, predicted by `tools/ck_acpi_scan.c` from this Spark's DSDT/SSDT/IORT: six controllers `xhci_acpi: USB0..USB5`, IORT streams 0x0-0x5 on the first SMMUv3 (0x13800000), each then denied `dma_gate: xhci USBn denied (SmmuNotReady), controller left halted` because the SMMU service refuses the Spark IORT (15 root-complex mappings to that SMMU, limit 8; stream ids up to 0xfffff, linear table 0x0-0xfff) |
 
 ## SEED-0B / P2-5 artifact loader: scripts/qemu_artifact_test.sh -> CK `P2_ARTIFACT` (scripts/qemu_ck_artifact_test.sh)
 

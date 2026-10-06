@@ -93,6 +93,8 @@ static int bring_up(void)
     return 0;
 }
 
+static int confine_sid(uint32_t sid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out);
+
 int ck_dma_confine(uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
 {
     if (!len || (phys & 0xfffu) || (len & 0xfffu) || phys + len < phys)
@@ -103,6 +105,37 @@ int ck_dma_confine(uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_conf
     uint32_t sid;
     if (ck_iort_stream_id(&g.iort, rid, &sid))
         return CK_SMMU_NOSTREAM;
+    return confine_sid(sid, phys, len, out);
+}
+
+int ck_dma_confine_named(const char *acpi_name, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
+{
+    if (!acpi_name || !len || (phys & 0xfffu) || (len & 0xfffu) || phys + len < phys)
+        return CK_SMMU_EARG;
+    int rc = bring_up();
+    if (rc)
+        return rc;
+    const void *iort = ck_acpi_find("IORT");
+    struct ck_iort_named nc;
+    int nrc = iort ? ck_iort_named(iort, acpi_name, &nc) : 0;
+    if (nrc != 1 || !nc.target_off)
+        return nrc == -2 ? CK_SMMU_EARG : CK_SMMU_NOSTREAM;
+    /* Only the SMMU this kernel drives (the IORT's first SMMUv3 node) can
+     * confine a stream; a stream behind another SMMU is refused, never
+     * granted unconfined. */
+    if (nc.target_off != g.iort.node_off) {
+        out->smmu_base = nc.target_base; /* reported, never used */
+        out->stream_id = nc.stream_id;
+        out->iova = out->len = 0;
+        return CK_SMMU_OTHER;
+    }
+    return confine_sid(nc.stream_id, phys, len, out);
+}
+
+/* Stage-1 window [phys, phys+len) for stream sid on the SMMU brought up. */
+static int confine_sid(uint32_t sid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
+{
+    int rc;
     if (sid >= STE_N)
         return CK_SMMU_NOSTREAM;
     int slot = -1;

@@ -1,0 +1,64 @@
+# DGX Spark (Machine 1): console lines the C kernel should print for the
+# platform xHCI discovery and fence (NEXT-PHASE-3 cut 2). Hardware NOT_RUN.
+# Produced by: make -C native/kernel acpi-scan, then
+#   ck_acpi_scan --iort IORT DSDT SSDT1 SSDT2 SSDT3 SSDT4 SSDT5
+# over the firmware tables read on this Spark under Ubuntu on 2026-10-05
+# (sudo cat /sys/firmware/acpi/tables/<name>, read only). Table sha256:
+#   DSDT 2871cbcb8992f7bd3915d6f19e7cfab577e068dcad58b6f00317a9f2d4e1b28e (70143 bytes)
+#   SSDT1 85f6ba0352ed5b63ae8a17239462c032717a2ffe53488df38c6618fab3b95ffe (6664 bytes)
+#   SSDT2 4de6724fcfb6e1ca9c9aeae4102a9ac10794c9dc6f1a3637ccf04aea9aa36a15 (773 bytes)
+#   SSDT3 50016e1cff2b1ca6fc107c42ad3c30afcdd6ecacf6b73f738ede186e38e2a4bd (1939 bytes)
+#   SSDT4 3f5cab8ad107d011648e60708d93dde0655556fd5bb300599c365704d01f869d (369 bytes)
+#   SSDT5 ed01843deef37e26beff21f7c149c317d3cf891028cadd779875d313b04d8b57 (901 bytes)
+#   IORT 5e0096a2be83ce2025c5c6395455c6814c16e01ff433791e8057c245f4939cb1 (3904 bytes)
+# Plain lines: printed byte for byte. "? " lines: the kernel prints a line
+# there whose values come from the hardware. "# " lines: tool notes.
+# Assumes no PCI xHCI (measured) and no keyboard found on an earlier
+# controller. SSDT order = sysfs numbering (XSDT order INFERRED).
+#
+acpi_scan: tables=6 refused=0 first_refusal=0 devices=119 (static scan; _STA not evaluated)
+acpi_scan: control ARMH0011 none
+xhci_acpi: USB0 hid=NVDA8000 cid=PNP0D15 table=DSDT mmio=0x1db60000+0x7800
+xhci_acpi: USB1 hid=NVDA8000 cid=PNP0D15 table=DSDT mmio=0x1db90000+0x7800
+xhci_acpi: USB2 hid=NVDA8000 cid=PNP0D15 table=DSDT mmio=0x1dde0000+0x7800
+xhci_acpi: USB3 hid=NVDA8000 cid=PNP0D15 table=DSDT mmio=0x1de10000+0x7800
+xhci_acpi: USB4 hid=NVDA8001 cid=PNP0D15 table=DSDT mmio=0x1d860000+0x7800
+xhci_acpi: USB5 hid=NVDA8000 cid=PNP0D15 table=DSDT mmio=0x1d870000+0x7800
+xhci_acpi: 6 platform controller(s)
+# iort: length=3904 nodes=68
+# smmu: ck_iort_parse=-1 (malformed)
+# smmu: 15 PCI root-complex mapping(s) to the first SMMUv3 (limit CK_IORT_MAX_MAPS=8), highest stream id 0xfffff (linear table holds 0x0-0xfff)
+keyboard: no PCI xHCI controller; trying 6 ACPI platform controller(s)
+xhci_plat: USB0 try mmio=0x1db60000+0x7800
+? xhci: USB0 caplength=<hardware> hciversion=<hardware> (platform)
+? xhci: halted before gate usbcmd=<hardware> usbsts=<hardware> halted=<yes, or NO (TIMEOUT) and the controller is left>
+? smmu: IORT malformed, SMMU unusable (fail closed) [once per boot, at the first DMA grant request]
+dma_gate: xhci USB0 denied (SmmuNotReady), controller left halted
+# USB0: IORT named component \_SB_.USB0 stream 0x0 on the SMMUv3 at 0x13800000 (the first SMMUv3 node; granted only once the kernel can bring it up)
+xhci_plat: USB1 try mmio=0x1db90000+0x7800
+? xhci: USB1 caplength=<hardware> hciversion=<hardware> (platform)
+? xhci: halted before gate usbcmd=<hardware> usbsts=<hardware> halted=<yes, or NO (TIMEOUT) and the controller is left>
+dma_gate: xhci USB1 denied (SmmuNotReady), controller left halted
+# USB1: IORT named component \_SB_.USB1 stream 0x1 on the SMMUv3 at 0x13800000 (the first SMMUv3 node; granted only once the kernel can bring it up)
+xhci_plat: USB2 try mmio=0x1dde0000+0x7800
+? xhci: USB2 caplength=<hardware> hciversion=<hardware> (platform)
+? xhci: halted before gate usbcmd=<hardware> usbsts=<hardware> halted=<yes, or NO (TIMEOUT) and the controller is left>
+dma_gate: xhci USB2 denied (SmmuNotReady), controller left halted
+# USB2: IORT named component \_SB_.USB2 stream 0x2 on the SMMUv3 at 0x13800000 (the first SMMUv3 node; granted only once the kernel can bring it up)
+xhci_plat: USB3 try mmio=0x1de10000+0x7800
+? xhci: USB3 caplength=<hardware> hciversion=<hardware> (platform)
+? xhci: halted before gate usbcmd=<hardware> usbsts=<hardware> halted=<yes, or NO (TIMEOUT) and the controller is left>
+dma_gate: xhci USB3 denied (SmmuNotReady), controller left halted
+# USB3: IORT named component \_SB_.USB3 stream 0x3 on the SMMUv3 at 0x13800000 (the first SMMUv3 node; granted only once the kernel can bring it up)
+xhci_plat: USB4 try mmio=0x1d860000+0x7800
+? xhci: USB4 caplength=<hardware> hciversion=<hardware> (platform)
+? xhci: halted before gate usbcmd=<hardware> usbsts=<hardware> halted=<yes, or NO (TIMEOUT) and the controller is left>
+dma_gate: xhci USB4 denied (SmmuNotReady), controller left halted
+# USB4: IORT named component \_SB_.USB4 stream 0x4 on the SMMUv3 at 0x13800000 (the first SMMUv3 node; granted only once the kernel can bring it up)
+xhci_plat: USB5 try mmio=0x1d870000+0x7800
+? xhci: USB5 caplength=<hardware> hciversion=<hardware> (platform)
+? xhci: halted before gate usbcmd=<hardware> usbsts=<hardware> halted=<yes, or NO (TIMEOUT) and the controller is left>
+dma_gate: xhci USB5 denied (SmmuNotReady), controller left halted
+# USB5: IORT named component \_SB_.USB5 stream 0x5 on the SMMUv3 at 0x13800000 (the first SMMUv3 node; granted only once the kernel can bring it up)
+keyboard: unavailable (no keyboard on any platform xHCI)
+# 0 controller(s) would reach the keyboard phase

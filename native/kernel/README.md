@@ -97,7 +97,7 @@ the operator-facing warning: `docs/TRUST-1-OPERATOR-STEPS.md`.
 
 ## Operator input and recovery access (C kernel)
 
-Status: **QEMU only.** CK gate `KEYBOARD` (rows 25-32 and 30a-30c in
+Status: **QEMU only.** CK gate `KEYBOARD` (rows 25-32, 30a-30c, 32a and 32b in
 `GATES.md`) runs in QEMU; no physical keyboard, xHCI controller or SMMU has
 been exercised by this code. Hardware NOT_RUN.
 
@@ -139,33 +139,95 @@ What is implemented (NEXT-PHASE-3 cut 1):
 
 Bus. The Rust kernel and both QEMU gates use a PCI xHCI controller
 (`qemu-xhci`, class 0x0c0330) with a `usb-kbd` attached. The C driver looks
-only there.
+there first, then at the ACPI platform controllers (below).
 
-**The Spark's USB controllers are not on PCI.** Read on this Spark under
-Ubuntu on 2026-10-05 (sysfs, read-only): no PCI function has class 0x0c03.
-The USB buses hang off six ACPI platform devices, `NVDA8000:00` to
-`NVDA8000:04` and `NVDA8001:00`, bound by Linux `xhci_plat_hcd` through the
-ACPI id `PNP0D15` (an xHCI controller), each behind the SMMUv3 at
-0x13800000. The DGX Spark hardware guide lists four USB Type-C ports on the
-rear panel and is silent on the controller behind them. Consequence
-(INFERRED, high confidence): on the Spark this cut finds no controller and
-prints `keyboard: unavailable (no xHCI controller)` and `recovery_access:
-unavailable (no operator keyboard: xhci=absent); choice=normal
-reason=no-keyboard`. The xHCI register work in `dev/usb_kbd.c` follows the
-xHCI specification and should carry over (UNVERIFIED, medium confidence),
-but the Spark needs discovery from the ACPI tables (DSDT `PNP0D15` devices
-and their IORT stream ids) instead of the PCI walk. That is the next cut,
-not this one. Which of the six controllers serves which rear port is
+**The Spark's USB controllers are not on PCI** (MEASURED under Ubuntu on
+2026-10-05, read only: no PCI function has class 0x0c03). They are six ACPI
+platform devices, bound by Linux `xhci_plat_hcd` through the ACPI id
+`PNP0D15` (an xHCI controller). The DSDT describes each one as
+`Device (USBn) { Name (_HID, "NVDA8000") Name (_CID, "PNP0D15") ...
+Method (_CRS) { Name (RBUF, Buffer () { Memory32Fixed ... }) Return (RBUF) } }`
+(`_DSD` names a MediaTek xHCI, `xhci-nvidia-mediatek-host`). The DGX Spark
+hardware guide lists four USB Type-C ports on the rear panel and is silent on
+the controllers behind them. Which controller serves which rear port is
 UNKNOWN.
+
+Platform xHCI discovery (NEXT-PHASE-3 cut 2). The fence now tries the PCI
+xHCI first (QEMU, and any machine with one) and, when there is none or it
+has no keyboard, the ACPI platform controllers:
+
+- **Walker** (`core/acpi_dev.c`, `core/acpi_platform.c`): a bounded static
+  scan of the DSDT (from the FADT) and every SSDT in the XSDT for `Device`
+  objects with `_HID` or `_CID` in `NVDA8000`, `NVDA8001`, `PNP0D10`,
+  `PNP0D15`, reading the first memory range of a constant `_CRS` template.
+  Nothing is executed: `_STA` is not evaluated. A table with a bad
+  signature, a bad checksum or a length past what is mapped is refused and
+  counted (`acpi_scan: tables=N refused=R first_refusal=E devices=M`).
+  Positive control on every boot: the Arm PL011 UART id `ARMH0011`.
+- **SMMU stream by ACPI name** (`ck_dma_confine_named`, `core/smmu_svc.c`):
+  the IORT named component whose name ends in the device's name gives the
+  stream id, as the IORT root-complex mapping does for the NVMe and the PCI
+  xHCI. Two components with that name, no single-id mapping, or a stream
+  behind an SMMU other than the one this kernel drives (`OtherSmmu`) are
+  refused: the controller is left halted and gets no DMA.
+- **Per controller** (`dev/xhci_fence.c`): map the range, halt whatever the
+  firmware left running, ask for the confined window, run the same keyboard
+  phase, then halt, reset (HCRST) and return the stream to abort. A platform
+  controller has no bus-master bit; the SMMU stream is the gate.
+
+Spark firmware tables (MEASURED, read only with `sudo cat
+/sys/firmware/acpi/tables/<name>`; acpidump and iasl are not installed;
+decoded by `tools/ck_acpi_scan.c`, which runs the kernel's own scan; Linux
+names and SMMU placement from `/sys`):
+
+| Linux device | ACPI name | `_HID` / `_CID` | main MMIO (`_CRS` first range) | IORT stream | SMMUv3 |
+| --- | --- | --- | --- | --- | --- |
+| NVDA8000:00 | `\_SB_.USB0` | NVDA8000 / PNP0D15 | 0x1db60000 + 0x7800 | 0x0 | 0x13800000 (first in IORT) |
+| NVDA8000:01 | `\_SB_.USB1` | NVDA8000 / PNP0D15 | 0x1db90000 + 0x7800 | 0x1 | 0x13800000 |
+| NVDA8000:02 | `\_SB_.USB2` | NVDA8000 / PNP0D15 | 0x1dde0000 + 0x7800 | 0x2 | 0x13800000 |
+| NVDA8000:03 | `\_SB_.USB3` | NVDA8000 / PNP0D15 | 0x1de10000 + 0x7800 | 0x3 | 0x13800000 |
+| NVDA8001:00 | `\_SB_.USB4` | NVDA8001 / PNP0D15 | 0x1d860000 + 0x7800 | 0x4 | 0x13800000 |
+| NVDA8000:04 | `\_SB_.USB5` | NVDA8000 / PNP0D15 | 0x1d870000 + 0x7800 | 0x5 | 0x13800000 |
+
+Each `_CRS` has three more memory ranges (+0x8000 size 0x100, a 0x4000 or
+0x5000 block, and a 0x18-byte register window), an interrupt and a GPIO
+interrupt; the walker takes only the first, the xHCI register block that
+Linux `xhci_plat_hcd` maps. Table digests are in
+`tests/fixtures/spark_xhci_acpi_expected.txt`.
+
+**What the Spark will print** (INFERRED from those tables, high confidence;
+hardware NOT_RUN): the walker finds all six controllers, and every one is
+then **denied** with `dma_gate: xhci USBn denied (SmmuNotReady), controller
+left halted`. The reason is not USB: the kernel's SMMU service refuses the
+Spark's IORT as a whole (`smmu: IORT malformed, SMMU unusable (fail
+closed)`), because the first SMMUv3 (0x13800000, the one behind the USB
+controllers) has 15 PCI root-complex mappings (the service keeps at most 8)
+with stream ids up to 0xfffff (its linear stream table holds 0x0-0xfff).
+The same refusal already applies to the NVMe on the Spark. The USB streams
+themselves (0x0-0x5) would fit. So on the Spark this cut still gives
+`keyboard: unavailable (no keyboard on any platform xHCI)` and normal boot,
+now for a stated reason, and fails closed. Making the SMMU service accept
+the Spark IORT (a two-level stream table, more root-complex mappings) is
+the next cut. Also UNKNOWN until a hardware run: whether the MediaTek glue
+around each controller is powered and clocked when the kernel reads its
+registers (Linux handles that in firmware `_STA`/`_PS0` and its own glue
+driver; reading a powered-down block could fault), and whether
+`ck_mm_mmio_try_map` accepts these ranges. The exact expected lines are in
+`tests/fixtures/spark_xhci_acpi_expected.txt` (KEYBOARD row 32b, NOT_RUN).
+
 
 ### Physical attended boot: what it will look like
 
-Do not run this until two things exist, because without them the run proves
-only the "no keyboard" line above: (1) ACPI discovery of the Spark's
-platform xHCI controllers, and (2) a staging command for the full hardware
-image (today `scripts/stage_one_time_boot_ck.sh` stages only the inference
-image, which has no devices stage and so no keyboard). The steps below are
-the procedure that run will follow, so it can be reviewed now.
+Both prerequisites named in cut 1 now exist: ACPI discovery of the Spark's
+platform xHCI controllers (above) and a staging command for the full
+hardware image, `scripts/stage_one_time_boot_ck_full.sh` (`--dry-run` prints
+every command and touches nothing; `--apply` builds `make full
+CK_HARDWARE_STAGING=1` with the operator's own owner files, copies it to
+`\EFI\AIENOS\aienos-ck-full.efi`, and sets BootNext once; it never
+reboots). Do not run it yet: until the SMMU service accepts the Spark IORT,
+the run can only show the fail-closed deny lines above, not a keyboard.
+The steps below are the procedure that run will follow, so it can be
+reviewed now.
 
 Ground rules: nothing here changes firmware settings, Secure Boot keys or the
 TPM. The boot is one-time (BootNext): the next restart returns to Ubuntu on
@@ -184,9 +246,10 @@ improvise.
 
    *You should see:* nothing changes on screen yet.
 
-2. **Stage the one-time boot** with the staging command the orchestrator
-   names for that run (it will be a `--dry-run` first, then `--apply`, in the
-   style of `scripts/stage_one_time_boot_ck.sh`). *Changes:* it copies the
+2. **Stage the one-time boot** with `scripts/stage_one_time_boot_ck_full.sh`,
+   `--dry-run` first, then `--apply`, with `AIENOS_OWNER_PUBKEYS` and
+   `AIENOS_MACHINE_ID` set to the operator's own files (the orchestrator
+   names them for that run; the TEST-FIXTURE files are refused). *Changes:* it copies the
    image to the EFI system partition and sets BootNext once; it never
    reboots. *You should see:* the dry run's list of commands, then the apply
    ending without `FAIL`.
@@ -195,7 +258,8 @@ improvise.
    shows AIENOS lines (white text on black, starting with the boot report).
 
 4. **Normal boot (do nothing).** Watch for, in order:
-   `keyboard: xhci ...`, `dma_gate: xhci granted (Confined), bus master on`,
+   `xhci_acpi: 6 platform controller(s)`, `xhci_plat: USBn try ...`,
+   `dma_gate: xhci USBn granted (Confined) smmu=0x13800000 stream=0xn`,
    `keyboard: ready (port P, slot S, endpoint 0x81)`, then
    `recovery_access: waiting 5000 ms ...`. Keep your hands off for those 5
    seconds. *You should see:* `recovery_access: choice=normal reason=timeout`,
