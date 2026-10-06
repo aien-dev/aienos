@@ -19,7 +19,10 @@ This is the C path's UEFI entry (Lane 18). It is deliberately small:
 boot-report file. The Rust `aienos-boot` crate has BootNext staging and a QEMU
 rollback test but no A/B slot selection (ADR 0024 Q3); it is frozen and
 parked for the C path; this stub boots the kernel linked into the same image
-and nothing else.
+and nothing else. Rollback needs no loader code: the firmware's one-time BootNext
+starts this image once and the unchanged BootOrder brings the Default back;
+`scripts/qemu_ck_rollback_test.sh` (CK gate M0_ROLLBACK) checks that in QEMU
+with this image as the candidate.
 
 Build and test from `native/kernel` (see its README). QEMU qualifies nothing
 physical.

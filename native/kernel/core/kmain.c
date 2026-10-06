@@ -90,6 +90,31 @@ static void screen_start(const struct ck_handoff *h, const struct ck_mm_report *
               (unsigned long long)h->fb_base, (unsigned long long)mm->fb_map_bytes, scale, cols, rows);
 }
 
+/* TEST-ONLY rollback candidates (CK gate M0_ROLLBACK, Makefile
+ * CK_TEST_ROLLBACK=cpu-fault|hang, scripts/qemu_ck_rollback_test.sh). They
+ * end the candidate boot the two ways a real kernel can fail after
+ * "kernel: alive": a CPU exception (BRK at EL1 -> ck_fault_report -> reset)
+ * or a hang with interrupts masked (no reset; only an outside reset ends it,
+ * docs/BOOT_HANDOFF_CONTRACT.md 7 step 3). Never in a hardware staging image. */
+#if defined(CK_TEST_ROLLBACK_CPU_FAULT) || defined(CK_TEST_ROLLBACK_HANG)
+#if defined(CK_HARDWARE_STAGING)
+#error "CK_TEST_ROLLBACK is TEST-only and cannot be combined with CK_HARDWARE_STAGING"
+#endif
+static __attribute__((noreturn)) void rollback_test_end(void)
+{
+#ifdef CK_TEST_ROLLBACK_CPU_FAULT
+    ck_puts("rollback_test: TEST-ONLY rollback candidate (cpu-fault): brk at EL1 now; never counts toward a PASS\n");
+    __asm__ volatile("brk #0x7b" ::: "memory");
+    ck_panic("rollback_test: brk returned");
+#else
+    ck_puts("rollback_test: TEST-ONLY rollback candidate (hang): spinning with interrupts masked, no reset follows; never counts toward a PASS\n");
+    __asm__ volatile("msr daifset, #0xf" ::: "memory");
+    for (;;)
+        __asm__ volatile("wfe" ::: "memory");
+#endif
+}
+#endif
+
 static __attribute__((noreturn)) void ck_el1_main(void *arg)
 {
     struct ck_handoff *h = arg;
@@ -171,6 +196,10 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     ck_printf("exception_level: EL%u\n", el);
     ck_puts("kernel: alive\n");
     ck_printf("kernel_el: EL%u%s\n", el, (spsel & 1) ? "h" : "t");
+
+#if defined(CK_TEST_ROLLBACK_CPU_FAULT) || defined(CK_TEST_ROLLBACK_HANG)
+    rollback_test_end();
+#endif
 
     /* Kernel entropy (arch/rndr.c): RNDR or a latched refusal, no fallback.
      * Probed once here, before the artifact loader and the stages. */

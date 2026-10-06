@@ -281,6 +281,25 @@ C variant as a separate labelled mode so the Rust-mock result is not
 replaced. All five rows stay **NOT_RUN** until a forge receipt covers them.
 QEMU only; Machine 1 is NOT_RUN.
 
+**Status update (code cut, QEMU only).** Rows 42-46 are built as a separate
+script, `scripts/qemu_ck_rollback_test.sh` (CK gate M0_ROLLBACK, child of
+`scripts/ck_gates.sh`), so the Rust-mock script and its labels stay as they
+were. Built as proposed: the normal C core image; TEST-only
+`make CK_TEST_ROLLBACK=bad-magic` (row 43) and `CK_TEST_ROLLBACK=hang`
+(row 44), both refused with `CK_HARDWARE_STAGING`. Added beyond the
+proposal: `CK_TEST_ROLLBACK=cpu-fault` (BRK at EL1 after `kernel: alive`,
+the `ck_fault_report` path), a rejected candidate made from the real C image
+(cut to 4096 bytes) instead of junk bytes, an explicit absent lane, and a
+host reader of the AAVMF vars file (`native/kernel/tools/ck_uefi_vars.c`) so
+"BootNext consumed" and "BootOrder unchanged" come from the firmware's store
+after every boot. Finding: AAVMF appends its own auto-created boot options to
+BootOrder on the boot after the stager writes `BootOrder=0001`, with or
+without a candidate; the script judges BootOrder against a no-candidate
+control lane (`native/kernel/GATES.md` M0 section). Result: QEMU PASS for all
+rows, run log `evidence/ck_rollback_qemu_5deb3971bd88b5664489d47bc273613104e1eb2c7a3e353bfe73f7729717fad8.log`;
+no `ck_gates.sh` receipt yet; Machine 1 NOT_RUN. The three return-to-firmware
+paths of section 7 step 3 are still NOT_RUN.
+
 ## 8. Frozen forever vs extensible
 
 **Frozen (v3, `CHANDOF3`; v1 `CHANDOF1` and v2 `CHANDOF2` are superseded and refused):** the magic value; the 232-byte layout and every
@@ -317,7 +336,7 @@ exact refusal line from section 6:
 QEMU (TEST-only builds, refused by `CK_HARDWARE_STAGING`):
 
 14. Corrupted magic image prints `panic: handoff: bad magic` and resets.
-15. Rows 42-46 per section 7.1.
+15. Rows 42-46 per section 7.1 (DONE in QEMU: `scripts/qemu_ck_rollback_test.sh`, see the status update there).
 
 Layout:
 
@@ -336,5 +355,5 @@ Layout:
   interrupts today (section 4); the PROPOSED rule needs its own small cut.
 - `native/boot/efi_main.c:8-9` (comment) says the Rust `aienos-boot` crate
   holds "A/B slots"; that contradicts ADR 0024 Q3 and the crate. A code
-  comment, out of scope for this docs change; the follow-up validator cut
-  should correct it.
+  comment, out of scope for this docs change. Corrected in the M0_ROLLBACK
+  code cut (the comment now points to section 7).

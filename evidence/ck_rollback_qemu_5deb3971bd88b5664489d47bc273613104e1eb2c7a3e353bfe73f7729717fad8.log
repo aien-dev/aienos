@@ -1,0 +1,436 @@
+# CK M0_ROLLBACK QEMU run (C-image evidence; Rust-mock evidence is scripts/qemu_native_rollback_test.sh, separate)
+# command: bash scripts/qemu_ck_rollback_test.sh  (AIENOS_ROLLBACK_KEEP set to keep lane files)
+# code commit: ecd12c685bcc76b0967925488c96e70b7d9c57b0 (clean tree), host aarch64 QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18), date 2026-10-06T19:06Z
+# QEMU only. Physical: NOT_RUN.
+
+## script output
+============================================================
+AIENOS CK M0_ROLLBACK: C kernel image as the one-time BootNext candidate (QEMU)
+commit: ecd12c685bcc76b0967925488c96e70b7d9c57b0
+firmware: AAVMF_CODE.no-secboot.fd vars template sha256 b3b855c5a80310168051164986855692d1bdb06e67619856177965cd87c6774f
+============================================================
+building aienos-rollback-mock (stager and Default, unchanged Rust mock) ...
+building the C kernel images ...
+candidate normal: sha256 7bf5d58ce24ddf57de24cdf0c3240f37f0971eac2689fa63935f7c4732a69038 bytes 135168
+candidate panic: sha256 2d172eda122198e9dde34c61ff401ffcc7ad7bf8cdf79a1dae061b2384d7dd85 bytes 135168
+candidate cpu-fault: sha256 ba93e92ca809f3151e58d126837b340ef0fcdfcf0daf9d6ec5118068575b6fa9 bytes 131072
+candidate hang: sha256 cd5edce9fce32756c6949ba86b2d52a6d8691f97497bd6ab8ab2b825d7e4fc7e bytes 131072
+candidate rejected: sha256 689288ac853a3c40d374f5c3750668f02ad2f8eb64f2b636ba34a36b03731b24 bytes 4096
+PASS  ck_uefi_vars self-test (18 cases)
+
+--- [lane absent] ---
+qemu exits: stage=0 attempt=0 next=0 repeat=0
+store after boot 1: BootOrder=0001 BootNext=0000
+store after boot 2: BootOrder=0001,0002,0003,0004 BootNext=absent
+store after boot 4: BootOrder=0001,0002,0003,0004 BootNext=absent
+PASS  absent: staged (BootNext=0000, BootOrder=0001, Boot0000 "AIENOS Candidate", read from the store)
+PASS  absent: attempt evidence in boot 2
+PASS  absent: next boot is Boot0001 Default (BOOT_CURRENT=0001)
+PASS  absent: repeat boot is still Default
+PASS  absent: BootNext consumed once (absent in the store after boots 2-4; Boot0000 dispatched never, load refused once)
+PASS  absent: BootOrder 0001 first, no 0000, same after boots 2-4 and equal to the no-candidate control
+observation: AAVMF rewrote BootOrder 0001 -> 0001,0002,0003,0004 in boot 2 (firmware auto-created options; the control lane shows the same)
+
+--- [lane normal] ---
+qemu exits: stage=0 attempt=0 next=0 repeat=0
+store after boot 1: BootOrder=0001 BootNext=0000
+store after boot 2: BootOrder=0001,0002,0003,0004 BootNext=absent
+store after boot 4: BootOrder=0001,0002,0003,0004 BootNext=absent
+PASS  normal: staged (BootNext=0000, BootOrder=0001, Boot0000 "AIENOS Candidate", read from the store)
+PASS  normal: attempt evidence in boot 2
+PASS  normal: next boot is Boot0001 Default (BOOT_CURRENT=0001)
+PASS  normal: repeat boot is still Default
+PASS  normal: BootNext consumed once (absent in the store after boots 2-4; Boot0000 dispatched in boot 2 only)
+PASS  normal: BootOrder 0001 first, no 0000, same after boots 2-4 and equal to the no-candidate control
+observation: AAVMF rewrote BootOrder 0001 -> 0001,0002,0003,0004 in boot 2 (firmware auto-created options; the control lane shows the same)
+
+--- [lane panic] ---
+qemu exits: stage=0 attempt=0 next=0 repeat=0
+store after boot 1: BootOrder=0001 BootNext=0000
+store after boot 2: BootOrder=0001,0002,0003,0004 BootNext=absent
+store after boot 4: BootOrder=0001,0002,0003,0004 BootNext=absent
+PASS  panic: staged (BootNext=0000, BootOrder=0001, Boot0000 "AIENOS Candidate", read from the store)
+PASS  panic: attempt evidence in boot 2
+PASS  panic: next boot is Boot0001 Default (BOOT_CURRENT=0001)
+PASS  panic: repeat boot is still Default
+PASS  panic: BootNext consumed once (absent in the store after boots 2-4; Boot0000 dispatched in boot 2 only)
+PASS  panic: BootOrder 0001 first, no 0000, same after boots 2-4 and equal to the no-candidate control
+observation: AAVMF rewrote BootOrder 0001 -> 0001,0002,0003,0004 in boot 2 (firmware auto-created options; the control lane shows the same)
+
+--- [lane cpu-fault] ---
+qemu exits: stage=0 attempt=0 next=0 repeat=0
+store after boot 1: BootOrder=0001 BootNext=0000
+store after boot 2: BootOrder=0001,0002,0003,0004 BootNext=absent
+store after boot 4: BootOrder=0001,0002,0003,0004 BootNext=absent
+PASS  cpu-fault: staged (BootNext=0000, BootOrder=0001, Boot0000 "AIENOS Candidate", read from the store)
+PASS  cpu-fault: attempt evidence in boot 2
+PASS  cpu-fault: next boot is Boot0001 Default (BOOT_CURRENT=0001)
+PASS  cpu-fault: repeat boot is still Default
+PASS  cpu-fault: BootNext consumed once (absent in the store after boots 2-4; Boot0000 dispatched in boot 2 only)
+PASS  cpu-fault: BootOrder 0001 first, no 0000, same after boots 2-4 and equal to the no-candidate control
+observation: AAVMF rewrote BootOrder 0001 -> 0001,0002,0003,0004 in boot 2 (firmware auto-created options; the control lane shows the same)
+
+--- [lane hang] ---
+hang: QEMU still running 10 s after the hang marker, no end report; host forces the reset
+qemu exits: stage=0 attempt=137 next=0 repeat=0
+store after boot 1: BootOrder=0001 BootNext=0000
+store after boot 2: BootOrder=0001,0002,0003,0004 BootNext=absent
+store after boot 4: BootOrder=0001,0002,0003,0004 BootNext=absent
+PASS  hang: staged (BootNext=0000, BootOrder=0001, Boot0000 "AIENOS Candidate", read from the store)
+PASS  hang: attempt evidence in boot 2
+PASS  hang: next boot is Boot0001 Default (BOOT_CURRENT=0001)
+PASS  hang: repeat boot is still Default
+PASS  hang: BootNext consumed once (absent in the store after boots 2-4; Boot0000 dispatched in boot 2 only)
+PASS  hang: BootOrder 0001 first, no 0000, same after boots 2-4 and equal to the no-candidate control
+observation: AAVMF rewrote BootOrder 0001 -> 0001,0002,0003,0004 in boot 2 (firmware auto-created options; the control lane shows the same)
+
+--- [lane rejected] ---
+qemu exits: stage=0 attempt=0 next=0 repeat=0
+store after boot 1: BootOrder=0001 BootNext=0000
+store after boot 2: BootOrder=0001,0002,0003,0004 BootNext=absent
+store after boot 4: BootOrder=0001,0002,0003,0004 BootNext=absent
+PASS  rejected: staged (BootNext=0000, BootOrder=0001, Boot0000 "AIENOS Candidate", read from the store)
+PASS  rejected: attempt evidence in boot 2
+PASS  rejected: next boot is Boot0001 Default (BOOT_CURRENT=0001)
+PASS  rejected: repeat boot is still Default
+PASS  rejected: BootNext consumed once (absent in the store after boots 2-4; Boot0000 dispatched never, load refused once)
+PASS  rejected: BootOrder 0001 first, no 0000, same after boots 2-4 and equal to the no-candidate control
+observation: AAVMF rewrote BootOrder 0001 -> 0001,0002,0003,0004 in boot 2 (firmware auto-created options; the control lane shows the same)
+
+============================================================
+Evidence kind: C-image, QEMU (AAVMF). Physical: NOT_RUN.
+CK_ROLLBACK_NORMAL: PASS
+CK_ROLLBACK_FAULT_PANIC: PASS
+CK_ROLLBACK_FAULT_CPU: PASS
+CK_ROLLBACK_TIMEOUT: PASS
+CK_ROLLBACK_REJECTED: PASS
+CK_ROLLBACK_ABSENT: PASS
+CK_ROLLBACK_BOOTNEXT_CONSUMED: PASS
+CK_ROLLBACK_DEFAULT_UNCHANGED: PASS
+AIENOS_CK_M0_ROLLBACK: PASS (QEMU only, C kernel image as candidate; physical NOT_RUN)
+
+## lane absent: store read by ck_uefi_vars after each boot (v0 = fresh template)
+### v0
+uefi_vars: store=authenticated live=0 obsolete=0
+BootOrder=absent
+BootNext=absent
+### v1
+uefi_vars: store=authenticated live=17 obsolete=6
+BootOrder=0001
+BootNext=0000
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=EFI Internal Shell
+### v2
+uefi_vars: store=authenticated live=18 obsolete=15
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+### v3
+uefi_vars: store=authenticated live=18 obsolete=16
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+### v4
+uefi_vars: store=authenticated live=18 obsolete=17
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+## lane absent: boot 2 serial, key lines
+BdsDxe: failed to load Boot0000 "AIENOS Candidate" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\AIENOS\missing_candidate.efi: Not Found
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+DEFAULT_OS: BOOT_CURRENT=0001
+## lane absent: boots 3-4, BdsDxe lines
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+
+## lane normal: store read by ck_uefi_vars after each boot (v0 = fresh template)
+### v0
+uefi_vars: store=authenticated live=0 obsolete=0
+BootOrder=absent
+BootNext=absent
+### v1
+uefi_vars: store=authenticated live=17 obsolete=6
+BootOrder=0001
+BootNext=0000
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=EFI Internal Shell
+### v2
+uefi_vars: store=authenticated live=18 obsolete=14
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+### v3
+uefi_vars: store=authenticated live=18 obsolete=16
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+### v4
+uefi_vars: store=authenticated live=18 obsolete=17
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+## lane normal: boot 2 serial, key lines
+BdsDxe: loading Boot0000 "AIENOS Candidate" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\AIENOS\candidate.efi
+BdsDxe: starting Boot0000 "AIENOS Candidate" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\AIENOS\candidate.efi
+aienos_commit: ecd12c685bcc76b0967925488c96e70b7d9c57b0
+report_kind: pre_exit
+kernel_impl: c (native/kernel, Lane 18)
+aienos_commit: ecd12c685bcc76b0967925488c96e70b7d9c57b0
+report_kind: kernel
+kernel: alive
+aienos_commit: ecd12c685bcc76b0967925488c96e70b7d9c57b0
+report_kind: final
+note: QEMU qualifies nothing physical
+## lane normal: boots 3-4, BdsDxe lines
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+
+## lane panic: store read by ck_uefi_vars after each boot (v0 = fresh template)
+### v0
+uefi_vars: store=authenticated live=0 obsolete=0
+BootOrder=absent
+BootNext=absent
+### v1
+uefi_vars: store=authenticated live=17 obsolete=6
+BootOrder=0001
+BootNext=0000
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=EFI Internal Shell
+### v2
+uefi_vars: store=authenticated live=18 obsolete=14
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+### v3
+uefi_vars: store=authenticated live=18 obsolete=16
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+### v4
+uefi_vars: store=authenticated live=18 obsolete=17
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+## lane panic: boot 2 serial, key lines
+BdsDxe: loading Boot0000 "AIENOS Candidate" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\AIENOS\candidate.efi
+BdsDxe: starting Boot0000 "AIENOS Candidate" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\AIENOS\candidate.efi
+aienos_commit: ecd12c685bcc76b0967925488c96e70b7d9c57b0
+report_kind: pre_exit
+rollback_test: TEST-ONLY rollback candidate (bad-magic): the kernel gets a corrupted handoff magic; never counts toward a PASS
+kernel_impl: c (native/kernel, Lane 18)
+aienos_commit: ecd12c685bcc76b0967925488c96e70b7d9c57b0
+report_kind: panic
+panic: handoff: bad magic
+## lane panic: boots 3-4, BdsDxe lines
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+
+## lane cpu-fault: store read by ck_uefi_vars after each boot (v0 = fresh template)
+### v0
+uefi_vars: store=authenticated live=0 obsolete=0
+BootOrder=absent
+BootNext=absent
+### v1
+uefi_vars: store=authenticated live=17 obsolete=6
+BootOrder=0001
+BootNext=0000
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=EFI Internal Shell
+### v2
+uefi_vars: store=authenticated live=18 obsolete=14
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+### v3
+uefi_vars: store=authenticated live=18 obsolete=16
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+### v4
+uefi_vars: store=authenticated live=18 obsolete=17
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+## lane cpu-fault: boot 2 serial, key lines
+BdsDxe: loading Boot0000 "AIENOS Candidate" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\AIENOS\candidate.efi
+BdsDxe: starting Boot0000 "AIENOS Candidate" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\AIENOS\candidate.efi
+aienos_commit: ecd12c685bcc76b0967925488c96e70b7d9c57b0
+report_kind: pre_exit
+kernel_impl: c (native/kernel, Lane 18)
+aienos_commit: ecd12c685bcc76b0967925488c96e70b7d9c57b0
+report_kind: kernel
+kernel: alive
+rollback_test: TEST-ONLY rollback candidate (cpu-fault): brk at EL1 now; never counts toward a PASS
+aienos_commit: ecd12c685bcc76b0967925488c96e70b7d9c57b0
+report_kind: fault
+fault: vector=sync_el_spx el=1 esr=0xf200007b ec=0x3c far=0x4c001008 elr=0x5c6f7280
+## lane cpu-fault: boots 3-4, BdsDxe lines
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+
+## lane hang: store read by ck_uefi_vars after each boot (v0 = fresh template)
+### v0
+uefi_vars: store=authenticated live=0 obsolete=0
+BootOrder=absent
+BootNext=absent
+### v1
+uefi_vars: store=authenticated live=17 obsolete=6
+BootOrder=0001
+BootNext=0000
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=EFI Internal Shell
+### v2
+uefi_vars: store=authenticated live=18 obsolete=14
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+### v3
+uefi_vars: store=authenticated live=18 obsolete=16
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+### v4
+uefi_vars: store=authenticated live=18 obsolete=17
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+## lane hang: boot 2 serial, key lines
+BdsDxe: loading Boot0000 "AIENOS Candidate" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\AIENOS\candidate.efi
+BdsDxe: starting Boot0000 "AIENOS Candidate" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\AIENOS\candidate.efi
+aienos_commit: ecd12c685bcc76b0967925488c96e70b7d9c57b0
+report_kind: pre_exit
+kernel_impl: c (native/kernel, Lane 18)
+aienos_commit: ecd12c685bcc76b0967925488c96e70b7d9c57b0
+report_kind: kernel
+kernel: alive
+rollback_test: TEST-ONLY rollback candidate (hang): spinning with interrupts masked, no reset follows; never counts toward a PASS
+## lane hang: boots 3-4, BdsDxe lines
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+
+## lane rejected: store read by ck_uefi_vars after each boot (v0 = fresh template)
+### v0
+uefi_vars: store=authenticated live=0 obsolete=0
+BootOrder=absent
+BootNext=absent
+### v1
+uefi_vars: store=authenticated live=17 obsolete=6
+BootOrder=0001
+BootNext=0000
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=EFI Internal Shell
+### v2
+uefi_vars: store=authenticated live=18 obsolete=15
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+### v3
+uefi_vars: store=authenticated live=18 obsolete=16
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+### v4
+uefi_vars: store=authenticated live=18 obsolete=17
+BootOrder=0001,0002,0003,0004
+BootNext=absent
+Boot0000=AIENOS Candidate
+Boot0001=Default Linux OS
+Boot0002=UiApp
+Boot0003=UEFI Misc Device
+Boot0004=EFI Internal Shell
+## lane rejected: boot 2 serial, key lines
+BdsDxe: loading Boot0000 "AIENOS Candidate" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\AIENOS\candidate.efi
+BdsDxe: failed to load Boot0000 "AIENOS Candidate" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\AIENOS\candidate.efi: Unsupported
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+DEFAULT_OS: BOOT_CURRENT=0001
+## lane rejected: boots 3-4, BdsDxe lines
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: loading Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi
+BdsDxe: starting Boot0001 "Default Linux OS" from PciRoot(0x0)/Pci(0x1,0x0)/HD(1,MBR,0xBE1AFDFA,0x3F,0xFBFC1)/\EFI\DEFAULT\default.efi

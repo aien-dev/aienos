@@ -27,9 +27,16 @@ Run on any aarch64 or cross-capable Linux host, from a clean checkout:
     make -s -C native/kernel OUT=/tmp/ck-b AIENOS_COMMIT="$commit" full
     sha256sum /tmp/ck-a/BOOTAA64.EFI /tmp/ck-b/BOOTAA64.EFI
 
-Expected: the two digests are equal for the same commit (UNVERIFIED: this was
-not built when this page was written, the machine was held quiet by another
-run). The digest changes with every commit because the commit hash is built
+`scripts/ck_repro_build.sh [full|core] [--keep DIR]` does exactly this: it
+refuses a dirty tree, builds twice into two fresh temp folders and prints
+`CK_REPRO_BUILD: PASS <kind> commit=<commit> sha256=<digest>` only when the
+digests are equal. Checked on the Spark host (gcc 13.3.0, GNU ld 2.42) at
+commit ecd12c6: `full` both builds
+`fa48c92029957e0c468b068b4196dde254f80036565b05facc240433b6fd77aa`, `core`
+both builds `7bf5d58ce24ddf57de24cdf0c3240f37f0971eac2689fa63935f7c4732a69038`.
+Negative control: the same tree built with a different `AIENOS_COMMIT` gives
+a different digest, so the comparison can fail. Same-host only: a build on
+another machine or toolchain is UNVERIFIED. The digest changes with every commit because the commit hash is built
 into the image, so no single digest can be written down in advance. The
 digest of the image that is actually staged is printed by the kernel itself on
 the recovery console (`recovery_console: identity build_sha256=<64 hex>
@@ -47,6 +54,14 @@ every command it would run and touches nothing.
 ## 2. Preflight checklist before any attended boot
 
 All of these are read-only checks. Stop at the first one that fails.
+
+`scripts/native_boot_preflight.sh [--image EFI --expect-sha256 HEX]` runs
+items 2, 3, 4, 5 and 8 below. It only reads (`efibootmgr` with no arguments,
+the SecureBoot variable file, `findmnt`, `git status`, the image file, the
+quiet flag), needs no sudo and never stages or reboots; its `--self-test`
+also fails if the script ever gains a writing command. Last line:
+`NATIVE_PREFLIGHT: READY` or `NOT_READY (<n> STOP)`. Items 1, 6 and 7 are
+printed as ASK lines: they are Drake's, a script cannot see them.
 
 1. Drake is at the machine, with a display and keyboard attached. (Drake's
    physical presence and fresh go-ahead are required; see section 5.)
@@ -67,6 +82,15 @@ All of these are read-only checks. Stop at the first one that fails.
 8. No other session holds the machine quiet for its own hardware test.
 
 ## 3. Getting back to Linux
+
+In plain words: the AIENOS test gets one try. Whatever it does (finishes,
+crashes, freezes, or the computer refuses to start it), the next start of the
+machine goes back to Linux by itself. If the screen stops changing for a full
+minute, hold the power button until the machine turns off, wait ten seconds,
+and press it again; Linux should come up. If Linux does not come up, use the
+recovery stick (section 4). Each of these outcomes was rehearsed with the real
+C image in QEMU (`scripts/qemu_ck_rollback_test.sh`, CK gate M0_ROLLBACK);
+not yet on the Spark itself.
 
 Normal return: do nothing. Firmware deletes BootNext before it starts the
 candidate, so any reset or power-cycle (hold the chassis power button, wait,
@@ -108,5 +132,6 @@ implemented and not specified here. The accepted spec forbids slots in this
 loader (Q3, ADR 0024; `docs/BOOT_HANDOFF_CONTRACT.md` section 7: "the handoff
 record carries no rollback state, and never will"). Doing it needs Drake to
 reopen Q3 first. The existing one-time BootNext rollback is proven in QEMU
-(M0_NATIVE_ROLLBACK_QEMU), and M0_ROLLBACK for the C image is
-MISSING_IMPLEMENTATION until the rows in section 7.1 of that contract are built.
+(M0_NATIVE_ROLLBACK_QEMU, Rust mock candidate), and with the C image as the
+candidate in QEMU (CK gate M0_ROLLBACK, `scripts/qemu_ck_rollback_test.sh`,
+rows 42-46 of `native/kernel/GATES.md`). Neither is a physical result.

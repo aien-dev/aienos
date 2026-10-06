@@ -34,6 +34,13 @@
 #                        (target/native-kernel-test-fwcfg); announces itself and
 #                        never counts toward a PASS. Default images are checked
 #                        to contain no fw_cfg artifact code.
+#   make CK_TEST_ROLLBACK=bad-magic|cpu-fault|hang
+#                        TEST-ONLY M0_ROLLBACK candidates (bad handoff magic, CPU
+#                        fault after "kernel: alive", hang with interrupts masked);
+#                        own OUT (target/native-kernel-test-rollback-<mode>); only
+#                        scripts/qemu_ck_rollback_test.sh; refused with CK_HARDWARE_STAGING
+#   make uefi-vars       host tool $(OUT)/host/ck_uefi_vars: reads BootOrder, BootNext
+#                        and Boot#### from an edk2 vars.fd (read-only, M0_ROLLBACK)
 #   make CK_TEST_SMP_SKIP_CPU=1
 #                        TEST-ONLY SMP mutation: CPU_ON skipped for one secondary
 #                        core (core/smp.c); own OUT (target/native-kernel-test-smp-skip);
@@ -151,6 +158,30 @@ $(error CK_TEST_STALE_HANDOFF (TEST-only stale handoff) cannot be combined with 
 endif
 OUT ?= $(REPO)/target/native-kernel-test-stale-handoff
 SMP_TEST_FLAGS += -DCK_TEST_STALE_HANDOFF=2
+endif
+# TEST-ONLY rollback candidates (CK gate M0_ROLLBACK,
+# scripts/qemu_ck_rollback_test.sh; docs/BOOT_HANDOFF_CONTRACT.md 7.1 rows 43-44):
+#   bad-magic  the stub flips one bit of the handoff magic after
+#              ExitBootServices; the kernel must panic "handoff: bad magic"
+#   cpu-fault  after "kernel: alive" the kernel executes BRK at EL1; the
+#              fault report must print and the kernel must reset
+#   hang       after "kernel: alive" the kernel prints one marker and spins
+#              with interrupts masked; only an outside reset ends it
+# Own OUT; announces itself; refused with CK_HARDWARE_STAGING. The default
+# image is checked to carry no trace of it (rollback_check).
+CK_TEST_ROLLBACK ?=
+ifneq ($(strip $(CK_TEST_ROLLBACK)),)
+ifeq ($(filter $(strip $(CK_TEST_ROLLBACK)),bad-magic cpu-fault hang),)
+$(error CK_TEST_ROLLBACK must be empty or one of bad-magic cpu-fault hang)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_TEST_ROLLBACK (TEST-only rollback candidate) cannot be combined with CK_HARDWARE_STAGING)
+endif
+ifneq ($(strip $(CK_TEST_STALE_HANDOFF)),)
+$(error CK_TEST_ROLLBACK cannot be combined with CK_TEST_STALE_HANDOFF)
+endif
+OUT ?= $(REPO)/target/native-kernel-test-rollback-$(strip $(CK_TEST_ROLLBACK))
+SMP_TEST_FLAGS += -DCK_TEST_ROLLBACK_$(subst -,_,$(shell echo '$(strip $(CK_TEST_ROLLBACK))' | tr a-z A-Z))=1
 endif
 OUT ?= $(REPO)/target/native-kernel
 AIENOS_COMMIT ?= $(shell git -C $(REPO) rev-parse HEAD 2>/dev/null || echo unknown)
@@ -561,6 +592,16 @@ define owner_check
 	fi
 endef
 
+# rollback_check(elf): only a CK_TEST_ROLLBACK image may carry a TEST-only
+# rollback candidate, and it must announce itself.
+define rollback_check
+	@if [ -n "$(strip $(CK_TEST_ROLLBACK))" ]; then \
+	  grep -aqF "TEST-ONLY rollback candidate ($(strip $(CK_TEST_ROLLBACK)))" $(1) || { echo "rollback test image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
+	else \
+	  if grep -aqF "TEST-ONLY rollback candidate" $(1); then echo "default image carries a TEST-ONLY rollback candidate"; rm -f $(1); exit 1; fi; \
+	fi
+endef
+
 # smp_check(elf): only a CK_TEST_SMP_SKIP_CPU image may carry the SMP mutation
 # announcement, and such an image must carry it.
 define smp_check
@@ -629,6 +670,7 @@ $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
 	$(call link_image,$@,$(CORE_OBJS) $(CK_RUST_LIBS) $(CK_INFER_LIB))
 	@if [ -z "$(strip $(CK_TEST_STALE_HANDOFF))" ] && grep -aqF "TEST-ONLY stale handoff" $@; then \
 	  echo "default image carries the TEST-only stale handoff"; rm -f $@; exit 1; fi
+	$(call rollback_check,$@)
 	@s=$$($(KNM) $@ | grep -E ' [TtDdBbWwVv] ck_stage_(devices|security|store|quiesce)$$' || true); \
 	if [ -n "$$s" ]; then echo "core image defines stage symbols: $$s"; rm -f $@; exit 1; fi
 	$(call fwcfg_check,$@)
@@ -636,6 +678,7 @@ $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
 
 $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	$(call link_image,$@,$(CORE_OBJS) $(STAGE_LINK) $(CK_RUST_LIBS) $(CK_INFER_LIB))
+	$(call rollback_check,$@)
 	@for s in ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce ck_stage_disk_artifacts; do \
 	  $(KNM) $@ | grep -qE " [TW] $$s$$" || { echo "full image lacks $$s"; rm -f $@; exit 1; }; done
 	$(call fwcfg_check,$@)
@@ -747,6 +790,12 @@ test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mut
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
 	@fail=0; for t in $^; do ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS (sanitize)"; else echo "CK_CORE_HOST: FAIL (sanitize)"; exit 1; fi
+
+# ---- host tool for the M0_ROLLBACK gate (scripts/qemu_ck_rollback_test.sh) ----
+uefi-vars: $(OUT)/host/ck_uefi_vars
+$(OUT)/host/ck_uefi_vars: $(KDIR)/tools/ck_uefi_vars.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -o $@ $<
 
 # ---- host tool for the AIENOS_CK_NET gate (scripts/qemu_ck_net_test.sh) ----
 udp-echo: $(OUT)/host/ck_udp_echo
@@ -1122,4 +1171,5 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
+.PHONY: uefi-vars
 .PHONY: all full test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE

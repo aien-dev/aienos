@@ -24,7 +24,7 @@ C gates (one line each from `ck_gates.sh`): `M1` and `M3` (from
 `scripts/qemu_ck_artifact_test.sh`, rows 33-41), `NET` (C-only, from
 `scripts/qemu_ck_net_test.sh`; rows 102-106 and 110-112; the script now also checks the virtio-net SMMU fence (ACCESS_PLATFORM required, out-of-window device DMA refused), rows 102 and 110-112 are QEMU PASS on this branch from the committed forge log `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`, hardware NOT_RUN), the kernel entropy rows 107-109 (M1 via `scripts/lib_ck_m1_checks.sh`, ARGUS1_REVOKE and M4_STORE via the Store gate boot 7),
 `DISK_LAYOUT` (C-only, from `scripts/qemu_ck_disk_layout_test.sh`, rows 118-123: QEMU PASS at 741b2b8 before the merge with main 8555049, rerun pending at the merged head; row 123 host test), and the NOT_RUN gates
-`SMP` (C-only, from `scripts/qemu_ck_smp_test.sh`, rows 113-117, NOT_RUN pending forge receipt), `M0_ROLLBACK`, `M4_STORE_CRASH` (now read from `scripts/qemu_ck_store_crash_test.sh`, rows 73-80; NOT_RUN until a forge receipt exists),
+`SMP` (C-only, from `scripts/qemu_ck_smp_test.sh`, rows 113-117, NOT_RUN pending forge receipt), `M0_ROLLBACK` (from `scripts/qemu_ck_rollback_test.sh`, rows 42-46; QEMU PASS in its committed run log, C-image, no `ck_gates.sh` receipt yet; hardware NOT_RUN), `M4_STORE_CRASH` (now read from `scripts/qemu_ck_store_crash_test.sh`, rows 73-80; NOT_RUN until a forge receipt exists),
 `M4_CONTINUITY`, `M4_RECOVERY`, `M4_ALLEN` (C-only, from `scripts/qemu_ck_allen_test.sh`, rows A1-A30; QEMU PASS, hardware NOT_RUN), `KEYBOARD` (from `scripts/qemu_ck_keyboard_test.sh`, rows 25-32 and C-only 30a-30c and 32a; QEMU PASS; C-only row 32b and all hardware NOT_RUN), `FPU` (C-only, from `scripts/qemu_ck_fpu_test.sh`, rows 124-128; QEMU PASS, hardware NOT_RUN), `INFER` (C-only, from `scripts/qemu_ck_infer_test.sh`, rows 129-139; QEMU PASS, hardware NOT_RUN), and `SCREEN` (C-only, from `scripts/qemu_ck_screen_test.sh`, rows 140-145; QEMU PASS, hardware NOT_RUN).
 
 `M4_NVME` and `SMMU` PASS in the SMMU-confined mode (default `make full`
@@ -287,15 +287,17 @@ the candidate, fallback to Default after a fault, hang, malformed or absent
 candidate, BootNext consumed and Default unchanged. No A/B slot logic exists
 in the script or in crates/aienos-boot. ADR 0024 Q3 (aien-architecture) freezes loader expansion: no A/B
 slots will be added. Rollback is the one-time BootNext rule; under
-`docs/BOOT_HANDOFF_CONTRACT.md` section 7.1 these rows run the script with the C kernel image as the candidate, after the script and TEST-build changes listed there. Until a forge receipt covers them they stay NOT_RUN.
+`docs/BOOT_HANDOFF_CONTRACT.md` section 7.1 these rows run with the C kernel image as the candidate: `scripts/qemu_ck_rollback_test.sh` (child `rollback` of `scripts/ck_gates.sh`), TEST-only candidates from `make CK_TEST_ROLLBACK=bad-magic|cpu-fault|hang`. The Rust mock stays stager and Default. Its own run (`scripts/qemu_native_rollback_test.sh`, Rust-mock evidence, labels `NATIVE_ROLLBACK_*`) is unchanged and kept apart from the C-image labels `CK_ROLLBACK_*`. BootNext and BootOrder are read by the host from the vars file after every boot (`native/kernel/tools/ck_uefi_vars.c`), not from a guest print. Run log: `evidence/ck_rollback_qemu_5deb3971bd88b5664489d47bc273613104e1eb2c7a3e353bfe73f7729717fad8.log` (code commit ecd12c6, clean tree). No `ck_gates.sh` receipt includes this child yet.
+
+AAVMF itself appends its auto-created options (UiApp, UEFI Misc Device, EFI Internal Shell) to BootOrder on the boot after the stager wrote `BootOrder=0001`. The absent lane, where no candidate code runs, shows the identical change, so "Default unchanged" is judged as: 0001 first, Boot0000 never in BootOrder, no change after the attempt boot, and equal to that no-candidate control.
 
 | # | Rust check (marker) | CK gate | Status |
 | --- | --- | --- | --- |
-| 42 | `AAVMF_BOOTNEXT_NVRAM` / `NATIVE_ROLLBACK_NORMAL` | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: C image not yet wired as the BootNext candidate, docs/BOOT_HANDOFF_CONTRACT.md 7.1) |
-| 43 | `NATIVE_ROLLBACK_FAULT` (faulted candidate returns to Default) | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: needs TEST-only bad-magic C image, contract 7.1) |
-| 44 | `NATIVE_ROLLBACK_TIMEOUT` (hung candidate) | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: needs TEST-only hang C image, contract 7.1) |
-| 45 | `NATIVE_ROLLBACK_REJECTED` (malformed image) and absent-image fallback | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: C image as candidate path, contract 7.1) |
-| 46 | `NATIVE_ROLLBACK_BOOTNEXT_CONSUMED` / `_DEFAULT_UNCHANGED` | M0_ROLLBACK | NOT_RUN (MISSING_IMPLEMENTATION: C image as candidate, contract 7.1) |
+| 42 | `AAVMF_BOOTNEXT_NVRAM` / `NATIVE_ROLLBACK_NORMAL` | M0_ROLLBACK | QEMU PASS, C-image (`CK_ROLLBACK_NORMAL`: the default core image runs to `report_kind: final`, PSCI reset; next boot is Boot0001 Default; run log above; hardware NOT_RUN) |
+| 43 | `NATIVE_ROLLBACK_FAULT` (faulted candidate returns to Default) | M0_ROLLBACK | QEMU PASS, C-image, two lanes (`CK_ROLLBACK_FAULT_PANIC`: TEST-only bad-magic image, `panic: handoff: bad magic`, reset; `CK_ROLLBACK_FAULT_CPU`: TEST-only BRK at EL1 after `kernel: alive`, `report_kind: fault` EC 0x3c, reset; both return to Default; hardware NOT_RUN) |
+| 44 | `NATIVE_ROLLBACK_TIMEOUT` (hung candidate) | M0_ROLLBACK | QEMU PASS, C-image (`CK_ROLLBACK_TIMEOUT`: TEST-only hang image prints its marker after `kernel: alive`; QEMU still running 10 s later with no end report; the host kill stands in for the operator power-cycle, there is no watchdog in the guest; next boot is Default; hardware NOT_RUN) |
+| 45 | `NATIVE_ROLLBACK_REJECTED` (malformed image) and absent-image fallback | M0_ROLLBACK | QEMU PASS, C-image (`CK_ROLLBACK_REJECTED`: the default C image cut to 4096 bytes, firmware `failed to load Boot0000 ... Unsupported`, Default in the same boot; `CK_ROLLBACK_ABSENT`: Boot0000 names a missing file, `failed to load`, Default; hardware NOT_RUN) |
+| 46 | `NATIVE_ROLLBACK_BOOTNEXT_CONSUMED` / `_DEFAULT_UNCHANGED` | M0_ROLLBACK | QEMU PASS, C-image, every lane (`CK_ROLLBACK_BOOTNEXT_CONSUMED`: the host-read store holds BootNext=0000 after the stage boot and none after boots 2, 3 and 4; Boot0000 dispatched in boot 2 only. `CK_ROLLBACK_DEFAULT_UNCHANGED`: judged as above; hardware NOT_RUN) |
 
 ## M4 NVMe read: scripts/qemu_nvme_test.sh (SMMU=1 and SMMU=0) -> CK `M4_NVME`
 
