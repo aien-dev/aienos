@@ -71,7 +71,10 @@ jobs:
           ls -l /usr/share/AAVMF/AAVMF_CODE.no-secboot.fd /usr/share/AAVMF/AAVMF_VARS.fd
 
       - name: Install Rust toolchain (the M0_ROLLBACK stager and Default are the Rust aienos-rollback-mock)
-        uses: dtolnay/rust-toolchain@stable
+        # Pinned to the toolchain the M0_ROLLBACK evidence was produced with (Spark, rustc 1.98.1).
+        # Rust 1.99.0 stable fails to link the aarch64-unknown-uefi mock: uefi 0.41 proto::shell
+        # references wcslen, undefined under 1.99 (first seen 2026-10-06, aienos#273 CI). Tracked separately.
+        uses: dtolnay/rust-toolchain@1.98.1
         with:
           targets: aarch64-unknown-uefi
 
