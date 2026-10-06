@@ -105,6 +105,8 @@ for f in owner_pubkeys machine_id; do
     elif [[ "$(basename "${v}")" == TEST-FIXTURE* ]]; then
         stop "${f} is a labelled TEST-FIXTURE file (${v}); a boot needs the operator's own file"
     else
+        v="$(realpath -- "${v}")" # make -C native/kernel resolves relative paths from there
+        printf -v "${f}" %s "${v}"
         echo "${f}: ${v}"
     fi
 done
