@@ -95,6 +95,137 @@ The kernel is partition-unaware. At every boot it writes and restores the last
 areas hold the protective MBR, the primary GPT and the backup GPT. Details and
 the operator-facing warning: `docs/TRUST-1-OPERATOR-STEPS.md`.
 
+## Operator input and recovery access (C kernel)
+
+Status: **QEMU only.** CK gate `KEYBOARD` (rows 25-32 and 30a-30c in
+`GATES.md`) runs in QEMU; no physical keyboard, xHCI controller or SMMU has
+been exercised by this code. Hardware NOT_RUN.
+
+What is implemented (NEXT-PHASE-3 cut 1):
+
+- **Device discovery.** The devices stage finds the USB host controller on
+  the PCI ECAM walk by class code 0x0c0330 (xHCI), after ExitBootServices and
+  after the bus-master sweep. It gets DMA only through the xHCI DMA fence
+  (`dev/xhci_fence.c`): SMMU window first, no SMMU means no DMA. Then
+  `dev/usb_kbd.c` resets the controller, finds the first connected port with
+  a USB HID boot keyboard, addresses it, configures its interrupt IN
+  endpoint and polls it. Polled only: no interrupts, no scheduler, no Store.
+- **Key decode** to one small fixed US keymap (`dev/usb_hid.c`): a-z (with
+  Shift: A-Z), 0-9, space, `-`, `.`, `/`, Enter, Backspace, Escape. Every
+  other key is ignored. A held key produces one event, not a repeat.
+- **Line input** with echo and a bound of 64 characters. One key past the
+  bound makes the whole line fail closed: at Enter it is refused
+  (`keyboard_line: overflow (line refused: N keys typed, limit 64)`) and never
+  run. The Rust shell drops the extra keys instead; this is the one deliberate
+  difference. The line feeds the same six commands as the Rust shell: `help`,
+  `mem`, `el`, `report`, `uptime`, `exit`.
+- **Recovery-access hook.** Right after the keyboard is ready the kernel
+  prints `recovery_access: waiting 5000 ms for an operator key (r = recovery
+  console; any other key or no key = normal boot)` and records the first key:
+  `r` gives `recovery_access: choice=recovery reason=key-r`, any other key
+  gives `choice=normal reason=other-key`, no key gives `choice=normal
+  reason=timeout`. Without a usable keyboard it prints `recovery_access:
+  unavailable (no operator keyboard: xhci=<state>); choice=normal
+  reason=no-keyboard` and does not wait.
+- **Recovery console: a stub.** On `r` the xHCI is halted and fenced, then
+  the NVMe and virtio-net DMA are released, then the screen shows
+  `recovery_console: STUB ...`, `recovery_console: identity
+  build_sha256=<64 hex> commit=<commit> (image build identity; not an owner
+  or machine identity)` and `recovery_console: halted (no device DMA live;
+  power-cycle to leave)`. The digest is SHA-256 over
+  `AIENOS-CK-RECOVERY-IDENTITY-V1`, one zero byte, and the commit the image
+  was built from, so anyone can recompute it from the commit. The CPU then
+  stops for good. It never touches the disk and has no commands.
+
+Bus. The Rust kernel and both QEMU gates use a PCI xHCI controller
+(`qemu-xhci`, class 0x0c0330) with a `usb-kbd` attached. The C driver looks
+only there.
+
+**The Spark's USB controllers are not on PCI.** Read on this Spark under
+Ubuntu on 2026-10-05 (sysfs, read-only): no PCI function has class 0x0c03.
+The USB buses hang off six ACPI platform devices, `NVDA8000:00` to
+`NVDA8000:04` and `NVDA8001:00`, bound by Linux `xhci_plat_hcd` through the
+ACPI id `PNP0D15` (an xHCI controller), each behind the SMMUv3 at
+0x13800000. The DGX Spark hardware guide lists four USB Type-C ports on the
+rear panel and is silent on the controller behind them. Consequence
+(INFERRED, high confidence): on the Spark this cut finds no controller and
+prints `keyboard: unavailable (no xHCI controller)` and `recovery_access:
+unavailable (no operator keyboard: xhci=absent); choice=normal
+reason=no-keyboard`. The xHCI register work in `dev/usb_kbd.c` follows the
+xHCI specification and should carry over (UNVERIFIED, medium confidence),
+but the Spark needs discovery from the ACPI tables (DSDT `PNP0D15` devices
+and their IORT stream ids) instead of the PCI walk. That is the next cut,
+not this one. Which of the six controllers serves which rear port is
+UNKNOWN.
+
+### Physical attended boot: what it will look like
+
+Do not run this until two things exist, because without them the run proves
+only the "no keyboard" line above: (1) ACPI discovery of the Spark's
+platform xHCI controllers, and (2) a staging command for the full hardware
+image (today `scripts/stage_one_time_boot_ck.sh` stages only the inference
+image, which has no devices stage and so no keyboard). The steps below are
+the procedure that run will follow, so it can be reviewed now.
+
+Ground rules: nothing here changes firmware settings, Secure Boot keys or the
+TPM. The boot is one-time (BootNext): the next restart returns to Ubuntu on
+its own. If anything looks different from "What you should see", write down
+or photograph the screen and hand it to the orchestrator. Do not retry or
+improvise.
+
+1. **Plug in.** At the Spark, with Ubuntu running:
+   - the HDMI monitor on the rear HDMI port (the kernel writes to the screen;
+     there is no other console you can see);
+   - a plain wired USB keyboard in one rear USB Type-C port (use a USB-A to
+     USB-C adapter if needed; a wireless or Bluetooth keyboard will not work,
+     and a keyboard with a built-in hub may not);
+   - the AIENOSRECOV recovery stick, so the firmware's recovery entry
+     (Boot0004) is there if anything goes wrong.
+
+   *You should see:* nothing changes on screen yet.
+
+2. **Stage the one-time boot** with the staging command the orchestrator
+   names for that run (it will be a `--dry-run` first, then `--apply`, in the
+   style of `scripts/stage_one_time_boot_ck.sh`). *Changes:* it copies the
+   image to the EFI system partition and sets BootNext once; it never
+   reboots. *You should see:* the dry run's list of commands, then the apply
+   ending without `FAIL`.
+
+3. **Restart** with `sudo reboot`. Do not touch the keyboard until the screen
+   shows AIENOS lines (white text on black, starting with the boot report).
+
+4. **Normal boot (do nothing).** Watch for, in order:
+   `keyboard: xhci ...`, `dma_gate: xhci granted (Confined), bus master on`,
+   `keyboard: ready (port P, slot S, endpoint 0x81)`, then
+   `recovery_access: waiting 5000 ms ...`. Keep your hands off for those 5
+   seconds. *You should see:* `recovery_access: choice=normal reason=timeout`,
+   then `keyboard: shell ready` and the prompt `aienos> `.
+
+5. **Type a line.** Type `help` and press Enter. *You should see:* the
+   letters appear as you type, then `keyboard_line: help` and `commands: help
+   mem el report uptime exit`. Type `exit` and press Enter. *You should see:*
+   `keyboard: done (exit)`, `dma_gate: xhci bus master revoked`, and later
+   `report_kind: final`. The screen holds the last report, then the Spark
+   restarts into Ubuntu by itself.
+
+6. **Recovery boot (second attended boot, staged again as in step 2).** This
+   time, as soon as `recovery_access: waiting 5000 ms ...` appears, press
+   `r` once. *You should see:* `recovery_access: choice=recovery
+   reason=key-r`, `devices: recovery halt nvme=released
+   virtio_net=released xhci=released`, `recovery_console: STUB ...`,
+   `recovery_console: identity build_sha256=<64 hex> commit=<commit>` and
+   `recovery_console: halted (no device DMA live; power-cycle to leave)`. The
+   machine then stays on that screen. Photograph it. Then hold the power
+   button until the Spark turns off, wait ten seconds, and press it again.
+   *You should see:* Ubuntu starts as usual (BootNext was used up).
+
+What success looks like: steps 4 to 6 show exactly those lines, the identity
+digest on the photo equals the one the orchestrator recomputes from the
+commit, and Ubuntu comes back after each boot with nothing changed on its
+disk. Any `report_kind: panic` or `report_kind: fault`, a missing
+`bus master revoked` line, or a keyboard that is ready but ignores typing is
+a FAIL to report, not to retry.
+
 ## Boot sequence
 
 1. UEFI stub: pre-exit report on ConOut, memory map, `ExitBootServices`.

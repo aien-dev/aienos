@@ -121,40 +121,67 @@ per-stream page tables, `ck_dma_confine` / `ck_dma_unconfine` /
 
 ## SEED-0A keyboard: scripts/qemu_keyboard_test.sh (SMMU=1 and SMMU=0) -> CK `KEYBOARD`
 
-C child script: `scripts/qemu_ck_keyboard_test.sh` (DMA-safety rows only; both
-modes in one run, boot `kbd-smmu` with QEMU `iommu=smmuv3` and boot
-`kbd-nosmmu` without; same devices as the Rust gate: `qemu-xhci` + `usb-kbd`,
-plus an NVMe disk for the normal full boot). It prints one
+C child script: `scripts/qemu_ck_keyboard_test.sh`. Three boots in one run,
+same devices as the Rust gate (`qemu-xhci` + `usb-kbd`, plus an NVMe disk for
+the normal full boot): `kbd-smmu` with QEMU `iommu=smmuv3`, `kbd-nosmmu`
+without, and `kbd-recovery` (SMMU on). Keys are injected by the script through
+the QEMU monitor (`sendkey`, as the Rust gate does); the kernel never fakes the
+device. Boot `kbd-smmu` sends no key in the recovery window, then the lines
+`abc`, `help`, `el`, `mem`, 65 `x` keys (one past the 64-key line bound) and
+`exit`. Boot `kbd-recovery` sends `r` in the recovery window. It prints one
 `KEYBOARD_ROW <n>: PASS|FAIL|NOT_RUN` line per row, then
-`AIENOS_CK_KEYBOARD_DMA: PASS|FAIL (rows 25-28,31,32)` and always
-`AIENOS_CK_KEYBOARD: NOT_RUN (MISSING_IMPLEMENTATION: ...)`: the gate stays
-NOT_RUN until rows 29-30 exist. C code: the post-exit bus-master sweep
-`pci_sweep_bus_master` (native/kernel/dev/pci.c, port of the Rust
-`dma_gate::sweep_bus_master`, run at the start of the devices stage before any
-device gets DMA) and the xHCI DMA fence `native/kernel/dev/xhci_fence.c`
-(same SMMU gate as NVMe and virtio-net: `ck_dma_confine` window first, then
-memory decode + bus master; no SMMU means no DMA, no bypass build; controller
-halted, bus master revoked, stream back to abort). No USB HID driver and no
-console shell. Mutation self-test: `scripts/qemu_ck_keyboard_test.sh
---mutation` builds `make full CK_TEST_XHCI_MUTATION=<m>` (TEST-ONLY, refused
-with `CK_HARDWARE_STAGING=1` and with `CK_QEMU_UNSAFE_DMA=1`, by the Makefile
-and by an `#error`; the default image is checked to carry no mutation banner)
-and requires bm-left-on -> row 27, no-revoke -> row 31, grant-no-smmu -> row 28,
-no-sweep -> row 26 to FAIL. Host tests (`stage_test`): sweep on a fake ECAM
-(endpoints cleared, bridges untouched, multi-function rule, every bus) and the
-fence fail-closed paths (no SMMU, bus master left on). Hardware NOT_RUN: no
-physical xHCI or SMMU run.
+`AIENOS_CK_KEYBOARD_DMA: PASS|FAIL (rows 25-28,31,32)` and
+`AIENOS_CK_KEYBOARD: PASS|FAIL|NOT_RUN` (NOT_RUN with exit 3 while the QEMU
+gate lock is held, while the quiet flag exists, or when `AIENOS_QEMU_SMMU`
+selects only one mode). `scripts/ck_gates.sh` takes KEYBOARD from this child
+only.
+
+C code: the post-exit bus-master sweep `pci_sweep_bus_master`
+(native/kernel/dev/pci.c), the xHCI DMA fence `native/kernel/dev/xhci_fence.c`
+(`ck_dma_confine` window first, then memory decode + bus master; no SMMU means
+no DMA, no bypass build; controller halted, bus master revoked, stream back to
+abort), and inside that fence the polled keyboard driver
+`native/kernel/dev/usb_kbd.c` (xHCI reset, command and event rings, Enable
+Slot, Address Device, configuration descriptor, Configure Endpoint,
+SET_PROTOCOL boot, interrupt IN transfers; port of the Rust
+`crates/aienos-kernel/src/usb/xhci` and `crates/aienos-boot/src/usb_keyboard.rs`)
+with its pure logic in `native/kernel/dev/usb_hid.c` (boot report decode to a
+fixed US keymap, descriptor walk, bounded line editor, the Rust shell commands,
+the recovery-access decision and identity digest). Every ring, context and
+buffer lives in the fence's DMA region, the controller stream's only SMMU
+window. The recovery choice is acted on by `native/kernel/dev/devices.c`
+after the xHCI revoke: virtio-net and NVMe DMA released, then the recovery
+console stub prints the identity digest and halts. Operator-facing
+description and the physical attended-boot procedure:
+`native/kernel/README.md`, section "Operator input and recovery access (C
+kernel)".
+
+Mutation self-test: `scripts/qemu_ck_keyboard_test.sh --mutation` builds
+`make full CK_TEST_XHCI_MUTATION=<m>` (TEST-ONLY, refused with
+`CK_HARDWARE_STAGING=1` and with `CK_QEMU_UNSAFE_DMA=1`, by the Makefile and by
+an `#error`; the default image is checked to carry no mutation banner) and
+requires bm-left-on -> row 27, no-revoke -> row 31, grant-no-smmu -> row 28,
+no-sweep -> row 26 to FAIL. Host tests (`stage_test`): sweep on a fake ECAM,
+the fence fail-closed paths, and the operator input logic (keymap, report
+decode with held keys and rollover, descriptor walk with malformed lengths,
+line editor overflow refusal, shell output texts, recovery decision, identity
+digest). One deliberate difference from Rust: the Rust shell drops keys past
+its 64-byte line; the C editor refuses the whole line (row 30c). Hardware
+NOT_RUN: no physical xHCI, keyboard or SMMU run.
 
 | # | Rust check (pattern) | CK gate | Status |
 | --- | --- | --- | --- |
-| 25 | xHCI found before exit (`keyboard: xhci `) | KEYBOARD | NOT_RUN (pending forge receipt; C would be DIFFERS: found after exit on the ECAM walk, class 0x0c0330, `keyboard: xhci 0000:BB:DD.F mmio 0x.. (found post-exit on the ECAM walk)`, both boots) |
-| 26 | bus-master sweep after exit (`dma_sweep: seg `, no `dma_sweep: bme STUCK`) | KEYBOARD | NOT_RUN (pending forge receipt; C would be DIFFERS: same line text as Rust, `dma_sweep: seg 0000 bus .. functions=N ... still_enabled=0`, no `dma_sweep: bme STUCK`, and stricter: the sweep must come before the first `dma_gate: ` line and before `keyboard: xhci `; both boots; mutation no-sweep) |
-| 27 | xHCI bus master off before the DMA gate (`xhci_pci: command=0x.. bus_master=off`) | KEYBOARD | NOT_RUN (pending forge receipt; C would be IDENTICAL prefix `xhci_pci: command=0x.... bus_master=off`, plus the order check: before `dma_gate: xhci `; both boots; mutation bm-left-on) |
-| 28 | fail-closed without SMMU (`dma_gate: xhci denied (NoSmmu)...`, `keyboard: unavailable (...)`, no grant, no `keyboard: ready`) | KEYBOARD | NOT_RUN (pending forge receipt; C would be IDENTICAL lines `dma_gate: xhci denied (NoSmmu), bus master stays off` and `keyboard: unavailable (SMMU DMA isolation not active)`, absent `dma_gate: xhci granted` and `keyboard: ready`, plus C-only: COMMAND read back after the deny `bus_master=off`, no xHCI SMMU window; boot kbd-nosmmu; mutation grant-no-smmu) |
-| 29 | keyboard attached and typed line echoed (`keyboard: ready`, `keyboard_echo:`, `keyboard_line:`, `keyboard: done (enter)`) | KEYBOARD | NOT_RUN (MISSING_IMPLEMENTATION: no USB HID driver in the C kernel; the image prints `keyboard: hid NOT_IMPLEMENTED ...`) |
-| 30 | shell commands (`commands: help mem el report uptime exit`, `EL1`, `conventional_memory_kb:`, `keyboard: done (exit)`) | KEYBOARD | NOT_RUN (MISSING_IMPLEMENTATION: no console shell) |
-| 31 | xHCI bus master revoked after the phase (`dma_gate: xhci bus master revoked`) | KEYBOARD | NOT_RUN (pending forge receipt; C would be DIFFERS (stronger): the same line after `smmu_dma_window: xhci only, translation active ...` and `dma_gate: xhci granted (Confined), bus master on`, controller halted first (`xhci: halt before revoke ... halted=yes`), COMMAND read back `xhci_pci: after phase command=0x.... bus_master=off`, `smmu: xhci stream 0x.. returned to abort (rc=0)`, in that order and before `devices: xhci=fenced (rc=0)`; no HID phase runs between grant and revoke; boot kbd-smmu; mutation no-revoke) |
-| 32 | no panic or fault | KEYBOARD | NOT_RUN (pending forge receipt; C would be IDENTICAL: `report_kind: (panic\|fault)` absent, plus `report_kind: final`, QEMU exit 0 and every M1 check of scripts/lib_ck_m1_checks.sh, both boots) |
+| 25 | xHCI found before exit (`keyboard: xhci `) | KEYBOARD | QEMU PASS, DIFFERS: found after exit on the ECAM walk, class 0x0c0330, `keyboard: xhci 0000:BB:DD.F mmio 0x.. (found post-exit on the ECAM walk)`, all three boots |
+| 26 | bus-master sweep after exit (`dma_sweep: seg `, no `dma_sweep: bme STUCK`) | KEYBOARD | QEMU PASS, DIFFERS: same line text as Rust, and stricter: the sweep must come before the first `dma_gate: ` line and before `keyboard: xhci `; all three boots; mutation no-sweep |
+| 27 | xHCI bus master off before the DMA gate (`xhci_pci: command=0x.. bus_master=off`) | KEYBOARD | QEMU PASS, IDENTICAL prefix `xhci_pci: command=0x.... bus_master=off`, plus the order check: before `dma_gate: xhci `; all three boots; mutation bm-left-on |
+| 28 | fail-closed without SMMU (`dma_gate: xhci denied (NoSmmu)...`, `keyboard: unavailable (...)`, no grant, no `keyboard: ready`) | KEYBOARD | QEMU PASS, IDENTICAL lines `dma_gate: xhci denied (NoSmmu), bus master stays off` and `keyboard: unavailable (SMMU DMA isolation not active)`, absent `dma_gate: xhci granted` and `keyboard: ready`, plus C-only: COMMAND read back after the deny `bus_master=off`, no xHCI SMMU window; boot kbd-nosmmu; mutation grant-no-smmu |
+| 29 | keyboard attached and typed line echoed (`keyboard: ready`, `keyboard_echo:`, `keyboard_line:`, `keyboard: done (enter)`) | KEYBOARD | QEMU PASS, DIFFERS: same four line prefixes (`keyboard: ready (port P, slot S, endpoint 0x81)`, `keyboard_echo: abc`, `keyboard_line: abc`, `keyboard: done (enter)`), plus C-only order checks: attached after `dma_gate: xhci granted (Confined)` and the line before the revoke; boots kbd-smmu (and attach in kbd-recovery) |
+| 30 | shell commands (`commands: help mem el report uptime exit`, `EL1`, `conventional_memory_kb:`, `keyboard: done (exit)`) | KEYBOARD | QEMU PASS, IDENTICAL output texts (`commands: help mem el report uptime exit`, `EL1`, `conventional_memory_kb: N`, `keyboard: done (exit)`), plus exit before the revoke; boot kbd-smmu |
+| 30a | (C only) recovery window: no key means normal boot | KEYBOARD | C only, QEMU PASS: `recovery_access: waiting 5000 ms ...` after `keyboard: ready`, `recovery_access: choice=normal reason=timeout` before the shell, no recovery console (boot kbd-smmu); without an SMMU `recovery_access: unavailable (no operator keyboard: xhci=denied); choice=normal reason=no-keyboard` and no wait (boot kbd-nosmmu) |
+| 30b | (C only) key `r` selects the recovery console stub | KEYBOARD | C only, QEMU PASS: `recovery_access: choice=recovery reason=key-r` before the xHCI revoke, `devices: recovery halt nvme=released virtio_net=released xhci=released`, `recovery_console: identity build_sha256=<hex>` equal to the digest the script recomputes from the commit, `recovery_console: halted`, no shell, no Store stage, no final report, no panic, QEMU still running 3 s later (halted, not reset); boot kbd-recovery |
+| 30c | (C only) overlong line fails closed | KEYBOARD | C only, QEMU PASS: 65 keys then Enter gives `keyboard_line: overflow (line refused: 65 keys typed, limit 64)` and `keyboard: done (overflow)`; no `keyboard_line:` with that text and no command run from it; boot kbd-smmu (Rust silently truncates instead) |
+| 31 | xHCI bus master revoked after the phase (`dma_gate: xhci bus master revoked`) | KEYBOARD | QEMU PASS, DIFFERS (stronger): the same line after `smmu_dma_window: xhci only, translation active ...` and `dma_gate: xhci granted (Confined), bus master on`, controller halted first (`xhci: halt before revoke ... halted=yes`), COMMAND read back `xhci_pci: after phase command=0x.... bus_master=off`, `smmu: xhci stream 0x.. returned to abort (rc=0)`, in that order and before the end of the xHCI phase; boots kbd-smmu and kbd-recovery; mutation no-revoke |
+| 32 | no panic or fault | KEYBOARD | QEMU PASS, IDENTICAL: `report_kind: (panic\|fault)` absent, plus `report_kind: final`, QEMU exit 0 and every M1 check of scripts/lib_ck_m1_checks.sh; boots kbd-smmu and kbd-nosmmu |
 
 ## SEED-0B / P2-5 artifact loader: scripts/qemu_artifact_test.sh -> CK `P2_ARTIFACT` (scripts/qemu_ck_artifact_test.sh)
 

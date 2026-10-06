@@ -7,6 +7,7 @@
 #include "virtio_net.h"
 #include "net_bind.h"
 #include "xhci_fence.h"
+#include "usb_kbd.h"
 
 static pci_system g_pci;
 static ck_nvme g_nvme;
@@ -64,11 +65,23 @@ int ck_stage_devices(void)
     int netrc = (vrc == 0 && vf) ? ck_net_bind_selftest(vf, &caps) : 1;
     ck_printf("devices: pci=ok nvme=%s virtio_net=%s\n", g_nvme.bound ? "bound" : "unbound",
               vrc != 0 ? "caps-refused" : !vf ? "absent" : netrc == 0 ? "selftest-ok" : "selftest-failed");
-    /* xHCI: DMA fence only (bus master off before the gate, SMMU-confined grant
-     * or fail-closed deny, halt, revoke, stream back to abort); no USB HID
-     * driver yet. Reported, never a devices-stage failure. */
+    /* xHCI: DMA fence (bus master off before the gate, SMMU-confined grant or
+     * fail-closed deny, halt, revoke, stream back to abort) with the operator
+     * keyboard phase inside the grant (usb_kbd.c). Reported, never a
+     * devices-stage failure. */
     int xrc = ck_xhci_fence(&g_pci);
     ck_printf("devices: xhci=%s (rc=%d)\n", ck_xhci_state(), xrc);
+    ck_kbd_recovery_report(ck_xhci_state());
+    if (ck_kbd_recovery_requested()) {
+        /* Recovery access chosen: the xHCI is already revoked; release every
+         * other device's DMA before the stub halts (no Store stage runs). */
+        if (ck_net_live()) ck_net_release();
+        ck_dev_nvme_release();
+        ck_printf("devices: recovery halt nvme=%s virtio_net=%s xhci=%s\n", g_nvme.bm_on || g_nvme.confined ? "LIVE" : "released",
+                  ck_net_live() ? "LIVE" : "released", ck_xhci_live() ? "LIVE" : "released");
+        if (!g_nvme.bm_on && !g_nvme.confined && !ck_net_live() && !ck_xhci_live()) ck_recovery_console_stub();
+        ck_panic("recovery access: device DMA still live, refusing to halt with it");
+    }
     if (nrc == -1) return 0;  /* no NVMe present: not a devices failure; Store reports it */
     return nrc;
 }

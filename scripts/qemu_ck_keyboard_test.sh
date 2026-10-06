@@ -1,44 +1,68 @@
 #!/usr/bin/env bash
-# KEYBOARD gate for the AIENOS C kernel, DMA-safety half only: rows 25-28, 31
-# and 32 of native/kernel/GATES.md "SEED-0A keyboard" (Rust oracle:
-# scripts/qemu_keyboard_test.sh with SMMU=1 and SMMU=0). Rows 29-30 (keyboard
-# attached, typed line echoed, console shell) stay NOT_RUN
-# (MISSING_IMPLEMENTATION: the C kernel has no USB HID driver and no console
-# shell), so the KEYBOARD gate itself stays NOT_RUN whatever this prints.
+# KEYBOARD gate for the AIENOS C kernel: rows 25-32 of native/kernel/GATES.md
+# "SEED-0A keyboard" (Rust oracle: scripts/qemu_keyboard_test.sh with SMMU=1
+# and SMMU=0) plus the C-only rows 30a-30c (recovery access, line overflow).
 # QEMU is not hardware: a PASS here qualifies nothing physical.
 #
 # Boots the full C image (make full) in QEMU AArch64 with UEFI (AAVMF), an
 # NVMe disk (normal full boot), a qemu-xhci controller with a usb-kbd on it
 # (the Rust gate's devices) and no NIC. The devices stage
 # (native/kernel/dev/devices.c) runs the post-exit bus-master sweep first and
-# the xHCI DMA fence (native/kernel/dev/xhci_fence.c) last.
+# the xHCI DMA fence (native/kernel/dev/xhci_fence.c) last; inside the
+# confined grant the operator phase (native/kernel/dev/usb_kbd.c) drives the
+# keyboard. Keys are typed from OUTSIDE the guest through the QEMU monitor
+# ("sendkey", as the Rust gate does); the kernel never fakes the device.
 #
-#  boot kbd-smmu    iommu=smmuv3 (Rust SMMU=1):
+#  boot kbd-smmu      iommu=smmuv3 (Rust SMMU=1). No key in the recovery
+#                     window (normal boot by timeout), then the lines "abc",
+#                     "help", "el", "mem", 65 x "x" (overflow) and "exit":
 #   row 25  "keyboard: xhci SSSS:BB:DD.F mmio 0x.." (found on the ECAM walk)
 #   row 26  "dma_sweep: seg 0000 bus .." before the first device DMA grant,
 #           no "dma_sweep: bme STUCK"
 #   row 27  "xhci_pci: command=0x.... bus_master=off" before the xHCI DMA gate
+#   row 29  "keyboard: ready", "keyboard_echo: abc", "keyboard_line: abc",
+#           "keyboard: done (enter)", all between the confined grant and the
+#           revoke
+#   row 30  "commands: help mem el report uptime exit", "EL1",
+#           "conventional_memory_kb: N" (N > 0), "keyboard: done (exit)"
+#   row 30a (C only) recovery access offered after "keyboard: ready" and
+#           decided "choice=normal reason=timeout" before the shell starts
+#   row 30c (C only) the 65-key line is refused ("keyboard_line: overflow
+#           (line refused: 65 keys typed, limit 64)"), never echoed back as a
+#           line and never run as a command
 #   row 31  grant confined ("smmu_dma_window: xhci only, translation active",
 #           "dma_gate: xhci granted (Confined), bus master on"), controller
 #           halted, "dma_gate: xhci bus master revoked", COMMAND read back
 #           "xhci_pci: after phase command=0x.... bus_master=off", "smmu: xhci
 #           stream 0x.. returned to abort (rc=0)", in that order, all before
-#           the "devices: xhci=fenced (rc=0)" line (so a later reset-time
-#           quiesce revoke cannot stand in for it)
+#           the "devices: xhci=fenced (rc=0)" line
 #   row 32  no "report_kind: (panic|fault)", "report_kind: final", QEMU exit 0
-#  boot kbd-nosmmu  no SMMU (Rust SMMU=0), same image:
+#  boot kbd-nosmmu    no SMMU (Rust SMMU=0), same image, no keys:
 #   rows 25, 26, 27, 32 as above
 #   row 28  "dma_gate: xhci denied (NoSmmu), bus master stays off", "keyboard:
 #           unavailable (SMMU DMA isolation not active)", COMMAND read back
 #           after the deny with bus_master=off, no "dma_gate: xhci granted",
 #           no "keyboard: ready"
-# Both boots must also pass every M1 check (scripts/lib_ck_m1_checks.sh) and
-# carry no TEST-ONLY mutation banner and no "UNSAFE DMA BYPASS".
+#   row 30a recovery access reported unavailable, normal boot
+#           ("choice=normal reason=no-keyboard")
+#  boot kbd-recovery  iommu=smmuv3, same image; "r" typed in the recovery window:
+#   row 30b (C only) "recovery_access: choice=recovery reason=key-r"; then, in
+#           order: xHCI bus master revoked, xHCI stream back to abort,
+#           "devices: recovery halt nvme=released virtio_net=released
+#           xhci=released", the stub's identity line (the SHA-256 this script
+#           recomputes from the commit), "recovery_console: halted"; no shell,
+#           no Store stage, no final report, no panic or fault, and QEMU still
+#           running 3 s after the halt line (halted, not reset; the script
+#           then stops QEMU)
+# kbd-smmu and kbd-nosmmu must also pass every M1 check
+# (scripts/lib_ck_m1_checks.sh); all boots carry no TEST-ONLY mutation
+# banner, no "UNSAFE DMA BYPASS" and no "keyboard: hid NOT_IMPLEMENTED".
 #
-# --mutation (self-test of the checks above; TEST-ONLY images): builds
-# "make full CK_TEST_XHCI_MUTATION=<m>" for each mutation and boots it once;
-# the named row must FAIL (and the boot must still reach "report_kind: final"
-# with row 25 PASS, so the failure is the mutation's, not a dead boot):
+# --mutation (self-test of the DMA checks; TEST-ONLY images): builds
+# "make full CK_TEST_XHCI_MUTATION=<m>" for each mutation and boots it once
+# without keys; the named row must FAIL (and the boot must still reach
+# "report_kind: final" with row 25 PASS, so the failure is the mutation's,
+# not a dead boot):
 #   bm-left-on     xHCI bus mastering switched back on after the sweep (smmu)  -> row 27
 #   no-revoke      release skips the bus-master clear (smmu)                    -> row 31
 #   grant-no-smmu  DMA granted without an SMMU (nosmmu)                         -> row 28
@@ -47,13 +71,17 @@
 # CK_HARDWARE_STAGING=1 (and with CK_QEMU_UNSAFE_DMA=1), and that the default
 # image carries no mutation banner.
 #
-# Env: AIENOS_QEMU_SMMU=1 or 0 runs only that boot (default: both).
-# Takes the machine quiet flag itself like the other qemu_ck_* scripts
-# (AIENOS_QUIET_FLAG / AIENOS_QUIET_TAG).
+# Env: AIENOS_QEMU_SMMU=1 runs only kbd-smmu and kbd-recovery, =0 only
+# kbd-nosmmu (a partial run: the gate verdict is then NOT_RUN).
+# Like the FPU/INFER/SCREEN children: NOT_RUN (exit 3) while the machine quiet
+# flag (AIENOS_QUIET_FLAG, default ~/workspace/.spark-quiet) exists, which this
+# script only reads and never writes, or while the QEMU gate lock
+# (AIENOS_GATE_LOCK, default ~/workspace/.qemu-gate-lock, exclusive create) is
+# held by another gate run.
 # Final lines (normal run): one "KEYBOARD_ROW <n>: PASS|FAIL|NOT_RUN (...)"
-# per row 25-32, "AIENOS_CK_KEYBOARD_DMA: PASS|FAIL (rows 25-28,31,32)" and
-# "AIENOS_CK_KEYBOARD: NOT_RUN (MISSING_IMPLEMENTATION: ...)". Exit 0 when
-# the DMA rows PASS, 1 FAIL, 2 missing tools, 3 NOT_RUN (quiet flag held).
+# per row, "AIENOS_CK_KEYBOARD_DMA: PASS|FAIL (rows 25-28,31,32)" and
+# "AIENOS_CK_KEYBOARD: PASS|FAIL|NOT_RUN (...)" (read by scripts/ck_gates.sh).
+# Exit 0 when the gate PASSes, 1 FAIL, 2 missing tools, 3 NOT_RUN.
 # --mutation: "AIENOS_CK_KEYBOARD_MUTATION: PASS|FAIL"; exit 0 / 1.
 # Needs qemu-system-aarch64, AAVMF (Ubuntu: qemu-system-arm qemu-efi-aarch64)
 # and a C compiler.
@@ -68,13 +96,13 @@ case "${1:-}" in
     --mutation) mutation_run=1 ;;
     *) echo "usage: $0 [--mutation]"; exit 2 ;;
 esac
-final_tag="AIENOS_CK_KEYBOARD_DMA"
+final_tag="AIENOS_CK_KEYBOARD"
 [[ "${mutation_run}" == 0 ]] || final_tag="AIENOS_CK_KEYBOARD_MUTATION"
 
 code_fd="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}"
 vars_fd="${AAVMF_VARS:-/usr/share/AAVMF/AAVMF_VARS.fd}"
-command -v qemu-system-aarch64 >/dev/null || { echo "qemu-system-aarch64 not installed"; echo "${final_tag}: NOT_RUN"; exit 2; }
-[[ -r "${code_fd}" && -r "${vars_fd}" ]] || { echo "AAVMF firmware not found"; echo "${final_tag}: NOT_RUN"; exit 2; }
+command -v qemu-system-aarch64 >/dev/null || { echo "qemu-system-aarch64 not installed"; echo "${final_tag}: NOT_RUN (qemu-system-aarch64 missing)"; exit 2; }
+[[ -r "${code_fd}" && -r "${vars_fd}" ]] || { echo "AAVMF firmware not found"; echo "${final_tag}: NOT_RUN (AAVMF missing)"; exit 2; }
 
 cross=""
 if [ "$(uname -m)" != "aarch64" ]; then cross="aarch64-linux-gnu-"; fi
@@ -88,24 +116,36 @@ if [[ "${mutation_run}" == 1 ]]; then
     for m in "${mutations[@]}"; do mk full CK_TEST_XHCI_MUTATION="${m}" >/dev/null; done
 fi
 
+# Machine-wide quiet flag: read only, never written here (Drake's rule: no
+# agent raises it without approval). If someone holds it: NOT_RUN.
 quiet_flag="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
-quiet_tag="${AIENOS_QUIET_TAG:-qemu_ck_keyboard_test $$}"
-if ! ( set -C; echo "${quiet_tag}" > "${quiet_flag}" ) 2>/dev/null; then
+if [[ -e "${quiet_flag}" ]]; then
     echo "NOT_RUN  quiet flag ${quiet_flag} is held: $(head -c 200 "${quiet_flag}" 2>/dev/null || true)"
-    echo "${final_tag}: NOT_RUN"
+    echo "${final_tag}: NOT_RUN (quiet flag held)"
     exit 3
 fi
-own_flag=1
-release_flag() {
-    if [[ "${own_flag}" == 1 ]]; then
-        own_flag=0
-        if [[ -f "${quiet_flag}" ]] && grep -qxF -- "${quiet_tag}" "${quiet_flag}"; then rm -f "${quiet_flag}"; fi
+# One QEMU gate at a time: exclusive create (set -C) of the gate lock.
+gate_lock="${AIENOS_GATE_LOCK:-${HOME}/workspace/.qemu-gate-lock}"
+gate_tag="${AIENOS_GATE_TAG:-qemu_ck_keyboard_test $$}"
+if ! ( set -C; echo "${gate_tag}" > "${gate_lock}" ) 2>/dev/null; then
+    echo "NOT_RUN  QEMU gate lock ${gate_lock} is held: $(head -c 200 "${gate_lock}" 2>/dev/null || true)"
+    echo "${final_tag}: NOT_RUN (QEMU gate lock held)"
+    exit 3
+fi
+own_lock=1
+release_lock() {
+    if [[ "${own_lock}" == 1 ]]; then
+        own_lock=0
+        if [[ -f "${gate_lock}" ]] && grep -qxF -- "${gate_tag}" "${gate_lock}"; then rm -f "${gate_lock}"; fi
     fi
 }
 top="$(mktemp -d)"
+qemu_pid=""
 cleanup() {
+    [[ -z "${qemu_pid}" ]] || kill "${qemu_pid}" 2>/dev/null || true
+    exec 3>&- 2>/dev/null || true
     rm -rf "${top}"
-    release_flag
+    release_lock
 }
 trap cleanup EXIT
 
@@ -115,19 +155,42 @@ img_bytes=67108864
 image="${top}/nvme.img"
 truncate -s "${img_bytes}" "${image}"
 m1_fail=0
+boot_timeout="${AIENOS_QEMU_TIMEOUT:-180}"
+overflow_keys=65
 
-# boot <name> <efi> smmu|nosmmu: one QEMU boot; serial text in ${work}/serial.txt.
+serial_has() { tr -d '\r' 2>/dev/null <"${work}/serial.log" | grep -qE -- "$1"; }
+qemu_running() { [[ -n "${qemu_pid}" ]] && kill -0 "${qemu_pid}" 2>/dev/null; }
+# wait_for seconds ERE...: 0 once the serial log matches one, 1 on timeout or QEMU exit.
+wait_for() {
+    local deadline=$(( $(date +%s) + $1 )) p; shift
+    while (( $(date +%s) < deadline )) && qemu_running; do
+        for p in "$@"; do serial_has "${p}" && return 0; done
+        sleep 0.2
+    done
+    for p in "$@"; do serial_has "${p}" && return 0; done
+    return 1
+}
+# Keys go in through the QEMU monitor (outside the guest), 0.12 s apart.
+send_keys() { local k; for k in "$@"; do echo "sendkey ${k}" >&3; sleep 0.12; done; }
+send_line() { send_keys "$@" ret; sleep 0.5; }
+
+# boot <name> <efi> smmu|nosmmu <action>: one QEMU boot; serial text in
+# ${work}/serial.txt, QEMU status in qemu_status, for recovery boots
+# halted_running=yes|no. action: none | shell | recovery.
 boot() {
     work="${top}/$1"
+    local action="$4"
     mkdir -p "${work}/esp/EFI/BOOT" "${work}/esp/EFI/AIENOS"
     touch "${work}/esp/EFI/AIENOS/BOOTREPORT.TXT"
     cp "$2" "${work}/esp/EFI/BOOT/BOOTAA64.EFI"
     cp "${vars_fd}" "${work}/vars.fd"
+    rm -f "${work}/mon.in" "${work}/mon.out"
+    mkfifo "${work}/mon.in" "${work}/mon.out"
+    : >"${work}/serial.log"
     local machine="virt,virtualization=on,gic-version=3"
     [[ "$3" != smmu ]] || machine+=",iommu=smmuv3"
-    set +e
     # Issue #61: single-threaded TCG (see qemu_boot_test.sh).
-    timeout "${AIENOS_QEMU_TIMEOUT:-180}" qemu-system-aarch64 \
+    timeout "${boot_timeout}" qemu-system-aarch64 \
         -M "${machine}" -accel tcg,thread=single -cpu max -smp 4 -m 2048 \
         -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
         -drive if=pflash,format=raw,file="${work}/vars.fd" \
@@ -137,18 +200,55 @@ boot() {
         -device nvme,drive=nvme0,serial=aienos-kbd-test \
         -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 \
         -device ramfb -display none -nic none \
-        -serial file:"${work}/serial.log" -no-reboot
+        -chardev pipe,id=mon,path="${work}/mon" -mon chardev=mon,mode=readline \
+        -serial file:"${work}/serial.log" -no-reboot 2>"${work}/qemu.err" &
+    qemu_pid=$!
+    cat "${work}/mon.out" >/dev/null &   # drain monitor output so QEMU never blocks
+    exec 3>"${work}/mon.in"
+    halted_running=no
+    case "${action}" in
+        shell)
+            # No key in the recovery window: the boot must continue by timeout.
+            if wait_for "${boot_timeout}" '^keyboard: shell ready' '^keyboard: unavailable' '^report_kind: (panic|fault|final)'; then
+                if serial_has '^keyboard: shell ready'; then
+                    send_line a b c
+                    send_line h e l p
+                    send_line e l
+                    send_line m e m
+                    local -a xs=()
+                    for ((i = 0; i < overflow_keys; i++)); do xs+=(x); done
+                    send_line "${xs[@]}"
+                    send_line e x i t
+                fi
+            fi ;;
+        recovery)
+            if wait_for "${boot_timeout}" '^recovery_access: waiting' '^recovery_access: unavailable' '^report_kind: (panic|fault|final)'; then
+                if serial_has '^recovery_access: waiting'; then
+                    send_keys r
+                    if wait_for 60 '^recovery_console: halted' '^report_kind: (panic|fault|final)' && serial_has '^recovery_console: halted'; then
+                        sleep 3
+                        qemu_running && halted_running=yes
+                    fi
+                fi
+            fi
+            kill "${qemu_pid}" 2>/dev/null || true ;;
+    esac
+    set +e
+    wait "${qemu_pid}"
     qemu_status=$?
     set -e
+    qemu_pid=""
+    exec 3>&- 2>/dev/null || true
     tr -d '\r' <"${work}/serial.log" >"${work}/serial.txt"
     [[ -z "${AIENOS_LOG_DIR:-}" ]] || cp "${work}/serial.txt" "${AIENOS_LOG_DIR}/qemu_ck_keyboard_$1.log"
-    echo "== boot $1 ($3): qemu exit ${qemu_status}"
+    echo "== boot $1 ($3, keys: ${action}): qemu exit ${qemu_status}$([[ "${action}" != recovery ]] || echo ", halted_running=${halted_running}")"
 }
 
 # Row bookkeeping: rowfail[n]=1 once any check of row n failed in this
 # evaluation; rowmodes[n] lists the boots that checked it.
+all_rows=(25 26 27 28 29 30 30a 30b 30c 31 32)
 declare -A rowfail rowmodes
-reset_rows() { for r in 25 26 27 28 31 32; do rowfail[$r]=0; rowmodes[$r]=""; done; }
+reset_rows() { local r; for r in "${all_rows[@]}"; do rowfail[$r]=0; rowmodes[$r]=""; done; }
 reset_rows
 mode=""
 note_mode() { [[ " ${rowmodes[$1]} " == *" ${mode} "* ]] || rowmodes[$1]="${rowmodes[$1]:+${rowmodes[$1]} }${mode}"; }
@@ -168,8 +268,8 @@ before() { # row, description, earlier ERE, later ERE: both present, earlier fir
     else rfail "$1" "$2 (lines ${a:-none} ${b:-none})"; fi
 }
 
-# evaluate smmu|nosmmu: every DMA-safety row check on ${work}/serial.txt.
-evaluate() {
+# evaluate_dma smmu|nosmmu|recovery: rows 25-28 and 31 on ${work}/serial.txt.
+evaluate_dma() {
     mode="$1"
     rcheck 25 "xHCI found on the ECAM walk (Rust: keyboard: xhci )" \
         '^keyboard: xhci 0000:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7] mmio 0x[0-9a-f]+ '
@@ -205,62 +305,147 @@ evaluate() {
         before 31 "order: stream abort < end of the xHCI phase (not a reset-time revoke)" \
             '^smmu: xhci stream .* returned to abort' '^devices: xhci=fenced \(rc=0\)$'
     fi
+}
+
+# evaluate_final smmu|nosmmu: row 32 for a boot that must end with the final report.
+evaluate_final() {
+    mode="$1"
     rabsent 32 "no panic or fault" '^report_kind: (panic|fault)'
     rcheck 32 "final report reached" 'report_kind: final'
     if [[ "${qemu_status}" == 0 ]]; then rpass 32 "QEMU exit 0 after PSCI reset"; else rfail 32 "QEMU exit ${qemu_status} (expected 0)"; fi
 }
 
+# evaluate_input smmu|nosmmu: rows 29, 30, 30a, 30c.
+evaluate_input() {
+    mode="$1"
+    if [[ "${mode}" == nosmmu ]]; then
+        rcheck 30a "recovery access reported unavailable, normal boot" \
+            '^recovery_access: unavailable \(no operator keyboard: xhci=denied\); choice=normal reason=no-keyboard$'
+        rabsent 30a "no recovery wait without a keyboard" '^recovery_access: waiting'
+        return
+    fi
+    rcheck 29 "keyboard attached by the C driver (Rust: keyboard: ready)" '^keyboard: ready \(port [0-9]+, slot [0-9]+, endpoint 0x8[0-9a-f]\)$'
+    before 29 "keyboard attached inside the confined grant" '^dma_gate: xhci granted \(Confined\)' '^keyboard: ready'
+    rcheck 29 "typed text echoed (Rust: keyboard_echo: abc)" '^keyboard_echo: abc$'
+    rcheck 29 "line ended by Enter and reported (Rust: keyboard_line: abc)" '^keyboard_line: abc$'
+    rcheck 29 "keyboard phase line finished on Enter (Rust: keyboard: done (enter))" '^keyboard: done \(enter\)$'
+    before 29 "typed line before the revoke" '^keyboard_line: abc$' '^dma_gate: xhci bus master revoked$'
+    rcheck 30 "help command output" '^commands: help mem el report uptime exit$'
+    rcheck 30 "EL command output" '^EL1$'
+    rcheck 30 "memory command output" '^conventional_memory_kb: [1-9][0-9]*$'
+    rcheck 30 "keyboard phase finished on exit" '^keyboard: done \(exit\)$'
+    before 30 "exit before the revoke" '^keyboard: done \(exit\)$' '^dma_gate: xhci bus master revoked$'
+    rcheck 30a "recovery window offered" '^recovery_access: waiting [0-9]+ ms for an operator key'
+    rcheck 30a "no key: normal boot by timeout" '^recovery_access: choice=normal reason=timeout$'
+    before 30a "keyboard ready < recovery window" '^keyboard: ready' '^recovery_access: waiting'
+    before 30a "recovery decision < shell" '^recovery_access: choice=' '^keyboard: shell ready'
+    rabsent 30a "no recovery console on a normal boot" '^recovery_console:'
+    rcheck 30c "overlong line refused (fail closed)" \
+        "^keyboard_line: overflow \\(line refused: ${overflow_keys} keys typed, limit 64\\)\$"
+    rabsent 30c "overlong line never reported as a line" '^keyboard_line: x'
+    rabsent 30c "overlong line never run as a command" '^unknown command: x'
+}
+
+# evaluate_recovery: rows 30b, 31 and the recovery boot's no-panic check.
+evaluate_recovery() {
+    mode=recovery
+    local want
+    want="$(printf 'AIENOS-CK-RECOVERY-IDENTITY-V1\0%s' "${commit}" | sha256sum | cut -d' ' -f1)"
+    rcheck 29 "keyboard attached by the C driver" '^keyboard: ready \(port [0-9]+, slot [0-9]+, endpoint 0x8[0-9a-f]\)$'
+    rcheck 30b "operator key r selects the recovery console" '^recovery_access: choice=recovery reason=key-r$'
+    before 30b "order: choice < xHCI revoke" '^recovery_access: choice=recovery' '^dma_gate: xhci bus master revoked$'
+    before 30b "order: xHCI stream abort < recovery halt line" '^smmu: xhci stream .* returned to abort \(rc=0\)$' '^devices: recovery halt '
+    rcheck 30b "every device DMA released before the halt" '^devices: recovery halt nvme=released virtio_net=released xhci=released$'
+    rcheck 30b "stub prints the identity digest (recomputed here from the commit)" \
+        "^recovery_console: identity build_sha256=${want} commit=${commit} "
+    before 30b "order: recovery halt line < identity" '^devices: recovery halt ' '^recovery_console: identity '
+    before 30b "order: identity < halted" '^recovery_console: identity ' '^recovery_console: halted'
+    rabsent 30b "no shell on the recovery path" '^keyboard: shell ready'
+    rabsent 30b "no Store stage on the recovery path" '^stage store'
+    rabsent 30b "no final report on the recovery path" 'report_kind: final'
+    rabsent 30b "no panic or fault" '^report_kind: (panic|fault)'
+    if [[ "${halted_running}" == yes ]]; then rpass 30b "QEMU still running 3 s after the halt line (halted, not reset)"
+    else rfail 30b "QEMU was not running after the halt line (or the halt line never came)"; fi
+}
+
+image_checks() {
+    check_absent "no TEST-ONLY mutation banner in the default image" "TEST-ONLY xHCI MUTATION"
+    check_absent "no unsafe DMA bypass in this image" "UNSAFE DMA BYPASS"
+    check_absent "no leftover NOT_IMPLEMENTED HID marker" "^keyboard: hid NOT_IMPLEMENTED"
+    check "image is this commit" "aienos_commit: ${commit}"
+}
+
 if [[ "${mutation_run}" == 0 ]]; then
-    modes=(smmu nosmmu)
+    modes=(smmu nosmmu recovery)
     case "${AIENOS_QEMU_SMMU:-}" in
-        1) modes=(smmu) ;;
+        1) modes=(smmu recovery) ;;
         0) modes=(nosmmu) ;;
         "") ;;
-        *) echo "AIENOS_QEMU_SMMU must be 1, 0 or unset"; release_flag; echo "${final_tag}: NOT_RUN"; exit 2 ;;
+        *) echo "AIENOS_QEMU_SMMU must be 1, 0 or unset"; release_lock; echo "${final_tag}: NOT_RUN (bad AIENOS_QEMU_SMMU)"; exit 2 ;;
     esac
     other_fail=0
     for md in "${modes[@]}"; do
-        boot "kbd-${md}" "${default_efi}" "${md}"
+        case "${md}" in
+            smmu) boot kbd-smmu "${default_efi}" smmu shell ;;
+            nosmmu) boot kbd-nosmmu "${default_efi}" nosmmu none ;;
+            recovery) boot kbd-recovery "${default_efi}" smmu recovery ;;
+        esac
         failed=0
-        ck_m1_checks
-        [[ "${failed}" == 0 ]] || m1_fail=1
+        if [[ "${md}" != recovery ]]; then
+            ck_m1_checks
+            [[ "${failed}" == 0 ]] || m1_fail=1
+        fi
         failed=0
-        check_absent "no TEST-ONLY mutation banner in the default image" "TEST-ONLY xHCI MUTATION"
-        check_absent "no unsafe DMA bypass in this image" "UNSAFE DMA BYPASS"
-        check "honest marker: no USB HID driver yet (rows 29-30 NOT_RUN)" \
-            "^keyboard: hid NOT_IMPLEMENTED\|^keyboard: unavailable (SMMU DMA isolation not active)$"
+        image_checks
         [[ "${failed}" == 0 ]] || other_fail=1
         failed=0
-        evaluate "${md}"
+        evaluate_dma "${md}"
+        if [[ "${md}" == recovery ]]; then
+            evaluate_recovery
+        else
+            evaluate_input "${md}"
+            evaluate_final "${md}"
+        fi
+        echo "RECOVERY_CHOICE kbd-${md}: $(grep -m1 -E '^recovery_access: (choice=|unavailable)' "${work}/serial.txt" || echo 'none recorded')"
     done
-    release_flag
-    if [[ "${m1_fail}${other_fail}" != 00 || -n "${AIENOS_QEMU_VERBOSE:-}" ]] || (( rowfail[25] + rowfail[26] + rowfail[27] + rowfail[28] + rowfail[31] + rowfail[32] )); then
+    release_lock
+    any_fail=0
+    for r in "${all_rows[@]}"; do any_fail=$(( any_fail | rowfail[$r] )); done
+    if [[ "${m1_fail}${other_fail}" != 00 || -n "${AIENOS_QEMU_VERBOSE:-}" || "${any_fail}" != 0 ]]; then
         for s in "${top}"/*/serial.txt; do
             echo "---- serial console $(basename "$(dirname "${s}")") (device lines) ----"
-            grep -E '^(keyboard|xhci|xhci_pci|dma_sweep|dma_gate|smmu|devices:|stage |report_kind:)' "${s}" | head -60 || true
+            grep -E '^(keyboard|xhci|xhci_pci|dma_sweep|dma_gate|smmu|devices:|stage |report_kind:|recovery_|commands|EL[0-9]|conventional)' "${s}" | head -80 || true
         done
     fi
     dma_fail=$(( m1_fail | other_fail ))
+    gate_fail=$(( m1_fail | other_fail ))
+    partial=0
+    [[ -z "${AIENOS_QEMU_SMMU:-}" ]] || partial=1
     echo "== per-row results (QEMU only; hardware NOT_RUN)"
-    for r in 25 26 27 28 31 32; do
+    for r in "${all_rows[@]}"; do
         if [[ -z "${rowmodes[$r]}" ]]; then
             echo "KEYBOARD_ROW ${r}: NOT_RUN (not checked in this run's modes)"
-            [[ -n "${AIENOS_QEMU_SMMU:-}" ]] || dma_fail=1
+            partial=1
         elif [[ "${rowfail[$r]}" == 0 && "${m1_fail}" == 0 ]]; then
             echo "KEYBOARD_ROW ${r}: PASS (${rowmodes[$r]})"
         else
             echo "KEYBOARD_ROW ${r}: FAIL (${rowmodes[$r]}$([[ "${m1_fail}" == 0 ]] || echo '; an M1 check failed'))"
-            dma_fail=1
+            gate_fail=1
+            case "${r}" in 25|26|27|28|31|32) dma_fail=1 ;; esac
         fi
     done
-    echo "KEYBOARD_ROW 29: NOT_RUN (MISSING_IMPLEMENTATION: no USB HID driver in the C kernel)"
-    echo "KEYBOARD_ROW 30: NOT_RUN (MISSING_IMPLEMENTATION: no console shell in the C kernel)"
-    [[ "${m1_fail}" == 0 ]] || echo "M1 checks failed on at least one boot: the DMA rows cannot pass"
-    [[ "${other_fail}" == 0 ]] || echo "image checks failed (mutation banner, unsafe bypass or HID marker)"
-    if [[ "${dma_fail}" == 0 ]]; then echo "${final_tag}: PASS (rows 25-28,31,32; modes ${modes[*]})"; else echo "${final_tag}: FAIL (rows 25-28,31,32; modes ${modes[*]})"; fi
-    echo "AIENOS_CK_KEYBOARD: NOT_RUN (MISSING_IMPLEMENTATION: no USB HID driver or console shell in the C kernel; rows 29-30)"
-    [[ "${dma_fail}" == 0 ]] && exit 0
-    exit 1
+    [[ "${m1_fail}" == 0 ]] || echo "M1 checks failed on at least one boot: no row can pass"
+    [[ "${other_fail}" == 0 ]] || echo "image checks failed (mutation banner, unsafe bypass, HID marker or commit)"
+    if [[ "${dma_fail}" == 0 ]]; then echo "AIENOS_CK_KEYBOARD_DMA: PASS (rows 25-28,31,32; modes ${modes[*]})"; else echo "AIENOS_CK_KEYBOARD_DMA: FAIL (rows 25-28,31,32; modes ${modes[*]})"; fi
+    if [[ "${gate_fail}" != 0 ]]; then
+        echo "${final_tag}: FAIL (rows 25-32,30a-30c; modes ${modes[*]}; QEMU only)"
+        exit 1
+    elif [[ "${partial}" != 0 ]]; then
+        echo "${final_tag}: NOT_RUN (partial run, modes ${modes[*]}; every boot is needed for the gate)"
+        exit 3
+    fi
+    echo "${final_tag}: PASS (rows 25-32,30a-30c; boots kbd-smmu kbd-nosmmu kbd-recovery; QEMU only, hardware NOT_RUN)"
+    exit 0
 fi
 
 # ---- --mutation: every mutation must make its row FAIL ----
@@ -283,9 +468,10 @@ declare -A mut_mode=([bm-left-on]=smmu [no-revoke]=smmu [grant-no-smmu]=nosmmu [
 declare -A mut_row=([bm-left-on]=27 [no-revoke]=31 [grant-no-smmu]=28 [no-sweep]=26)
 for m in "${mutations[@]}"; do
     efi="${out}/full-test-xhci-${m}/BOOTAA64.EFI"
-    boot "mut-${m}" "${efi}" "${mut_mode[$m]}"
+    boot "mut-${m}" "${efi}" "${mut_mode[$m]}" none
     reset_rows
-    evaluate "${mut_mode[$m]}"
+    evaluate_dma "${mut_mode[$m]}"
+    evaluate_final "${mut_mode[$m]}"
     r="${mut_row[$m]}"
     if ! grep -qF "WARNING: TEST-ONLY xHCI MUTATION BUILD (CK_TEST_XHCI_MUTATION=${m}," "${work}/serial.txt"; then
         mut_bad "${m}: image did not announce the mutation"
@@ -297,7 +483,7 @@ for m in "${mutations[@]}"; do
         mut_bad "${m} (${mut_mode[$m]}): row ${r} still PASSES: the check does not catch this mutation"
     fi
 done
-release_flag
+release_lock
 if [[ "${mut_fail}" != 0 || -n "${AIENOS_QEMU_VERBOSE:-}" ]]; then
     for s in "${top}"/*/serial.txt; do
         echo "---- serial console $(basename "$(dirname "${s}")") (device lines) ----"
