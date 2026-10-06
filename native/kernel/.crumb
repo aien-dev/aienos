@@ -58,19 +58,19 @@
         },
         {
           "digest": "e5ebaf34e03225eabc74a1b335f9aea4635942690cd0d8aeb22cfa6addd4e833",
-          "last_commit": "0a3c4a4",
+          "last_commit": "f921666",
           "name": "core",
           "purpose": "Directory native/kernel/core. Purpose not yet described by a human."
         },
         {
           "digest": "914c089b5c7d4cf9f5ffd86440ae5a8250bb7e518c497aa65e9829797b1f1e57",
-          "last_commit": "0a3c4a4",
+          "last_commit": "f921666",
           "name": "dev",
           "purpose": "Directory native/kernel/dev. Purpose not yet described by a human."
         },
         {
           "digest": "67502074fde0b499b68d22d8498c2e410e365f1d9f2dc69b890fac52a56a2d93",
-          "last_commit": "0a3c4a4",
+          "last_commit": "f921666",
           "name": "include",
           "purpose": "Directory native/kernel/include. Purpose not yet described by a human."
         },
@@ -82,7 +82,7 @@
         },
         {
           "digest": "2c634b363be2e02a04c0fdb3cf56c88bebf0a86ee172f3416989df3764ea7a0d",
-          "last_commit": "0a3c4a4",
+          "last_commit": "f921666",
           "name": "svc",
           "purpose": "Directory native/kernel/svc. Purpose not yet described by a human."
         },
@@ -100,14 +100,14 @@
         }
       ],
       "children_root": "sha256:0b4520412eaa0fbd41c3c2686b6a590d39a836ca4875d3e317730a40e384989c",
-      "compiled_at": "2026-10-06T01:02:24Z",
+      "compiled_at": "2026-10-06T01:42:01Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:664679d9f55efafbbe1f8574e9c0c9cad4c1f01f39dc5210ca204f2502531376",
+      "digest": "sha256:e2bbca7edcc6a7f38cdd2287cd8ed3dfc10e33b674f771a689f0c6d7d26fb682",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 146,
-      "generated_at_commit": "0a3c4a4561b78f46b992596dbbf4cee446c8c9a1",
-      "source_tree": "sha256:d6c436c48df9154d1e9c646492829300928eaaf50c98190ac58a62473b648cf3"
+      "generated_at_commit": "f921666189e67fbc80cc511d84d9991ec76c26b4",
+      "source_tree": "sha256:ee6bfdcb90b79757e6dd8bf893def42c954f46042882cca2216467c2ddaf5bcf"
     },
     "owner_lane": "",
     "provenance": {
