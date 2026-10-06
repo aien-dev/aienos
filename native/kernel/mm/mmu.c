@@ -415,3 +415,8 @@ volatile void *ck_mm_mmio_try_map(uint64_t phys, size_t len)
         tlb_sync();
     return (volatile void *)(uintptr_t)phys;
 }
+
+volatile void *ck_mmio_try_map(uint64_t phys, size_t len)
+{
+    return len ? ck_mm_mmio_try_map(phys, len) : 0;
+}

@@ -44,6 +44,10 @@ void *ck_dma_alloc(size_t bytes, size_t align, uint64_t *phys);
 /* Map [phys, phys+len) as Device-nGnRE (identity) and return the pointer.
  * Panics if the range overlaps RAM. */
 volatile void *ck_mmio_map(uint64_t phys, size_t len);
+/* Same mapping, but NULL instead of a panic when the range overlaps RAM or
+ * cannot be mapped (for addresses read from firmware tables; added for the
+ * platform xHCI path, NEXT-PHASE-3 cut 2). */
+volatile void *ck_mmio_try_map(uint64_t phys, size_t len);
 
 /* Full system barrier (dsb sy). */
 void ck_mb(void);
@@ -94,6 +98,7 @@ void ck_irq_cpu_enable(int on);
 #define CK_SMMU_FAILED (-2)
 #define CK_SMMU_NOSTREAM (-3)
 #define CK_SMMU_EARG (-4)
+#define CK_SMMU_OTHER (-5) /* the device's stream belongs to an SMMU this kernel does not drive */
 #define CK_DMA_MAX_STREAMS 8
 struct ck_dma_confinement {
     uint64_t smmu_base;
@@ -101,6 +106,39 @@ struct ck_dma_confinement {
     uint64_t iova, len;
 };
 int ck_dma_confine(uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out);
+/* Same window for an ACPI platform device (no PCI requester id), added for
+ * the platform xHCI path (NEXT-PHASE-3 cut 2): the stream comes from the
+ * IORT named component whose object name has the same final segment as
+ * acpi_name ("USB0" for "\\_SB_.USB0"), through its single mapping. Returns
+ * as ck_dma_confine, plus CK_SMMU_NOSTREAM when no named component or no
+ * stream mapping exists, CK_SMMU_EARG when two named components carry that
+ * name, and CK_SMMU_OTHER when the stream belongs to an SMMUv3 other than
+ * the one this kernel brings up (the IORT's first; *out then names that
+ * SMMU and the stream, with len 0, for the report). Never grants unconfined. */
+int ck_dma_confine_named(const char *acpi_name, uint64_t phys, uint64_t len, struct ck_dma_confinement *out);
+
+/* ACPI platform devices (core/acpi_platform.c, NEXT-PHASE-3 cut 2): a
+ * static scan of the DSDT (from the FADT) and every SSDT the XSDT lists for
+ * Device objects whose _HID or _CID is one of ids[0..nids). Nothing is
+ * executed: _STA is not evaluated, _CRS is read only when it is a constant
+ * resource template (see core/acpi_dev.h). Each table must pass signature,
+ * length and checksum checks; a refused table is counted and skipped.
+ * Returns the number of matches (only max are stored), or -1 when no DSDT is
+ * reachable. info (may be NULL) gets the scan counters. */
+struct ck_platform_dev {
+    char name[48]; /* name at the DeviceOp, usually relative ("USB0") */
+    char hid[16], cid[16];
+    uint64_t mmio_base, mmio_len; /* first memory range of _CRS; 0 if none */
+    char table[5];                /* "DSDT" or "SSDT" */
+};
+struct ck_acpi_scan_info {
+    unsigned tables;  /* definition blocks scanned (DSDT + SSDTs) */
+    unsigned refused; /* blocks refused: signature, length or checksum */
+    unsigned devices; /* Device objects parsed in the accepted blocks */
+    int first_refusal; /* CK_AML_E_* of the first refused block, 0 if none */
+};
+int ck_acpi_platform_devices(const char *const *ids, unsigned nids, struct ck_platform_dev *out, unsigned max,
+                             struct ck_acpi_scan_info *info);
 /* Return a confined stream to abort (after the device's bus mastering is
  * off). 0 ok, CK_SMMU_EARG if not confined, CK_SMMU_FAILED on a command
  * timeout. */

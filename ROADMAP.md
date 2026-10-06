@@ -17,13 +17,16 @@ NOT_RUN, BLOCKED_HARDWARE, BLOCKED_OPERATOR, MISSING_IMPLEMENTATION.
 C kernel series  #194 34c6053 .. #204 c3878bb   IMPLEMENTED / NOT QUALIFIED
     evidence class: QEMU, plus GitHub ARM64 CI (which is still QEMU).
     No physical boot of the C kernel has happened ("physical": NOT_RUN).
-    newest ck_gates receipt: evidence/ck_gates_bc306a04d8ba513b2364fbee644f37375dc686ccead97c8759191b76ebec94eb.json
-        run at f921666 (NEXT-PHASE-3 cut 1, C keyboard + recovery access); verdict NOT_ALL_GATES_PASS
+    newest ck_gates receipt: evidence/ck_gates_05762a0f09ee9ca1453ebc80b1ee904a92de8cd6a73e2012e1bed7eeda0f8089.json
+        run at b79954c (NEXT-PHASE-3 cut 2, platform xHCI discovery from ACPI); verdict NOT_ALL_GATES_PASS
         19 PASS / 0 FAIL / 1 NOT_RUN of 20 gates
         NOT_RUN: M0_ROLLBACK
-        KEYBOARD PASS in QEMU only; the Spark's USB controllers are ACPI platform
-        xHCI devices, not PCI, so the C driver does not reach them yet
-        (native/kernel/README.md, "Operator input and recovery access").
+        KEYBOARD PASS in QEMU only. The C driver now finds the Spark's six ACPI
+        platform xHCI controllers (from its firmware tables, hardware NOT_RUN),
+        but the SMMU service refuses the Spark IORT (15 root-complex mappings,
+        limit 8; stream ids past its linear table), so every one is denied
+        and fails closed (native/kernel/README.md, "Operator input and
+        recovery access").
     M0_ROLLBACK is still MISSING_IMPLEMENTATION in the C kernel (the C loader
         BootNext / A-B / rollback is parked, native/boot/README.md), despite
         the title of #204 ("P2_ARTIFACT loader and M0_ROLLBACK gates"). #204
