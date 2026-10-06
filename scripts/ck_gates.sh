@@ -9,7 +9,8 @@
 # scripts/qemu_ck_disk_layout_test.sh, scripts/qemu_ck_continuity_test.sh,
 # scripts/qemu_ck_recovery_test.sh, scripts/qemu_ck_allen_test.sh,
 # scripts/qemu_ck_keyboard_test.sh, scripts/qemu_ck_fpu_test.sh,
-# scripts/qemu_ck_infer_test.sh, scripts/qemu_ck_screen_test.sh), and prints
+# scripts/qemu_ck_infer_test.sh, scripts/qemu_ck_screen_test.sh,
+# scripts/qemu_ck_rollback_test.sh), and prints
 # one line per gate:
 #     AIENOS_CK_<gate>: PASS|FAIL|NOT_RUN [(reason)]
 # for M1 M3 SMMU NVME_SHUTDOWN P2_ARTIFACT M0_ROLLBACK M4_NVME M4_STORE M4_STORE_CRASH
@@ -59,6 +60,7 @@ set -uo pipefail
 #         fpu   -> verdict line from scripts/qemu_ck_fpu_test.sh (NOT_RUN without the Rust target)
 #         infer -> verdict line from scripts/qemu_ck_infer_test.sh (NOT_RUN without the model file or the Rust target)
 #         screen -> verdict line from scripts/qemu_ck_screen_test.sh (GOP framebuffer console vs a QMP screendump)
+#         rollback -> verdict line from scripts/qemu_ck_rollback_test.sh (C image as the one-time BootNext candidate, AAVMF)
 #         missing -> NOT_RUN (MISSING_IMPLEMENTATION), never run, never PASS
 # ===========================================================================
 CK_GATE_TABLE='
@@ -67,7 +69,7 @@ M3|boot|-
 SMMU|store|-
 NVME_SHUTDOWN|store|-
 P2_ARTIFACT|artifact|-
-M0_ROLLBACK|missing|C loader signatures, A/B, BootNext and rollback are parked (native/boot/README.md)
+M0_ROLLBACK|rollback|-
 M4_NVME|store|-
 M4_STORE|store|-
 M4_STORE_CRASH|crash|-
@@ -83,7 +85,7 @@ FPU|fpu|-
 INFER|infer|-
 SCREEN|screen|-
 '
-CHILDREN=(boot store net artifact smp crash disk cont recov allen kbd fpu infer screen)
+CHILDREN=(boot store net artifact smp crash disk cont recov allen kbd fpu infer screen rollback)
 # ===========================================================================
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -135,6 +137,7 @@ set_default_children() {
         [fpu]="${repo_root}/scripts/qemu_ck_fpu_test.sh"
         [infer]="${repo_root}/scripts/qemu_ck_infer_test.sh"
         [screen]="${repo_root}/scripts/qemu_ck_screen_test.sh"
+        [rollback]="${repo_root}/scripts/qemu_ck_rollback_test.sh"
     )
 }
 
@@ -368,7 +371,7 @@ self_test() {
     }
     scenario() { # NAME BOOT_SCRIPT STORE_SCRIPT [NET_SCRIPT] [ARTIFACT_SCRIPT] [SMP_SCRIPT] [CRASH_SCRIPT] [DISK_SCRIPT] (absent: missing)
         scen="$1"
-        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}" [smp]="${6:-${tmp}/kids/no_smp_child.sh}" [crash]="${7:-${tmp}/kids/no_crash_child.sh}" [disk]="${8:-${tmp}/kids/no_disk_child.sh}" [cont]="${tmp}/kids/no_cont_child.sh" [recov]="${tmp}/kids/no_recov_child.sh" [allen]="${tmp}/kids/no_allen_child.sh" [kbd]="${kbd_kid:-${tmp}/kids/no_kbd_child.sh}" [fpu]="${tmp}/kids/no_fpu_child.sh" [infer]="${tmp}/kids/no_infer_child.sh" [screen]="${tmp}/kids/no_screen_child.sh")
+        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}" [smp]="${6:-${tmp}/kids/no_smp_child.sh}" [crash]="${7:-${tmp}/kids/no_crash_child.sh}" [disk]="${8:-${tmp}/kids/no_disk_child.sh}" [cont]="${tmp}/kids/no_cont_child.sh" [recov]="${tmp}/kids/no_recov_child.sh" [allen]="${tmp}/kids/no_allen_child.sh" [kbd]="${kbd_kid:-${tmp}/kids/no_kbd_child.sh}" [fpu]="${tmp}/kids/no_fpu_child.sh" [infer]="${tmp}/kids/no_infer_child.sh" [screen]="${tmp}/kids/no_screen_child.sh" [rollback]="${rollback_kid:-${tmp}/kids/no_rollback_child.sh}")
         run_children 2>/dev/null
         evaluate_table >"${tmp}/${scen}.out"
     }
@@ -391,8 +394,10 @@ self_test() {
         && ok "A: M4_NVME PASS line carries the confined-mode note" || bad "A: M4_NVME PASS line lacks the note"
     grep -qxF "AIENOS_CK_NET: PASS (${NET_PASS_NOTE})" "${tmp}/A.out" \
         && ok "A: NET PASS line carries the QEMU slirp / SMMU fence note" || bad "A: NET PASS line lacks the note"
-    grep -qxF 'AIENOS_CK_M0_ROLLBACK: NOT_RUN (MISSING_IMPLEMENTATION: C loader signatures, A/B, BootNext and rollback are parked (native/boot/README.md))' "${tmp}/A.out" \
-        && ok "A: missing gate prints NOT_RUN (MISSING_IMPLEMENTATION: reason)" || bad "A: M0_ROLLBACK line wrong"
+    grep -qxF 'AIENOS_CK_M0_ROLLBACK: NOT_RUN (child script no_rollback_child.sh not present at this commit)' "${tmp}/A.out" \
+        && ok "A: M0_ROLLBACK without its child prints NOT_RUN (child script not present)" || bad "A: M0_ROLLBACK line wrong"
+    [[ "$(classify_gate X missing 'parked')" == "NOT_RUN|MISSING_IMPLEMENTATION: parked" ]] \
+        && ok "a missing-source row is NOT_RUN (MISSING_IMPLEMENTATION: reason)" || bad "missing-source row not NOT_RUN"
     grep -q '^AIENOS_CK_KEYBOARD: NOT_RUN' "${tmp}/A.out" \
         && ok "A: KEYBOARD claimed PASS by the store child stays NOT_RUN without its own child" || bad "A: KEYBOARD line wrong"
     [[ "$(grep -c '^AIENOS_CK_[A-Z0-9_]*: ' "${tmp}/A.out")" == 20 ]] && ok "A: exactly 20 verdict lines" || bad "A: verdict line count"
@@ -498,6 +503,17 @@ self_test() {
     scenario Y "$(fake bootY 0 'AIENOS_CK_M1: PASS')" "$(fake storeY 0 'AIENOS_CK_M4_NVME: PASS')"
     expect KEYBOARD NOT_RUN
     unset kbd_kid
+    # RA, RB, RC: M0_ROLLBACK comes only from its own child (scripts/qemu_ck_rollback_test.sh).
+    rollback_kid="$(fake rbA 0 'PASS  normal: attempt evidence in boot 2' 'AIENOS_CK_M0_ROLLBACK: PASS (QEMU only, C kernel image as candidate; physical NOT_RUN)')"
+    scenario RA "$(fake bootRA 0 'AIENOS_CK_M1: PASS')" "$(fake storeRA 0 'AIENOS_CK_M0_ROLLBACK: FAIL')"
+    expect M0_ROLLBACK PASS
+    rollback_kid="$(fake rbB 1 'FAIL  hang: attempt evidence in boot 2' 'AIENOS_CK_M0_ROLLBACK: FAIL')"
+    scenario RB "$(fake bootRB 0 'AIENOS_CK_M1: PASS')" "$(fake storeRB 0 'AIENOS_CK_M0_ROLLBACK: PASS')"
+    expect M0_ROLLBACK FAIL
+    rollback_kid="$(fake rbC 3 'NOT_RUN  QEMU gate lock held' 'AIENOS_CK_M0_ROLLBACK: NOT_RUN')"
+    scenario RC "$(fake bootRC 0 'AIENOS_CK_M1: PASS')" "$(fake storeRC 0 'AIENOS_CK_M4_NVME: PASS')"
+    expect M0_ROLLBACK NOT_RUN
+    unset rollback_kid
 
     # Receipt: named by its content hash, valid JSON, physical NOT_RUN, never overwritten.
     scenario R "$(fake bootR 0 'AIENOS_CK_M1: PASS')" "$(fake storeR 0 'AIENOS_CK_M4_NVME: PASS')"
@@ -523,7 +539,7 @@ self_test() {
         jq -e '.physical == "NOT_RUN" and (.gates | length) == 20 and .verdict == "NOT_ALL_GATES_PASS"
                and ([.gates[] | select(.id == "M1")][0].verdict == "PASS")
                and ([.gates[] | select(.id == "ARGUS1_REVOKE")][0].verdict == "FAIL")
-               and (.children | length) == 14 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
+               and (.children | length) == 15 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
             && ok "receipt is valid JSON (jq) with expected fields" || bad "receipt JSON invalid or fields wrong"
     else
         echo "NOT_RUN  jq not installed; JSON validity not machine-checked"; jq_skipped=1
@@ -542,7 +558,7 @@ self_test() {
         [[ -n "${g}" ]] || continue
         rows=$((rows + 1))
         case "${s}" in
-            boot|store|net|artifact|smp|crash|disk|cont|recov|allen|kbd|fpu|infer|screen) [[ "${w}" == - ]] || tbad=1 ;;
+            boot|store|net|artifact|smp|crash|disk|cont|recov|allen|kbd|fpu|infer|screen|rollback) [[ "${w}" == - ]] || tbad=1 ;;
             missing) [[ -n "${w}" && "${w}" != - ]] || tbad=1 ;;
             *) tbad=1 ;;
         esac

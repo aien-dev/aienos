@@ -6,7 +6,9 @@
 #   2. stage host tests: make stage-test, make stage-sanitize
 #   3. the gate runner's own self-test: scripts/ck_gates.sh --self-test
 #   4. the QEMU gates: scripts/ck_gates.sh (scripts/qemu_ck_boot_test.sh and
-#      scripts/qemu_ck_store_test.sh) with qemu-system-aarch64 and the AAVMF
+#      scripts/qemu_ck_store_test.sh, and the other children; M0_ROLLBACK from
+#      scripts/qemu_ck_rollback_test.sh also needs cargo and the Rust target
+#      aarch64-unknown-uefi for its stager/Default mock) with qemu-system-aarch64 and the AAVMF
 #      UEFI firmware from Ubuntu (packages qemu-system-arm, qemu-efi-aarch64).
 #      Every gate that has a C implementation must print PASS; a NOT_RUN for
 #      one of them fails the job (a missing tool or firmware cannot turn into
@@ -67,6 +69,11 @@ jobs:
           gcc --version | head -1
           qemu-system-aarch64 --version | head -1
           ls -l /usr/share/AAVMF/AAVMF_CODE.no-secboot.fd /usr/share/AAVMF/AAVMF_VARS.fd
+
+      - name: Install Rust toolchain (the M0_ROLLBACK stager and Default are the Rust aienos-rollback-mock)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-uefi
 
       - name: Host unit tests (plain and ASan + UBSan)
         run: make -C native/kernel test sanitize

@@ -5,8 +5,10 @@
  * kernel needs (EL, TTBR0/SCTLR of the firmware regime, RSDP, counter), takes
  * the final memory map, leaves boot services (retrying when the map key goes
  * stale) and jumps to ck_kernel_entry with a handoff in the image's BSS.
- * The full loader (signature checks, A/B slots, BootNext, rollback) lives in
- * the Rust aienos-boot crate and is parked for the C path; see README.md. */
+ * There are no A/B slots (ADR 0024 Q3; the Rust aienos-boot crate has none
+ * either): rollback is the firmware's one-time BootNext with BootOrder
+ * unchanged (docs/BOOT_HANDOFF_CONTRACT.md section 7). Signature checks are
+ * parked for the C path; see README.md. */
 #include "efi.h"
 #include "../kernel/arch/arch.h"
 #include "../kernel/core/ck_internal.h"
@@ -16,6 +18,14 @@
  * hardware staging image. */
 #if defined(CK_TEST_STALE_HANDOFF) && defined(CK_HARDWARE_STAGING)
 #error "CK_TEST_STALE_HANDOFF is TEST-only and cannot be combined with CK_HARDWARE_STAGING"
+#endif
+
+/* TEST-ONLY (CK gate M0_ROLLBACK, native/kernel/Makefile CK_TEST_ROLLBACK=bad-magic):
+ * flip bit 0 of the handoff magic ("CHANDOF3" -> "BHANDOF3") after
+ * ExitBootServices, so the kernel refuses the record with "handoff: bad magic"
+ * and resets. Never in a hardware staging image. */
+#if defined(CK_TEST_ROLLBACK_BAD_MAGIC) && defined(CK_HARDWARE_STAGING)
+#error "CK_TEST_ROLLBACK_BAD_MAGIC is TEST-only and cannot be combined with CK_HARDWARE_STAGING"
 #endif
 
 #define MAP_BYTES (64u << 10)
@@ -111,6 +121,9 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 #ifdef CK_TEST_STALE_HANDOFF
     ck_puts("handoff: TEST-ONLY stale handoff image: the kernel gets a CHANDOF2 record; never counts toward a PASS\n");
 #endif
+#ifdef CK_TEST_ROLLBACK_BAD_MAGIC
+    ck_puts("rollback_test: TEST-ONLY rollback candidate (bad-magic): the kernel gets a corrupted handoff magic; never counts toward a PASS\n");
+#endif
     /* The yardstick model from the boot disk, while the firmware drivers are
      * still up (efi_model.c). Absent map: boot continues without a model. */
     ck_boot_model_load(image, st, h);
@@ -161,6 +174,9 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     ck_set_stage("kernel_entry");
 #ifdef CK_TEST_STALE_HANDOFF
     h->magic = CK_HANDOFF_MAGIC_V2;
+#endif
+#ifdef CK_TEST_ROLLBACK_BAD_MAGIC
+    h->magic ^= 1ull;
 #endif
     ck_kernel_entry(h);
 }
