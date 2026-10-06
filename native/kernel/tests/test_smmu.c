@@ -104,6 +104,7 @@ static struct ck_smmu_tables T;
 static void reset(void)
 {
     memset(&M, 0, sizeof M);
+    memset(&T, 0, sizeof T);
     memset(&mem, 0xee, sizeof mem);
     M.idr0 = CK_SMMU_IDR0_S1P;
     M.idr1 = 16u | (19u << 16) | (19u << 21);
@@ -501,6 +502,153 @@ static void test_iort_cap_overlap(void)
     CHECK(ck_iort_stream_id(&s, 1, 0x10, &sid) == 0 && sid == 0x5010);
 }
 
+/* ---- two-level stream table (Arm IHI 0070 H.a 6.3.25, 5.1) ------------- */
+#define L2_SID_BITS 20u
+#define L1_N (1u << (L2_SID_BITS - CK_SMMU_SPLIT))
+#define POOL_N 4
+static struct {
+    uint64_t l1[L1_N + 16] __attribute__((aligned(L1_N * 8)));
+    uint64_t page[POOL_N][CK_SMMU_L2_STES * 8] __attribute__((aligned(CK_SMMU_L2_BYTES)));
+} l2mem;
+static int pool_next, pool_misalign;
+static int pool_alloc(void *ctx, uint64_t **page)
+{
+    (void)ctx;
+    if (pool_next >= POOL_N) return -1;
+    *page = l2mem.page[pool_next++] + (pool_misalign ? 8 : 0);
+    return 0;
+}
+
+/* Independent model of the SMMU's stream table walk (IHI 0070 3.3.1,
+ * 5.1.1): -1 terminated (out of range, invalid span, outside the span,
+ * STE.V = 0), -2 a valid span whose L2 table is at address 0, else the STE
+ * Config (0 abort, 5 stage-1 translate). */
+static int walk(uint32_t sid)
+{
+    uint32_t cfg = M.strtab_cfg, split = (cfg >> 6) & 0x1f, log2size = cfg & 0x3f;
+    if (((cfg >> 16) & 3) != 1 || (sid >> log2size)) return -1;
+    const uint64_t *l1 = (const uint64_t *)(uintptr_t)(M.strtab & 0x00ffffffffffffc0ull);
+    uint64_t d = l1[sid >> split];
+    uint32_t span = (uint32_t)(d & 0x1f);
+    if (span == 0 || span > 11 || span > split + 1) return -1;
+    uint32_t idx = sid & ((1u << split) - 1u);
+    if (idx >= (1u << (span - 1))) return -1;
+    uint64_t l2 = d & 0x00ffffffffffffc0ull & ~((1ull << (6 + span - 1)) - 1ull);
+    if (l2 == 0) return -2; /* the SMMU would fetch STEs from physical address 0 */
+    const uint64_t *ste = (const uint64_t *)(uintptr_t)l2 + (uint64_t)idx * 8u;
+    if (!(ste[0] & 1)) return -1;
+    return (int)((ste[0] >> 1) & 7);
+}
+static void reset_l2(void)
+{
+    reset();
+    memset(&l2mem, 0xff, sizeof l2mem); /* dirty pages: the attach must fill them */
+    pool_next = 0;
+    pool_misalign = 0;
+    M.idr0 = CK_SMMU_IDR0_S1P | (1u << CK_SMMU_IDR0_ST_LEVEL_SHIFT);
+    M.idr1 = L2_SID_BITS | (19u << 16) | (19u << 21);
+    T.strtab = 0; T.ste_n = 0;
+    T.l1 = l2mem.l1; T.sid_bits = L2_SID_BITS;
+    T.l2_alloc = pool_alloc; T.l2_ctx = 0;
+}
+static int saw_cmd(uint8_t op, uint32_t sid, uint64_t w1)
+{
+    for (int i = 0; i < M.ncmd; i++)
+        if ((M.cmds[i][0] & 0xff) == op && (uint32_t)(M.cmds[i][0] >> 32) == sid && M.cmds[i][1] == w1) return 1;
+    return 0;
+}
+
+static void test_two_level(void)
+{
+    uint64_t ste[8];
+    ck_smmu_ste_stage1(ste, 0x40001000ull);
+    reset_l2();
+    CHECK(ck_smmu_tables_check(&T) == 0);
+    CHECK(ck_smmu_enable(&R, &T, 100) == 0);
+    CHECK(M.strtab_cfg == ((1u << 16) | (6u << 6) | 20u)); /* FMT 2-level, SPLIT 6, LOG2SIZE 20 */
+    CHECK(M.strtab == (uint64_t)(uintptr_t)l2mem.l1);
+    int all_invalid = 1;
+    for (uint32_t i = 0; i < L1_N; i++)
+        if (l2mem.l1[i] != 0) all_invalid = 0;
+    CHECK(all_invalid);
+    CHECK(pool_next == 0); /* lazy: no L2 table before the first grant */
+    CHECK(walk(0x0) == -1 && walk(0x50100) == -1);
+    /* Grant 0x0-0x5 (the USB named components) and 0x50100 (the NVMe). */
+    for (uint32_t sid = 0; sid <= 5; sid++)
+        CHECK(ck_smmu_install_ste(&R, &T, sid, ste, 100) == 0);
+    CHECK(pool_next == 1); /* one span covers 0x0-0x3f */
+    M.ncmd = 0;
+    CHECK(ck_smmu_install_ste(&R, &T, 0x50100, ste, 100) == 0);
+    CHECK(pool_next == 2);
+    CHECK(ck_smmu_l1std(&T, 0x50100) == ((uint64_t)(uintptr_t)l2mem.page[1] | 7u)); /* Span 7 = 64 STEs */
+    CHECK(l2mem.l1[0x50100 >> 6] == ck_smmu_l1std(&T, 0x50100));
+    CHECK(saw_cmd(CK_SMMU_CMD_CFGI_STE, 0x50100, 0)); /* non-leaf: the L1STD */
+    CHECK(saw_cmd(CK_SMMU_CMD_CFGI_STE, 0x50100, 1)); /* leaf: the STE */
+    for (uint32_t sid = 0; sid <= 5; sid++)
+        CHECK(walk(sid) == 5);
+    CHECK(walk(0x50100) == 5);
+    /* Refused: the neighbour in the same span aborts, other spans and
+     * out-of-range ids are terminated. */
+    CHECK(walk(0x50101) == 0);
+    CHECK(walk(0x6) == 0 && walk(0x3f) == 0);
+    CHECK(walk(0x40) == -1 && walk(0x50140) == -1 && walk(0x500ff) == -1);
+    CHECK(walk(0x100000) == -1);
+    CHECK(ck_smmu_sid_in_range(&T, 0xfffff) == 1 && ck_smmu_sid_in_range(&T, 0x100000) == 0);
+    CHECK(ck_smmu_install_ste(&R, &T, 0x100000, ste, 100) == CK_SMMU_EINVAL);
+    CHECK(pool_next == 2);
+    /* Revoke: back to abort; aborting an unattached span allocates nothing. */
+    CHECK(ck_smmu_abort_ste(&R, &T, 0x50100, 100) == 0 && walk(0x50100) == 0);
+    CHECK(ck_smmu_abort_ste(&R, &T, 0x80, 100) == 0 && walk(0x80) == -1 && pool_next == 2);
+    /* A descriptor the kernel did not write is refused, never overwritten. */
+    l2mem.l1[2] = 0x1234;
+    CHECK(ck_smmu_install_ste(&R, &T, 0x80, ste, 100) == CK_SMMU_EINVAL && l2mem.l1[2] == 0x1234);
+    CHECK(ck_smmu_abort_ste(&R, &T, 0x80, 100) == CK_SMMU_EINVAL);
+    CHECK(pool_next == 2);
+}
+
+static void test_two_level_refusals(void)
+{
+    uint64_t ste[8];
+    ck_smmu_ste_stage1(ste, 0x40001000ull);
+    /* Bad L1 pointer: not aligned to the L1 size (128 KiB here). */
+    reset_l2();
+    T.l1 = l2mem.l1 + 1;
+    CHECK(ck_smmu_tables_check(&T) == CK_SMMU_EINVAL);
+    CHECK(ck_smmu_enable(&R, &T, 100) == CK_SMMU_EINVAL && M.cr0 == 0 && M.wn == 0);
+    reset_l2();
+    T.l1 = l2mem.l1 + 8; /* 64-byte aligned only */
+    CHECK(ck_smmu_enable(&R, &T, 100) == CK_SMMU_EINVAL);
+    /* LOG2SIZE bounds and a missing allocator. */
+    reset_l2();
+    T.sid_bits = CK_SMMU_L2_MAX_BITS + 1;
+    CHECK(ck_smmu_tables_check(&T) == CK_SMMU_EINVAL);
+    T.sid_bits = CK_SMMU_SPLIT;
+    CHECK(ck_smmu_tables_check(&T) == CK_SMMU_EINVAL);
+    reset_l2();
+    T.l2_alloc = 0;
+    CHECK(ck_smmu_tables_check(&T) == CK_SMMU_EINVAL);
+    /* The SMMU must report 2-level support and enough StreamID bits. */
+    reset_l2();
+    M.idr0 = CK_SMMU_IDR0_S1P;
+    CHECK(ck_smmu_enable(&R, &T, 100) == CK_SMMU_EUNSUP && last_cr0() == 0);
+    reset_l2();
+    M.idr1 = 16u | (19u << 16) | (19u << 21);
+    CHECK(ck_smmu_enable(&R, &T, 100) == CK_SMMU_EUNSUP);
+    /* Bad L2 pointer from the allocator: refused, span stays invalid. */
+    reset_l2();
+    CHECK(ck_smmu_enable(&R, &T, 100) == 0);
+    pool_misalign = 1;
+    CHECK(ck_smmu_install_ste(&R, &T, 0x50100, ste, 100) == CK_SMMU_EINVAL);
+    CHECK(ck_smmu_l1std(&T, 0x50100) == 0 && walk(0x50100) == -1);
+    /* Allocator exhausted: refused, span stays invalid. */
+    pool_misalign = 0;
+    pool_next = POOL_N;
+    CHECK(ck_smmu_install_ste(&R, &T, 0x50100, ste, 100) == CK_SMMU_EINVAL && walk(0x50100) == -1);
+    /* The linear path is unchanged by the two-level fields being zero. */
+    reset();
+    CHECK(ck_smmu_enable(&R, &T, 100) == 0 && M.strtab_cfg == 4u && M.strtab == (uint64_t)(uintptr_t)mem.ste);
+}
+
 int main(void)
 {
     test_layouts();
@@ -513,5 +661,7 @@ int main(void)
     test_iort();
     test_iort_spark_shape();
     test_iort_cap_overlap();
+    test_two_level();
+    test_two_level_refusals();
     return ck_t_verdict("test_smmu");
 }

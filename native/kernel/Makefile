@@ -716,8 +716,32 @@ iort-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_IORT_MUTANTS: PASS"; else echo "CK_IORT_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants test-continuity-subject-restart
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants test-continuity-subject-restart,$^); do $$t || fail=1; done; \
+# TEST-ONLY mutants of the two-level stream table in core/smmu.c: test_smmu
+# must FAIL against each (SPAN_OVERFLOW: L1STD Span past SPLIT + 1;
+# UNGRANTED_VALID: L1STDs valid before any grant; BAD_L1_PTR: misaligned L1
+# table accepted; L2_NO_FILL: a new L2 page published without abort STEs).
+# Host only (smmu.c refuses them freestanding and with CK_HARDWARE_STAGING).
+SMMU_L2_MUTANTS := CK_SMMU_MUTANT_SPAN_OVERFLOW CK_SMMU_MUTANT_UNGRANTED_VALID CK_SMMU_MUTANT_BAD_L1_PTR CK_SMMU_MUTANT_L2_NO_FILL
+smmu-l2-mutants: $(OUT)/host/test_smmu
+	@mkdir -p $(OUT)/host-mut; fail=0; \
+	$(OUT)/host/test_smmu > $(OUT)/host-mut/smmu-l2-base.log 2>&1 || { echo "unmutated test_smmu fails"; fail=1; }; \
+	for m in $(SMMU_L2_MUTANTS); do \
+	  b=$(OUT)/host-mut/test_smmu_$$m; \
+	  if ! $(HOSTCC) $(HCFLAGS) -D$$m -o $$b $(KDIR)/tests/test_smmu.c $(HOST_SRCS); then \
+	    echo "mutant $$m: does not build (FAIL)"; fail=1; continue; fi; \
+	  if $$b > $$b.log 2>&1; then echo "mutant $$m: SURVIVED (FAIL)"; fail=1; \
+	  elif grep -q "^test_smmu: FAIL" $$b.log; then \
+	    echo "mutant $$m: killed ($$(grep -c '^  FAIL ' $$b.log) checks failed)"; \
+	  else echo "mutant $$m: no FAIL verdict (crashed?) (FAIL)"; fail=1; fi; \
+	done; \
+	if $(HOSTCC) $(HCFLAGS) -DCK_HARDWARE_STAGING=1 -DCK_SMMU_MUTANT_SPAN_OVERFLOW \
+	    -fsyntax-only $(KDIR)/core/smmu.c 2>/dev/null; then \
+	  echo "mutant flag accepted under CK_HARDWARE_STAGING (FAIL)"; fail=1; \
+	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
+	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
+
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants test-continuity-subject-restart
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants test-continuity-subject-restart,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -1098,4 +1122,4 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: all full test sanitize handoff-mutant acpi-dev-mutant iort-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE

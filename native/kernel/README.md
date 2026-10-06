@@ -373,11 +373,26 @@ low-water free bytes.
   0-0xffff to streams `0x10000*(n+1)` on the first SMMUv3 (0x13800000), and
   segment 15 on the second SMMUv3. Its NVMe (MEASURED: PCI 0004:01:00.0,
   behind that first SMMU) resolves to stream 0x50000 + (bus 1 << 8 | dev 0
-  << 3 | fn 0 = 0x100) = 0x50100. The linear stream table holds streams
-  0x0-0xfff only, so `ck_dma_confine` still refuses that stream with
-  `CK_SMMU_NOSTREAM` until the two-level stream table lands. The PCI walk
-  itself (`dev/pci.c`) still covers segment 0 only, so every `pci_func`
-  carries segment 0 today.
+  << 3 | fn 0 = 0x100) = 0x50100. The PCI walk itself (`dev/pci.c`) still
+  covers segment 0 only, so every `pci_func` carries segment 0 today.
+- Stream table format: when the SMMU reports two-level support
+  (`SMMU_IDR0.ST_LEVEL == 0b01`), `core/smmu_svc.c` runs a two-level stream
+  table (Arm IHI 0070 H.a, `SMMU_STRTAB_BASE_CFG` FMT 0b01, SPLIT 6, L1STD
+  section 5.1) of `MIN(SMMU_IDR1.SIDSIZE, 20)` StreamID bits, so stream ids
+  up to 0xfffff (the Spark's 0x50100 included) can be granted; otherwise the
+  linear table of 4096 entries as before. Every L1 descriptor starts with
+  Span 0 (its streams are terminated by the SMMU); the first grant in a
+  64-stream span takes one 4 KiB page, fills it with abort STEs, and only
+  then publishes the descriptor (Span 7) with a non-leaf `CMD_CFGI_STE`. Boot
+  prints `smmu: stream table 2-level log2size=.. split=6 (spans allocated per
+  grant)` or `smmu: stream table linear entries=4096`. QEMU 8.2.2
+  `iommu=smmuv3` takes the two-level path (log2size=16), so the existing
+  QEMU SMMU rows exercise it; the Spark SMMU's ST_LEVEL and SIDSIZE are
+  UNKNOWN until a hardware boot reads them (the NVMe working under Linux at
+  stream 0x50100 implies SIDSIZE >= 19, INFERRED). `make smmu-l2-mutants`
+  (run by `make test`) checks that test_smmu fails against an overflowing
+  Span, L1 descriptors valid before any grant, a misaligned L1 table, and an
+  L2 page published without abort STEs.
 
 - The kernel writes only inside the AIENOS partition of the boot disk
   (`dev/disk_part.h`, gate `DISK_LAYOUT`). The GPT is parsed read-only:

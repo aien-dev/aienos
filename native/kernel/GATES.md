@@ -105,7 +105,8 @@ stream instead (boots 1-4 of `scripts/qemu_ck_store_test.sh`, default
 `make full` image, QEMU `iommu=smmuv3`, both geometries). Every row below
 therefore DIFFERS in the device named; the property checked is the same.
 The C SMMU service is `core/smmu.c` (port of `crates/aienos-kernel/src/smmu.rs`:
-linear stream table, stage 1 only, global abort set first and never cleared,
+linear stream table, plus a C-only two-level stream table when the SMMU
+supports it (see README), stage 1 only, global abort set first and never cleared,
 every stream in abort until installed) plus `core/smmu_svc.c` (IORT lookup,
 per-stream page tables, `ck_dma_confine` / `ck_dma_unconfine` /
 `ck_dma_faults` in ck.h); host tests in `tests/test_smmu.c`. The IORT
