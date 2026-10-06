@@ -2,7 +2,9 @@
  * friends) over core/smmu.c, the IORT parser and the DMA pool. Kernel only
  * (the host tests drive core/smmu.c directly against a model SMMU).
  *
- * Memory: stream table (4096 STEs, 256 KiB), command and event queues, the
+ * Memory: stream table (two-level when the SMMU supports it: an L1 table of
+ * at most 128 KiB plus one 4 KiB L2 page per granted span; else linear, 4096
+ * STEs, 256 KiB), command and event queues, the
  * context descriptors and every stage-1 table come from ck_dma_alloc, which
  * is Normal Non-cacheable, so a dsb orders them before register writes. */
 #include "ck_internal.h"
@@ -54,6 +56,41 @@ static int pt_alloc(void *ctx, uint64_t *phys)
     return ck_dma_alloc(4096, 4096, phys) ? 0 : -1;
 }
 
+static int l2_alloc(void *ctx, uint64_t **page)
+{
+    (void)ctx;
+    uint64_t p;
+    *page = ck_dma_alloc(CK_SMMU_L2_BYTES, CK_SMMU_L2_BYTES, &p);
+    return *page ? 0 : -1;
+}
+
+/* Stream table format: two-level when the SMMU supports it
+ * (IDR0.ST_LEVEL == 0b01), sized to MIN(IDR1.SIDSIZE, CK_SMMU_L2_MAX_BITS)
+ * StreamID bits, so the DGX Spark's PCI streams (up to 0xfffff, MEASURED
+ * from its IORT) fit; L2 spans are allocated per grant. Otherwise the
+ * linear table of STE_N entries. 0 ok, -1 allocation failed. */
+static int alloc_strtab(void)
+{
+    uint64_t p;
+    uint32_t idr0 = r_rd32(0, CK_SMMU_IDR0), sidsize = r_rd32(0, CK_SMMU_IDR1) & CK_SMMU_IDR1_SIDSIZE_MASK;
+    if (((idr0 >> CK_SMMU_IDR0_ST_LEVEL_SHIFT) & CK_SMMU_IDR0_ST_LEVEL_MASK) == 1u && sidsize >= CK_SMMU_L2_MIN_BITS) {
+        uint32_t bits = sidsize < CK_SMMU_L2_MAX_BITS ? sidsize : CK_SMMU_L2_MAX_BITS;
+        uint32_t l1_bytes = (1u << (bits - CK_SMMU_SPLIT)) * 8u;
+        if (l1_bytes < 64u)
+            l1_bytes = 64u;
+        g.t.sid_bits = bits;
+        g.t.l2_alloc = l2_alloc;
+        g.t.l1 = ck_dma_alloc(l1_bytes, l1_bytes, &p);
+        ck_printf("smmu: stream table 2-level log2size=%u split=%u (spans allocated per grant)\n", bits,
+                  CK_SMMU_SPLIT);
+        return g.t.l1 ? 0 : -1;
+    }
+    g.t.ste_n = STE_N;
+    g.t.strtab = ck_dma_alloc(STE_N * CK_SMMU_STE_BYTES, STE_N * CK_SMMU_STE_BYTES, &p);
+    ck_printf("smmu: stream table linear entries=%u\n", STE_N);
+    return g.t.strtab ? 0 : -1;
+}
+
 static int bring_up(void)
 {
     if (g.state)
@@ -73,14 +110,13 @@ static int bring_up(void)
     g.base = g.iort.base;
     ck_mmio_map(g.base, CK_SMMU_MMIO_BYTES);
     uint64_t p;
-    g.t.ste_n = STE_N;
+    int st = alloc_strtab(); /* first, as before: the largest aligned block */
     g.t.cmd_n = QUEUE_N;
     g.t.evt_n = QUEUE_N;
-    g.t.strtab = ck_dma_alloc(STE_N * CK_SMMU_STE_BYTES, STE_N * CK_SMMU_STE_BYTES, &p);
     g.t.cmdq = ck_dma_alloc(4096, 4096, &p);
     g.t.evtq = ck_dma_alloc(4096, 4096, &p);
     g.cds = ck_dma_alloc(4096, 4096, &p);
-    if (!g.t.strtab || !g.t.cmdq || !g.t.evtq || !g.cds) {
+    if (st || !g.t.cmdq || !g.t.evtq || !g.cds) {
         ck_printf("smmu: table allocation failed (fail closed)\n");
         return g.state;
     }
@@ -136,8 +172,8 @@ int ck_dma_confine_named(const char *acpi_name, uint64_t phys, uint64_t len, str
 static int confine_sid(uint32_t sid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
 {
     int rc;
-    if (sid >= STE_N)
-        return CK_SMMU_NOSTREAM;
+    if (!ck_smmu_sid_in_range(&g.t, sid))
+        return CK_SMMU_NOSTREAM; /* beyond the stream table this SMMU runs */
     int slot = -1;
     for (int i = 0; i < CK_DMA_MAX_STREAMS; i++) {
         if (g.used[i] && g.sid[i] == sid)
