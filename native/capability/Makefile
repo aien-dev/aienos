@@ -3,7 +3,7 @@
 #
 #   make          build out/libaienos_capability.a
 #   make test     build and run the rule tests (SEED=n picks the random-op seed)
-#   make mutants  plant 17 known bugs one at a time; the existing tests must
+#   make mutants  plant 18 known bugs one at a time; the existing tests must
 #                 catch every one (see the table near the end of this file)
 #   make clean
 
@@ -113,6 +113,7 @@ mint_depth_limit|aienos_capability.c|1|ancestor_hops(s, r->parent.cap_id) >= AIE
 revoke_no_cascade|aienos_capability.c|1|parent->state == AIENOS_CAP_STATE_REVOKED|0
 generation_not_advanced|aienos_capability.c|1|*out = generation + 1|*out = generation
 authorize_epoch|aienos_capability.c|2|e->epoch != s->epoch) return AIENOS_CAP_ERR_EPOCH|0) return AIENOS_CAP_ERR_EPOCH
+privileged_right_ignores_resource|aienos_capability.c|1|e->resource != AIENOS_CAP_RES_AUTHORITY)|0)
 contain_subject_mismatch|aienos_contain.c|1|e.subject != r->principal|0
 contain_not_leaf|aienos_contain.c|1|has_live_child(g, r->target.cap_id, r->target.generation)|0
 contain_protected_subject|aienos_contain.c|1|if (is_protected_subject(r->principal)) return true|if (0) return true

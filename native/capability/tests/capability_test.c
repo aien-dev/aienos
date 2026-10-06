@@ -776,8 +776,50 @@ static void validate_refuses_child_of_non_live_parent_in_corrupt_table(void) {
     aienos_cap_stop(a.admin, a.view);
 }
 
+/* #266: a privileged right is an authority-office right. A capability that
+ * carries privileged rights on another resource (the operator CONTROL
+ * resource) is honored by validate for that resource, but never accepted by
+ * the authority operations. */
+static void control_resource_capability_cannot_operate_the_authority(void) {
+    Auth a = boot();
+    const uint64_t control = 0xC0DEull;
+    AienosCapRef halt, victim, ok;
+    const uint32_t all_priv = AIENOS_CAP_RIGHT_PRIVILEGED & ~AIENOS_CAP_RIGHT_PROMOTE;
+    EQ(root_mint(&a, 1, control, AIENOS_CAP_RIGHT_EPOCH | AIENOS_CAP_RIGHT_READ, &halt),
+       AIENOS_CAP_OK);
+    EQ(root_mint(&a, 1, control, all_priv, &ok), AIENOS_CAP_OK);
+    EQ(root_mint(&a, 2, 0x77, AIENOS_CAP_RIGHT_READ, &victim), AIENOS_CAP_OK);
+    /* Negative: no authority operation accepts a control-resource capability. */
+    EQ(aienos_cap_bump_epoch(a.admin, halt), AIENOS_CAP_ERR_RESOURCE);
+    EQ(aienos_cap_bump_epoch(a.admin, ok), AIENOS_CAP_ERR_RESOURCE);
+    EQ(aienos_cap_advance_clock(a.admin, ok, 1), AIENOS_CAP_ERR_RESOURCE);
+    EQ(aienos_cap_revoke(a.admin, ok, victim), AIENOS_CAP_ERR_RESOURCE);
+    EQ(aienos_cap_reclaim(a.admin, ok, victim.cap_id), AIENOS_CAP_ERR_RESOURCE);
+    AienosCapMint m = {3, 2, 0x78, AIENOS_CAP_RIGHT_READ, 0, NONE, ok};
+    AienosCapRef out;
+    EQ(aienos_cap_mint(a.admin, &m, &out), AIENOS_CAP_ERR_RESOURCE);
+    /* Nothing moved: victim still live, epoch unchanged (office still works). */
+    EQ(validate(&a, victim, 2, 0x77, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_OK);
+    /* Regression: operator stop/status/resume checks on CONTROL still pass. */
+    EQ(validate(&a, halt, 1, control, AIENOS_CAP_RIGHT_EPOCH), AIENOS_CAP_OK);
+    EQ(validate(&a, halt, 1, control, AIENOS_CAP_RIGHT_READ), AIENOS_CAP_OK);
+    EQ(validate(&a, ok, 1, control, AIENOS_CAP_RIGHT_CLOCK), AIENOS_CAP_OK);
+    /* Regression: the real office still performs every operation. */
+    EQ(aienos_cap_advance_clock(a.admin, office(&a), 1), AIENOS_CAP_OK);
+    EQ(aienos_cap_revoke(a.admin, office(&a), victim), AIENOS_CAP_OK);
+    EQ(aienos_cap_reclaim(a.admin, office(&a), victim.cap_id), AIENOS_CAP_OK);
+    /* Authority-resource privileged delegate-free caps still work too. */
+    AienosCapRef reclaimer;
+    EQ(root_mint(&a, 1, AIENOS_CAP_RES_AUTHORITY, AIENOS_CAP_RIGHT_CLOCK, &reclaimer),
+       AIENOS_CAP_OK);
+    EQ(aienos_cap_advance_clock(a.admin, reclaimer, 1), AIENOS_CAP_OK);
+    EQ(aienos_cap_bump_epoch(a.admin, office(&a)), AIENOS_CAP_OK);
+    aienos_cap_stop(a.admin, a.view);
+}
+
 int main(int argc, char **argv) {
     uint64_t base_seed = argc > 1 ? strtoull(argv[1], NULL, 0) : 0x5eedull;
+    control_resource_capability_cannot_operate_the_authority();
     high_half_resource_is_kept();
     forged_stale_subject_resource_and_rights_fail_closed();
     amplification_lease_epoch_and_revoked_ancestor_fail();
