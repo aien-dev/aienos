@@ -21,6 +21,8 @@
 //!   /boot/efi/EFI/AIENOS/BOOTREPORT.TXT
 //!   /sys/firmware/efi/efivars/AienosBootReportV1-a1e05b0e-7c3d-4f51-9b6a-2d8e4c1f0a37
 
+// Links the `wcslen` definition (see wcslen.rs); rustc 1.99 emits calls to it.
+extern crate aienos_boot as _;
 extern crate alloc;
 
 use aienos_kernel::acpi;

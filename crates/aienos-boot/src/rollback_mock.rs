@@ -1,6 +1,9 @@
 #![no_std]
 #![no_main]
 
+// Links the `wcslen` definition (see wcslen.rs); rustc 1.99 emits calls to it.
+extern crate aienos_boot as _;
+
 extern crate alloc;
 
 use alloc::vec::Vec;
