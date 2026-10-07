@@ -34,3 +34,7 @@ compile_error!(
 
 /// Whether this build carries the unsafe, QEMU-only NVMe DMA bypass.
 pub const UNSAFE_NVME_DMA_BYPASS: bool = cfg!(feature = "unsafe-debug-nvme-dma-without-smmu");
+
+// `wcslen` for the UEFI target, which has no C library (rustc 1.99 / LLVM 23
+// emits calls to it from the `uefi` crate). See wcslen.rs.
+pub mod wcslen;
