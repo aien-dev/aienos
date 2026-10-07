@@ -13,21 +13,21 @@
     "generated": {
       "children": [
         {
-          "digest": "54dee6fbaf412744a84ec70fe3803ed80316ce8ce86a8d9bdbfab2ea8f1d13a5",
-          "last_commit": "761e63d",
+          "digest": "4789715d6543656d583f0d02f332d316551419889580740df2fe1b0448da7c7a",
+          "last_commit": "7acfbcf",
           "name": "src",
           "purpose": "Directory crates/aienos-boot/src. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:2871663fc9573a5b1ed5f401284467a407fcef370fe797dd3df1b8b1e6e12210",
-      "compiled_at": "2026-10-07T01:17:35Z",
+      "children_root": "sha256:8c0204d0fb3e2b20aca2f701cb6dda4bbadf8f2fbcd438535cb1d1092dd96278",
+      "compiled_at": "2026-10-07T01:17:46Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:7b78f2b4fe1d7ed4c52e08b1f5626197a12f93c716fcea1364ed9155f03c9ec8",
+      "digest": "sha256:41559b6187a30de12fdf5ee7e749662f3576d60e4bf0e0753284c05aa64baec0",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "files": 8,
-      "generated_at_commit": "61bd76a6be67de58021a4b96606d57f50c5d03a2",
-      "source_tree": "sha256:bd4ba443a94aab5aae12d85bc01daf582725d9bd9b59aab7aaec02f88853fdd0"
+      "files": 9,
+      "generated_at_commit": "7acfbcf2acfbc8c505a60d0e20cebf4d5f963c00",
+      "source_tree": "sha256:1d4d7212af5f4f030a40c8235fb130cef357fcbc89cbf0008c905a2581ce88aa"
     },
     "owner_lane": "",
     "provenance": {
