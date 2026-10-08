@@ -184,5 +184,8 @@ int pci_stage_probe(pci_system *s);
 
 /* Report-only, read-only multi-segment discovery for the boot log (see pci.c). */
 int pci_stage_discover_report(void);
+/* The functions the last report found (the last segment scanned), for the
+ * read-only MMIO window report (mmio_window.h). */
+const pci_found *pci_stage_disc_found(uint32_t *n);
 
 #endif

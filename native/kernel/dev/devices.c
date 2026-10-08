@@ -4,6 +4,7 @@
 #include "ck.h"
 #include "nvme_bind.h"
 #include "pci.h"
+#include "mmio_window.h"
 #include "virtio_net.h"
 #include "net_bind.h"
 #include "xhci_fence.h"
@@ -48,6 +49,8 @@ int ck_stage_devices(void)
     /* Report-only multi-segment discovery for the boot log (aienos#286); the
      * result is ignored, nothing below depends on it. */
     (void)pci_stage_discover_report();
+    /* Report-only read-only MMIO window on a discovered NVMe BAR0 (aienos#286, cut B3); result ignored. */
+    (void)ck_mmio_stage_report();
     /* Post-exit bus-master sweep (Rust dma_gate::sweep_bus_master): before any
      * device is given DMA, clear BME on every endpoint firmware left with it
      * set, so each device starts with DMA off. */

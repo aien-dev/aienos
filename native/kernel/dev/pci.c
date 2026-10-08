@@ -498,6 +498,9 @@ int pci_discover(const pci_bus_access *a, uint16_t segment, pci_found *out, uint
 
 static pci_ecam g_disc_ecam[PCI_MAX_SEGMENTS];
 static pci_found g_disc_found[PCI_MAX_FUNCS];
+/* Every function the last report found, across segments (capped), for pci_stage_disc_found. */
+static pci_found g_disc_all[PCI_MAX_FUNCS];
+static uint32_t g_disc_all_n;
 
 /* Report-only: prints what firmware declared and what answers, changes no
  * state. Each segment maps only its declared bus range through the
@@ -522,6 +525,7 @@ int pci_stage_discover_report(void)
         return rc;
     }
     uint32_t scanned = 0, total = 0;
+    g_disc_all_n = 0;
     for (uint32_t i = 0; i < nseg; i++) {
         const pci_ecam *e = &g_disc_ecam[i];
         uint64_t first = e->base + ((uint64_t)e->start_bus << 20);
@@ -542,6 +546,8 @@ int pci_stage_discover_report(void)
                   e->end_bus, n, br, drc);
         for (uint32_t j = 0; j < n; j++) {
             const pci_found *f = &g_disc_found[j];
+            if (g_disc_all_n < PCI_MAX_FUNCS)
+                g_disc_all[g_disc_all_n++] = *f;
             ck_printf("pci_disc: %04x:%02x:%02x.%u %04x:%04x class=%06x rev=%02x\n", f->segment, f->bus, f->dev,
                       f->fn, f->vendor, f->device, f->class_code, f->revision);
         }
@@ -550,4 +556,10 @@ int pci_stage_discover_report(void)
     }
     ck_printf("pci_disc: segments=%u functions=%u (read-only, no config writes)\n", scanned, total);
     return PCI_OK;
+}
+
+const pci_found *pci_stage_disc_found(uint32_t *n)
+{
+    *n = g_disc_all_n;
+    return g_disc_all;
 }

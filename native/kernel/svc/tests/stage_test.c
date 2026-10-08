@@ -17,6 +17,7 @@
 #include "m5.h"
 #include "nvme_bind.h"
 #include "pci.h"
+#include "mmio_window.h"
 #include "security.h"
 #include "store_boot.h"
 #include "artifact_store.h"
@@ -1411,6 +1412,222 @@ static void test_usb_hid(void)
     CHECK(memcmp(id, want, 32) != 0);
 }
 
+/* ---------------- Capability-bound read-only MMIO window (cut B3) ---------------- */
+
+#define WIN_BYTES 4096u
+static uint8_t win_pat(size_t i) { return (uint8_t)(i * 7u + 3u); }
+static uint64_t win_expect(uint64_t off, unsigned w)
+{
+    uint64_t v = 0;
+    for (unsigned i = 0; i < w; i++) v |= (uint64_t)win_pat(off + i) << (8 * i);
+    return v;
+}
+
+/* Fake BAR window: pattern bytes, then PROT_READ so any stray write traps. */
+static uint8_t *mk_fake_bar(void)
+{
+    uint8_t *m = mmap(NULL, WIN_BYTES, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (m == MAP_FAILED) return NULL;
+    for (size_t i = 0; i < WIN_BYTES; i++) m[i] = win_pat(i);
+    if (mprotect(m, WIN_BYTES, PROT_READ) != 0) return NULL;
+    return m;
+}
+
+static void child_write_window(uint8_t *p) { *(volatile uint8_t *)p = 0x5a; }
+
+static void test_mmio_window(void)
+{
+    uint8_t *bar = mk_fake_bar();
+    uint8_t *ecam = mk_fake_seg15();
+    CHECK(bar && ecam);
+    if (!bar || !ecam) return;
+    static uint8_t copy[WIN_BYTES];
+    memcpy(copy, bar, WIN_BYTES);
+    pci_bus_access a;
+    acc_for(&a, ecam, 0, 1);
+    pci_found f[8];
+    uint32_t n = 0, br = 0;
+    CHECK(pci_discover(&a, FAKE_SEG, f, 8, &n, &br) == PCI_OK);
+    const pci_found *g = NULL;
+    for (uint32_t i = 0; i < n; i++)
+        if (f[i].vendor == 0x10de && f[i].device == 0x2e12) g = &f[i];
+    CHECK(g != NULL);
+    if (!g) return;
+
+    /* BAR decode: bar0 is a 64-bit pair (0x0c, 0x01) = 0x1_0000_0000; bar2 is
+     * a 64-bit BAR whose halves are both 0 (address 0). */
+    uint64_t ad = 0;
+    CHECK(ck_mmio_bar_addr(g, 0, &ad) == CK_MMIO_OK && ad == 0x100000000ull);
+    CHECK(ck_mmio_bar_addr(g, 2, &ad) == CK_MMIO_E_BAR);            /* address 0 refused */
+    CHECK(ck_mmio_bar_addr(g, 3, &ad) == CK_MMIO_E_BAR);            /* unused register */
+    CHECK(ck_mmio_bar_addr(g, 1, &ad) == CK_MMIO_E_BAR);            /* raw value 1: I/O BAR */
+    CHECK(ck_mmio_bar_addr(g, 6, &ad) == CK_MMIO_E_ARG);
+    CHECK(ck_mmio_bar_addr(NULL, 0, &ad) == CK_MMIO_E_ARG);
+    pci_found syn = *g;
+    memset(syn.bar_raw, 0, sizeof syn.bar_raw);
+    syn.bar_raw[0] = 0x10000008u;                                   /* 32-bit prefetchable memory */
+    CHECK(ck_mmio_bar_addr(&syn, 0, &ad) == CK_MMIO_OK && ad == 0x10000000ull);
+    syn.bar_raw[0] = 0x10000002u;                                   /* reserved type 1 */
+    CHECK(ck_mmio_bar_addr(&syn, 0, &ad) == CK_MMIO_E_BAR);
+    syn.bar_raw[5] = 0x1000000cu;                                   /* 64-bit at the last register: no upper half */
+    CHECK(ck_mmio_bar_addr(&syn, 5, &ad) == CK_MMIO_E_BAR);
+
+    struct ck_mmio_registry reg;
+    struct ck_cap_table tab;
+    struct ck_cap_table *const tabs[1] = {&tab};
+    ck_mmio_registry_init(&reg);
+    ck_cap_init(&tab, 1, CK_CAP_SLOTS);
+    struct ck_handle h, h2;
+
+    /* Creation refusals: write (and every right outside READ|DERIVE|REVOKE). */
+    CHECK(ck_mmio_window_create(&reg, &tab, g, 0, WIN_BYTES, bar, CK_R_READ | CK_R_WRITE, &h) == CK_MMIO_E_RIGHTS);
+    CHECK(ck_mmio_window_create(&reg, &tab, g, 0, WIN_BYTES, bar, CK_R_ALL, &h) == CK_MMIO_E_RIGHTS);
+    CHECK(ck_mmio_window_create(&reg, &tab, g, 0, WIN_BYTES, bar, CK_R_READ | CK_R_MAP, &h) == CK_MMIO_E_RIGHTS);
+    CHECK(ck_mmio_window_create(&reg, &tab, g, 0, WIN_BYTES, bar, CK_R_READ | CK_R_GRANT, &h) == CK_MMIO_E_RIGHTS);
+    CHECK(ck_mmio_window_create(&reg, &tab, g, 0, WIN_BYTES, bar, CK_R_WRITE, &h) == CK_MMIO_E_RIGHTS);
+    CHECK(ck_mmio_window_create(&reg, &tab, g, 0, WIN_BYTES, bar, CK_R_DERIVE, &h) == CK_MMIO_E_RIGHTS); /* no READ */
+    /* Other creation refusals. */
+    CHECK(ck_mmio_window_create(&reg, &tab, g, 2, WIN_BYTES, bar, CK_MMIO_RIGHTS, &h) == CK_MMIO_E_BAR);
+    CHECK(ck_mmio_window_create(&reg, &tab, g, 0, 0, bar, CK_MMIO_RIGHTS, &h) == CK_MMIO_E_ARG);
+    CHECK(ck_mmio_window_create(&reg, &tab, g, 0, WIN_BYTES, NULL, CK_MMIO_RIGHTS, &h) == CK_MMIO_E_ARG);
+    CHECK(ck_mmio_window_create(&reg, &tab, g, 0, WIN_BYTES, bar, CK_MMIO_RIGHTS, NULL) == CK_MMIO_E_ARG);
+    CHECK(ck_mmio_window_create(&reg, &tab, g, 0, 0xffffffffffffffffull, bar, CK_MMIO_RIGHTS, &h) == CK_MMIO_E_RANGE); /* wraps */
+    CHECK(reg.next == 0);                                           /* refusals consumed nothing */
+
+    CHECK(ck_mmio_window_create(&reg, &tab, g, 0, WIN_BYTES, bar, CK_MMIO_RIGHTS, &h) == CK_MMIO_OK);
+    CHECK(reg.next == 1 && reg.w[0].bus_addr == 0x100000000ull && reg.w[0].size == WIN_BYTES);
+
+    /* In-range reads return fixture values (all widths, edges). */
+    uint64_t v = 0;
+    static const unsigned widths[4] = {1, 2, 4, 8};
+    for (unsigned k = 0; k < 4; k++) {
+        unsigned w = widths[k];
+        const uint64_t offs[4] = {0, 8, 64, WIN_BYTES - w};
+        for (unsigned j = 0; j < 4; j++) {
+            v = ~0ull;
+            CHECK(ck_mmio_read(&reg, &tab, h, offs[j], w, &v) == CK_MMIO_OK && v == win_expect(offs[j], w));
+        }
+    }
+
+    /* Refusals: out of range, oversize, unaligned, bad width. *value untouched. */
+    v = 0xdeadbeefull;
+    CHECK(ck_mmio_read(&reg, &tab, h, WIN_BYTES, 1, &v) == CK_MMIO_E_RANGE);
+    CHECK(ck_mmio_read(&reg, &tab, h, WIN_BYTES - 4, 8, &v) == CK_MMIO_E_ALIGN); /* 8-byte access must be 8-aligned */
+    CHECK(ck_mmio_read(&reg, &tab, h, WIN_BYTES + 8, 8, &v) == CK_MMIO_E_RANGE);
+    CHECK(ck_mmio_read(&reg, &tab, h, 0xfffffffffffffff8ull, 8, &v) == CK_MMIO_E_RANGE); /* offset + width wraps */
+    CHECK(ck_mmio_read(&reg, &tab, h, 0xffffffffffffffffull, 1, &v) == CK_MMIO_E_RANGE);
+    CHECK(ck_mmio_read(&reg, &tab, h, 1, 2, &v) == CK_MMIO_E_ALIGN);
+    CHECK(ck_mmio_read(&reg, &tab, h, 2, 4, &v) == CK_MMIO_E_ALIGN);
+    CHECK(ck_mmio_read(&reg, &tab, h, 4, 8, &v) == CK_MMIO_E_ALIGN);
+    CHECK(ck_mmio_read(&reg, &tab, h, 0, 3, &v) == CK_MMIO_E_ALIGN);
+    CHECK(ck_mmio_read(&reg, &tab, h, 0, 0, &v) == CK_MMIO_E_ALIGN);
+    CHECK(ck_mmio_read(&reg, &tab, h, 0, 16, &v) == CK_MMIO_E_ALIGN);
+    CHECK(ck_mmio_read(&reg, &tab, h, 0, 4, NULL) == CK_MMIO_E_ARG);
+    CHECK(v == 0xdeadbeefull);
+
+    /* Rights: a child without READ cannot read; a child cannot gain WRITE. */
+    struct ck_handle noread, rd;
+    CHECK(ck_cap_derive(&tab, h, CK_R_DERIVE, &noread) == CK_CAP_OK);
+    CHECK(ck_mmio_read(&reg, &tab, noread, 0, 4, &v) == CK_CAP_MISSING_RIGHTS);
+    CHECK(v == 0xdeadbeefull);
+    CHECK(ck_cap_derive(&tab, h, CK_R_READ | CK_R_WRITE, &h2) == CK_CAP_ESCALATION);
+    CHECK(ck_cap_derive(&tab, h, CK_R_READ, &rd) == CK_CAP_OK);
+    CHECK(ck_mmio_read(&reg, &tab, rd, 16, 4, &v) == CK_CAP_OK && v == win_expect(16, 4));
+
+    /* A live handle for some other resource names no window. */
+    struct ck_handle other;
+    CHECK(ck_cap_insert(&tab, 0x12345u, CK_R_READ, &other) == CK_CAP_OK);
+    CHECK(ck_mmio_read(&reg, &tab, other, 0, 4, &v) == CK_MMIO_E_RESOURCE);
+    CHECK(ck_mmio_read(&reg, &tab, (struct ck_handle){6, 1}, 0, 4, &v) == CK_CAP_INVALID); /* empty slot */
+    struct ck_handle stale = h;
+    stale.generation += 1;                                          /* generation not issued */
+    CHECK(ck_mmio_read(&reg, &tab, stale, 0, 4, &v) == CK_CAP_INVALID);
+
+    /* Revoke the parent: parent and derived children all refused. */
+    CHECK(ck_cap_revoke(tab.id, h, tabs, 1) == CK_CAP_OK);
+    v = 0xdeadbeefull;
+    CHECK(ck_mmio_read(&reg, &tab, h, 0, 4, &v) == CK_CAP_INVALID);
+    CHECK(ck_mmio_read(&reg, &tab, rd, 16, 4, &v) == CK_CAP_INVALID);
+    CHECK(ck_mmio_read(&reg, &tab, noread, 0, 4, &v) == CK_CAP_INVALID);
+    for (unsigned k = 0; k < 4; k++)
+        CHECK(ck_mmio_read(&reg, &tab, h, 0, widths[k], &v) == CK_CAP_INVALID);
+    CHECK(v == 0xdeadbeefull);
+
+    /* A new window never reuses the number; the old handle stays refused even
+     * though its table slot is reused with a higher generation. */
+    CHECK(ck_mmio_window_create(&reg, &tab, g, 0, WIN_BYTES, bar, CK_MMIO_RIGHTS, &h2) == CK_MMIO_OK);
+    CHECK(reg.next == 2 && reg.w[1].resource != reg.w[0].resource);
+    CHECK(h2.index == h.index && h2.generation > h.generation);
+    CHECK(ck_mmio_read(&reg, &tab, h, 0, 4, &v) == CK_CAP_INVALID);
+    CHECK(ck_mmio_read(&reg, &tab, h2, 0, 4, &v) == CK_CAP_OK && v == win_expect(0, 4));
+
+    /* Registry full: windows are never freed. */
+    ck_mmio_registry_init(&reg);
+    struct ck_cap_table big;
+    ck_cap_init(&big, 2, CK_CAP_SLOTS);
+    for (unsigned i = 0; i < CK_MMIO_WINDOWS; i++)
+        CHECK(ck_mmio_window_create(&reg, &big, g, 0, WIN_BYTES, bar, CK_MMIO_RIGHTS, &h) == CK_MMIO_OK);
+    CHECK(ck_mmio_window_create(&reg, &big, g, 0, WIN_BYTES, bar, CK_MMIO_RIGHTS, &h) == CK_MMIO_E_FULL);
+
+    /* The fake BAR bytes never changed; the write trap is live. */
+    CHECK(memcmp(bar, copy, WIN_BYTES) == 0);
+    CHECK(child_died_on_write(child_write_window, bar) == 1);       /* NEGATIVE CONTROL */
+    CHECK(memcmp(bar, copy, WIN_BYTES) == 0);
+    munmap(bar, WIN_BYTES);
+    munmap(ecam, FAKE_BYTES);
+}
+
+/* The stage report binds a window to a discovered NVMe BAR0, reads VS
+ * through the capability, and shows the read refused after revoke. */
+static void test_mmio_stage_report(void)
+{
+    uint8_t *ecam = map_aligned(FAKE_BYTES);
+    uint8_t *regs = mmap(NULL, WIN_BYTES, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    CHECK(ecam && regs != MAP_FAILED);
+    if (!ecam || regs == MAP_FAILED) return;
+    memset(ecam, 0xff, FAKE_BYTES);
+    put32(regs + 0x08, 0x00010400u);                                /* NVMe VS 1.4.0 */
+    uint8_t *c;
+    memset(c = cfgp(ecam, 0, 0, 0), 0, 4096); mkfn(c, 0x1b36, 0x0008, 0x060000, 0);
+    memset(c = cfgp(ecam, 0, 2, 0), 0, 4096); mkfn(c, 0x1b36, 0x0010, 0x010802, 0);
+    uint64_t a = (uint64_t)(uintptr_t)regs;
+    put32(c + 0x10, (uint32_t)a | 4u);                              /* 64-bit memory BAR0 */
+    put32(c + 0x14, (uint32_t)(a >> 32));
+    uint8_t t[44 + 16];
+    uint64_t b[1] = {(uint64_t)(uintptr_t)ecam};
+    uint16_t s[1] = {0};
+    uint8_t sb[1] = {0}, eb[1] = {1};
+    mk_mcfg(t, 1, b, s, sb, eb);
+    ck_host_mcfg = t;
+    ck_host_try_map_ok = 1;
+    ck_host_try_map_fail = 0;
+    ck_host_capture_start();
+    CHECK(pci_stage_discover_report() == PCI_OK);
+    CHECK(ck_mmio_stage_report() == CK_MMIO_OK);
+    ck_host_capture_stop();
+    const char *x = ck_host_capture_text();
+    CHECK(has(x, "mmio_win: 0000:00:02.0 bar0 addr=0x"));
+    CHECK(has(x, "size=0x1000 create=0 read(VS)=0 value=0x10400 past-end=-504 revoke=0 after-revoke=-2 (read-only, report-only)\n"));
+    /* Map refused: reported, nothing bound. */
+    ck_host_try_map_ok = 0;
+    ck_host_capture_start();
+    CHECK(ck_mmio_stage_report() == CK_MMIO_E_BAR);
+    ck_host_capture_stop();
+    CHECK(has(ck_host_capture_text(), "BAR0 map refused (report-only)\n"));
+    /* No NVMe discovered (the NVMe has BAR0 0). */
+    put32(c + 0x10, 0);
+    put32(c + 0x14, 0);
+    ck_host_try_map_ok = 1;
+    ck_host_capture_start();
+    CHECK(pci_stage_discover_report() == PCI_OK);
+    CHECK(ck_mmio_stage_report() == CK_MMIO_E_BAR);
+    ck_host_capture_stop();
+    CHECK(has(ck_host_capture_text(), "mmio_win: no discovered NVMe function with a firmware-assigned BAR0 (report-only)\n"));
+    ck_host_mcfg = NULL;
+    ck_host_try_map_ok = 0;
+    munmap(regs, WIN_BYTES);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -1424,6 +1641,8 @@ int main(void)
     test_discover_edges();
     test_discover_report();
     test_discover_in_stage();
+    test_mmio_window();
+    test_mmio_stage_report();
     test_store();
     test_artifact_store();
     test_security();
