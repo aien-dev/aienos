@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include "ck.h"
 #include "ck_compat.h"
@@ -79,19 +80,93 @@ void *ck_dma_alloc(size_t bytes, size_t align, uint64_t *phys)
     if (phys) *phys = (uint64_t)(uintptr_t)p;
     return p;
 }
-volatile void *ck_mmio_map(uint64_t phys, size_t len)
-{
-    (void)len;
-    return (volatile void *)(uintptr_t)phys;
-}
 /* Host: no platform MMIO by default (the ACPI platform xHCI list is always
  * empty). A test may turn on identity mapping (ck_host_try_map_ok) and make
- * one exact address fail (ck_host_try_map_fail). */
+ * one exact address fail (ck_host_try_map_fail).
+ *
+ * The fake also keeps a tiny page map so exclusive ownership and unmap can be
+ * tested: try_map (shared, like the kernel's) and map_exclusive record the
+ * page range as mapped; map_exclusive refuses when any page is recorded;
+ * unmap_exclusive turns the range into PROT_NONE so a raw access really
+ * faults, and a later map_exclusive restores PROT_READ|PROT_WRITE. */
+#define HOST_PAGE 4096ull
+#define HOST_MAPS 16
+static struct { uint64_t lo, hi; int unmapped, excl; } hmap[HOST_MAPS];
+static unsigned hmap_n;
+int ck_host_unmap_calls;
+
+static void host_range(uint64_t phys, size_t len, uint64_t *lo, uint64_t *hi)
+{
+    *lo = phys & ~(HOST_PAGE - 1);
+    *hi = (phys + len + HOST_PAGE - 1) & ~(HOST_PAGE - 1);
+}
+static int host_find(uint64_t lo, uint64_t hi, int unmapped)
+{
+    for (unsigned i = 0; i < hmap_n; i++)
+        if (hmap[i].unmapped == unmapped && lo < hmap[i].hi && hmap[i].lo < hi) return (int)i;
+    return -1;
+}
+static void host_drop(int i) { hmap[i] = hmap[--hmap_n]; }
+static void host_add(uint64_t lo, uint64_t hi, int excl)
+{
+    if (hmap_n < HOST_MAPS) hmap[hmap_n++] = (typeof(hmap[0])){ lo, hi, 0, excl };
+}
+/* Same rule as the kernel: a live exclusive range is never shared. */
+static int host_excl_live(uint64_t lo, uint64_t hi)
+{
+    for (unsigned i = 0; i < hmap_n; i++)
+        if (hmap[i].excl && !hmap[i].unmapped && lo < hmap[i].hi && hmap[i].lo < hi) return 1;
+    return 0;
+}
+void ck_host_mmio_reset(void) { hmap_n = 0; ck_host_unmap_calls = 0; }
+
 volatile void *ck_mmio_try_map(uint64_t phys, size_t len)
 {
-    (void)len;
     if (!ck_host_try_map_ok || (ck_host_try_map_fail && phys == ck_host_try_map_fail)) return NULL;
+    uint64_t lo, hi;
+    host_range(phys, len, &lo, &hi);
+    if (host_excl_live(lo, hi)) return NULL;
+    for (int i; (i = host_find(lo, hi, 1)) >= 0;) { /* pages given back earlier: usable again */
+        mprotect((void *)(uintptr_t)hmap[i].lo, hmap[i].hi - hmap[i].lo, PROT_READ | PROT_WRITE);
+        host_drop(i);
+    }
+    if (host_find(lo, hi, 0) < 0) host_add(lo, hi, 0);
     return (volatile void *)(uintptr_t)phys;
+}
+volatile void *ck_mmio_map_exclusive(uint64_t phys, size_t len)
+{
+    if (!len || !ck_host_try_map_ok || (ck_host_try_map_fail && phys == ck_host_try_map_fail)) return NULL;
+    uint64_t lo, hi;
+    host_range(phys, len, &lo, &hi);
+    if (hmap_n >= HOST_MAPS || host_find(lo, hi, 0) >= 0) return NULL;
+    for (int i; (i = host_find(lo, hi, 1)) >= 0;) { /* pages given back earlier: usable again */
+        mprotect((void *)(uintptr_t)hmap[i].lo, hmap[i].hi - hmap[i].lo, PROT_READ | PROT_WRITE);
+        host_drop(i);
+    }
+    host_add(lo, hi, 1);
+    return (volatile void *)(uintptr_t)phys;
+}
+int ck_mmio_is_mapped(uint64_t phys, size_t len)
+{
+    uint64_t lo, hi;
+    host_range(phys, len, &lo, &hi);
+    return len && host_find(lo, hi, 0) >= 0;
+}
+volatile void *ck_mmio_map(uint64_t phys, size_t len)
+{
+    if (len && host_excl_live(phys & ~(HOST_PAGE - 1), (phys + len + HOST_PAGE - 1) & ~(HOST_PAGE - 1)))
+        ck_panic("ck_mmio_map: 0x%llx overlaps an exclusive MMIO window", (unsigned long long)phys);
+    return (volatile void *)(uintptr_t)phys;
+}
+int ck_mmio_unmap_exclusive(uint64_t phys, size_t len)
+{
+    uint64_t lo, hi;
+    host_range(phys, len, &lo, &hi);
+    int i = len ? host_find(lo, hi, 0) : -1;
+    if (i < 0 || !hmap[i].excl || hmap[i].lo != lo || hmap[i].hi != hi) return -1;
+    ck_host_unmap_calls++;
+    hmap[i].unmapped = 1;
+    return mprotect((void *)(uintptr_t)lo, hi - lo, PROT_NONE) == 0 ? 0 : -1;
 }
 /* Host: no DSDT reachable (no FADT in ck_acpi_find). */
 int ck_acpi_platform_devices(const char *const *ids, unsigned nids, struct ck_platform_dev *out, unsigned max,
