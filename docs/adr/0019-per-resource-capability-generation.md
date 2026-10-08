@@ -91,7 +91,7 @@ Until aienos#285 is done, every nonzero pin stays refused (`CAP_GENERATION_STALE
 
 ## Evidence and limits
 
-- Facts above were read on 2026-10-08 from aienos `origin/main` at `827e20f4` (rechecked at `fa209e45` for the gate) and the spec at aien-protocols `666100969ced`. No code was run for this ADR.
+- Facts above were read on 2026-10-08 from aienos `origin/main` at `827e20f4` (rechecked at `fa209e45` for the gate) and the spec at aien-protocols `666100969ced`. No code was run by this ADR itself; the runs cited below are aienos#284's.
 - This ADR changes no code, vector or gate. Kernel behavior stays: every nonzero pin refused.
 - The kernel's refusal of a nonzero pin is run, not only read: aienos#284 (`fa209e45`) added `a02` to the QEMU gate. Red first: with the lookup made permissive (uncommitted), the gate failed on exactly the a02 line and the totals; with the real lookup it passed 34 of 34 checks (QEMU aarch64 virt, TEST signer, not physical).
 - QEMU is the only place the OSC unit path has run; nothing here is a physical-Spark result.
