@@ -1,0 +1,19 @@
+{
+  "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-08T13:43:27Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:b70ff73a2880fdf550897aaf008c283c131d78b3a21e6f38de03305917075f19",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 39,
+      "generated_at_commit": "827e20f441f861b08aa4ae32b4f2144ad6fa499a",
+      "source_tree": "sha256:e34105d0eeb15052d0a9b4e6f1e469170f9ef15d6e7325fe3530796660e05ca2"
+    }
+  },
+  "name": "osh",
+  "purpose": "OSH-AIENOS-0 fixtures: compiled shell-core units, Linux step traces and scripts, pinned omega layout, provenance (QEMU, TEST signer, not physical)",
+  "schema_version": "1.0.0"
+}
