@@ -449,3 +449,33 @@ yielding `SEED_0B_MACHINE1`.
 Phase 2 is complete only after the same qualified artifact is admitted,
 executed with attenuated authority, denied an unauthorized write, reclaimed,
 and covered by a valid receipt in QEMU and then on Machine 1.
+
+## Amendment note, 2026-10-08: second TEST key for OSC unit containers
+
+This note adds to section 6 and does not change the status of this ADR or any other text in it.
+
+Section 6 allows a `seed0b-test-anchor` build to add "one known qualification public key". Today that key is the RFC 8032 TEST 1 public key (`d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a`, signer fingerprint `21fe31dfa154a261626bf854046fd2271b7bed4b6abe45aa58877ef47f9721b9`). It verifies Binary Artifact v0.
+
+The OSC unit container ([aien-protocols](https://github.com/aien-dev/aien-protocols) `specs/osc-unit-artifact`, PR #17, v1 draft) is a different format with its own conformance vectors. Those vectors are signed with a different throwaway key, `keys/test1.pub` of that spec, whose signer fingerprint is `7b136f1c9197f8a99a91057f5deced18d5754669e559ee7cc4f7cef64a626abf`. It is not the RFC 8032 TEST 1 key.
+
+Amendment: a `seed0b-test-anchor` qualification build may also hold the OSC unit spec's TEST key (`specs/osc-unit-artifact/keys/test1.pub`, fingerprint `7b136f1c9197f8a99a91057f5deced18d5754669e559ee7cc4f7cef64a626abf`), beside the RFC 8032 TEST 1 key. The OSC unit admission path trusts only the spec key and Binary Artifact v0 admission trusts only the RFC 8032 key; neither key is accepted on the other path.
+
+- This is TEST only. The private seed of the spec key is derivable from a public label in the spec's generator and is not secret.
+- A release image holds neither key, and its trust-anchor sets stay empty.
+- The qualification gate checks this: the OSC unit gate refuses a TEST-signed unit in an ordinary build, and the boot report names the build as a TEST-only qualification tier.
+
+Observation, no change made here: the `execution_status` mapping text in section 7.1 lists codes 0 to 5, while the field table above it also lists `6` (canary failed). The mapping text omits 6.
+
+## Amendment, 2026-10-08: the OSC unit is a second container type
+
+This amendment does not change the status of this ADR, the Binary Artifact v0 encoding, its limits, its rejection reasons, its receipt, or its trust anchor. It records how the OSC unit container ([aien-protocols](https://github.com/aien-dev/aien-protocols) `specs/osc-unit-artifact`, PR #17, container version 1) relates to this ADR. It settles conflicts C2 and C3 of that spec's section 15.3 and records the AIENOS position on C1.
+
+Decision record: the operator was offered three choices on aienos#277 (record the OSC unit as its own container type; fit it into Binary Artifact v0; or keep it as an unrecorded QEMU-only path) and on 2026-10-08 delegated the choice ("proceed with however you think best"). The orchestrator chose the first, which this amendment writes down.
+
+1. **Two container types.** AIENOS recognizes two native container types, told apart by their first eight bytes: Binary Artifact v0 (this ADR, sections 2 to 7) and the OSC unit (magic `OSCUNIT\0`, defined only by the aien-protocols spec). Neither format is a version or extension of the other. The native loader routes on that magic: bytes beginning `OSCUNIT\0` go to the OSC unit path and never reach the Binary Artifact v0 parser, and everything else goes to the Binary Artifact v0 path. Each parser also refuses the other format on its own (`BadMagic` in Binary Artifact v0, `BAD_MAGIC` in the OSC unit reader), so a routing mistake is refused, never misread.
+2. **Separate parsers and admission paths.** Each container has its own parser and admission path. Neither path calls the other's parser, and section 5 of this ADR still has no OSC unit responsibilities. Bytes reach both paths the same way (section 1: firmware or the Store is a byte provider only; the kernel copies to protected staging before parsing).
+3. **Limits (spec conflict C3).** The limits of section 4 ("Maximum section count: 2", 16 MiB per artifact, 8 MiB payload, 16 capabilities) apply to Binary Artifact v0 only. An OSC unit is held to the limits of its own spec (section 7 there: 4 sections, 2 MiB, 16 capabilities), plus any stricter limit compiled into the kernel, which is part of the kernel's identity and cannot be relaxed by the unit. Today that is the native staging limit of 160 pages (655,360 bytes) per artifact.
+4. **Trust anchors (spec conflict C2).** Unchanged from the amendment note above: each path trusts only its own anchors, a qualification build may hold the spec's TEST key for the OSC unit path, and a release image holds no test key for either path. OSC unit OWNER anchors stay empty until TRUST-1 (ADR 0017) provisions them.
+5. **Pinned generations (spec conflict C1, AIENOS position).** No AIENOS ADR yet defines a per-resource generation that an OSC unit capability request could pin. Until one does, the OSC unit admission path refuses every request that pins a nonzero `required_generation`, because the kernel has no generation to compare it with. The refusal code follows the spec's fixed check order (its section 8.2): a request on an unsupported domain is refused `CAP_DOMAIN_UNSUPPORTED` (27) first, a domain-1 value wider than 32 bits `CAP_GEN_NOT_REPRESENTABLE` (28) next, and any remaining nonzero pin `CAP_GENERATION_STALE` (29). AIENOS supports domain 1 only. That direction only ever refuses more, never admits more. Defining a per-resource generation is a later AIENOS amendment; it needs no byte change in the container.
+6. **Admitted is not Admitted.** Section 5 of this ADR reaches `Admitted` only after a canary run. The OSC unit path defines no canary, so an accepted OSC unit is reported as accepted by its own path, never as `Admitted` in the sense of section 5, and no Admission Receipt v0 (section 7) is issued for it. A canary and a receipt for OSC units are later work.
+7. **Evidence boundary.** The OSC unit path in aienos#277 is qualified in QEMU only. A QEMU pass is not a result on the physical Spark.

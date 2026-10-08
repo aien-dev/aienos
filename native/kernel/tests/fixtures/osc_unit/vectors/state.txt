@@ -1,0 +1,4 @@
+# vector mode domains anchors state verdict
+a02_valid_caps_kernel_domain.unit qualification 1 T gens=1:3:1=7 ACCEPT unit_digest=80a35e189253582322cd94ebbacf15c4e8fc48545fd5ee932c6d2af4386ddbfe program_id=084803c232dc44effcc44704c9ed0600dec1231451e0b76693633e98a48d1a1d
+a02_valid_caps_kernel_domain.unit qualification 1 T gens=1:3:1=8 REFUSED CAP_GENERATION_STALE 29
+a01_valid_min.unit qualification 1 T noreserve REFUSED RESOURCE_UNAVAILABLE 30
