@@ -189,4 +189,15 @@ int pci_stage_discover_report(void);
  * read-only MMIO window report (mmio_window.h). */
 const pci_found *pci_stage_disc_found(uint32_t *n);
 
+/* NVMe through multi-segment discovery (aienos#31, cut S1). Pure selector over
+ * a discovery result: the first function (lowest segment, then bus, device,
+ * function) whose class_code & mask == class_code & mask of the argument, or
+ * NULL. *count (may be NULL) receives how many functions match. Reads only. */
+const pci_found *pci_disc_find_class(const pci_found *f, uint32_t n, uint32_t class_code, uint32_t mask,
+                                     uint32_t *count);
+/* Report-only: print the discovery's NVMe (class 0x010802) candidate and
+ * whether the function the segment-0 probe bound (`bound`, NULL when none)
+ * is the same. Changes no state; returns the number of candidates. */
+int pci_nvme_disc_report(const pci_found *f, uint32_t n, const pci_func *bound);
+
 #endif
