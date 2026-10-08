@@ -9,18 +9,19 @@
 # Verdict line: AIENOS_STORE_NVME_QEMU: PASS | FAIL | NOT_RUN
 # QEMU is an emulator. PASS here qualifies nothing about physical hardware.
 #
-# Respects the shared quiet flag: refuses to run (NOT_RUN) while
-# ~/workspace/.spark-quiet exists; otherwise holds it for the run.
+# Respects the shared quiet flag: refuses to run (NOT_RUN, exit 0) while
+# ~/workspace/.spark-quiet exists, which it only reads, or while another gate
+# holds the QEMU gate lock (scripts/lib_gate_hold.sh, aienos#278).
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-quiet="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
 qemu_timeout="${AIENOS_QEMU_TIMEOUT:-60}"
 out_rel="out"
 out="${repo}/native/disk/qemu/${out_rel}"
+. "${repo}/scripts/lib_gate_hold.sh"
 
-if [ -e "${quiet}" ]; then
-    echo "quiet flag ${quiet} is present ($(head -c 200 "${quiet}" 2>/dev/null || true)); another heavy run owns the machine"
+if ! gh_quiet_check; then
+    echo "NOT_RUN  ${gh_why}"
     echo "AIENOS_STORE_NVME_QEMU: NOT_RUN"
     exit 0
 fi
@@ -32,14 +33,14 @@ for tool in qemu-system-aarch64 timeout make; do
     fi
 done
 
-# Take the flag atomically (noclobber): if another run created it since the
-# check above, refuse instead of overwriting it, and never delete its flag.
-if ! ( set -C; echo "lane11 qemu_native_nvme_test" > "${quiet}" ) 2>/dev/null; then
-    echo "quiet flag ${quiet} appeared during setup; another heavy run owns the machine"
+# One QEMU gate at a time; the gate lock record is removed only if it is still
+# this run's own (never another run's hold).
+if ! gh_lock_take qemu_native_nvme_test "${AIENOS_GATE_MINUTES:-60}"; then
+    echo "NOT_RUN  ${gh_why}"
     echo "AIENOS_STORE_NVME_QEMU: NOT_RUN"
     exit 0
 fi
-cleanup() { rm -f "${quiet}"; }
+cleanup() { gh_lock_release; }
 trap cleanup EXIT
 
 cross=""

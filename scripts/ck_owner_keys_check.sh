@@ -22,8 +22,9 @@
 #      label (the grep is not vacuous).
 #   5. The default image carries the "argus: TEST machine id 0xA1" banner (control); the
 #      Makefile owner_check pattern matches a blob holding it (counterexample).
-# Build-only: nothing is booted. Takes the Spark quiet flag like the qemu_ck_*
-# scripts (NOT_RUN, exit 3, if another run holds it). No Python.
+# Build-only: nothing is booted. Like the qemu_ck_* scripts it only reads the
+# Spark quiet flag and takes the QEMU gate lock (scripts/lib_gate_hold.sh);
+# NOT_RUN, exit 3, while either is held by another run. No Python.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,17 +34,18 @@ out="${CK_OWNER_CHECK_OUT:-${repo_root}/target/ck-owner-keys-check}"
 cross=""
 if [ "$(uname -m)" != "aarch64" ]; then cross="aarch64-linux-gnu-"; fi
 
-quiet_flag="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
-quiet_tag="${AIENOS_QUIET_TAG:-ck_owner_keys_check $$}"
-if ! ( set -C; echo "${quiet_tag}" > "${quiet_flag}" ) 2>/dev/null; then
-    echo "NOT_RUN  quiet flag ${quiet_flag} is held: $(head -c 200 "${quiet_flag}" 2>/dev/null || true)"
+# Machine quiet flag (read only) and the QEMU gate lock (one gate at a time):
+# scripts/lib_gate_hold.sh (aienos#278).
+. "${repo_root}/scripts/lib_gate_hold.sh"
+if ! gh_quiet_check || ! gh_lock_take ck_owner_keys_check "${AIENOS_GATE_MINUTES:-60}"; then
+    echo "NOT_RUN  ${gh_why}"
     echo "CK_OWNER_KEYS_CHECK: NOT_RUN"
     exit 3
 fi
 tmp="$(mktemp -d)"
 cleanup() {
     rm -rf "${tmp}"
-    if [[ -f "${quiet_flag}" ]] && grep -qxF -- "${quiet_tag}" "${quiet_flag}"; then rm -f "${quiet_flag}"; fi
+    gh_lock_release
 }
 trap cleanup EXIT
 

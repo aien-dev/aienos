@@ -44,8 +44,8 @@
 #   "NOT REFUSED", so the Store is never reached); the default image file must
 #   not contain the bypass warning text.
 #
-# Takes the machine quiet flag itself like qemu_ck_store_test.sh
-# (AIENOS_QUIET_FLAG / AIENOS_QUIET_TAG). Any QEMU exit status other than 0
+# Reads the machine quiet flag and takes the QEMU gate lock like
+# qemu_ck_store_test.sh (scripts/lib_gate_hold.sh). Any QEMU exit status other than 0
 # fails (via the M1 checks). Final line: AIENOS_CK_DISK_LAYOUT:
 # PASS|FAIL|NOT_RUN. Needs qemu-system-aarch64 and AAVMF.
 set -euo pipefail
@@ -71,20 +71,16 @@ safe_efi="${out}/full/BOOTAA64.EFI"
 bypass_efi="${out}/full-test-xlate-bypass/BOOTAA64.EFI"
 
 # Machine quiet flag: one heavy run at a time on the Spark.
-quiet_flag="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
-quiet_tag="${AIENOS_QUIET_TAG:-qemu_ck_disk_layout_test $$}"
-if ! ( set -C; echo "${quiet_tag}" > "${quiet_flag}" ) 2>/dev/null; then
-    echo "NOT_RUN  quiet flag ${quiet_flag} is held: $(head -c 200 "${quiet_flag}" 2>/dev/null || true)"
+# Machine quiet flag (read only) and the QEMU gate lock (one gate at a time):
+# scripts/lib_gate_hold.sh (aienos#278).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_gate_hold.sh"
+if ! gh_quiet_check || ! gh_lock_take "qemu_ck_disk_layout_test" "${AIENOS_GATE_MINUTES:-60}"; then
+    echo "NOT_RUN  ${gh_why}"
     verdicts NOT_RUN
     exit 3
 fi
-own_flag=1
-release_flag() {
-    if [[ "${own_flag}" == 1 ]]; then
-        own_flag=0
-        if [[ -f "${quiet_flag}" ]] && grep -qxF -- "${quiet_tag}" "${quiet_flag}"; then rm -f "${quiet_flag}"; fi
-    fi
-}
+# Release only this run's own gate lock record, at most once.
+release_flag() { gh_lock_release; }
 top="$(mktemp -d)"
 cleanup() {
     rm -rf "${top}"
