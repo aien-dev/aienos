@@ -1637,6 +1637,14 @@ static void test_mmio_unmap(void)
     CHECK(ck_cap_derive_into(&tab, h, &tab2, CK_R_READ | CK_R_REVOKE, &c) == CK_CAP_OK);
     CHECK(ck_cap_derive(&tab, h, CK_R_READ, &c2) == CK_CAP_OK);
     CHECK(ck_mmio_read(&reg, &tab2, c, 16, 4, &v) == CK_MMIO_OK && v == win_expect(16, 4));
+    /* Live window: nobody else may share its pages (a shared page would be
+     * unmapped under them by the revoke). Overlap of any kind is refused;
+     * non-overlapping neighbours are unaffected. */
+    CHECK(ck_mmio_try_map(addr, WIN_BYTES) == NULL);                /* open: same pages */
+    CHECK(ck_mmio_try_map(addr + 0x800, 0x10) == NULL);             /* inside */
+    CHECK(ck_mmio_try_map(addr - WIN_BYTES, 2 * WIN_BYTES) == NULL); /* straddles the start */
+    CHECK(ck_mmio_try_map(addr + WIN_BYTES, WIN_BYTES) != NULL);    /* the neighbour (already mapped above) */
+    CHECK(ck_mmio_try_map(addr + 2 * WIN_BYTES, WIN_BYTES) != NULL);
     /* NEGATIVE CONTROL: with no revoke, the raw read in a child succeeds, so a
      * fault below can only come from the revoke. */
     CHECK(child_died_on_write(child_read_window, win) == 0);
@@ -1663,6 +1671,12 @@ static void test_mmio_unmap(void)
     CHECK(ck_mmio_revoke(&reg, tab.id, h, tabs, 2) == CK_CAP_INVALID);
     CHECK(ck_host_unmap_calls == 1);
 
+    /* After the revoke the pages are ordinary free pages again: a shared map
+     * (what a driver does) is accepted, and then a window is refused. */
+    CHECK(ck_mmio_try_map(addr, WIN_BYTES) != NULL);
+    CHECK(ck_mmio_window_open(&reg, &tab, &f, 0, WIN_BYTES, CK_MMIO_RIGHTS, &again) == CK_MMIO_E_MAP);
+    CHECK(child_died_on_write(child_read_window, win) == 0);
+    ck_host_mmio_reset();
     /* The pages are free again for a new owner (what nvme_bind does after the
      * report); numbers still never repeat. */
     CHECK(ck_mmio_window_open(&reg, &tab, &f, 0, WIN_BYTES, CK_MMIO_RIGHTS, &again) == CK_MMIO_OK);
@@ -1670,7 +1684,21 @@ static void test_mmio_unmap(void)
     CHECK(ck_mmio_read(&reg, &tab, h, 0, 4, &v) == CK_CAP_INVALID);
     CHECK(ck_mmio_read(&reg, &tab, again, 0, 4, &v) == CK_MMIO_OK && v == win_expect(0, 4));
     CHECK(child_died_on_write(child_read_window, win) == 0);
-    CHECK(ck_mmio_revoke(&reg, tab.id, again, tabs, 2) == CK_CAP_OK && ck_host_unmap_calls == 2);
+    CHECK(ck_mmio_revoke(&reg, tab.id, again, tabs, 2) == CK_CAP_OK && ck_host_unmap_calls == 1);
+
+    /* A BARE ck_cap_revoke (bypassing ck_mmio_revoke) is the known exposure:
+     * the accessor refuses, but nothing tells the window to give its pages
+     * back, so they stay mapped. Windows must be revoked through ck_mmio_revoke. */
+    ck_host_mmio_reset();
+    CHECK(mprotect(win, WIN_BYTES, PROT_READ | PROT_WRITE) == 0);
+    CHECK(ck_mmio_window_open(&reg, &tab, &f, 0, WIN_BYTES, CK_MMIO_RIGHTS, &h) == CK_MMIO_OK);
+    CHECK(ck_cap_revoke(tab.id, h, tabs, 2) == CK_CAP_OK);
+    CHECK(ck_mmio_read(&reg, &tab, h, 0, 4, &v) == CK_CAP_INVALID);
+    CHECK(ck_mmio_is_mapped(addr, WIN_BYTES) && ck_host_unmap_calls == 0 && reg.w[reg.next - 1].mapped == 1);
+    CHECK(ck_mmio_revoke(&reg, tab.id, h, tabs, 2) == CK_CAP_INVALID); /* too late: the handle is gone */
+    CHECK(ck_mmio_is_mapped(addr, WIN_BYTES));
+    CHECK(child_died_on_write(child_read_window, win) == 0);        /* still mapped */
+    ck_host_mmio_reset();
 
     /* A borrowed window (ck_mmio_window_create) revokes the capability only. */
     ck_host_mmio_reset();
@@ -1687,6 +1715,7 @@ static void test_mmio_unmap(void)
     CHECK(ck_mmio_window_open(&reg, &tab, &f, 0, WIN_BYTES, CK_R_READ | CK_R_WRITE, &h) == CK_MMIO_E_RIGHTS);
     CHECK(ck_mmio_window_open(&reg, &tab, &f, 2, WIN_BYTES, CK_MMIO_RIGHTS, &h) == CK_MMIO_E_BAR);
     CHECK(ck_mmio_revoke(NULL, tab.id, h, tabs, 2) == CK_MMIO_E_ARG);
+    ck_mmio_registry_init(&reg); /* four windows used: E_FULL would hide the map refusal */
     ck_host_try_map_ok = 0;
     CHECK(ck_mmio_window_open(&reg, &tab, &f, 0, WIN_BYTES, CK_MMIO_RIGHTS, &h) == CK_MMIO_E_MAP);
     ck_host_try_map_ok = 1;
@@ -1726,7 +1755,7 @@ static void test_mmio_stage_report(void)
     ck_host_capture_stop();
     const char *x = ck_host_capture_text();
     CHECK(has(x, "mmio_win: 0000:00:02.0 bar0 addr=0x"));
-    CHECK(has(x, "size=0x1000 create=0 read(VS)=0 value=0x10400 past-end=-504 revoke=0 after-revoke=-2 unmapped=1 (read-only, report-only)\n"));
+    CHECK(has(x, "size=0x1000 create=0 read(VS)=0 value=0x10400 past-end=-504 shared-map-refused=1 revoke=0 after-revoke=-2 unmapped=1 (read-only, report-only)\n"));
     /* Map refused: reported, nothing bound. */
     ck_host_try_map_ok = 0;
     ck_host_capture_start();

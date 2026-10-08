@@ -189,10 +189,11 @@ int ck_mmio_stage_report(void)
     uint64_t vs = 0, again = 0;
     int rrc = crc ? crc : ck_mmio_read(&reg, &tab, h, 0x08, 4, &vs); /* NVMe VS register */
     int wrc = crc ? crc : ck_mmio_read(&reg, &tab, h, 0x1000, 4, &again); /* one past the window */
+    int shrc = crc ? crc : ck_mmio_try_map(addr, 0x1000) == 0; /* 1: a second (shared) map of the live window is refused */
     int vrc = crc ? crc : ck_mmio_revoke(&reg, tab.id, h, tabs, 1);
     int arc = crc ? crc : ck_mmio_read(&reg, &tab, h, 0x08, 4, &again);
     ck_printf("mmio_win: %04x:%02x:%02x.%u bar0 addr=0x%llx size=0x1000 create=%d read(VS)=%d value=0x%llx "
-              "past-end=%d revoke=%d after-revoke=%d unmapped=%d (read-only, report-only)\n",
-              nv->segment, nv->bus, nv->dev, nv->fn, (unsigned long long)addr, crc, rrc, (unsigned long long)vs, wrc, vrc, arc, crc ? -1 : !ck_mmio_is_mapped(addr, 0x1000));
+              "past-end=%d shared-map-refused=%d revoke=%d after-revoke=%d unmapped=%d (read-only, report-only)\n",
+              nv->segment, nv->bus, nv->dev, nv->fn, (unsigned long long)addr, crc, rrc, (unsigned long long)vs, wrc, shrc, vrc, arc, crc ? -1 : !ck_mmio_is_mapped(addr, 0x1000));
     return CK_MMIO_OK;
 }

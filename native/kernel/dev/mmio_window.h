@@ -27,12 +27,21 @@
  * refusal stays as a second layer. Refuse-not-refcount was chosen on purpose:
  * a shared page would make revoke depend on a stranger. Windows made with
  * ck_mmio_window_create (borrowed mapping) still revoke the capability only.
+ * Exclusivity holds in both directions: while a window is live, the kernel's
+ * ck_mm_mmio_try_map refuses (NULL) and ck_mmio_map panics for any range that
+ * overlaps its pages, so a driver cannot share them later either.
+ *
+ * RULE: window capabilities must be revoked through ck_mmio_revoke. A bare
+ * ck_cap_revoke removes the capability and the accessor refuses, but the
+ * window is never told, so its pages stay mapped (tested in stage_test.c).
+ * That is the remaining exposure; there is no lazy cleanup, because a revoked
+ * handle no longer reaches the window.
  *
  * Limits (named): BAR size is not discoverable here, so the caller supplies
  * it from firmware or a fixture; the mapping is Device RW even though the
  * accessor is read-only (no read-only Device mapping is made); revoke must go
- * through ck_mmio_revoke (a bare ck_cap_revoke still refuses the accessor but
- * leaves the pages mapped); no interrupts, no DMA, no polling helper, no
+ * through ck_mmio_revoke (see RULE above); the exclusive-range table holds 8
+ * ranges and a ninth window is refused with CK_MMIO_E_MAP; no interrupts, no DMA, no polling helper, no
  * config-space or COMMAND changes. */
 #ifndef AIENOS_CK_MMIO_WINDOW_H
 #define AIENOS_CK_MMIO_WINDOW_H
