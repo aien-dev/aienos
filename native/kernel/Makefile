@@ -1219,7 +1219,7 @@ tool: $(ART_TOOL)
 # into the sealed Store on a raw NVMe image with the kernel's own Store code
 # (store_boot.c, artifact_store.c). Hosted; never part of an image.
 STORE_IMG_TOOL := $(OUT)/host/ck_store_image
-STORE_IMG_SRCS := $(STAGE_OWN_SRCS) $(STAGE_NATIVE_SRCS) $(NATIVE)/disk/disk_file.c \
+STORE_IMG_SRCS := $(STAGE_OWN_SRCS) $(KDIR)/core/ipc.c $(STAGE_NATIVE_SRCS) $(NATIVE)/disk/disk_file.c \
 	$(KDIR)/svc/tests/ck_host.c $(KDIR)/tools/ck_store_image.c
 $(STORE_IMG_TOOL): $(STORE_IMG_SRCS) $(STAGE_HDRS)
 	@mkdir -p $(dir $@)
@@ -1230,7 +1230,7 @@ store-image: $(STORE_IMG_TOOL)
 # scripts/qemu_ck_recovery_test.sh): operator response, degraded-peer injection,
 # AgentRoot corruption on a boot-disk image. Hosted; never part of an image.
 CONT_TOOL := $(OUT)/host/ck_cont_tool
-CONT_TOOL_SRCS := $(STAGE_OWN_SRCS) $(STAGE_NATIVE_SRCS) $(NATIVE)/disk/disk_file.c \
+CONT_TOOL_SRCS := $(STAGE_OWN_SRCS) $(KDIR)/core/ipc.c $(STAGE_NATIVE_SRCS) $(NATIVE)/disk/disk_file.c \
 	$(KDIR)/svc/tests/ck_host.c $(KDIR)/svc/continuity_resolve.c $(KDIR)/svc/continuity_codec.c \
 	$(KDIR)/svc/continuity_resolve_sealed.c $(KDIR)/svc/continuity_subject.c \
 	$(KDIR)/tools/ck_cont_tool.c
