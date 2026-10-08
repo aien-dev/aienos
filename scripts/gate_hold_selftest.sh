@@ -21,6 +21,8 @@
 #     expected_end=, pid=, hold=); when quietlock is installed it reads the
 #     holder as alive
 #   8 no script under scripts/ writes or removes the machine quiet flag
+#   9 a "*" in a record is not globbed; a reused pid (other start time) is
+#     dead; no date or no flock: the gate refuses and writes nothing
 # Exit 0 when every case passes, 1 otherwise.
 set -uo pipefail
 
@@ -145,6 +147,34 @@ else
 fi
 kill -TERM "${a}" 2>/dev/null; wait "${a}" 2>/dev/null
 check "7 SIGTERM releases the hold" '[[ ! -e ${AIENOS_GATE_LOCK} ]]'
+
+# ---- 9: review hardening (aienos#281 review)
+# 9a a "*" in a record is a literal token, never a filename glob
+mkdir -p "${tmp}/globdir" && touch "${tmp}/globdir/gateA"
+p="$(dead_pid)"
+printf 'aienos qemu-gate * start=%s expected_end=%s pid=%s hold=g\n' "$(iso '-1 minute')" "$(iso '+30 minutes')" "${p}" >"${AIENOS_GATE_LOCK}"
+before="$(cat "${AIENOS_GATE_LOCK}")"
+out="$(cd "${tmp}/globdir" && "${gate}" gateA true 2>&1)"; rc=$?
+check "9a holder '*' is not read as a filename (dead, before expected_end: held)" \
+    '[[ ${rc} == 3 && "$(cat "${AIENOS_GATE_LOCK}")" == "${before}" ]]'
+rm -f "${AIENOS_GATE_LOCK}"
+# 9b pid reused: the recorded start time differs from the live pid's, so the
+#    holder is dead (removed by the same gate name)
+printf 'aienos qemu-gate gateA start=%s expected_end=%s pid=%s pidstart=1 hold=g\n' "$(iso now)" "$(iso '+30 minutes')" "$$" >"${AIENOS_GATE_LOCK}"
+out="$("${gate}" gateA true 2>&1)"; rc=$?
+check "9b live pid with a different start time counts as dead" '[[ ${rc} == 0 && ! -e ${AIENOS_GATE_LOCK} ]]'
+printf 'aienos qemu-gate gateA start=%s expected_end=%s pid=%s pidstart=1 hold=g\n' "$(iso now)" "$(iso '+30 minutes')" "$$" >"${AIENOS_GATE_LOCK}"
+out="$("${gate}" gateB true 2>&1)"; rc=$?
+check "9b and another gate still waits for its expected_end" '[[ ${rc} == 3 && -e ${AIENOS_GATE_LOCK} ]]'
+rm -f "${AIENOS_GATE_LOCK}"
+# 9c no clock or no flock: refuse, write nothing
+mkdir -p "${tmp}/nodate" "${tmp}/noflock"
+for t in bash cat flock mkdir dirname rm sleep true; do ln -sf "$(command -v "${t}")" "${tmp}/nodate/${t}"; done
+for t in bash cat date mkdir dirname rm sleep true; do ln -sf "$(command -v "${t}")" "${tmp}/noflock/${t}"; done
+out="$(PATH="${tmp}/nodate" "${gate}" gateA true 2>&1)"; rc=$?
+check "9c no date: refuses and writes no record" '[[ ${rc} == 3 && ${out} == *"clock"* && ! -e ${AIENOS_GATE_LOCK} ]]'
+out="$(PATH="${tmp}/noflock" "${gate}" gateA true 2>&1)"; rc=$?
+check "9c no flock: refuses by name and writes no record" '[[ ${rc} == 3 && ${out} == *"flock not found"* && ! -e ${AIENOS_GATE_LOCK} ]]'
 
 # ---- 8: no script writes or removes the machine quiet flag
 # trust1_m5_qualify.sh is left out of the grep: it writes and removes a flag

@@ -64,7 +64,9 @@ _gh_parse() {
     _gh_holder="" _gh_name="" _gh_pid="" _gh_pidstart="" _gh_end="" _gh_end_text="" _gh_hold=""
     IFS= read -r line <"$1" 2>/dev/null || [[ -n "${line:-}" ]] || return 1
     _gh_first="${line:0:200}"
-    for tok in ${line}; do
+    local -a toks
+    read -r -a toks <<<"${line}"
+    for tok in "${toks[@]}"; do
         case "${tok}" in
             pid=*) [[ -z "${_gh_pid}" ]] && _gh_pid="${tok#pid=}" ;;
             pidstart=*) [[ -z "${_gh_pidstart}" ]] && _gh_pidstart="${tok#pidstart=}" ;;
@@ -111,6 +113,10 @@ gh_lock_take() { # NAME MINUTES
         gh_why="gate_hold: bad gate name or minutes ('${name}', '${minutes}')"
         return 3
     fi
+    if ! command -v flock >/dev/null 2>&1; then
+        gh_why="gate_hold: flock not found; refusing to take the QEMU gate lock"
+        return 3
+    fi
     mkdir -p "$(dirname "${gh_gate_lock}")" 2>/dev/null || true
     if ! exec {fd}>>"${gh_gate_lock}.mutex"; then
         gh_why="QEMU gate lock mutex ${gh_gate_lock}.mutex cannot be opened"
@@ -121,7 +127,13 @@ gh_lock_take() { # NAME MINUTES
         gh_why="QEMU gate lock mutex ${gh_gate_lock}.mutex busy for 30 s"
         return 3
     fi
-    now="$(date +%s)"
+    now="$(date +%s 2>/dev/null)"
+    if [[ ! "${now}" =~ ^[0-9]+$ ]] || ! _gh_iso "${now}" >/dev/null 2>&1; then
+        flock -u "${fd}"
+        exec {fd}>&-
+        gh_why="gate_hold: the clock (date) is unreadable; refusing to take the QEMU gate lock"
+        return 3
+    fi
     if [[ -e "${gh_gate_lock}" ]]; then
         if ! _gh_parse "${gh_gate_lock}"; then
             gh_why="QEMU gate lock ${gh_gate_lock} is held (unreadable record, treated as held and never removed: ${_gh_first:-?})"
