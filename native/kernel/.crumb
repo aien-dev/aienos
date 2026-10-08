@@ -52,25 +52,25 @@
         },
         {
           "digest": "efd08e41584e2cbb282cea72e620fa2db42c423c6b3211a91585affb92e34893",
-          "last_commit": "c3878bb",
+          "last_commit": "5849a7a",
           "name": "artifact",
           "purpose": "Directory native/kernel/artifact. Purpose not yet described by a human."
         },
         {
-          "digest": "e1178d16f8c4764be7222ae67ed3f2ba728acc7196975e1600fe3608801c689c",
-          "last_commit": "ecd12c6",
+          "digest": "b45aaa519ba778938f0e30eaa63431594398232c02f1c9f3dfdf970f3a6ed5a8",
+          "last_commit": "e387b50",
           "name": "core",
           "purpose": "Directory native/kernel/core. Purpose not yet described by a human."
         },
         {
-          "digest": "a258da86889a2c724e401240270737100b650ab9f35e53b763ea0737b2a0a204",
-          "last_commit": "2dffd97",
+          "digest": "fb8880e2cf5544851b097a3f9977d543ec58a4644a8e43ea615c7242a55de245",
+          "last_commit": "e387b50",
           "name": "dev",
           "purpose": "Directory native/kernel/dev. Purpose not yet described by a human."
         },
         {
-          "digest": "b6d9b7f41a384aadce48d58fe49e4e35cff1909579d5478b4a03a6f4ca7a9c59",
-          "last_commit": "2dffd97",
+          "digest": "4a14f71ed7d1e067b7ead5dacb0c2fda6217626ba5bdf377b3d33701cee109f9",
+          "last_commit": "e387b50",
           "name": "include",
           "purpose": "Directory native/kernel/include. Purpose not yet described by a human."
         },
@@ -81,8 +81,8 @@
           "purpose": "Directory native/kernel/mm. Purpose not yet described by a human."
         },
         {
-          "digest": "5f3563ae990ea4c130d7f24cb057effd855202f96c89d51d7542e68eba2dbc79",
-          "last_commit": "2dffd97",
+          "digest": "25f9bc7ba37e97d49ebc01a48acf93cddb55bda543bed09eb60d25c43caaaaa5",
+          "last_commit": "e387b50",
           "name": "svc",
           "purpose": "Directory native/kernel/svc. Purpose not yet described by a human."
         },
@@ -94,20 +94,20 @@
         },
         {
           "digest": "414bb61e8cc5185f66cee0e8a7a809c3c03e92770eb4229ab5e94b60a9aa055a",
-          "last_commit": "ecd12c6",
+          "last_commit": "61bd76a",
           "name": "tools",
           "purpose": "Directory native/kernel/tools. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:67d8eb578cc9eac202f5e94f1758233b6916299366e7f9785ae1612c3d3150e6",
-      "compiled_at": "2026-10-06T19:08:10Z",
+      "children_root": "sha256:673a07645a7a618d81218876577a7d16979324a64a204069936580b7df9f76d8",
+      "compiled_at": "2026-10-08T04:37:23Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:fb063189a7b59c3f9b741bf877991880d94811195eb869940fdd151ef0e266e4",
+      "digest": "sha256:0dbade83a3790275a2ac39ba503afab9e5f339dcbe33c40d2a8ca272179e5d10",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 154,
-      "generated_at_commit": "f23da6872ed8576de162878d89c4eaaa3e065099",
-      "source_tree": "sha256:13b63c0d90e176a0fd8893ad2ab7aff0651dc48ff1fc127f116f1ffbe7c2f825"
+      "generated_at_commit": "e387b502b58d9d15fd2751ec5ef4c60f93862244",
+      "source_tree": "sha256:5f1ab2483973c31d1244c3f3cffdb0416d5655240bc133844fb2d8806582baf5"
     },
     "owner_lane": "",
     "provenance": {

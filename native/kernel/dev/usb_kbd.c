@@ -590,3 +590,152 @@ void ck_recovery_console_stub(void)
 #endif
     }
 }
+
+#if defined(CK_CONSOLE_SESSION) && CK_CONSOLE_SESSION
+/* ---- console session (C3-1a, QEMU test image only) ----
+ * Serial (PL011, polled) and the USB keyboard feed one bounded line editor
+ * and the same shell. No time limit, no idle exit: it ends on "exit". The USB
+ * half runs inside the xHCI fence (ck_kbd_session_phase); the serial half
+ * can also run alone (ck_console_session_serial_only) when the keyboard is
+ * unavailable or its endpoint halts. No new authority: the shell commands are
+ * the existing ones. */
+/* Most bytes the start-of-session drain reads before it gives up. */
+#define CK_SESSION_DRAIN_MAX 4096u
+static ck_line s_line;
+static ck_src_gate s_gate;
+static ck_hid_decoder s_dec;
+static ck_key_event s_pend[CK_HID_MAX_KEYS];
+static unsigned s_np, s_ip;
+static uint8_t s_prev;
+static int s_serial_ok, s_began, s_ended;
+static uint64_t s_t0;
+
+static const char *src_name(int s) { return s == CK_SRC_SERIAL ? "serial" : "usb"; }
+
+static void sess_begin(const char *usb)
+{
+    if (s_began) return;
+    s_began = 1;
+    uint32_t cr = 0;
+    s_serial_ok = ck_console_rx_ready(&cr);
+    if (s_serial_ok) {
+        /* Bytes typed before the session are not input. The drain is bounded: a
+         * continuous flood must not stall the boot. Error bytes (-2) are drained
+         * too; only an empty FIFO (-1) ends it early. */
+        unsigned n = 0;
+        while (n < CK_SESSION_DRAIN_MAX) {
+            if (ck_console_rx_poll() == -1) break;
+            n++;
+        }
+        if (n == CK_SESSION_DRAIN_MAX)
+            ck_printf("console_session: serial drain cap hit (%u bytes read, flood?); going on\n", n);
+        ck_printf("console_session: serial rx pl011 base=0x%llx uartcr=0x%04x ready\n",
+                  (unsigned long long)ck_console_uart_base(), cr);
+    } else
+        ck_printf("console_session: serial rx unavailable (console uart is %s, uartcr=0x%04x)\n", ck_console_uart_name(), cr);
+    ck_printf("console_session: ready (usb %s; no time limit, no idle exit; ends on exit)\n", usb);
+    ck_line_reset(&s_line);
+    ck_src_gate_reset(&s_gate);
+    s_np = s_ip = 0;
+    s_t0 = ck_time_us();
+    ck_puts("console> ");
+}
+
+static void sess_drops(int owner, unsigned dropped)
+{
+    if (dropped)
+        ck_printf("console_input: dropped %u key(s) from %s while %s owned the line\n", dropped,
+                  src_name(owner == CK_SRC_SERIAL ? CK_SRC_USB : CK_SRC_SERIAL), src_name(owner));
+}
+
+/* One key from src. Returns 1 when the shell ran "exit". */
+static int sess_key(int src, ck_key_event ev)
+{
+    if (!ck_src_gate_accept(&s_gate, src, ev)) return 0;
+    int r = ck_line_feed(&s_line, ev, echo);
+    if (r == CK_LINE_MORE && ev.kind != CK_KEY_ESCAPE) return 0;
+    int owner = s_gate.owner ? s_gate.owner : src; /* an unowned Enter or Escape: the key's own source */
+    if (r == CK_LINE_MORE && s_gate.owner == CK_SRC_NONE) return 0; /* Escape on an empty line: nothing to clear */
+    if (r == CK_LINE_OVERFLOW)
+        ck_printf("\nconsole_line: overflow (line refused: %u keys typed, limit %u) source=%s\n", s_line.typed,
+                  (unsigned)CK_LINE_CAP, src_name(owner));
+    else if (r == CK_LINE_DONE)
+        ck_printf("\nconsole_echo: %s\nconsole_line: %s source=%s\n", s_line.buf, s_line.buf, src_name(owner));
+    else
+        ck_printf("\nconsole_line: cleared source=%s\n", src_name(owner));
+    sess_drops(owner, ck_src_gate_release(&s_gate));
+    int ex = 0;
+    if (r == CK_LINE_DONE) {
+        ck_shell_ctx ctx = {ck_conventional_memory_kb(), ck_exception_level(), (ck_time_us() - s_t0) / 1000u, ck_commit()};
+        ex = ck_shell_run(s_line.buf, &ctx, shell_out);
+        if (ex) ck_printf("console_session: exit (source=%s)\n", src_name(owner));
+    }
+    ck_line_reset(&s_line);
+    if (!ex) ck_puts("console> ");
+    return ex;
+}
+
+/* 0: the session ended (exit); 1: the USB endpoint halted, serial goes on. */
+static int sess_loop(int usb_ok)
+{
+    for (;;) {
+        int idle = 1;
+        if (usb_ok) {
+            if (s_ip < s_np) {
+                ck_key_event ev = s_pend[s_ip++];
+                idle = 0;
+                if (sess_key(CK_SRC_USB, ev)) { s_ended = 1; return 0; }
+            } else {
+                uint8_t rep[CK_HID_REPORT_LEN];
+                if (poll_report(rep)) {
+                    s_np = ck_hid_decode(&s_dec, rep, sizeof rep, s_pend);
+                    s_ip = 0;
+                    idle = 0;
+                }
+                if (g_k.ep_halted) {
+                    ck_printf("\nconsole_session: usb endpoint halted (completion %u); the keyboard is revoked, serial goes on\n",
+                              g_k.last_code);
+                    return 1;
+                }
+            }
+        }
+        if (s_serial_ok) {
+            int b = ck_console_rx_poll();
+            if (b == -2) idle = 0; /* errored byte: dropped by the console, look again at once */
+            if (b >= 0) {
+                idle = 0;
+                ck_key_event ev = ck_serial_key((uint8_t)b, &s_prev);
+                if (ev.kind != CK_KEY_NONE && sess_key(CK_SRC_SERIAL, ev)) { s_ended = 1; return 0; }
+            }
+        }
+        if (idle && usb_ok && !(rd(g_k.op + OP_PORTSC(g_k.port)) & PS_CCS)) {
+            ck_printf("\nconsole_session: usb keyboard disconnected (port %u); the keyboard is revoked, serial goes on\n", g_k.port);
+            return 1;
+        }
+        if (idle) ck_udelay(100);
+    }
+}
+
+int ck_kbd_session_phase(volatile uint8_t *bar0, uint8_t *mem, uint64_t phys, size_t bytes)
+{
+    int rc = start(bar0, mem, phys, bytes);
+    if (rc) {
+        ck_printf("console_session: usb keyboard unavailable (%s, rc=%d, completion %u)\n", g_k.why, rc, g_k.last_code);
+        return rc;
+    }
+    ck_printf("console_session: usb keyboard attached (port %u, slot %u, endpoint 0x%02x), inside the xHCI fence\n",
+              g_k.port, g_k.slot, g_k.kbd.endpoint);
+    sess_begin("keyboard ready");
+    (void)sess_loop(1);
+    return CK_KBD_OK;
+}
+
+void ck_console_session_serial_only(void)
+{
+    if (s_ended) return;
+    sess_begin("keyboard unavailable");
+    (void)sess_loop(0);
+}
+
+int ck_console_session_ended(void) { return s_ended; }
+#endif

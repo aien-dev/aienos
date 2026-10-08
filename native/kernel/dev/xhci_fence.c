@@ -18,6 +18,21 @@
 #else
 #define CK_XHCI_MUT 0
 #endif
+#if defined(CK_CONSOLE_SESSION) && CK_CONSOLE_SESSION
+#if defined(CK_HARDWARE_STAGING)
+#error "CK_CONSOLE_SESSION (QEMU test console session) cannot be combined with CK_HARDWARE_STAGING"
+#endif
+#if defined(CK_QEMU_UNSAFE_DMA)
+#error "CK_CONSOLE_SESSION cannot be combined with CK_QEMU_UNSAFE_DMA"
+#endif
+static int g_session; /* 1 while ck_xhci_session drives the fence */
+#define KBD_RUN(b, m, p, n) (g_session ? ck_kbd_session_phase(b, m, p, n) : ck_kbd_phase(b, m, p, n))
+#else
+#if defined(CK_TEST_CONSOLE_MUTATION)
+#error "CK_TEST_CONSOLE_MUTATION needs CK_CONSOLE_SESSION=1"
+#endif
+#define KBD_RUN(b, m, p, n) ck_kbd_phase(b, m, p, n)
+#endif
 
 #define CMD_MEM 0x2u
 #define CMD_BM 0x4u
@@ -125,6 +140,10 @@ void ck_xhci_release(void)
 #if CK_XHCI_MUT == CK_XHCI_MUT_NO_REVOKE
         /* TEST-ONLY mutation: bus mastering is left on. */
         int off = (pci_r16(x->pf->cfg, 0x04) & CMD_BM) ? -1 : 0;
+#elif defined(CK_TEST_CONSOLE_MUTATION)
+        /* TEST-ONLY console-session mutation: after the session's exit the bus
+         * master is left on (the devices-stage fence still revokes normally). */
+        int off = g_session ? ((pci_r16(x->pf->cfg, 0x04) & CMD_BM) ? -1 : 0) : pci_bus_master_off(x->pf);
 #else
         int off = pci_bus_master_off(x->pf);
 #endif
@@ -266,7 +285,7 @@ static int plat_fence_one(int idx, int *kbd_rc)
     ck_printf(CK_XHCI_PLAT_GRANT_FMT, x->name, (unsigned long long)cf.smmu_base, cf.stream_id);
     ck_printf("smmu_dma_window: xhci %s only, translation active iova=0x%llx len=0x%llx\n", x->name,
               (unsigned long long)cf.iova, (unsigned long long)cf.len);
-    *kbd_rc = ck_kbd_phase(x->bar0, g_dma_mem, g_dma_phys, CK_XHCI_DMA_BYTES);
+    *kbd_rc = KBD_RUN(x->bar0, g_dma_mem, g_dma_phys, CK_XHCI_DMA_BYTES);
     x->state = "fenced";
     ck_xhci_release();
     return CK_XHCI_OK;
@@ -382,7 +401,7 @@ int ck_xhci_fence(const pci_system *pci)
      * boot-keyboard driver runs only here, inside the confined grant, on the
      * fence's DMA region; the release below halts and revokes whatever it
      * returns. A controller that would not halt is never driven. */
-    int krc = hrc == 0 ? ck_kbd_phase(x->bar0, g_dma_mem, g_dma_phys, CK_XHCI_DMA_BYTES) : 1;
+    int krc = hrc == 0 ? KBD_RUN(x->bar0, g_dma_mem, g_dma_phys, CK_XHCI_DMA_BYTES) : 1;
     x->state = hrc ? "halt-failed" : "fenced";
     ck_xhci_release();
     /* A PCI controller without a keyboard: try the platform ones next. */
@@ -395,3 +414,13 @@ int ck_xhci_fence(const pci_system *pci)
     }
     return hrc ? CK_XHCI_E_HALT : CK_XHCI_OK;
 }
+
+#if defined(CK_CONSOLE_SESSION) && CK_CONSOLE_SESSION
+int ck_xhci_session(const pci_system *pci)
+{
+    g_session = 1;
+    int rc = ck_xhci_fence(pci);
+    g_session = 0;
+    return rc;
+}
+#endif

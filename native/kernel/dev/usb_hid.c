@@ -229,3 +229,51 @@ void ck_recovery_identity(const char *commit, uint8_t out[32])
     sha256_update(&c, (const uint8_t *)(commit ? commit : ""), n);
     sha256_final(&c, out);
 }
+
+/* ---- console session: source ownership of the shared line ---- */
+void ck_src_gate_reset(ck_src_gate *g)
+{
+    g->owner = CK_SRC_NONE;
+    g->dropped = 0;
+    g->dropped_all = 0;
+}
+
+int ck_src_gate_accept(ck_src_gate *g, int src, ck_key_event ev)
+{
+    if (ev.kind == CK_KEY_NONE || (src != CK_SRC_SERIAL && src != CK_SRC_USB))
+        return 0;
+    if (g->owner == CK_SRC_NONE) {
+        /* Only a printable key claims a line. Backspace, Escape and Enter on an
+         * empty line pass through without owning it, so they cannot lock the
+         * other source out. */
+        if (ev.kind == CK_KEY_CHAR) g->owner = src;
+        return 1;
+    }
+    if (g->owner == src)
+        return 1;
+    g->dropped++;
+    g->dropped_all++;
+    return 0;
+}
+
+unsigned ck_src_gate_release(ck_src_gate *g)
+{
+    unsigned d = g->dropped;
+    g->owner = CK_SRC_NONE;
+    g->dropped = 0;
+    return d;
+}
+
+ck_key_event ck_serial_key(uint8_t byte, uint8_t *prev)
+{
+    ck_key_event none = {CK_KEY_NONE, 0};
+    uint8_t before = *prev;
+    *prev = byte;
+    if (byte == '\r' || (byte == '\n' && before != '\r')) return (ck_key_event){CK_KEY_ENTER, 0};
+    if (byte == 0x08 || byte == 0x7f) return (ck_key_event){CK_KEY_BACKSPACE, 0};
+    if (byte == 0x1b) return (ck_key_event){CK_KEY_ESCAPE, 0};
+    if ((byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') || byte == ' ' ||
+        byte == '-' || byte == '.' || byte == '/')
+        return (ck_key_event){CK_KEY_CHAR, (char)byte};
+    return none;
+}
