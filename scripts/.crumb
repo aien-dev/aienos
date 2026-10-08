@@ -7,14 +7,14 @@
     "generated": {
       "children": [],
       "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "compiled_at": "2026-10-08T11:44:36Z",
+      "compiled_at": "2026-10-08T11:47:30Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:c04319f1fc5fdad3055c573f0a4220edb348fa42481e3e539854ab3c8a57cb96",
+      "digest": "sha256:97add3c421215472cc6dfff787e3d6dce5f7531d86bcc0321f31767929d4cf0c",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 72,
-      "generated_at_commit": "b43a7c813a26a227b816c778203acf78404505ee",
-      "source_tree": "sha256:1ceb7072e472db0bf516831f700701f2cbe7b41413c8f116a8c08ab1dec1978e"
+      "generated_at_commit": "8b35a4e79e4bd1282f6d3a001e3d44556c2d86af",
+      "source_tree": "sha256:60629f8f6eef8e252041b8662e56a433b8be16d15b96b32ea86755bdc0f41156"
     },
     "owner_lane": "",
     "provenance": {
