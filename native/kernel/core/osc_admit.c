@@ -14,6 +14,10 @@
 #include "ck_internal.h"
 #include "osc_admit.h"
 #include "osc_unit.h"
+#ifdef CK_OSH_TEST
+void ck_osh_save(const char *name, const uint8_t *b, size_t len, const struct osc_accept *acc);
+void ck_osh_all(void);
+#endif
 #ifdef CK_SEED0B_TEST_ANCHOR
 #include "osc_unit_test_anchor.h"
 #endif
@@ -268,6 +272,9 @@ unsigned ck_osc_candidate(const char *name, const uint8_t *b, size_t len)
 #ifdef CK_OSC_LAUNCH_TEST
         lt_save(name, b, len);
 #endif
+#ifdef CK_OSH_TEST
+        ck_osh_save(name, b, len, &acc);
+#endif
         ck_printf("osc_unit: %s ACCEPT unit_digest=%s program_id=%s funcs=%u caps=%u signer=%s\n", name, d, i,
                   (unsigned)acc.function_count, (unsigned)acc.cap_count,
                   acc.signer_class == OSC_SIGNER_TEST ? "TEST" : "OWNER");
@@ -290,11 +297,15 @@ void ck_osc_oversize(const char *name, uint64_t len)
 void ck_osc_summary(void)
 {
     if (seen || oversize)
-#ifdef CK_OSC_LAUNCH_TEST
+#if defined(CK_OSC_LAUNCH_TEST) || defined(CK_OSH_TEST)
     {
         ck_printf("osc_units: seen=%u accepted=%u refused=%u oversize=%u (admission; launches follow)\n", seen, accepted,
                   refused, oversize);
+#ifdef CK_OSC_LAUNCH_TEST
         lt_all();
+#else
+        ck_osh_all();
+#endif
     }
 #else
         ck_printf("osc_units: seen=%u accepted=%u refused=%u oversize=%u (admission only, nothing launched)\n", seen, accepted,

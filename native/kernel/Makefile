@@ -447,6 +447,20 @@ $(error CK_OSC_LAUNCH_TEST needs CK_SEED0B_TEST_ANCHOR=1 (it launches TEST-signe
 endif
 ART_TRUST_FLAGS += -DCK_OSC_LAUNCH_TEST=1
 endif
+# OSH-AIENOS-0: the shell-core self-test (core/osh_test.c) runs the three osh units over embedded fixture scripts and
+# prints the step trace. TEST ONLY, QEMU only; not combined with the launch self-test.
+CK_OSH_TEST ?=
+OSH_TEST_C :=
+ifeq ($(strip $(CK_OSH_TEST)),1)
+ifeq ($(strip $(CK_SEED0B_TEST_ANCHOR)),)
+$(error CK_OSH_TEST needs CK_SEED0B_TEST_ANCHOR=1 (it launches TEST-signed units))
+endif
+ifeq ($(strip $(CK_OSC_LAUNCH_TEST)),1)
+$(error CK_OSH_TEST and CK_OSC_LAUNCH_TEST are exclusive)
+endif
+ART_TRUST_FLAGS += -DCK_OSH_TEST=1
+OSH_TEST_C := $(KDIR)/core/osh_test.c
+endif
 
 # Screen hold before reset (core/console.c ck_console_fb_hold): seconds the
 # GOP framebuffer console keeps the last report on screen before the PSCI
@@ -481,6 +495,7 @@ ART_C := $(KDIR)/core/artifact_loader.c $(KDIR)/core/osc_admit.c $(KDIR)/core/os
 	$(KDIR)/artifact/receipt.c $(KDIR)/artifact/osc_unit.c $(NATIVE)/argus/sha256.c $(NATIVE)/sig/sha512.c \
 	$(NATIVE)/sig/ed25519.c $(NATIVE)/sig/ct.c
 ART_INC := -I$(KDIR)/svc/compat -I$(KDIR)/artifact -I$(NATIVE)/sig -I$(NATIVE)/argus
+ART_C += $(OSH_TEST_C)
 CORE_C += $(ART_C)
 CORE_S := $(BOOT)/efi_entry.S $(KDIR)/arch/vectors.S $(KDIR)/arch/m3.S $(KDIR)/arch/smp_entry.S
 HDRS := $(wildcard $(KDIR)/include/*.h $(KDIR)/*/*.h $(BOOT)/*.h)
