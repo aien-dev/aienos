@@ -93,6 +93,9 @@ through `OscRt` ends `OUTCOME_UNKNOWN(OTHER)`.
    ends `OUTCOME_UNKNOWN(OTHER)` (decision 6). Real reservation failures keep 30 (`RESOURCE_UNAVAILABLE`):
    code larger than 64 KiB, input over 4 KiB, task slot busy, no free address-space slot. The container has no
    workspace field (spec section 7), so there is no declared workspace to refuse.
+   `cpu_ticks` and `pool_slots` have no launcher hard maximum, so they never get 14 from the launcher: the
+   container already bounds them at admission (cpu_ticks up to 1e9, pool_slots up to 64), a lower tick limit is
+   the caller's `max_ticks` (decision 3), and pool_slots reserves nothing because no pool service exists.
 4a. **The workspace is caller-sized, capped at 32 pages (128 KiB, `OSC_WS_MAX_PAGES`).** The only workspace bound
    is the caller's. OSH needs 23 pages. 0 pages means no workspace. The cap bounds the user pages, page-table
    slots and kernel bss; it is the kernel's choice, never read from the container. A request over the cap, with

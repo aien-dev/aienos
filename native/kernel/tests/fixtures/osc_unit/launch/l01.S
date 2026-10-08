@@ -53,13 +53,24 @@ counter:
 peek_kernel:
     ldr x0, [x0]
     ret
-// fn 9  jump_ws(ws: cells, n: u64) -> u64 : branch into the caller workspace (data page, UXN): must fault
+// fn 9  jump_ws(ws: cells, n: u64) -> u64 : call the code at x0 (the caller pre-loads a valid `ret` there); returns 42
+//        if that works, so only an execute-never workspace page makes this fault
 jump_ws:
+    sub sp, sp, #16
+    str x30, [sp]
     blr x0
+    ldr x30, [sp]
+    add sp, sp, #16
+    movz x0, #42
     ret
-// fn 10 jump_in(in: bytes, n: u64) -> u64 : branch into the input window (data page, UXN): must fault
+// fn 10 jump_in(in: bytes, n: u64) -> u64 : same, into the input window (caller supplies the `ret` bytes)
 jump_in:
+    sub sp, sp, #16
+    str x30, [sp]
     blr x0
+    ldr x30, [sp]
+    add sp, sp, #16
+    movz x0, #42
     ret
 // fn 11 dirty() -> u64 : leave a nonzero value in x1..x29 (for the register-clearing check)
 dirty:

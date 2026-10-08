@@ -179,6 +179,7 @@ static void lt_all(void)
     lt_ws[6].mem = (uint8_t *)(uintptr_t)sa; /* a workspace aimed at the launcher's own state */
     lt_ws[6].pages = 1;
     memcpy(lt_ws_mem2 + 64, "Zeta", 5);       /* an input buffer that lies inside workspace 8 (index 7) */
+    *(uint32_t *)(lt_ws_mem1 + 512) = 0xd65f03c0u; /* a valid `ret` in workspace 1, cell 64, for jump_ws */
     static const struct lt_step steps[] = {
         { "a01_valid_min.unit", "add", 2, { 1000000007, 998244353 }, 0, 0, 0 },
         { "a01_valid_min.unit", "add", 1, { 5 }, 0, 0, 0 },
@@ -211,9 +212,9 @@ static void lt_all(void)
         { "a01_valid_min.unit", "add", 2, { 3, 4 }, 0, 0, 0 },
         { "l01_launch_fns.unit", "peek_kernel", 1, { KERN_PTR }, 0, 0, 0 },
         { "a01_valid_min.unit", "add", 2, { 5, 6 }, 0, 0, 0 },
-        { "l01_launch_fns.unit", "jump_ws", 2, { WS_PTR, 1 }, 0, 1, 0 },
+        { "l01_launch_fns.unit", "jump_ws", 2, { WS_PTR | 512, 1 }, 0, 1, 0 },
         { "a01_valid_min.unit", "add", 2, { 7, 8 }, 0, 0, 0 },
-        { "l01_launch_fns.unit", "jump_in", 2, { IN_PTR, 4 }, "Zeta", 0, 0 },
+        { "l01_launch_fns.unit", "jump_in", 2, { IN_PTR, 4 }, "\xc0\x03\x5f\xd6", 0, 0 },
         { "a01_valid_min.unit", "add", 2, { 9, 10 }, 0, 0, 0 },
         { "l01_launch_fns.unit", "dirty", 0, { 0 }, 0, 0, 0 },
         { "l01_launch_fns.unit", "regs_or", 0, { 0 }, 0, 0, 0 },

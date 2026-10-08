@@ -278,7 +278,7 @@ static void fixture_unit(void)
     CHECK(!osc_launch_args_ok(a.entry[fi].reg_kind, a.entry[fi].nregs, ok, 1));
     CHECK(osc_unit_lookup(&a, "Counter", 7) == -1 && osc_unit_lookup(&a, "trap", 4) == 0);
     /* every word of l01 passed the section 8.4 scan inside admission; the spin loop and the bare brk are in it */
-    CHECK(a.code_len == 384);
+    CHECK(a.code_len == 424);
 }
 
 static void workspace_bounds(void)
