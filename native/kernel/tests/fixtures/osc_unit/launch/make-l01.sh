@@ -42,8 +42,18 @@ cp "$SRC/min.ir" "$work/ir"
     entry 5 0 5 0 0 0 0 0 0 "$(off exec_stack)" exec_stack
     entry 6 0 5 0 0 0 0 0 0 "$(off overflow)" overflow
     entry 7 2 5 12 5 0 0 0 0 "$(off counter)" counter
+    entry 8 1 5 5 0 0 0 0 0 "$(off peek_kernel)" peek_kernel
+    entry 9 2 5 12 5 0 0 0 0 "$(off jump_ws)" jump_ws
+    entry 10 2 5 11 5 0 0 0 0 "$(off jump_in)" jump_in
+    entry 11 0 5 0 0 0 0 0 0 "$(off dirty)" dirty
+    entry 12 0 5 0 0 0 0 0 0 "$(off regs_or)" regs_or
+    entry 13 2 5 12 5 0 0 0 0 "$(off touch_past)" touch_past
 } >"$work/ent"
 caps_none >"$work/caps0"
-build "$OUT/l01_launch_fns.unit" test1 1 5 1 8 "$work/ir" "$work/code" "$work/ent" "$work/caps0"
+build "$OUT/l01_launch_fns.unit" test1 1 5 1 14 "$work/ir" "$work/code" "$work/ent" "$work/caps0"
 cp "$work/code" "$OUT/l01.code"
-echo "built $OUT/l01_launch_fns.unit"
+# l02: l01 with max_stack_bytes = 65552 = 65536 + 16 (offset 36; the container requires a multiple of 16, so this is the smallest legal value over the launcher's 65536 maximum), re-signed.
+# The launcher must refuse it LIMIT_EXCEEDED (14) before any reservation.
+patch "$OUT/l01_launch_fns.unit" 36 10 00 01 00 >"$OUT/l02_stack_over.unit"
+resign "$OUT/l02_stack_over.unit" test1
+echo "built $OUT/l01_launch_fns.unit $OUT/l02_stack_over.unit"

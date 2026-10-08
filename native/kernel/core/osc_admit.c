@@ -101,6 +101,7 @@ static void lt_save(const char *name, const uint8_t *b, size_t len)
 
 #define IN_PTR (1ull << 62) /* placeholders for the task's input and workspace windows */
 #define WS_PTR (1ull << 63)
+#define KERN_PTR (1ull << 61) /* an address in the kernel image (mapped EL1-only in the task address space) */
 struct lt_step {
     const char *unit, *fn;
     unsigned nargs;
@@ -110,9 +111,11 @@ struct lt_step {
     uint64_t cap;
 };
 
+extern void ck_osc_state_range(uint64_t *addr, uint64_t *len);
 static uint8_t lt_ws_mem1[4 * 4096], lt_ws_mem2[4 * 4096], lt_ws_mem3[23 * 4096], lt_ws_mem4[33 * 4096]
     __attribute__((aligned(4096)));
-static struct ck_osc_ws lt_ws[4] = { { lt_ws_mem1, 4 }, { lt_ws_mem2, 4 }, { lt_ws_mem3, 23 }, { lt_ws_mem4, 33 } };
+static struct ck_osc_ws lt_ws[8] = { { lt_ws_mem1, 4 }, { lt_ws_mem2, 4 }, { lt_ws_mem3, 23 }, { lt_ws_mem4, 33 },
+                                      { 0, 1 }, { lt_ws_mem1 + 8, 1 }, { 0, 1 }, { lt_ws_mem2, 4 } };
 static unsigned lt_counts[5];
 
 static void lt_run(const struct lt_step *s)
@@ -132,6 +135,8 @@ static void lt_run(const struct lt_step *s)
                 rq.args[i] = ck_osc_va_in() + (s->a[i] & 0xffffff);
             else if (s->a[i] & WS_PTR)
                 rq.args[i] = ck_osc_va_ws() + (s->a[i] & 0xffffff);
+            else if (s->a[i] & KERN_PTR)
+                rq.args[i] = (uint64_t)(uintptr_t)&lt_counts;
         }
         if (s->in) {
             rq.in = (const uint8_t *)s->in;
@@ -152,13 +157,15 @@ static void lt_run(const struct lt_step *s)
                 n += (unsigned)ck_snprintf(as + n, sizeof as - n, "%sin+%u", i ? "," : "", (unsigned)(v & 0xffffff));
             else if (v & WS_PTR)
                 n += (unsigned)ck_snprintf(as + n, sizeof as - n, "%sws+%u", i ? "," : "", (unsigned)(v & 0xffffff));
+            else if (v & KERN_PTR)
+                n += (unsigned)ck_snprintf(as + n, sizeof as - n, "%skernel", i ? "," : "");
             else
                 n += (unsigned)ck_snprintf(as + n, sizeof as - n, "%s%llu", i ? "," : "", (unsigned long long)v);
         }
-        ck_printf("osc_launch: %s %s(%s) -> %s ticks=%llu budget=%llu pages_mapped=%u pages_after=%u slot_free=%u; "
+        ck_printf("osc_launch: %s %s(%s) -> %s ticks=%llu budget=%llu pages_mapped=%u page_tables_zeroed=%u slot_free=%u; "
                   "QEMU (aarch64 virt), TEST signer, not physical\n",
                   s->unit, s->fn, as, rs, (unsigned long long)r.ticks, (unsigned long long)info.budget,
-                  info.pages_mapped, info.pages_after, (unsigned)info.slot_free_after);
+                  info.pages_mapped, (unsigned)info.tables_zeroed, (unsigned)info.slot_free_after);
         lt_counts[r.cls]++;
         return;
     }
@@ -167,6 +174,11 @@ static void lt_run(const struct lt_step *s)
 
 static void lt_all(void)
 {
+    uint64_t sa, sl;
+    ck_osc_state_range(&sa, &sl);
+    lt_ws[6].mem = (uint8_t *)(uintptr_t)sa; /* a workspace aimed at the launcher's own state */
+    lt_ws[6].pages = 1;
+    memcpy(lt_ws_mem2 + 64, "Zeta", 5);       /* an input buffer that lies inside workspace 8 (index 7) */
     static const struct lt_step steps[] = {
         { "a01_valid_min.unit", "add", 2, { 1000000007, 998244353 }, 0, 0, 0 },
         { "a01_valid_min.unit", "add", 1, { 5 }, 0, 0, 0 },
@@ -194,6 +206,24 @@ static void lt_all(void)
         { "l01_launch_fns.unit", "counter", 2, { WS_PTR | 94200, 1 }, 0, 3, 0 },
         { "l01_launch_fns.unit", "counter", 2, { WS_PTR | 94200, 1 }, 0, 3, 0 },
         { "l01_launch_fns.unit", "counter", 2, { WS_PTR, 1 }, 0, 4, 0 },
+        { "a06_valid_limits_at_max.unit", "add", 2, { 1, 2 }, 0, 0, 0 },
+        { "l02_stack_over.unit", "peek0", 0, { 0 }, 0, 0, 0 },
+        { "a01_valid_min.unit", "add", 2, { 3, 4 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "peek_kernel", 1, { KERN_PTR }, 0, 0, 0 },
+        { "a01_valid_min.unit", "add", 2, { 5, 6 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "jump_ws", 2, { WS_PTR, 1 }, 0, 1, 0 },
+        { "a01_valid_min.unit", "add", 2, { 7, 8 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "jump_in", 2, { IN_PTR, 4 }, "Zeta", 0, 0 },
+        { "a01_valid_min.unit", "add", 2, { 9, 10 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "dirty", 0, { 0 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "regs_or", 0, { 0 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "touch_past", 2, { WS_PTR | 16376, 1 }, 0, 1, 0 },
+        { "a01_valid_min.unit", "add", 2, { 11, 12 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "counter", 2, { WS_PTR | 8, 1 }, 0, 5, 0 },
+        { "l01_launch_fns.unit", "counter", 2, { WS_PTR | 16, 1 }, 0, 6, 0 },
+        { "l01_launch_fns.unit", "counter", 2, { WS_PTR | 24, 1 }, 0, 7, 0 },
+        { "l01_launch_fns.unit", "counter", 2, { WS_PTR | 32, 1 }, (const char *)(lt_ws_mem2 + 64), 8, 0 },
+        { "a01_valid_min.unit", "add", 2, { 13, 14 }, 0, 0, 0 },
     };
     ck_printf("osc_launch_policy: units=%u code_max=%u stack_max=%u in_max=%u ws_max=%u pages; 1 tick = 10 ms; "
               "QEMU (aarch64 virt), TEST signer, not physical\n",

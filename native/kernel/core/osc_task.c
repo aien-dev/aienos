@@ -162,6 +162,7 @@ void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept
         info = &local;
     memset(info, 0, sizeof *info);
     info->slot_free_after = 1;
+    info->tables_zeroed = 1; /* a refusal built no tables */
     refuse(res, OSC_RESOURCE_UNAVAILABLE);
     int fi = osc_unit_lookup(a, rq->name, rq->name_len);
     if (fi < 0) {
@@ -169,7 +170,25 @@ void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept
         return;
     }
     const struct osc_entry *e = &a->entry[fi];
+    /* spec 8.2 step 16: a signer-declared budget above a launcher hard maximum is LIMIT_EXCEEDED, before any
+     * reservation. max_stack_bytes is the only declared budget the launcher bounds: cpu_ticks is only lowered by
+     * the caller cap (max_ticks), and pool_slots is not bounded because no pool service is provided (a call to
+     * one ends OUTCOME_UNKNOWN). Real reservation failures below keep 30. */
+    if (!osc_launch_stack_ok(a->max_stack_bytes, CK_OSC_STACK_MAX_BYTES)) {
+        refuse(res, OSC_LIMIT_EXCEEDED);
+        return;
+    }
     uint64_t in_va = ck_osc_va_in(), ws_va = ck_osc_va_ws();
+    /* The workspace is mapped read-write into EL0, so it must be memory the caller owns: refuse (30, nothing
+     * mapped) a range over the cap, null, not page aligned, or overlapping the launcher's own state (slot0: page
+     * tables, code copy, runtime, stack) or the caller's input buffer. The kernel has no allowed region for
+     * workspaces, so ownership beyond that is the caller's promise (osc_task.h). */
+    if (rq->ws && rq->ws->pages && osc_launch_ws_pages_ok(rq->ws->pages) && rq->ws->mem &&
+        (!osc_launch_disjoint((uintptr_t)rq->ws->mem, (uint64_t)rq->ws->pages * CK_OSC_PAGE, (uintptr_t)&slot0, sizeof slot0) ||
+         !osc_launch_disjoint((uintptr_t)rq->ws->mem, (uint64_t)rq->ws->pages * CK_OSC_PAGE, (uintptr_t)rq->in, rq->in_len))) {
+        refuse(res, OSC_RESOURCE_UNAVAILABLE);
+        return;
+    }
     if (rq->ws && (!osc_launch_ws_pages_ok(rq->ws->pages) || (rq->ws->pages && (!rq->ws->mem || ((uintptr_t)rq->ws->mem & 4095))))) {
         refuse(res, OSC_RESOURCE_UNAVAILABLE); /* workspace over the cap or unusable: nothing ran */
         return;
@@ -180,10 +199,10 @@ void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept
         refuse(res, OSC_LAUNCH_ARG_SHAPE);
         return;
     }
-    /* reservation: everything below refuses with RESOURCE_UNAVAILABLE and nothing runs */
+    /* reservation: code size, input size, busy slot, no base: RESOURCE_UNAVAILABLE and nothing runs */
     uint64_t base = get_base();
     uint32_t stack = a->max_stack_bytes;
-    if (!base || slot0.used || run.active || a->code_len > CK_OSC_CODE_MAX_BYTES || stack > CK_OSC_STACK_MAX_BYTES ||
+    if (!base || slot0.used || run.active || a->code_len > CK_OSC_CODE_MAX_BYTES ||
         rq->in_len > CK_OSC_IN_MAX_BYTES || (rq->in_len && !rq->in) || (uint64_t)a->code_off + a->code_len > unit_len ||
         e->code_offset >= a->code_len || (e->code_offset & 3))
         return;
@@ -255,7 +274,7 @@ void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept
 
     int (*old_sync)(struct ck_frame *, uint64_t) = ck_lower_sync;
     struct ck_frame *(*old_tick)(struct ck_frame *) = ck_tick_switch;
-    uint64_t kttbr = ck_rd(ttbr0_el1), cpacr = ck_rd(cpacr_el1);
+    uint64_t kttbr = ck_rd(ttbr0_el1), cpacr = ck_rd(cpacr_el1), cntkctl = ck_rd(cntkctl_el1);
     memset(&run, 0, sizeof run);
     run.budget = info->budget;
     run.rt_code_va = rt_code_va;
@@ -263,6 +282,10 @@ void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept
     ck_tick_switch = launch_tick;
     uint64_t hz = ck_rd(cntfrq_el0);
     ck_wr(cpacr_el1, (cpacr & ~(3ull << 20)) | (1ull << 20)); /* FP/SIMD traps at EL0 */
+    /* EL0 must not touch the timers or counters: the budget timer is the kernel's, whatever firmware left in
+     * CNTKCTL_EL1. Clear EL0PCTEN/EL0VCTEN (bits 0,1: counter reads), EVNTEN/EVNTDIR (2,3: event stream) and
+     * EL0VTEN/EL0PTEN (8,9: timer registers); the loader clears only 8 and 9 (artifact_loader.c). */
+    ck_wr(cntkctl_el1, cntkctl & ~0x30Full);
     swap_ttbr0((uint64_t)(uintptr_t)s->l0);
     ck_wr(cntp_cval_el0, ck_rd(cntpct_el0) + (hz ? hz / 100 : 625000));
     ck_wr(cntp_ctl_el0, 1);
@@ -274,6 +297,7 @@ void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept
     ck_isb();
     swap_ttbr0(kttbr);
     ck_wr(cpacr_el1, cpacr);
+    ck_wr(cntkctl_el1, cntkctl);
     ck_isb();
     ck_lower_sync = old_sync;
     ck_tick_switch = old_tick;
@@ -299,7 +323,7 @@ void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept
     memset(s->code, 0, sizeof s->code);
     memset(s->stack, 0, sizeof s->stack);
     clean_range(s, sizeof *s, 1);
-    info->pages_after = count_mapped(s) + (unsigned)(s->l0[idx] != 0);
+    info->tables_zeroed = count_mapped(s) + (unsigned)(s->l0[idx] != 0) == 0;
     s->used = 0;
     info->slot_free_after = !s->used;
 }
@@ -319,4 +343,11 @@ int ck_osc_result_str(const struct osc_result *r, char *buf, size_t n)
     default:
         return ck_snprintf(buf, n, "UNCLASSIFIED");
     }
+}
+
+/* Where the launcher keeps its own state, so the selftest can aim a workspace at it. */
+void ck_osc_state_range(uint64_t *addr, uint64_t *len)
+{
+    *addr = (uint64_t)(uintptr_t)&slot0;
+    *len = sizeof slot0;
 }

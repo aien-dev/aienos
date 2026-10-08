@@ -156,3 +156,17 @@ int osc_launch_ws_pages_ok(uint64_t pages)
 {
     return pages <= OSC_WS_MAX_PAGES;
 }
+
+int osc_launch_stack_ok(uint64_t declared, uint64_t hard_max)
+{
+    return declared <= hard_max;
+}
+
+int osc_launch_disjoint(uint64_t a, uint64_t alen, uint64_t b, uint64_t blen)
+{
+    if (alen == 0 || blen == 0)
+        return 1;
+    if (a + alen < a || b + blen < b) /* a wrapped range is never disjoint from anything */
+        return 0;
+    return a + alen <= b || b + blen <= a;
+}

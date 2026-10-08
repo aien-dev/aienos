@@ -17,6 +17,10 @@
  * `mem`, 0 to OSC_WS_MAX_PAGES (0 = no workspace). It is mapped read-write (never executable) into the task for the
  * call and is NOT cleared by teardown: state a unit leaves in it is there for the next call that is given the same
  * workspace. A workspace over the cap, or with unaligned or null memory, is refused 30 before the first instruction. */
+/* A workspace is mapped read-write (never executable) into EL0 as it is, so it MUST be memory the caller owns
+ * and nothing else uses: page aligned, not null, not overlapping the launcher's own state or the input buffer
+ * (refused 30, nothing mapped). The kernel has no region it restricts workspaces to, so beyond those checks it
+ * trusts the caller. It is not cleared at teardown. */
 struct ck_osc_ws {
     uint8_t *mem;
     uint32_t pages;
@@ -36,7 +40,7 @@ struct ck_osc_launch_req {
 struct ck_osc_launch_info {
     uint64_t budget;          /* ticks granted */
     unsigned pages_mapped;    /* user pages that were mapped while the task existed */
-    unsigned pages_after;     /* user pages still mapped after teardown (must be 0) */
+    int tables_zeroed;        /* after teardown every page-table entry of the task is zero and its L0 slot is clear (says nothing about frame contents) */
     int slot_free_after;      /* the task slot is reusable */
 };
 

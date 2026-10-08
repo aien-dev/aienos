@@ -65,7 +65,7 @@ make -s -C native/kernel OUT="${out_prod}" store-image gpt-image >/dev/null
 simg="${out_prod}/host/ck_store_image"
 
 fix="native/kernel/tests/fixtures/osc_unit"
-files=("${fix}/vectors/a01_valid_min.unit" "${fix}/launch/l01_launch_fns.unit")
+files=("${fix}/vectors/a01_valid_min.unit" "${fix}/launch/l01_launch_fns.unit" "${fix}/vectors/a06_valid_limits_at_max.unit" "${fix}/launch/l02_stack_over.unit")
 a01_line=$(grep -E '^a01_valid_min\.unit ' "${fix}/vectors/expected.txt")
 a01_digest=$(sed -E 's/.* unit_digest=([0-9a-f]{64}) .*/\1/' <<<"${a01_line}")
 [[ ${#a01_digest} == 64 ]] || fail "expected UnitDigest read from the frozen expected.txt"
@@ -114,18 +114,18 @@ boot "${out_launch}/full/BOOTAA64.EFI" "${serial}" "${work}/disk-run.img"
 release_flag
 
 check "${serial}" "left firmware and entered the kernel" "kernel: alive"
-check "${serial}" "kernel read both candidates from the boot disk Store" "^artifact_candidates: 2$"
+check "${serial}" "kernel read all four candidates from the boot disk Store" "^artifact_candidates: 4$"
 if has "${serial}" "^report-truncated:"; then fail "kernel report lines were truncated"; else pass "no kernel report line was truncated"; fi
 check "${serial}" "final report reached the console" "report_kind: final"
 if has "${serial}" "report_kind: (panic|fault)"; then fail "panic or fault reported (a unit fault must stay contained)"; else pass "no kernel panic or fault report: unit faults stayed contained"; fi
 check "${serial}" "a01 admitted with the frozen UnitDigest" "^osc_unit: a01_valid_min\\.unit ACCEPT unit_digest=${a01_digest} "
-check "${serial}" "l01 admitted (every hand-assembled word is in the OSC subset)" "^osc_unit: l01_launch_fns\\.unit ACCEPT .* funcs=8 caps=0 signer=TEST$"
-check "${serial}" "totals: 2 seen, 2 accepted" "^osc_units: seen=2 accepted=2 refused=0 oversize=0 "
-check "${serial}" "launch policy line, labelled" "^osc_launch_policy: units=2 code_max=65536 stack_max=65536 in_max=4096 ws_max=32 pages; 1 tick = 10 ms; QEMU \\(aarch64 virt\\), TEST signer, not physical$"
+check "${serial}" "l01 admitted (every hand-assembled word is in the OSC subset)" "^osc_unit: l01_launch_fns\\.unit ACCEPT .* funcs=14 caps=0 signer=TEST$"
+check "${serial}" "totals: 4 seen, 4 accepted" "^osc_units: seen=4 accepted=4 refused=0 oversize=0 "
+check "${serial}" "launch policy line, labelled" "^osc_launch_policy: units=4 code_max=65536 stack_max=65536 in_max=4096 ws_max=32 pages; 1 tick = 10 ms; QEMU \\(aarch64 virt\\), TEST signer, not physical$"
 
 label='QEMU \(aarch64 virt\), TEST signer, not physical'
-tail_run="ticks=[0-9]+ budget=[0-9]+ pages_mapped=[1-9][0-9]* pages_after=0 slot_free=1; ${label}\$"
-tail_ref="ticks=0 budget=0 pages_mapped=0 pages_after=0 slot_free=1; ${label}\$"
+tail_run="ticks=[0-9]+ budget=[0-9]+ pages_mapped=[1-9][0-9]* page_tables_zeroed=1 slot_free=1; ${label}\$"
+tail_ref="ticks=0 budget=0 pages_mapped=0 page_tables_zeroed=1 slot_free=1; ${label}\$"
 # lline NAME UNIT CALL RESULT-REGEX [ref]: one launch line
 lline() {
     local t="${tail_run}"
@@ -145,7 +145,7 @@ lline "TRAPPED code 14 (the top of the table)" $l 'trap\(14\)' 'TRAPPED trap_cod
 lline "trap code 15 is OUTCOME_UNKNOWN (TRAP_CODE_UNKNOWN=4), never TRAPPED" $l 'trap\(15\)' 'OUTCOME_UNKNOWN unknown_reason=4'
 lline "a brk reached directly is OUTCOME_UNKNOWN (FAULT=1), never TRAPPED" $l 'bare_brk\(\)' 'OUTCOME_UNKNOWN unknown_reason=1'
 check "${serial}" "budget exhaustion: spin() is OUTCOME_UNKNOWN (TICK_OVERRUN=2) after exactly 5 ticks of budget 5" \
-    "^osc_launch: ${l} spin\\(\\) -> OUTCOME_UNKNOWN unknown_reason=2 ticks=5 budget=5 pages_mapped=[1-9][0-9]* pages_after=0 slot_free=1; ${label}\$"
+    "^osc_launch: ${l} spin\\(\\) -> OUTCOME_UNKNOWN unknown_reason=2 ticks=5 budget=5 pages_mapped=[1-9][0-9]* page_tables_zeroed=1 slot_free=1; ${label}\$"
 lline "after the budget kill, the next launch succeeds: add(40,2) = 42" $a 'add\(40,2\)' 'RETURNED value=42'
 lline "contained fault: a null read is OUTCOME_UNKNOWN (FAULT=1)" $l 'peek0\(\)' 'OUTCOME_UNKNOWN unknown_reason=1'
 lline "after the fault, the next launch succeeds in the same boot: add(20,22) = 42" $a 'add\(20,22\)' 'RETURNED value=42'
@@ -166,13 +166,33 @@ lline "refused misaligned cells pointer (ws+4): LAUNCH_ARG_SHAPE (41)" $l 'count
 lline "re-entry with a 23-page workspace, last cell (ws+94200) touched: counter 1" $l 'counter\(ws\+94200,1\)' 'RETURNED value=1'
 lline "re-entry, same 23-page workspace: counter state preserved, 2" $l 'counter\(ws\+94200,1\)' 'RETURNED value=2'
 lline "refused 33-page workspace (over the 32-page cap): RESOURCE_UNAVAILABLE (30), nothing ran" $l 'counter\(ws\+0,1\)' 'REFUSED_AT_ADMISSION code=30 name=RESOURCE_UNAVAILABLE' ref
-check "${serial}" "summary: 11 returned, 2 trapped, 6 refused, 7 unknown" \
-    "^osc_launches: returned=11 trapped=2 refused=6 unknown=7; ${label}\$"
+# review additions: limits, memory protection, register clearing, workspace edges
+a6=a06_valid_limits_at_max.unit; l2=l02_stack_over.unit
+lline "a06 (declared stack 1 MiB, over the 64 KiB launcher maximum): LIMIT_EXCEEDED (14), before any reservation" $a6 'add\(1,2\)' 'REFUSED_AT_ADMISSION code=14 name=LIMIT_EXCEEDED' ref
+lline "stack just over the maximum (65552 = 65536 + 16, the smallest legal value above it): LIMIT_EXCEEDED (14)" $l2 'peek0\(\)' 'REFUSED_AT_ADMISSION code=14 name=LIMIT_EXCEEDED' ref
+lline "after the limit refusals, a launch succeeds: add(3,4) = 7" $a 'add\(3,4\)' 'RETURNED value=7'
+lline "contained fault: a read of a kernel virtual address (not address 0) is OUTCOME_UNKNOWN (FAULT=1)" $l 'peek_kernel\(kernel\)' 'OUTCOME_UNKNOWN unknown_reason=1'
+lline "after the kernel-address read, a launch succeeds: add(5,6) = 11" $a 'add\(5,6\)' 'RETURNED value=11'
+lline "W^X: a branch into the caller workspace (UXN) is OUTCOME_UNKNOWN (FAULT=1)" $l 'jump_ws\(ws\+0,1\)' 'OUTCOME_UNKNOWN unknown_reason=1'
+lline "after the workspace branch, a launch succeeds: add(7,8) = 15" $a 'add\(7,8\)' 'RETURNED value=15'
+lline "W^X: a branch into the input window (UXN) is OUTCOME_UNKNOWN (FAULT=1)" $l 'jump_in\(in\+0,4\)' 'OUTCOME_UNKNOWN unknown_reason=1'
+lline "after the input-window branch, a launch succeeds: add(9,10) = 19" $a 'add\(9,10\)' 'RETURNED value=19'
+lline "a task dirties x1..x29 and returns 1" $l 'dirty\(\)' 'RETURNED value=1'
+lline "the next task sees x0..x29 (except x7, the OscRt pointer) all zero: OR of them = 0" $l 'regs_or\(\)' 'RETURNED value=0'
+lline "the first byte past the workspace (ws + pages*4096) is OUTCOME_UNKNOWN (FAULT=1), contained" $l 'touch_past\(ws\+16376,1\)' 'OUTCOME_UNKNOWN unknown_reason=1'
+lline "after the past-the-end read, a launch succeeds: add(11,12) = 23" $a 'add\(11,12\)' 'RETURNED value=23'
+lline "workspace with null memory and pages>0: RESOURCE_UNAVAILABLE (30), nothing mapped" $l 'counter\(ws\+8,1\)' 'REFUSED_AT_ADMISSION code=30 name=RESOURCE_UNAVAILABLE' ref
+lline "workspace with unaligned memory: RESOURCE_UNAVAILABLE (30), nothing mapped" $l 'counter\(ws\+16,1\)' 'REFUSED_AT_ADMISSION code=30 name=RESOURCE_UNAVAILABLE' ref
+lline "workspace overlapping the launcher's own state: RESOURCE_UNAVAILABLE (30), nothing mapped" $l 'counter\(ws\+24,1\)' 'REFUSED_AT_ADMISSION code=30 name=RESOURCE_UNAVAILABLE' ref
+lline "workspace overlapping the input buffer: RESOURCE_UNAVAILABLE (30), nothing mapped" $l 'counter\(ws\+32,1\)' 'REFUSED_AT_ADMISSION code=30 name=RESOURCE_UNAVAILABLE' ref
+lline "after the workspace refusals, a launch succeeds: add(13,14) = 27" $a 'add\(13,14\)' 'RETURNED value=27'
+check "${serial}" "summary: 19 returned, 2 trapped, 12 refused, 11 unknown" \
+    "^osc_launches: returned=19 trapped=2 refused=12 unknown=11; ${label}\$"
 # every launch line carries the label; the teardown columns never show a page left behind
 nl=$(grep -c '^osc_launch: ' "${serial}" || true)
 nlab=$(grep -cE "^osc_launch: .*; ${label}\$" "${serial}" || true)
-[[ "${nl}" == 26 && "${nlab}" == 26 ]] && pass "all 26 launch lines carry the label" || fail "launch lines labelled (${nlab} of ${nl})"
-if grep -E '^osc_launch: ' "${serial}" | grep -vqE 'pages_after=0 slot_free=1;'; then fail "a task left pages mapped or its slot busy"; else pass "every task was torn down: pages_after=0, slot_free=1"; fi
+[[ "${nl}" == 44 && "${nlab}" == 44 ]] && pass "all 44 launch lines carry the label" || fail "launch lines labelled (${nlab} of ${nl})"
+if grep -E '^osc_launch: ' "${serial}" | grep -vqE 'page_tables_zeroed=1 slot_free=1;'; then fail "a task left pages mapped or its slot busy"; else pass "every task was torn down: page_tables_zeroed=1, slot_free=1"; fi
 
 if [[ -n "${AIENOS_LOG_DIR:-}" ]]; then cp "${serial}" "${AIENOS_LOG_DIR}/qemu_ck_osc_launch_serial.log"; fi
 if [[ "${failed}" != 0 || -n "${AIENOS_QEMU_VERBOSE:-}" ]]; then

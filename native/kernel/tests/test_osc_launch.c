@@ -257,7 +257,7 @@ static void fixture_unit(void)
     FILE *f = fopen(path, "rb");
     CHECK(f != NULL);
     if (!f) return;
-    static uint8_t buf[4096];
+    static uint8_t buf[8192];
     size_t n = fread(buf, 1, sizeof buf, f);
     fclose(f);
     struct osc_policy p;
@@ -269,7 +269,7 @@ static void fixture_unit(void)
     p.abi_versions = OSC_PROFILE_ABI;
     static struct osc_accept a;
     CHECK(osc_unit_admit(buf, n, &p, &a) == OSC_OK);
-    CHECK(a.function_count == 8);
+    CHECK(a.function_count == 14);
     int fi = osc_unit_lookup(&a, "counter", 7);
     CHECK(fi == 7 && a.entry[fi].nregs == 2 && a.entry[fi].reg_kind[0] == 12 && a.entry[fi].reg_kind[1] == 5);
     uint64_t ok[2] = { 0x210000, 1 }, bad[2] = { 0x210004, 1 };
@@ -278,7 +278,7 @@ static void fixture_unit(void)
     CHECK(!osc_launch_args_ok(a.entry[fi].reg_kind, a.entry[fi].nregs, ok, 1));
     CHECK(osc_unit_lookup(&a, "Counter", 7) == -1 && osc_unit_lookup(&a, "trap", 4) == 0);
     /* every word of l01 passed the section 8.4 scan inside admission; the spin loop and the bare brk are in it */
-    CHECK(a.code_len == 116);
+    CHECK(a.code_len == 384);
 }
 
 static void workspace_bounds(void)
@@ -286,6 +286,22 @@ static void workspace_bounds(void)
     const uint8_t kc[2] = { 12, 5 };
     const uint64_t in = 0x200000, ws = 0x210000;
     CHECK(OSC_WS_MAX_PAGES == 32u);
+    /* declared stack vs the launcher maximum: at the max passes, one byte over is LIMIT_EXCEEDED (14) */
+    CHECK(osc_launch_stack_ok(0, 65536) && osc_launch_stack_ok(65536, 65536));
+    CHECK(!osc_launch_stack_ok(65552, 65536) && !osc_launch_stack_ok(65537, 65536) && !osc_launch_stack_ok(1048576, 65536));
+    /* a workspace must not overlap the launcher state (slot0) or the input buffer: disjoint test */
+    {
+        const uint64_t slot = 0x80000, slen = 0x40000;
+        CHECK(osc_launch_disjoint(0x100000, 4096, slot, slen));                 /* clear of it */
+        CHECK(!osc_launch_disjoint(slot, 4096, slot, slen));                    /* starts inside slot0 */
+        CHECK(!osc_launch_disjoint(slot - 4096, 8192, slot, slen));             /* straddles the start */
+        CHECK(!osc_launch_disjoint(slot + slen - 4096, 8192, slot, slen));      /* straddles the end */
+        CHECK(osc_launch_disjoint(slot - 4096, 4096, slot, slen));              /* ends exactly at its start */
+        CHECK(osc_launch_disjoint(slot + slen, 4096, slot, slen));              /* begins exactly at its end */
+        CHECK(!osc_launch_disjoint(slot - 8, ~0ull, slot, slen));               /* a wrapping range overlaps */
+        CHECK(osc_launch_disjoint(slot, 4096, 0, 0) && osc_launch_disjoint(slot, 0, slot, slen)); /* empty: nothing */
+        CHECK(!osc_launch_disjoint(0x100000, 4096, 0x100040, 5));               /* an input buffer inside the workspace */
+    }
     CHECK(osc_launch_ws_pages_ok(0) && osc_launch_ws_pages_ok(1) && osc_launch_ws_pages_ok(32));
     CHECK(!osc_launch_ws_pages_ok(33) && !osc_launch_ws_pages_ok(0xffffffffull) && !osc_launch_ws_pages_ok(~0ull));
     for (uint64_t pages = 0; pages <= 33; pages++) {

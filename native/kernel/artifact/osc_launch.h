@@ -50,6 +50,13 @@ int osc_launch_args_ok(const uint8_t *kinds, unsigned nregs, const uint64_t *arg
 int osc_launch_ranges_owned(const uint8_t *kinds, unsigned nregs, const uint64_t *args, uint64_t in_va,
                             uint64_t in_len, uint64_t ws_va, uint64_t ws_len);
 
+/* 1 if the byte ranges [a, a+alen) and [b, b+blen) do not overlap (an empty range overlaps nothing; a
+ * range that wraps the address space overlaps everything, so 0). */
+int osc_launch_disjoint(uint64_t a, uint64_t alen, uint64_t b, uint64_t blen);
+
+/* 1 if a signer-declared max_stack_bytes is within the launcher hard maximum (else LIMIT_EXCEEDED, 14). */
+int osc_launch_stack_ok(uint64_t declared, uint64_t hard_max);
+
 /* 1 if a workspace of this many pages is allowed (0 = none, up to OSC_WS_MAX_PAGES). */
 int osc_launch_ws_pages_ok(uint64_t pages);
 

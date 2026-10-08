@@ -15,3 +15,7 @@ launch/ (added by the C3-3a task-launch cut):
                       bare_brk, exec_stack, overflow, counter. NOT compiled by oscc; its IR section is
                       min.ir, so the IR does not describe the code (attested, never checked: spec 10).
                       Fixture for the QEMU launch gate only.
+  (C3-3a review fixes) l01 now also holds peek_kernel, jump_ws, jump_in, dirty, regs_or, touch_past (14 functions,
+                      TEST, hand-assembled, same key and labelling); l02_stack_over.unit is l01 with
+                      max_stack_bytes patched to 65552 (65536 + 16) and re-signed with test1 (TEST, one byte over the
+                      launcher maximum). a06_valid_limits_at_max.unit (vectors/) is launched too: 1 MiB stack.

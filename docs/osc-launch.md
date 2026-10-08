@@ -40,7 +40,7 @@ the Nth tick that arrives while EL0 is running ends the task. A task shorter tha
 `OUTCOME_UNKNOWN` reaches the caller as `struct osc_result`: `cls == OSC_RES_UNKNOWN (4)` and
 `unknown_reason`: 1 FAULT, 2 TICK_OVERRUN, 3 LAUNCH_LOST, 4 TRAP_CODE_UNKNOWN, 255 OTHER (the spec's values).
 The other classes: `RETURNED (1)` with `value`, `TRAPPED (2)` with `trap_code` 1..14, `REFUSED (3)` with
-`refused_code` (40, 41, 30 or 16). The reason is diagnostic and never changes the class.
+`refused_code` (40, 41, 30, 16 or 14). The reason is diagnostic and never changes the class.
 
 ## Re-entry: yes, with a caller-owned workspace
 
@@ -69,7 +69,8 @@ through `OscRt` ends `OUTCOME_UNKNOWN(OTHER)`.
 - **Results:** RETURNED only through the return stub; TRAPPED only through the trap stub with a code in
   1..14; a `brk` reached directly, any CPU fault, a trap code outside 1..14 and a budget overrun are
   `OUTCOME_UNKNOWN`, never RETURNED or TRAPPED.
-- **Teardown:** tables, runtime pages, input, code and stack are zeroed and unmapped; `pages_after=0` and the
+- **Timers:** EL0 access to the timers, counters and event stream is switched off for the task (CNTKCTL_EL1 bits 0-3, 8, 9 cleared, restored after), whatever firmware left there.
+- **Teardown:** tables, runtime pages, input, code and stack are zeroed and unmapped; `page_tables_zeroed=1` (every page-table entry and the L0 slot are zero; this says nothing about frame contents, which are cleared by memset) and the
   slot is free for the next launch. Caches are cleaned and the TLB invalidated.
 
 ## Decisions (simplest honest option, with reasons)
@@ -84,15 +85,22 @@ through `OscRt` ends `OUTCOME_UNKNOWN(OTHER)`.
    preemption between tasks. This keeps the C kernel's scheduler untouched. Cost: 10 ms granularity.
 3. **A caller cap on the budget** (`max_ticks`), because the declared maximum of a signer is up to 1e9 ticks
    (a loop would run 115 days). The cap only lowers.
-4. **Launcher hard maxima are stricter than the container's:** code 64 KiB, stack 64 KiB, input 4 KiB,
-   declared workspace 16 KiB. A unit declaring more is refused 30 (`RESOURCE_UNAVAILABLE`) at launch, nothing runs
-   (spec 8.2 step 16 lets a loader apply stricter limits). `a06_valid_limits_at_max` is such a unit.
-4a. **The workspace is caller-sized, capped at 32 pages (128 KiB, `OSC_WS_MAX_PAGES`).** OSH needs 23 pages. 0 pages
-   means no workspace. The cap bounds the user pages, page-table slots and kernel bss; it is the kernel's choice,
-   never read from the container (container format and vectors unchanged). A request over the cap, with a null
-   or non-page-aligned `mem`, is refused before the first instruction with 30 (`RESOURCE_UNAVAILABLE`), the
-   code spec 8.3 gives to a failed reservation of pages. The mapping stays read-write and never executable,
-   is not cleared at teardown, and `cells` pointer checks use the actual size.
+4. **Launcher hard maxima are stricter than the container's.** Spec 8.2 step 16: a signer-declared budget
+   above a hard maximum is refused `LIMIT_EXCEEDED` (14) before any reservation, nothing runs. The only declared
+   budget the launcher bounds is `max_stack_bytes`, at 64 KiB: a stack of 65552 (65536 + 16, the smallest legal value above the maximum: the container needs a multiple of 16) gives 14 (gate line, unit
+   `l02_stack_over`), and so does `a06_valid_limits_at_max` (1 MiB). `cpu_ticks` is never refused here; the caller
+   cap `max_ticks` only lowers it (decision 3). `pool_slots` is not bounded: no pool service exists, a call to one
+   ends `OUTCOME_UNKNOWN(OTHER)` (decision 6). Real reservation failures keep 30 (`RESOURCE_UNAVAILABLE`):
+   code larger than 64 KiB, input over 4 KiB, task slot busy, no free address-space slot. The container has no
+   workspace field (spec section 7), so there is no declared workspace to refuse.
+4a. **The workspace is caller-sized, capped at 32 pages (128 KiB, `OSC_WS_MAX_PAGES`).** The only workspace bound
+   is the caller's. OSH needs 23 pages. 0 pages means no workspace. The cap bounds the user pages, page-table
+   slots and kernel bss; it is the kernel's choice, never read from the container. A request over the cap, with
+   a null or non-page-aligned `mem`, or overlapping the launcher's own state or the input buffer, is refused
+   before anything is mapped with 30 (`RESOURCE_UNAVAILABLE`), the code spec 8.3 gives to a failed reservation
+   of pages. The workspace is mapped read-write into EL0, so it MUST be memory the caller owns. The kernel has no
+   region it limits workspaces to; beyond those checks it trusts the caller (also stated in `osc_task.h`). The
+   mapping is never executable, is not cleared at teardown, and `cells` pointer checks use the actual size.
 5. **Ownership failures use code 41.** The spec gives no separate code for 9.1.1 item 4.
 6. **Unprovided runtime services end the task as `OUTCOME_UNKNOWN(OTHER)`** instead of being faked.
 7. **Hand-assembled test unit.** The extra gate units (trap, spin, faults, counter) are written in assembly
