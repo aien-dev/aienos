@@ -3,4 +3,19 @@ aien-dev/aien-protocols main at 6661009 (PR #17 merged), specs/osc-unit-artifact
 (contract OSC_UNIT_ARTIFACT.md, container version 1, frozen v1).
 Both keys are THROWAWAY TEST keys derived from fixed labels in that spec's
 tools/make-vectors.sh. They protect nothing and must never enter a real anchor set.
-launch.txt (launch code 41) is copied but not run by this admission test: launch is a separate cut.
+launch.txt (launch code 41) is vectors/launch.txt, used by tests/test_osc_launch.c (C3-3a).
+
+launch/ (added by the C3-3a task-launch cut):
+  osc-launch-check.c  copied unchanged from the same spec (tools/osc-launch-check.c): the C reference
+                      for the launch-argument rule (spec 9.2, launch code 41). vectors/launch.txt is the
+                      spec's launch.txt, unchanged.
+  l01.S, make-l01.sh, l01_launch_fns.unit, l01.code
+                      a TEST-signed unit (the spec's throwaway key test1, built with the spec's own
+                      generator helpers) of hand-assembled functions: trap, spin, peek0, poke_rt,
+                      bare_brk, exec_stack, overflow, counter. NOT compiled by oscc; its IR section is
+                      min.ir, so the IR does not describe the code (attested, never checked: spec 10).
+                      Fixture for the QEMU launch gate only.
+  (C3-3a review fixes) l01 now also holds peek_kernel, jump_ws, jump_in, dirty, regs_or, touch_past (14 functions,
+                      TEST, hand-assembled, same key and labelling); l02_stack_over.unit is l01 with
+                      max_stack_bytes patched to 65552 (65536 + 16) and re-signed with test1 (TEST, one byte over the
+                      launcher maximum). a06_valid_limits_at_max.unit (vectors/) is launched too: 1 MiB stack.

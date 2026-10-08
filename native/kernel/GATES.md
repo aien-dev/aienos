@@ -730,3 +730,31 @@ Serial input is typed from outside the guest through a QEMU pipe chardev, USB ke
 Mutation self-test (red before green): `scripts/qemu_ck_console_test.sh --mutation` builds `make full CK_CONSOLE_SESSION=1 CK_TEST_CONSOLE_MUTATION=bm-left-on-after-exit` (TEST-ONLY, announces itself with a `WARNING: TEST-ONLY console session MUTATION BUILD` line, refused with `CK_HARDWARE_STAGING=1`, `CK_QEMU_UNSAFE_DMA=1` and without `CK_CONSOLE_SESSION=1`, by the Makefile and by `#error`), which leaves the xHCI bus master on after the session exit. With the SMMU on, row 151 must FAIL (the revoke prints `revoke FAILED`, the COMMAND read back shows bus_master=on) while the boot still reaches the final report with row 146 passing. The reset-time quiesce hook then revokes the leftover bus master, which is after the session window the row reads.
 
 `scripts/ck_gates.sh` takes CONSOLE from this child only (NOT_RUN with exit 3 while the QEMU gate lock is held or the quiet flag exists).
+
+## OSC_LAUNCH: OSC unit task launch (C-only, Campaign 3 cut C3-3a) -> CK `OSC_LAUNCH` (scripts/qemu_ck_osc_launch_test.sh)
+
+Contract: `OSC_UNIT_ARTIFACT.md` section 9 (calling convention, launch requirements, argument checks, result
+shape), 8.4 and 11. Code: `native/kernel/artifact/osc_launch.{h,c}` (pure: argument rule, range ownership,
+ticks budget, result classification) and `native/kernel/core/osc_task.{h,c}` (maps and runs the EL0 task, tears
+it down). What is enforced, what is not, and the decisions taken: `docs/osc-launch.md`.
+
+- Host tests: `tests/test_osc_launch.c`, part of `make test` and `make sanitize`. It runs every line of
+  `launch.txt` (16), compares the argument rule with the spec's own C reference `osc-launch-check.c` on 3000
+  pseudo-random cases (0 mismatches), and classifies all 64 exception classes, every trap code 0..255 and
+  every stub/SVC placement (RETURNED only from the return stub, TRAPPED only from the trap stub with 1..14).
+- QEMU gate: one boot of the qualification image built with `CK_SEED0B_TEST_ANCHOR=1 CK_OSC_LAUNCH_TEST=1`
+  (TEST ONLY; the flag is refused without the TEST anchor). Two TEST-signed units are in the sealed Store: the
+  spec's `a01_valid_min.unit` and the hand-assembled `l01_launch_fns.unit` (`tests/fixtures/osc_unit/launch/`,
+  built by `make-l01.sh` with the spec's generator helpers; its IR section is min.ir, so the IR does not
+  describe that code, which the spec says the kernel never checks). 44 launches, each printed as one
+  `osc_launch:` line carrying the label: RETURNED with exact values; refused wrong argument count, unknown name,
+  wrong case, slice outside the input window, misaligned cells; TRAPPED 3 and 14 through the trap service; trap
+  code 15 and a brk reached directly are OUTCOME_UNKNOWN (never TRAPPED); budget exhaustion (TICK_OVERRUN);
+  contained faults (null read, write to OscRt, jump into the stack, stack overflow), each followed by a
+  successful launch in the same boot; every task torn down (`page_tables_zeroed=1 slot_free=1`); a caller-owned
+  workspace keeping state across calls, a 23-page workspace touched at its last cell with state kept, and a
+  33-page workspace refused 30 (over the 32-page cap); stack over the maximum (a06 1 MiB, l02 65552) refused LIMIT_EXCEEDED 14; kernel-address read, branch into workspace and into input (UXN), read just past the workspace end: each OUTCOME_UNKNOWN FAULT, contained, relaunch succeeds; x1..x29 zero at entry after a dirtying task; null, unaligned, state-overlapping and input-overlapping workspaces refused 30.
+- Mutants (run by hand, restored): dropping the execute-never bit on data turns the W^X line, and the lines
+  after it, red; serving an SVC from unit context turns the host classification test red (no admitted unit can
+  execute an SVC, so only the host test reaches that lock).
+- Labels: QEMU (aarch64 virt), TEST signer, not physical. Nothing here ran on a Spark.
