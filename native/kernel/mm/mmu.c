@@ -420,3 +420,62 @@ volatile void *ck_mmio_try_map(uint64_t phys, size_t len)
 {
     return len ? ck_mm_mmio_try_map(phys, len) : 0;
 }
+
+/* Exclusive map for a caller that unmaps again (mmio_window.c). All or
+ * nothing: if any page is already mapped, by anyone, nothing is mapped. Pages
+ * are mapped one at a time at level 3 so the unmap never needs to split a
+ * block (a split is refused on live tables). */
+volatile void *ck_mmio_map_exclusive(uint64_t phys, size_t len)
+{
+    uint64_t lo = phys & ~(CK_PAGE - 1);
+    uint64_t hi = (phys + len + CK_PAGE - 1) & ~(CK_PAGE - 1);
+    if (!len || hi <= lo || overlaps_ram(lo, hi))
+        return 0;
+    for (uint64_t p = lo; p < hi; p += CK_PAGE)
+        if (ck_pt_lookup(&pt, p, 0, 0, 0) == 0)
+            return 0;
+    for (uint64_t p = lo; p < hi; p += CK_PAGE)
+        if (ck_pt_map(&pt, p, p, CK_PAGE, CK_PT_DEVICE)) {
+            (void)ck_pt_unmap(&pt, lo, p - lo); /* undo: these pages were ours a moment ago */
+            if (pt.live)
+                tlb_sync();
+            return 0;
+        }
+    if (pt.live)
+        tlb_sync();
+    return (volatile void *)(uintptr_t)phys;
+}
+
+/* Break before make: the entries are made invalid first, then the TLB is
+ * invalidated and synchronised (tlb_sync) before this returns, so no stale
+ * translation outlives the call and a later map of the same pages starts from
+ * invalid entries. */
+int ck_mmio_unmap_exclusive(uint64_t phys, size_t len)
+{
+    uint64_t lo = phys & ~(CK_PAGE - 1);
+    uint64_t hi = (phys + len + CK_PAGE - 1) & ~(CK_PAGE - 1);
+    if (!len || hi <= lo || overlaps_ram(lo, hi))
+        return -1;
+    for (uint64_t p = lo; p < hi; p += CK_PAGE) {
+        uint64_t a, at;
+        int lv;
+        /* Only a Device identity page of its own: never RAM, a block, or a page with other attributes. */
+        if (ck_pt_lookup(&pt, p, &a, &at, &lv) != 0 || a != p || lv != 3 || at != CK_PT_DEVICE)
+            return -1;
+    }
+    if (ck_pt_unmap(&pt, lo, hi - lo))
+        return -1;
+    if (pt.live)
+        tlb_sync();
+    return 0;
+}
+
+int ck_mmio_is_mapped(uint64_t phys, size_t len)
+{
+    uint64_t lo = phys & ~(CK_PAGE - 1);
+    uint64_t hi = (phys + len + CK_PAGE - 1) & ~(CK_PAGE - 1);
+    for (uint64_t p = lo; len && p < hi; p += CK_PAGE)
+        if (ck_pt_lookup(&pt, p, 0, 0, 0) == 0)
+            return 1;
+    return 0;
+}

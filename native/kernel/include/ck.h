@@ -48,6 +48,21 @@ volatile void *ck_mmio_map(uint64_t phys, size_t len);
  * cannot be mapped (for addresses read from firmware tables; added for the
  * platform xHCI path, NEXT-PHASE-3 cut 2). */
 volatile void *ck_mmio_try_map(uint64_t phys, size_t len);
+/* Exclusive variant of ck_mmio_try_map for a caller that must later take the
+ * pages away again (aienos#286, cut B3b). Maps [phys, phys+len) Device-nGnRE
+ * only if EVERY page in the range is currently unmapped; NULL (and nothing
+ * mapped) when any page is already mapped by someone else, overlaps RAM, or
+ * cannot be mapped. ck_mmio_try_map reuses pages that are already mapped, so
+ * it must never be paired with an unmap. */
+volatile void *ck_mmio_map_exclusive(uint64_t phys, size_t len);
+/* Unmaps pages mapped by ck_mmio_map_exclusive and invalidates the TLB. 0 on
+ * success; -1 (nothing changed) if any page of the range is not a Device
+ * identity mapping of itself or the unmap cannot be done on live tables.
+ * After it returns 0 a raw access to the range faults. */
+int ck_mmio_unmap_exclusive(uint64_t phys, size_t len);
+/* 1 if any page of [phys, phys+len) is currently mapped in the kernel's
+ * tables (a table lookup, never an access, so it cannot fault), else 0. */
+int ck_mmio_is_mapped(uint64_t phys, size_t len);
 
 /* Full system barrier (dsb sy). */
 void ck_mb(void);

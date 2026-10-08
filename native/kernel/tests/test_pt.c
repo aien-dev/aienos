@@ -141,6 +141,17 @@ int main(void)
     CHECK(ck_pt_map(&pt, 2 * G + 0x400000, 2 * G + 0x400000, K4, CK_PT_DEVICE) == CK_PT_ELIVE);
     CHECK(ck_pt_unmap(&pt, 2 * G + 0x400000, K4) == CK_PT_ELIVE);
     expect(pt.root, 2 * G + 0x400000, 2 * G + 0x400000, CK_PT_NORMAL_RW, 2); /* block split by the stack guard */
+    /* Live unmap of one level-3 page (MMIO window revoke): the page becomes a
+     * hole, neighbours are untouched, and the hole can be mapped again (the
+     * live rule only fills invalid entries). A block would need a split. */
+    CHECK(ck_pt_unmap(&pt, 0x08004000, K4) == 0);
+    expect_hole(pt.root, 0x08004000);
+    expect_hole(pt.root, 0x08004ff8);
+    expect(pt.root, 0x08003000, 0x08003000, CK_PT_DEVICE, 3);
+    expect(pt.root, 0x08005000, 0x08005000, CK_PT_DEVICE, 3);
+    CHECK(ck_pt_unmap(&pt, 0x08004000, K4) == 0);                    /* unmapping a hole is harmless */
+    CHECK(ck_pt_map(&pt, 0x08004000, 0x08004000, K4, CK_PT_DEVICE) == 0);
+    expect(pt.root, 0x08004000, 0x08004000, CK_PT_DEVICE, 3);
     pt.live = 0;
 
     /* ck_pt_lookup agrees with the independent walk. */

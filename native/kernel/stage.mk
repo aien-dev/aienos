@@ -62,7 +62,7 @@ STAGE_FREE_FLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -nostdli
 STAGE_ALLOWED_U := ck_puts ck_printf ck_vprintf ck_panic ck_alloc ck_free ck_dma_alloc ck_mmio_map \
   ck_dma_confine ck_dma_unconfine ck_dma_faults \
   ck_mb ck_acpi_find ck_time_us ck_udelay ck_commit ck_exception_level ck_conventional_memory_kb \
-  ck_acpi_platform_devices ck_dma_confine_named ck_mmio_try_map \
+  ck_acpi_platform_devices ck_dma_confine_named ck_mmio_try_map ck_mmio_map_exclusive ck_mmio_unmap_exclusive ck_mmio_is_mapped \
   ck_cap_init ck_cap_insert ck_cap_lookup ck_cap_revoke \
   ck_entropy_fill ck_entropy_status ck_entropy_reason \
   ck_console_rx_ready ck_console_rx_poll ck_console_uart_name ck_console_uart_base

@@ -1577,6 +1577,124 @@ static void test_mmio_window(void)
     munmap(ecam, FAKE_BYTES);
 }
 
+
+/* ---------------- Unmap on revoke, exclusive page ownership (cut B3b) ---------------- */
+
+static void child_read_window(uint8_t *p) { (void)*(volatile uint8_t *)p; }
+
+/* A synthetic function whose 64-bit BAR0 is the address of `win` (identity
+ * mapping on the host), command register memory-decode on. */
+static void syn_func(pci_found *f, uint8_t *win)
+{
+    memset(f, 0, sizeof *f);
+    f->vendor = 0x1b36;
+    f->device = 0x0010;
+    f->class_code = 0x010802;
+    f->command = 0x2;
+    f->bar_raw[0] = (uint32_t)(uintptr_t)win | 4u;
+    f->bar_raw[1] = (uint32_t)((uint64_t)(uintptr_t)win >> 32);
+}
+
+static void test_mmio_unmap(void)
+{
+    uint8_t *win = mmap(NULL, 2 * WIN_BYTES, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    CHECK(win != MAP_FAILED);
+    if (win == MAP_FAILED) return;
+    for (size_t i = 0; i < 2 * WIN_BYTES; i++) win[i] = win_pat(i);
+    uint8_t *next = win + WIN_BYTES;                                /* neighbouring page, not part of the window */
+    pci_found f;
+    syn_func(&f, win);
+    uint64_t addr = (uint64_t)(uintptr_t)win;
+
+    struct ck_mmio_registry reg;
+    struct ck_cap_table tab, tab2;
+    struct ck_cap_table *const tabs[2] = {&tab, &tab2};
+    struct ck_handle h, c, c2, again;
+    uint64_t v = 0;
+    ck_host_mmio_reset();
+    ck_host_try_map_ok = 1;
+    ck_host_try_map_fail = 0;
+    ck_mmio_registry_init(&reg);
+    ck_cap_init(&tab, 1, CK_CAP_SLOTS);
+    ck_cap_init(&tab2, 2, CK_CAP_SLOTS);
+
+    /* Exclusive ownership: pages someone else already mapped (nvme_bind maps
+     * the same BAR0) are refused, nothing is created, and the other mapping
+     * is untouched. */
+    CHECK(ck_mmio_try_map(addr, WIN_BYTES) != NULL);
+    CHECK(ck_mmio_window_open(&reg, &tab, &f, 0, WIN_BYTES, CK_MMIO_RIGHTS, &h) == CK_MMIO_E_MAP);
+    CHECK(reg.next == 0 && ck_host_unmap_calls == 0 && ck_mmio_is_mapped(addr, WIN_BYTES));
+    CHECK(child_died_on_write(child_read_window, win) == 0);
+    ck_host_mmio_reset();                                           /* the other owner is gone */
+
+    /* Open, read, derive. */
+    CHECK(ck_mmio_window_open(&reg, &tab, &f, 0, WIN_BYTES, CK_MMIO_RIGHTS, &h) == CK_MMIO_OK);
+    CHECK(reg.next == 1 && reg.w[0].owned == 1 && reg.w[0].mapped == 1 && reg.w[0].bus_addr == addr);
+    CHECK(ck_mmio_is_mapped(addr, WIN_BYTES));
+    CHECK(ck_mmio_read(&reg, &tab, h, 8, 4, &v) == CK_MMIO_OK && v == win_expect(8, 4));
+    CHECK(ck_mmio_window_open(&reg, &tab, &f, 0, WIN_BYTES, CK_MMIO_RIGHTS, &again) == CK_MMIO_E_MAP); /* second owner refused */
+    CHECK(ck_mmio_try_map(addr + WIN_BYTES, WIN_BYTES) != NULL);   /* an unrelated neighbour page */
+    CHECK(ck_cap_derive_into(&tab, h, &tab2, CK_R_READ | CK_R_REVOKE, &c) == CK_CAP_OK);
+    CHECK(ck_cap_derive(&tab, h, CK_R_READ, &c2) == CK_CAP_OK);
+    CHECK(ck_mmio_read(&reg, &tab2, c, 16, 4, &v) == CK_MMIO_OK && v == win_expect(16, 4));
+    /* NEGATIVE CONTROL: with no revoke, the raw read in a child succeeds, so a
+     * fault below can only come from the revoke. */
+    CHECK(child_died_on_write(child_read_window, win) == 0);
+
+    /* Revoking one derived child leaves the parent, its other children and the
+     * pages alone. */
+    CHECK(ck_mmio_revoke(&reg, tab2.id, c, tabs, 2) == CK_CAP_OK);
+    CHECK(ck_mmio_read(&reg, &tab2, c, 16, 4, &v) == CK_CAP_INVALID);
+    CHECK(ck_mmio_read(&reg, &tab, h, 8, 4, &v) == CK_MMIO_OK);
+    CHECK(ck_mmio_is_mapped(addr, WIN_BYTES) && ck_host_unmap_calls == 0 && reg.w[0].mapped == 1);
+    CHECK(child_died_on_write(child_read_window, win) == 0);
+
+    /* Revoking the parent removes every remaining capability and unmaps. */
+    CHECK(ck_mmio_revoke(&reg, tab.id, h, tabs, 2) == CK_CAP_OK);
+    CHECK(ck_mmio_read(&reg, &tab, h, 8, 4, &v) == CK_CAP_INVALID);
+    CHECK(ck_mmio_read(&reg, &tab, c2, 8, 4, &v) == CK_CAP_INVALID);
+    CHECK(!ck_mmio_is_mapped(addr, WIN_BYTES) && ck_host_unmap_calls == 1 && reg.w[0].mapped == 0);
+    CHECK(child_died_on_write(child_read_window, win) == 1);        /* raw access faults at the MMU */
+    CHECK(child_died_on_write(child_read_window, win + WIN_BYTES - 8) == 1);
+    CHECK(child_died_on_write(child_read_window, next) == 0);       /* neighbour page untouched */
+    CHECK(ck_mmio_is_mapped(addr + WIN_BYTES, WIN_BYTES));
+
+    /* Double revoke is harmless: refused, no second unmap. */
+    CHECK(ck_mmio_revoke(&reg, tab.id, h, tabs, 2) == CK_CAP_INVALID);
+    CHECK(ck_host_unmap_calls == 1);
+
+    /* The pages are free again for a new owner (what nvme_bind does after the
+     * report); numbers still never repeat. */
+    CHECK(ck_mmio_window_open(&reg, &tab, &f, 0, WIN_BYTES, CK_MMIO_RIGHTS, &again) == CK_MMIO_OK);
+    CHECK(reg.next == 2 && reg.w[1].resource != reg.w[0].resource);
+    CHECK(ck_mmio_read(&reg, &tab, h, 0, 4, &v) == CK_CAP_INVALID);
+    CHECK(ck_mmio_read(&reg, &tab, again, 0, 4, &v) == CK_MMIO_OK && v == win_expect(0, 4));
+    CHECK(child_died_on_write(child_read_window, win) == 0);
+    CHECK(ck_mmio_revoke(&reg, tab.id, again, tabs, 2) == CK_CAP_OK && ck_host_unmap_calls == 2);
+
+    /* A borrowed window (ck_mmio_window_create) revokes the capability only. */
+    ck_host_mmio_reset();
+    CHECK(mprotect(win, WIN_BYTES, PROT_READ | PROT_WRITE) == 0);
+    CHECK(ck_mmio_window_create(&reg, &tab, &f, 0, WIN_BYTES, win, CK_MMIO_RIGHTS, &h) == CK_MMIO_OK);
+    CHECK(reg.w[reg.next - 1].owned == 0);
+    CHECK(ck_mmio_revoke(&reg, tab.id, h, tabs, 2) == CK_CAP_OK && ck_host_unmap_calls == 0);
+    CHECK(ck_mmio_read(&reg, &tab, h, 0, 4, &v) == CK_CAP_INVALID);
+    CHECK(child_died_on_write(child_read_window, win) == 0);
+
+    /* Argument and failure edges. */
+    CHECK(ck_mmio_window_open(NULL, &tab, &f, 0, WIN_BYTES, CK_MMIO_RIGHTS, &h) == CK_MMIO_E_ARG);
+    CHECK(ck_mmio_window_open(&reg, &tab, &f, 0, 0, CK_MMIO_RIGHTS, &h) == CK_MMIO_E_ARG);
+    CHECK(ck_mmio_window_open(&reg, &tab, &f, 0, WIN_BYTES, CK_R_READ | CK_R_WRITE, &h) == CK_MMIO_E_RIGHTS);
+    CHECK(ck_mmio_window_open(&reg, &tab, &f, 2, WIN_BYTES, CK_MMIO_RIGHTS, &h) == CK_MMIO_E_BAR);
+    CHECK(ck_mmio_revoke(NULL, tab.id, h, tabs, 2) == CK_MMIO_E_ARG);
+    ck_host_try_map_ok = 0;
+    CHECK(ck_mmio_window_open(&reg, &tab, &f, 0, WIN_BYTES, CK_MMIO_RIGHTS, &h) == CK_MMIO_E_MAP);
+    ck_host_try_map_ok = 1;
+    munmap(win, 2 * WIN_BYTES);
+    ck_host_mmio_reset();
+    ck_host_try_map_ok = 0;
+}
+
 /* The stage report binds a window to a discovered NVMe BAR0, reads VS
  * through the capability, and shows the read refused after revoke. */
 static void test_mmio_stage_report(void)
@@ -1608,7 +1726,7 @@ static void test_mmio_stage_report(void)
     ck_host_capture_stop();
     const char *x = ck_host_capture_text();
     CHECK(has(x, "mmio_win: 0000:00:02.0 bar0 addr=0x"));
-    CHECK(has(x, "size=0x1000 create=0 read(VS)=0 value=0x10400 past-end=-504 revoke=0 after-revoke=-2 (read-only, report-only)\n"));
+    CHECK(has(x, "size=0x1000 create=0 read(VS)=0 value=0x10400 past-end=-504 revoke=0 after-revoke=-2 unmapped=1 (read-only, report-only)\n"));
     /* Map refused: reported, nothing bound. */
     ck_host_try_map_ok = 0;
     ck_host_capture_start();
@@ -1655,6 +1773,7 @@ int main(void)
     test_discover_report();
     test_discover_in_stage();
     test_mmio_window();
+    test_mmio_unmap();
     test_mmio_stage_report();
     test_store();
     test_artifact_store();
