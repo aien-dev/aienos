@@ -4,3 +4,4 @@ step 3 unit=expand in_len=8 ret=103 ws_sha256=b4ca6c4cd9e03de08accd13a39ca8685e5
 request 1 sha256=0c69d388dbfd5634d8e5d4f801ab87b24ad5b53c19cea45bf27ce0c57e387d59
 step 4 unit=expand in_len=8 ret=104 ws_sha256=0e9abb9058a2211457ab28855efa3283c6c02012079f8d9006dfe103e3ab0554
 step 5 unit=lex in_len=11 ret=228 ws_sha256=a5a9106c585ae611db08b5d6ad3827c8deab3f8fb0e15cfb43013749a3571c55
+event exit=2

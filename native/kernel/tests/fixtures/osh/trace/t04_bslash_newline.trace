@@ -11,3 +11,4 @@ step 9 unit=parse in_len=8 ret=0 ws_sha256=a5e4ca3523a7d006f310019783e1b1203fac0
 step 10 unit=expand in_len=8 ret=103 ws_sha256=f381e1298dd857f3731c7b3fa4b8fb1d38e02dcab9efb3bd38f72c885d88e943
 request 2 sha256=bfc090f613ae9244c112d0200c919b3b7c8cfeaee9d49753f151b554a2a9a4d3
 step 11 unit=expand in_len=8 ret=104 ws_sha256=d1744d5bce5b6927f4a2058cf3771b9fdf8e88be117579cf58989f20c7ce726f
+event exit=0

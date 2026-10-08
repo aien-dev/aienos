@@ -7,8 +7,9 @@
 # Label: QEMU (aarch64 virt), TEST signer, not physical. Nothing here ran on a Spark or any real machine.
 # The only key is the spec's THROWAWAY TEST key.
 #
-# Five containers are written into the sealed C Store of a GPT boot disk image: the three units, a copy of
-# osh_lex.unit with one byte of its CODE flipped, and the launch gate's l01_launch_fns.unit (only its spin() is used,
+# Six containers are written into the sealed C Store of a GPT boot disk image: the three units, a copy of
+# osh_lex.unit with one byte of its CODE flipped, a copy with one byte of its Ed25519 signature flipped, and the launch
+# gate's l01_launch_fns.unit (only its spin() is used,
 # for control 4b). One boot of the qualification image built with
 # CK_SEED0B_TEST_ANCHOR=1 CK_OSH_TEST=1. The kernel admits them, runs every embedded fixture script and prints the trace
 # between osh_script_begin / osh_script_end lines. This gate cuts each trace out of the serial log and diffs it, byte for
@@ -17,6 +18,7 @@
 #   2a a workspace passed with len 512 cells (emit_tok, w[17]=127)           -> TRAPPED trap_code 3 (BOUNDS), no stray write
 #   2b the entry point with len 512 cells                                    -> RETURNED 213 (the unit's own size check)
 #   3  one flipped byte in a unit's CODE                                     -> admission refuses, nothing of it ran
+#   3b one flipped byte in a unit's signature (last 64 bytes)               -> admission refuses BAD_SIGNATURE (26)
 #   4a caller max_ticks 1 on the long shell fixture                          -> RETURNED inside the tick (ticks=0): LIMIT, see below
 #   4b the same cap through the same launch path on l01 spin()               -> OUTCOME_UNKNOWN TICK_OVERRUN
 #      LIMIT: every shell loop is bounded and every entry call has a step budget, so no single shell call lasts a whole
@@ -34,20 +36,16 @@ vars_fd="${AAVMF_VARS:-/usr/share/AAVMF/AAVMF_VARS.fd}"
 command -v qemu-system-aarch64 >/dev/null || { echo "qemu-system-aarch64 not installed"; echo "${verdict}: NOT_RUN"; exit 2; }
 [[ -r "${code_fd}" && -r "${vars_fd}" ]] || { echo "AAVMF firmware not found"; echo "${verdict}: NOT_RUN"; exit 2; }
 
-quiet_flag="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
-quiet_tag="${AIENOS_QUIET_TAG:-qemu_ck_osh_core_test $$}"
-if ! ( set -C; echo "${quiet_tag}" > "${quiet_flag}" ) 2>/dev/null; then
-    echo "NOT_RUN  quiet flag ${quiet_flag} is held: $(head -c 200 "${quiet_flag}" 2>/dev/null || true)"
+# Machine quiet flag (read only) and the QEMU gate lock (one gate at a time):
+# scripts/lib_gate_hold.sh (aienos#278).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_gate_hold.sh"
+if ! gh_quiet_check || ! gh_lock_take "qemu_ck_osh_core_test" "${AIENOS_GATE_MINUTES:-60}"; then
+    echo "NOT_RUN  ${gh_why}"
     echo "${verdict}: NOT_RUN"
     exit 3
 fi
-own_flag=1
-release_flag() {
-    if [[ "${own_flag}" == 1 ]]; then
-        own_flag=0
-        if [[ -f "${quiet_flag}" ]] && grep -qxF -- "${quiet_tag}" "${quiet_flag}"; then rm -f "${quiet_flag}"; fi
-    fi
-}
+# Release only this run's own gate lock record, at most once.
+release_flag() { gh_lock_release; }
 work="$(mktemp -d)"
 cleanup() { rm -rf "${work}"; release_flag; }
 trap cleanup EXIT
@@ -83,7 +81,15 @@ flip=$(printf '%02x' $(( 0x${orig} ^ 0x01 )))
 printf "\\x${flip}" | dd of="${work}/osh_lex_flipped.unit" bs=1 seek=$((code_off + 100)) conv=notrunc status=none
 [[ "$(od -An -tx1 -j$((code_off + 100)) -N1 "${work}/osh_lex_flipped.unit" | tr -d ' ')" == "${flip}" ]] && pass "flipped one code byte at offset $((code_off + 100)) (${orig} -> ${flip})" || fail "code byte flip"
 
-files=("${fix}/osh_lex.unit" "${fix}/osh_parse.unit" "${fix}/osh_expand.unit" "${work}/osh_lex_flipped.unit" "${fix}/../osc_unit/launch/l01_launch_fns.unit")
+# negative control 3b input: osh_lex.unit with one byte of the signature (R half, the last 64 bytes) flipped
+sz=$(stat -c %s "${fix}/osh_lex.unit"); sig_at=$((sz - 64 + 5))
+cp "${fix}/osh_lex.unit" "${work}/osh_lex_badsig.unit"
+orig=$(od -An -tx1 -j${sig_at} -N1 "${fix}/osh_lex.unit" | tr -d ' ')
+flip=$(printf '%02x' $(( 0x${orig} ^ 0x01 )))
+printf "\\x${flip}" | dd of="${work}/osh_lex_badsig.unit" bs=1 seek=${sig_at} conv=notrunc status=none
+[[ "$(od -An -tx1 -j${sig_at} -N1 "${work}/osh_lex_badsig.unit" | tr -d ' ')" == "${flip}" ]] && pass "flipped one signature byte at offset ${sig_at} (${orig} -> ${flip})" || fail "signature byte flip"
+
+files=("${fix}/osh_lex.unit" "${fix}/osh_parse.unit" "${fix}/osh_expand.unit" "${work}/osh_lex_flipped.unit" "${work}/osh_lex_badsig.unit" "${fix}/../osc_unit/launch/l01_launch_fns.unit")
 disk="${work}/nvme.img"
 "${out_prod}/host/ck_gpt_image" create "${disk}" 512 64 aienos-middle >/dev/null || fail "GPT boot disk image created"
 if "${simg}" build "${disk}" 512 "${files[@]}" >"${work}/build.txt" 2>&1; then pass "boot disk built: $(head -1 "${work}/build.txt")"
@@ -129,14 +135,14 @@ release_flag
 
 label='QEMU \(aarch64 virt\), TEST signer, not physical'
 check "${serial}" "left firmware and entered the kernel" "kernel: alive"
-check "${serial}" "kernel read all five candidates from the boot disk Store" "^artifact_candidates: 5$"
+check "${serial}" "kernel read all six candidates from the boot disk Store" "^artifact_candidates: 6$"
 if has "${serial}" "^report-truncated:"; then fail "kernel report lines were truncated"; else pass "no kernel report line was truncated"; fi
 check "${serial}" "final report reached the console" "report_kind: final"
 if has "${serial}" "report_kind: (panic|fault)"; then fail "panic or fault reported (a unit fault must stay contained)"; else pass "no kernel panic or fault report"; fi
 for u in osh_lex osh_parse osh_expand; do
     check "${serial}" "${u} admitted (real oscc output, TEST signer)" "^osc_unit: ${u}\\.unit ACCEPT unit_digest=[0-9a-f]{64} program_id=[0-9a-f]{64} funcs=[0-9]+ caps=0 signer=TEST$"
 done
-check "${serial}" "totals: 5 seen, 4 accepted, 1 refused" "^osc_units: seen=5 accepted=4 refused=1 oversize=0 "
+check "${serial}" "totals: 6 seen, 4 accepted, 2 refused" "^osc_units: seen=6 accepted=4 refused=2 oversize=0 "
 check "${serial}" "core line: 3 units, 11456 cells, 23 pages, input window 4096" "^osh_core: units=3 ws_cells=11456 ws_pages=23 input_max=4096; ${label}\$"
 check "${serial}" "driver finished every script" "^osh_core_done: scripts=${nsh}; ${label}\$"
 if has "${serial}" "^osh_fault:"; then fail "a launch did not return (osh_fault line)"; else pass "no launch failed during the traces"; fi
@@ -167,6 +173,7 @@ check "${serial}" "control 2b: entry point with len 512 cells -> RETURNED 213 (W
     "^osh_neg2b: .* -> RETURNED value=213 ticks=[0-9]+ budget=[0-9]+ pages_mapped=[1-9][0-9]* page_tables_zeroed=1 slot_free=1 cells_512_up_unchanged=1; ${label}\$"
 check "${serial}" "control 3: one flipped CODE byte -> admission REFUSED" "^osc_unit: osh_lex_flipped\\.unit REFUSED code=[0-9]+ name=[A-Z_]+$"
 check "${serial}" "control 3: nothing of the flipped unit ran" "^osh_neg3: osh_lex_flipped\\.unit -> NOT_RUN \\(unit was not admitted\\); ${label}\$"
+check "${serial}" "control 3b: one flipped signature byte -> admission REFUSED code=26 BAD_SIGNATURE" "^osc_unit: osh_lex_badsig\\.unit REFUSED code=26 name=BAD_SIGNATURE$"
 check "${serial}" "control 4a (limit): max_ticks 1 on the long shell fixture: finishes inside the first tick (ticks=0) or overruns (1); the units are loop-bounded" \
     "^osh_neg4a: .* -> (RETURNED value=[0-9]+ ticks=0|OUTCOME_UNKNOWN unknown_reason=2 ticks=1) budget=1 pages_mapped=[1-9][0-9]* page_tables_zeroed=1 slot_free=1 fixture=[a-z0-9_]+ in_len=[0-9]+ max_ticks=1; ${label}\$"
 check "${serial}" "control 4b: the same max_ticks 1 cap on spin() -> OUTCOME_UNKNOWN TICK_OVERRUN (2) after exactly 1 tick" \

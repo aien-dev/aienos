@@ -400,7 +400,7 @@ self_test() {
         "$(fake smpA 0 'PASS  3 secondary cores checked in' 'AIENOS_CK_SMP_MUTATION: FAIL' 'AIENOS_CK_SMP: PASS')"
     expect M1 PASS; expect M3 PASS; expect M4_NVME PASS; expect M4_STORE PASS; expect ARGUS1_REVOKE PASS; expect SMMU PASS; expect NVME_SHUTDOWN PASS; expect NET PASS; expect SMP PASS; expect_missing_all
     count_rows
-    [[ "${n_pass}/${n_fail}/${n_notrun}/${n_total}" == "9/0/14/23" && ${overall} == NOT_ALL_GATES_PASS ]] \
+    [[ "${n_pass}/${n_fail}/${n_notrun}/${n_total}" == "9/0/15/24" && ${overall} == NOT_ALL_GATES_PASS ]] \
         && ok "A: counts 9/0/14 of 23, verdict NOT_ALL_GATES_PASS" || bad "A: counts ${n_pass}/${n_fail}/${n_notrun}/${n_total} ${overall}"
     [[ "$(nvme_dma_mode)" == "Confined (QEMU SMMUv3 stage 1, out-of-window DMA faulted); no-SMMU boot denied (NoSmmu); TEST-ONLY bypass image checked separately" ]] && ok "A: confined DMA mode recorded from the store PASS lines" || bad "A: dma mode '$(nvme_dma_mode)'"
     grep -qxF "AIENOS_CK_M4_NVME: PASS (${M4_NVME_PASS_NOTE})" "${tmp}/A.out" \
@@ -413,7 +413,7 @@ self_test() {
         && ok "a missing-source row is NOT_RUN (MISSING_IMPLEMENTATION: reason)" || bad "missing-source row not NOT_RUN"
     grep -q '^AIENOS_CK_KEYBOARD: NOT_RUN' "${tmp}/A.out" \
         && ok "A: KEYBOARD claimed PASS by the store child stays NOT_RUN without its own child" || bad "A: KEYBOARD line wrong"
-    [[ "$(grep -c '^AIENOS_CK_[A-Z0-9_]*: ' "${tmp}/A.out")" == 23 ]] && ok "A: exactly 23 verdict lines" || bad "A: verdict line count"
+    [[ "$(grep -c '^AIENOS_CK_[A-Z0-9_]*: ' "${tmp}/A.out")" == 24 ]] && ok "A: exactly 24 verdict lines" || bad "A: verdict line count"
 
     # B: boot FAIL; store script missing -> its three gates NOT_RUN, never PASS.
     scenario B "$(fake bootB 1 'FAIL  kernel: alive' 'AIENOS_CK_M3: FAIL' 'AIENOS_CK_M1: FAIL')" "${tmp}/kids/does_not_exist.sh"
@@ -584,10 +584,10 @@ self_test() {
     # Restore the clean-tree receipt as the one the checks below look at.
     write_receipt
     if command -v jq >/dev/null; then
-        jq -e '.physical == "NOT_RUN" and (.gates | length) == 23 and .verdict == "NOT_ALL_GATES_PASS"
+        jq -e '.physical == "NOT_RUN" and (.gates | length) == 24 and .verdict == "NOT_ALL_GATES_PASS"
                and ([.gates[] | select(.id == "M1")][0].verdict == "PASS")
                and ([.gates[] | select(.id == "ARGUS1_REVOKE")][0].verdict == "FAIL")
-               and (.children | length) == 18 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
+               and (.children | length) == 19 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
             && ok "receipt is valid JSON (jq) with expected fields" || bad "receipt JSON invalid or fields wrong"
     else
         echo "NOT_RUN  jq not installed; JSON validity not machine-checked"; jq_skipped=1
@@ -600,7 +600,7 @@ self_test() {
         bad "an existing receipt was overwritten or the clash was not refused"
     fi
 
-    # The gate table parses: 23 rows, known sources, reasons only on missing rows.
+    # The gate table parses: 24 rows, known sources, reasons only on missing rows.
     local g s w rows=0 tbad=0
     while IFS='|' read -r g s w; do
         [[ -n "${g}" ]] || continue
@@ -611,7 +611,7 @@ self_test() {
             *) tbad=1 ;;
         esac
     done <<<"${CK_GATE_TABLE}"
-    [[ ${tbad} == 0 && ${rows} == 23 ]] && ok "gate table: 23 rows well-formed" || bad "gate table malformed (${rows} rows)"
+    [[ ${tbad} == 0 && ${rows} == 24 ]] && ok "gate table: 24 rows well-formed" || bad "gate table malformed (${rows} rows)"
 
     # Dirty-tree refusal, end to end, on a private clone (never this tree).
     # Both runs stop before any child script (no QEMU).

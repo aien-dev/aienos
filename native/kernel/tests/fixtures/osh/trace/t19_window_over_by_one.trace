@@ -1,0 +1,2 @@
+event input_window_exceeded have=4096 add=1 max=4096
+event exit=2

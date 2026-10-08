@@ -7,3 +7,4 @@ step 5 unit=lex in_len=10 ret=0 ws_sha256=f884b0dfd4b36ba8bd70cef2b011b6562369b1
 step 6 unit=parse in_len=10 ret=100 ws_sha256=5e47abb9a785bc1a732203fc6a8dd1740d0ea371537f2980457b8cce2c7a1d49
 step 7 unit=lex in_len=10 ret=0 ws_sha256=5abcc4459a088079d4f298aea20da41f912ed323c0c4ccf5fce9ece8bd909cf8
 step 8 unit=parse in_len=10 ret=248 ws_sha256=3271dbe9e1b0ac956deb5549851e28bc2efa22c18c2209a41a7a90dbf7fdcaa2
+event exit=2

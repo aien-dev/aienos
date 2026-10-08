@@ -77,3 +77,4 @@ step 76 unit=lex in_len=3958 ret=100 ws_sha256=17070354363a3541efb312765ca9ee1ff
 step 77 unit=lex in_len=4010 ret=100 ws_sha256=3dde0205fc6d46aeac17ff65b585933ff20f147eaf2cc76b256ea266d444ba33
 step 78 unit=lex in_len=4062 ret=100 ws_sha256=f8b575dbdbf4e6bf40140e5f4f5fb438c2876adb8cbebf9ce33ff1043c2d2eec
 event input_window_exceeded have=4062 add=51 max=4096
+event exit=2

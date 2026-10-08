@@ -6,9 +6,11 @@
  * same trace lines on the serial console:
  *     step <n> unit=<lex|parse|expand> in_len=<n> ret=<u64> ws_sha256=<hex of WS_CELLS*8 bytes>
  *     request <n> sha256=<hex of the request record cells>
- *     event input_window_exceeded have=<n> add=<n> max=4096
- * Nothing is executed: on PIPELINE_READY the driver only records the request; NEED_VAR is answered from a fixed
- * table (HOME=/home/t, X="a b", EMPTY="", $? = fake status 0). No environment, no files, no exec.
+ *     event <text>   (input_window_exceeded, internal_error, request_ncmds_out_of_range, fake_status_exhausted)
+ *     event exit=<status>   last line of every fixture (2 after a refusal, 70 after a unit fault status)
+ * Nothing is executed: on PIPELINE_READY the driver only records the request and takes the fixture's next fake
+ * status (its .status sidecar, then 0); NEED_VAR is answered from a fixed table (HOME=/home/t, X="a b", EMPTY=""),
+ * $? = the last fake status, $0 = "osh_trace", $1.. from the fixture's .args sidecar. No environment, no files, no exec.
  * One caller-owned workspace of 23 pages (11456 cells) lives across every call. Input goes through the read-only
  * input window (at most 4096 bytes). A list buffer that would exceed 4096 is refused by the driver exactly as
  * osh_trace.c does (event line), documented in the gate.
@@ -43,7 +45,7 @@ static const char *const u_file[U_COUNT] = { "osh_lex.unit", "osh_parse.unit", "
 static const char *const u_entry[U_COUNT] = { "lex_run", "parse_run", "expand_run" };
 static const char *const u_label[U_COUNT] = { "lex", "parse", "expand" };
 
-#define UNIT_BYTES 65536u
+#define UNIT_BYTES 131072u /* the packed containers (IR + code + manifest) pass 64 KiB; the code stays under CK_OSC_CODE_MAX_BYTES */
 static struct {
     uint8_t bytes[UNIT_BYTES];
     size_t len;
@@ -230,7 +232,81 @@ static const char *var_get(const char *name)
     return NULL;
 }
 
-#define LAST_STATUS 0u /* fixed fake status */
+/* Per fixture, as omega tests/osh/osh_trace.c load_fixture(): fake pipeline statuses from the .status sidecar, the
+ * positionals $1.. from the .args sidecar (one per line), $0 = "osh_trace". */
+#define MAX_FAKE 256
+#define MAX_POS 9
+static int last_status; /* the shell's $?: fake pipeline statuses, 2 after a refusal */
+static int fake[MAX_FAKE], nfake, fake_i, have_status;
+static char pos_buf[4096];
+static const char *pos[MAX_POS];
+static int npos;
+static int exhausted; /* .status ran out: omega's osh_trace exits 2 after its event line, with no exit line */
+static const char ARG0[] = "osh_trace";
+
+static int next_fake(void)
+{
+    if (fake_i < nfake)
+        return fake[fake_i++];
+    if (have_status) {
+        ck_printf("event fake_status_exhausted after=%d\n", nfake);
+        exhausted = 1;
+    }
+    return 0;
+}
+
+static int is_ws(unsigned char c)
+{
+    return c == ' ' || c == '\t' || c == '\n';
+}
+
+/* 0, or -1 with a line printed: a malformed sidecar is a fixture error (omega's osh_trace exits 2 on it) */
+static int load_fixture(unsigned i)
+{
+    nfake = fake_i = have_status = npos = exhausted = 0;
+    last_status = 0;
+    if (osh_fx[i].status) {
+        const unsigned char *s = osh_fx[i].status;
+        unsigned long n = osh_fx[i].status_len, q = 0;
+        have_status = 1;
+        for (;;) {
+            while (q < n && is_ws(s[q]))
+                q++;
+            if (q >= n)
+                break;
+            unsigned long v = 0, d = 0;
+            while (q < n && s[q] >= '0' && s[q] <= '9' && v <= 255) {
+                v = v * 10 + (unsigned long)(s[q++] - '0');
+                d++;
+            }
+            if (d == 0 || v > 255 || (q < n && !is_ws(s[q])) || nfake == MAX_FAKE) {
+                ck_printf("osh_fixture_error: %s.status; %s\n", osh_fx[i].name, LABEL);
+                return -1;
+            }
+            fake[nfake++] = (int)v;
+        }
+    }
+    if (osh_fx[i].args) {
+        const unsigned char *s = osh_fx[i].args;
+        unsigned long n = osh_fx[i].args_len, q = 0, o = 0;
+        if (n >= sizeof pos_buf) {
+            ck_printf("osh_fixture_error: %s.args too long; %s\n", osh_fx[i].name, LABEL);
+            return -1;
+        }
+        while (q < n) {
+            if (npos == MAX_POS) {
+                ck_printf("osh_fixture_error: %s.args has more than %d arguments; %s\n", osh_fx[i].name, MAX_POS, LABEL);
+                return -1;
+            }
+            pos[npos++] = pos_buf + o;
+            while (q < n && s[q] != '\n')
+                pos_buf[o++] = (char)s[q++];
+            pos_buf[o++] = 0;
+            q++; /* the newline (or one past the end) */
+        }
+    }
+    return 0;
+}
 
 static void answer(void)
 {
@@ -256,14 +332,23 @@ static void answer(void)
     }
     case 2:
         found = 1;
-        vl = dec(LAST_STATUS, num);
+        vl = dec((uint64_t)(unsigned)last_status, num);
         val = num;
         break;
-    case 3:
-        break; /* no positional parameters, no $0 */
+    case 3: /* as osh_shell.c answer() */
+        if (a == 0) {
+            found = 1;
+            val = (const uint8_t *)ARG0;
+            vl = strlen(ARG0);
+        } else if (a >= 1 && a <= (uint64_t)npos) {
+            found = 1;
+            val = (const uint8_t *)pos[a - 1];
+            vl = strlen(pos[a - 1]);
+        }
+        break;
     case 4:
         found = 1;
-        vl = dec(0, num);
+        vl = dec((uint64_t)npos, num);
         val = num;
         break;
     default:
@@ -271,15 +356,16 @@ static void answer(void)
     }
     w[OSH_STAGING + 0] = (uint64_t)found;
     w[OSH_STAGING + 1] = vl;
-    w[OSH_STAGING + 2] = 0; /* npos */
+    w[OSH_STAGING + 2] = (uint64_t)npos;
     w[OSH_STAGING + 3] = 0;
     for (size_t i = 0; i < vl && i < 1024; i++)
         w[OSH_STAGING + 4 + i] = val[i];
 }
 
+/* returns 1 when the driver must stop */
 static int run_list(void)
 {
-    w[OSH_S_LAST_STATUS] = LAST_STATUS;
+    w[OSH_S_LAST_STATUS] = (uint64_t)(unsigned)last_status;
     for (int guard = 0; guard < 1000000; guard++) {
         uint64_t st = call(U_EXPAND);
         if (stop)
@@ -292,16 +378,30 @@ static int run_list(void)
             continue;
         case ST_PIPE: {
             uint64_t nc = w[OSH_REQUEST + 1];
+            if (nc > (OSH_OUT - OSH_REQUEST - REQ_HDR_CELLS) / CMD_CELLS) { /* never read past REQUEST */
+                ck_printf("event request_ncmds_out_of_range ncmds=%llu\n", (unsigned long long)nc);
+                last_status = 2;
+                return 1;
+            }
             size_t cells = (size_t)(REQ_HDR_CELLS + nc * CMD_CELLS);
             char h[65];
             hex((const uint8_t *)(w + OSH_REQUEST), cells * 8, h);
             ck_printf("request %lu sha256=%s\n", ++req_no, h);
-            w[OSH_S_LAST_STATUS] = LAST_STATUS;
+            last_status = next_fake(); /* nothing ran: the fixture's next status */
+            if (exhausted)
+                return 1;
+            w[OSH_S_LAST_STATUS] = (uint64_t)(unsigned)last_status;
             continue;
         }
         case ST_COMPLETE:
             return 0;
-        default:
+        default: /* as osh_shell.c: a refusal stops a non-interactive shell with 2, a unit fault status with 70 */
+            if (st == ~(uint64_t)0 || st < 200) {
+                ck_printf("event internal_error status=%llu\n", (unsigned long long)st);
+                last_status = 70;
+                return 1;
+            }
+            last_status = 2;
             return 1;
         }
     }
@@ -316,8 +416,10 @@ static int run_src(void)
         int eof = 0;
         for (;;) {
             int r = read_line();
-            if (r < 0)
+            if (r < 0) {
+                last_status = 2;
                 return 2;
+            }
             if (r == 0) {
                 eof = 1;
                 if (blen == 0)
@@ -338,6 +440,7 @@ static int run_src(void)
             if (run_list())
                 return 1;
         } else {
+            last_status = 2; /* lexer or parser refusal */
             return 2;
         }
         if (eof)
@@ -469,7 +572,11 @@ void ck_osh_all(void)
         src_len = osh_fx[i].len;
         src_pos = 0;
         ck_printf("osh_script_begin %s\n", osh_fx[i].name);
-        int rc = run_src();
+        int rc = load_fixture(i) != 0 ? 4 : run_src();
+        /* omega's osh_trace ends every trace with the exit line, except after fake_status_exhausted (it exits 2 there);
+         * after a launch that did not RETURN (stop) the trace is incomplete and the gate's diff fails it */
+        if (rc != 4 && !stop && !exhausted)
+            ck_printf("event exit=%d\n", last_status);
         ck_printf("osh_script_end %s rc=%d\n", osh_fx[i].name, rc);
     }
     negatives();
