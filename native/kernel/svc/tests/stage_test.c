@@ -401,6 +401,162 @@ static void test_discover_edges(void)
     munmap(ecam, 4u << 20);
 }
 
+/* ---------------- Boot discovery report (pci_stage_discover_report) ---------------- */
+
+/* 1 MiB aligned anonymous map (the fake ECAM base must be the address itself
+ * and ECAM bases are 1 MiB aligned). */
+static uint8_t *map_aligned(size_t bytes)
+{
+    size_t slack = 1u << 20;
+    uint8_t *raw = mmap(NULL, bytes + slack, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (raw == MAP_FAILED) return NULL;
+    uintptr_t a = ((uintptr_t)raw + slack - 1) & ~(uintptr_t)(slack - 1);
+    return (uint8_t *)a;
+}
+
+/* Fake segment 0 (SYNTHETIC ids, QEMU-style): host bridge 00:00.0 and a
+ * virtio NIC 00:01.0, two buses. */
+static uint8_t *mk_fake_seg0(void)
+{
+    uint8_t *ecam = map_aligned(FAKE_BYTES);
+    if (!ecam) return NULL;
+    memset(ecam, 0xff, FAKE_BYTES);
+    uint8_t *c;
+    memset(c = cfgp(ecam, 0, 0, 0), 0, 4096); mkfn(c, 0x1b36, 0x0008, 0x060000, 0);
+    memset(c = cfgp(ecam, 0, 1, 0), 0, 4096); mkfn(c, 0x1af4, 0x1041, 0x020000, 0);
+    return ecam;
+}
+
+/* Segment-15 fake, copied to a 1 MiB aligned map (same content as mk_fake_seg15). */
+static uint8_t *mk_fake_seg15_aligned(void)
+{
+    uint8_t *src = mk_fake_seg15();
+    uint8_t *dst = map_aligned(FAKE_BYTES);
+    if (src && dst) memcpy(dst, src, FAKE_BYTES);
+    if (src) munmap(src, FAKE_BYTES);
+    return dst;
+}
+
+static size_t mk_two_seg_mcfg(uint8_t *t, uint8_t *e0, uint8_t *e15)
+{
+    uint64_t b[2] = {(uint64_t)(uintptr_t)e0, (uint64_t)(uintptr_t)e15};
+    uint16_t s[2] = {0, FAKE_SEG};
+    uint8_t sb[2] = {0, 0}, eb[2] = {1, 1};
+    return mk_mcfg(t, 2, b, s, sb, eb);
+}
+
+static int has(const char *text, const char *needle) { return strstr(text, needle) != NULL; }
+
+static void test_discover_report(void)
+{
+    uint8_t *e0 = mk_fake_seg0(), *e15 = mk_fake_seg15_aligned();
+    CHECK(e0 && e15);
+    if (!e0 || !e15) return;
+    static uint8_t c0[FAKE_BYTES], c15[FAKE_BYTES];
+    memcpy(c0, e0, FAKE_BYTES);
+    memcpy(c15, e15, FAKE_BYTES);
+    CHECK(mprotect(e0, FAKE_BYTES, PROT_READ) == 0);
+    CHECK(mprotect(e15, FAKE_BYTES, PROT_READ) == 0);
+    uint8_t t[44 + 32];
+    size_t len = mk_two_seg_mcfg(t, e0, e15);
+    ck_host_mcfg = t;
+    ck_host_try_map_ok = 1;
+    ck_host_try_map_fail = 0;
+
+    /* Both segments mapped read-only: a config write would kill the process. */
+    ck_host_capture_start();
+    CHECK(pci_stage_discover_report() == PCI_OK);
+    ck_host_capture_stop();
+    const char *x = ck_host_capture_text();
+    CHECK(has(x, "pci_disc: seg 0000 bus 00-01 functions=2 bridges=0 rc=0\n"));
+    CHECK(has(x, "pci_disc: seg 000f bus 00-01 functions=2 bridges=1 rc=0\n"));
+    CHECK(has(x, "pci_disc: 000f:01:00.0 10de:2e12 class=030000 rev=a1\n"));
+    CHECK(has(x, "pci_disc: 0000:00:01.0 1af4:1041 class=020000 rev=01\n"));
+    CHECK(has(x, "pci_disc: segments=2 functions=4 (read-only, no config writes)\n"));
+    CHECK(memcmp(e0, c0, FAKE_BYTES) == 0 && memcmp(e15, c15, FAKE_BYTES) == 0);
+
+    /* Segment 15 map refused: that segment is reported as refused, segment 0 still scanned, no fallback. */
+    ck_host_try_map_fail = (uint64_t)(uintptr_t)e15;
+    ck_host_capture_start();
+    CHECK(pci_stage_discover_report() == PCI_OK);
+    ck_host_capture_stop();
+    x = ck_host_capture_text();
+    CHECK(has(x, "pci_disc: seg 000f bus 00-01 REFUSED"));
+    CHECK(!has(x, "10de:2e12"));
+    CHECK(has(x, "pci_disc: seg 0000 bus 00-01 functions=2"));
+    CHECK(has(x, "pci_disc: segments=1 functions=2 (read-only, no config writes)\n"));
+
+    /* Mapping unavailable for every segment (the host default): all refused. */
+    ck_host_try_map_ok = 0;
+    ck_host_try_map_fail = 0;
+    ck_host_capture_start();
+    CHECK(pci_stage_discover_report() == PCI_OK);
+    ck_host_capture_stop();
+    x = ck_host_capture_text();
+    CHECK(has(x, "pci_disc: segments=0 functions=0 (read-only, no config writes)\n"));
+
+    /* Malformed MCFG: error returned, one line. */
+    ck_host_try_map_ok = 1;
+    t[4] = (uint8_t)(len - 1);
+    ck_host_capture_start();
+    CHECK(pci_stage_discover_report() == PCI_E_MCFG);
+    ck_host_capture_stop();
+    CHECK(has(ck_host_capture_text(), "pci_disc: MCFG malformed"));
+    ck_host_mcfg = NULL;
+    ck_host_capture_start();
+    CHECK(pci_stage_discover_report() == PCI_E_NO_MCFG);
+    ck_host_capture_stop();
+    CHECK(has(ck_host_capture_text(), "pci_disc: no ACPI MCFG table\n"));
+    ck_host_try_map_ok = 0;
+    munmap(e0, FAKE_BYTES);
+    munmap(e15, FAKE_BYTES);
+}
+
+/* The devices stage runs the report after pci: probe, ignores its result, and
+ * leaves the report's segments untouched (segment 15 is read-only here). */
+static void test_discover_in_stage(void)
+{
+    uint8_t *e0 = mk_fake_seg0(), *e15 = mk_fake_seg15_aligned();
+    CHECK(e0 && e15);
+    if (!e0 || !e15) return;
+    static uint8_t c15[FAKE_BYTES];
+    memcpy(c15, e15, FAKE_BYTES);
+    CHECK(mprotect(e15, FAKE_BYTES, PROT_READ) == 0);
+    uint8_t t[44 + 32];
+    size_t len = mk_two_seg_mcfg(t, e0, e15);
+    ck_host_mcfg = t;
+    ck_host_try_map_ok = 1;
+    ck_host_quiet = 1;
+    ck_host_capture_start();
+    CHECK(ck_stage_devices() == 0);
+    ck_host_capture_stop();
+    const char *x = ck_host_capture_text();
+    const char *p = strstr(x, "pci: ecam base="), *d = strstr(x, "pci_disc: seg 0000"), *v = strstr(x, "devices: pci=ok");
+    CHECK(p && d && v && p < d && d < v);                           /* probe, then report, then the rest */
+    CHECK(has(x, "pci_disc: 000f:01:00.0 10de:2e12 class=030000 rev=a1\n"));
+    CHECK(memcmp(e15, c15, FAKE_BYTES) == 0);
+
+    /* Report fails (segment 0 allocated twice: pci_mcfg_parse takes the first,
+     * pci_mcfg_parse_all refuses the table): the stage still completes. */
+    uint64_t b[2] = {(uint64_t)(uintptr_t)e0, (uint64_t)(uintptr_t)e0};
+    uint16_t s[2] = {0, 0};
+    uint8_t sb[2] = {0, 0}, eb[2] = {1, 1};
+    (void)len;
+    mk_mcfg(t, 2, b, s, sb, eb);
+    ck_host_capture_start();
+    CHECK(ck_stage_devices() == 0);
+    ck_host_capture_stop();
+    x = ck_host_capture_text();
+    CHECK(has(x, "pci_disc: MCFG malformed") && has(x, "devices: pci=ok"));
+    ck_host_capture_stop();
+    ck_host_quiet = 0;
+    ck_host_try_map_ok = 0;
+    ck_host_mcfg = NULL;
+    munmap(e0, FAKE_BYTES);
+    munmap(e15, FAKE_BYTES);
+}
+
+
 /* ---------------- Store boot ---------------- */
 
 #define T_UNITS 128u
@@ -1266,6 +1422,8 @@ int main(void)
     test_discover_seg15();
     test_discover_trap();
     test_discover_edges();
+    test_discover_report();
+    test_discover_in_stage();
     test_store();
     test_artifact_store();
     test_security();
