@@ -28,6 +28,7 @@
 #include "ck_internal.h"
 #include "pt.h"
 #include "ck_artifact.h"
+#include "osc_admit.h"
 #include "sha256.h"
 
 #ifndef AIENOS_COMMIT
@@ -1137,14 +1138,25 @@ static uint32_t disk_source(void)
             break;
         memcpy(name, a->name, nlen);
         name[nlen] = 0;
+        if (a->state == CK_DISK_ART_OK && a->bytes && ck_osc_is_unit(a->bytes, a->len)) {
+            /* OSCUNIT container (OSC_UNIT_ARTIFACT v1): admission verdict only, not a Binary Artifact. */
+            ck_osc_candidate(name, a->bytes, a->len);
+            run_seen++;
+            continue;
+        }
         if (a->state == CK_DISK_ART_OK && a->bytes && a->len >= 1 && a->len <= MAX_BATCH * PAGE)
             process_candidate(a->bytes, a->len, &rep);
-        else if (a->state == CK_DISK_ART_TOO_LARGE || a->len > MAX_BATCH * PAGE)
+        else if (a->state == CK_DISK_ART_TOO_LARGE || a->len > MAX_BATCH * PAGE) {
+            /* The Store never reads a too-large entry, so an OSCUNIT among them cannot be recognised:
+             * say so on the osc_unit: channel (RESOURCE_UNAVAILABLE) and keep the old refusal. */
+            if (a->state == CK_DISK_ART_TOO_LARGE)
+                ck_osc_oversize(name, a->len);
             firmware_rejection(&rep, CKL_STAGING_TOO_LARGE);
-        else
+        } else
             firmware_rejection(&rep, CKL_FIRMWARE_READ); /* missing on disk */
         finish_candidate(name);
     }
+    ck_osc_summary();
     return count;
 }
 #else

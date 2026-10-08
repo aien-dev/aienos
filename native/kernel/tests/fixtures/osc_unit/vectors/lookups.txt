@@ -1,0 +1,7 @@
+# vector mode domains anchors name verdict
+a01_valid_min.unit qualification 1 T add ACCEPT fn_index=0
+a01_valid_min.unit qualification 1 T first_byte ACCEPT fn_index=1
+a01_valid_min.unit qualification 1 T ADD REFUSED LAUNCH_BAD_ENTRY 40
+a01_valid_min.unit qualification 1 T ad REFUSED LAUNCH_BAD_ENTRY 40
+a01_valid_min.unit qualification 1 T first_byt REFUSED LAUNCH_BAD_ENTRY 40
+a01_valid_min.unit qualification 1 T missing REFUSED LAUNCH_BAD_ENTRY 40

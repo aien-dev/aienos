@@ -677,6 +677,33 @@ NOT_RUN (never a silent pass) when QEMU, AAVMF, socat or the cross compiler is m
 
 Evidence: red on main a93e27b (`AIENOS_CK_SCREEN: FAIL`, gate script and branch-built checker copied in), green at 2e44c0b standalone and in the full receipt above, green again at c2232ef (CodeQL widening fix in fbcon.c): `fb_check: PASS 800x600 format=bgrx scale=1 grid=100x60 scrolls=1 pixels=480000 mismatched=0 undecodable=0`. Logs: `~/workspace/evidence-out/L6C/` on the Spark (not committed).
 
+## OSC_UNIT: OSC unit admission (C-only, Campaign 3, arch#158/#162) -> CK `OSC_UNIT` (scripts/qemu_ck_osc_unit_test.sh)
+
+Contract: aien-dev/aien-protocols PR #17, `specs/osc-unit-artifact/OSC_UNIT_ARTIFACT.md` (container v1,
+frozen). Code: `native/kernel/artifact/osc_unit.{h,c}` (pure admission function, section 8.2 check order,
+section 8.4 code scan with the decoder round trip), `native/kernel/core/osc_admit.{h,c}` (kernel policy and the
+`osc_unit:` report lines). It reuses `argus/sha256.c` and `sig/ed25519.c` (strict verify, `S < L`); no new crypto.
+Candidates reach it through the same boot-disk Store path as the P2 artifacts; a candidate that begins with the
+magic `OSCUNIT\0` is judged by this module instead of the Binary Artifact v0 path.
+
+- Host conformance: `tests/test_osc_unit.c` runs every line of the frozen `expected.txt` (52), `lookups.txt` (6)
+  and `state.txt` (3) from `tests/fixtures/osc_unit` (provenance there) and requires the stated verdict; also
+  every single-byte flip and every truncation of the valid vector is refused. Part of `make test` and
+  `make sanitize`.
+- QEMU gate: two boots (TEST-anchor qualification build; ordinary release build) of four vectors staged in the
+  sealed Store. Qualification: valid TEST unit ACCEPT with the frozen UnitDigest; OWNER unit UNTRUSTED_SIGNER;
+  bad signature; SVC word. Release: TEST unit TEST_SIGNER_IN_RELEASE (also for the bad-signature vector: class is
+  checked first); OWNER unit UNTRUSTED_SIGNER; SVC word CODE_INSTRUCTION; nothing accepted. The release image is
+  checked not to carry the TEST public key.
+- Labels: QEMU (aarch64 virt), TEST signer, not physical. Admission only: nothing is mapped, launched or
+  scheduled (launch is a later cut; launch code 41 and `launch.txt` are not covered here). OWNER anchors are empty
+  until TRUST-1 provisions one.
+- Kernel policy: capability domain 1 only (32-bit generation); the kernel holds no resource state yet, so any
+  pinned generation is refused CAP_GENERATION_STALE.
+
+Spec status: OSC_UNIT_ARTIFACT is v1 FROZEN (aien-protocols#17, 2026-10-08; bytes and vectors unchanged by the freeze). Passing the host vectors
+is not evidence of the native loader; only the QEMU gate row exercises the in-kernel path, and nothing here is physical.
+
 ## C3-1a console session: scripts/qemu_ck_console_test.sh -> CK `CONSOLE` (Campaign 3 cut C3-1a, C-only, no Rust-kernel counterpart)
 
 QEMU only. Hardware NOT_RUN: no physical serial port, xHCI controller, keyboard or SMMU run.
