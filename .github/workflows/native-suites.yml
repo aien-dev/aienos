@@ -33,6 +33,7 @@ on:
       - "native/**"
       - ".github/workflows/native-suites.yml"
       - "scripts/qemu_native_nvme_test.sh"
+      - "scripts/lib_gate_hold.sh"
   workflow_dispatch:
 
 permissions:
@@ -104,6 +105,7 @@ jobs:
       - name: Run QEMU NVMe gate
         env:
           AIENOS_QUIET_FLAG: ${{ runner.temp }}/aienos-quiet-flag
+          AIENOS_GATE_LOCK: ${{ runner.temp }}/aienos-gate-lock
         run: |
           bash scripts/qemu_native_nvme_test.sh 2>&1 | tee qemu.log
           # The script exits 0 on NOT_RUN; only an explicit PASS counts.

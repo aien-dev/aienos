@@ -19,7 +19,7 @@
 #
 # Usage: bash scripts/qemu_ck_fpu_test.sh               the gate
 #        bash scripts/qemu_ck_fpu_test.sh --self-test   canned logs, no QEMU/build
-# Environment: AIENOS_QEMU_TIMEOUT (180 s), AIENOS_GATE_LOCK / AIENOS_GATE_TAG,
+# Environment: AIENOS_QEMU_TIMEOUT (180 s), AIENOS_GATE_LOCK, AIENOS_GATE_MINUTES,
 # AIENOS_QUIET_FLAG (read only),
 # AIENOS_LOG_DIR, AIENOS_QEMU_VERBOSE.
 set -euo pipefail
@@ -97,27 +97,21 @@ make -s -C native/kernel CROSS="${cross}" OUT="${out}" AIENOS_COMMIT="${commit}"
 
 # Machine-wide quiet flag: read only, never written here (Drake's rule: no
 # agent raises it without approval). If someone holds it: NOT_RUN.
-quiet_flag="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
-if [[ -e "${quiet_flag}" ]]; then
-    echo "NOT_RUN  quiet flag ${quiet_flag} is held: $(head -c 200 "${quiet_flag}" 2>/dev/null || true)"
+# Machine quiet flag (read only) and the QEMU gate lock (one gate at a time):
+# scripts/lib_gate_hold.sh (aienos#278).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_gate_hold.sh"
+if ! gh_quiet_check; then
+    echo "NOT_RUN  ${gh_why}"
     echo "${verdict_name}: NOT_RUN"
     exit 3
 fi
-# One QEMU gate at a time: exclusive create (set -C) of the gate lock.
-gate_lock="${AIENOS_GATE_LOCK:-${HOME}/workspace/.qemu-gate-lock}"
-gate_tag="${AIENOS_GATE_TAG:-qemu_ck_fpu_test $$}"
-if ! ( set -C; echo "${gate_tag}" > "${gate_lock}" ) 2>/dev/null; then
-    echo "NOT_RUN  QEMU gate lock ${gate_lock} is held: $(head -c 200 "${gate_lock}" 2>/dev/null || true)"
+if ! gh_lock_take qemu_ck_fpu_test "${AIENOS_GATE_MINUTES:-60}"; then
+    echo "NOT_RUN  ${gh_why}"
     echo "${verdict_name}: NOT_RUN"
     exit 3
 fi
-own_lock=1
-release_lock() {
-    if [[ "${own_lock}" == 1 ]]; then
-        own_lock=0
-        if [[ -f "${gate_lock}" ]] && grep -qxF -- "${gate_tag}" "${gate_lock}"; then rm -f "${gate_lock}"; fi
-    fi
-}
+# Release only this run's own gate lock record, at most once.
+release_lock() { gh_lock_release; }
 work="$(mktemp -d)"
 cleanup() { rm -rf "${work}"; release_lock; }
 trap cleanup EXIT

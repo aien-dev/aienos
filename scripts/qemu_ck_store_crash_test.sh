@@ -77,7 +77,8 @@
 #             AIENOS_CK_STORE_CRASH_MUTANT_<NAME>: KILLED (exit 0) when the
 #             gate's checks FAIL on it, SURVIVED (exit 1) otherwise. Never
 #             prints the AIENOS_CK_M4_STORE_CRASH line.
-# Takes the machine quiet flag like qemu_ck_store_test.sh (not in --self-test).
+# Reads the quiet flag and takes the QEMU gate lock like qemu_ck_store_test.sh
+# (not in --self-test).
 # Final line (gate): AIENOS_CK_M4_STORE_CRASH: PASS|FAIL|NOT_RUN.
 # Exit: 0 PASS, 1 FAIL, 2 missing tools/build failure, 3 quiet flag held.
 set -uo pipefail
@@ -428,20 +429,16 @@ if ! make -s -C native/kernel OUT="${out}" gpt-image >/dev/null; then
     echo "GPT image tool build failed"; verdict NOT_RUN; exit 2
 fi
 
-quiet_flag="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
-quiet_tag="${AIENOS_QUIET_TAG:-qemu_ck_store_crash_test $$}"
-if ! ( set -C; echo "${quiet_tag}" > "${quiet_flag}" ) 2>/dev/null; then
-    echo "NOT_RUN  quiet flag ${quiet_flag} is held: $(head -c 200 "${quiet_flag}" 2>/dev/null || true)"
+# Machine quiet flag (read only) and the QEMU gate lock (one gate at a time):
+# scripts/lib_gate_hold.sh (aienos#278).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_gate_hold.sh"
+if ! gh_quiet_check || ! gh_lock_take "qemu_ck_store_crash_test" "${AIENOS_GATE_MINUTES:-60}"; then
+    echo "NOT_RUN  ${gh_why}"
     verdict NOT_RUN
     exit 3
 fi
-own_flag=1
-release_flag() {
-    if [[ "${own_flag}" == 1 ]]; then
-        own_flag=0
-        if [[ -f "${quiet_flag}" ]] && grep -qxF -- "${quiet_tag}" "${quiet_flag}"; then rm -f "${quiet_flag}"; fi
-    fi
-}
+# Release only this run's own gate lock record, at most once.
+release_flag() { gh_lock_release; }
 top="$(mktemp -d)"
 qemu_pid=""
 cleanup() { [[ -n "${qemu_pid}" ]] && kill -9 "${qemu_pid}" 2>/dev/null; rm -rf "${top}"; release_flag; }
