@@ -22,6 +22,13 @@
 #                        purpose: $(OUT)/full-test-xhci-<name>/ (only
 #                        scripts/qemu_ck_keyboard_test.sh --mutation; refused
 #                        with CK_HARDWARE_STAGING=1 or CK_QEMU_UNSAFE_DMA=1)
+#   make full CK_CONSOLE_SESSION=1 [CK_TEST_CONSOLE_MUTATION=bm-left-on-after-exit]
+#                        TEST-ONLY QEMU image with the final "console" boot stage
+#                        (serial + USB keyboard input until "exit", no time limit):
+#                        $(OUT)/full-console-session/ (the mutation image:
+#                        full-test-console-mutation/, bus master left on after the
+#                        exit); only scripts/qemu_ck_console_test.sh; refused with
+#                        CK_HARDWARE_STAGING=1 or CK_QEMU_UNSAFE_DMA=1
 #   make full CK_TEST_STORE_CRASH=1 [CK_TEST_STORE_CRASH_MUTANT=<name>]
 #                        TEST-ONLY Store crash hook image
 #                        $(OUT)/full-test-store-crash[-mutant-<name>]/ for
@@ -248,6 +255,38 @@ $(error CK_TEST_XHCI_MUTATION must be one of bm-left-on no-revoke grant-no-smmu 
 endif
 endif
 
+# TEST-ONLY console session (C3-1a, dev/devices.c ck_stage_console_session):
+# CK_CONSOLE_SESSION=1 adds a final boot stage that keeps taking serial and USB
+# keyboard input until the shell's "exit". QEMU test image only: own FULL_NAME,
+# refused with CK_HARDWARE_STAGING and CK_QEMU_UNSAFE_DMA. The default image
+# carries none of it. CK_TEST_CONSOLE_MUTATION=bm-left-on-after-exit (needs
+# CK_CONSOLE_SESSION=1) leaves the xHCI bus master on after the session exit,
+# for the CONSOLE gate's red-before-green self-test.
+CK_CONSOLE_SESSION ?=
+CK_TEST_CONSOLE_MUTATION ?=
+ifneq ($(strip $(CK_CONSOLE_SESSION)),)
+ifneq ($(strip $(CK_CONSOLE_SESSION)),1)
+$(error CK_CONSOLE_SESSION must be empty or 1)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_CONSOLE_SESSION (QEMU test console session) cannot be combined with CK_HARDWARE_STAGING)
+endif
+ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),)
+$(error CK_CONSOLE_SESSION cannot be combined with CK_QEMU_UNSAFE_DMA)
+endif
+ifneq ($(strip $(CK_TEST_XHCI_MUTATION)),)
+$(error CK_CONSOLE_SESSION cannot be combined with CK_TEST_XHCI_MUTATION)
+endif
+endif
+ifneq ($(strip $(CK_TEST_CONSOLE_MUTATION)),)
+ifneq ($(strip $(CK_TEST_CONSOLE_MUTATION)),bm-left-on-after-exit)
+$(error CK_TEST_CONSOLE_MUTATION must be bm-left-on-after-exit)
+endif
+ifneq ($(strip $(CK_CONSOLE_SESSION)),1)
+$(error CK_TEST_CONSOLE_MUTATION needs CK_CONSOLE_SESSION=1)
+endif
+endif
+
 # TEST-ONLY Store crash hook (svc/store_crash.h; only
 # scripts/qemu_ck_store_crash_test.sh sets it): the Store stage reads a crash
 # plan from the scratch unit, runs on a volatile write cache and halts at the
@@ -457,6 +496,14 @@ ifneq ($(strip $(CK_TEST_XHCI_MUTATION)),)
 FULL_NAME := full-test-xhci-$(strip $(CK_TEST_XHCI_MUTATION))
 STAGE_DMA_FLAGS += -DCK_TEST_XHCI_MUTATION=$(XHCI_MUT_NUM)
 endif
+ifeq ($(strip $(CK_CONSOLE_SESSION)),1)
+FULL_NAME := full-console-session
+STAGE_DMA_FLAGS += -DCK_CONSOLE_SESSION=1
+ifneq ($(strip $(CK_TEST_CONSOLE_MUTATION)),)
+FULL_NAME := full-test-console-mutation
+STAGE_DMA_FLAGS += -DCK_TEST_CONSOLE_MUTATION=1
+endif
+endif
 ifneq ($(strip $(CK_HARDWARE_STAGING)),)
 # Own OUT subdirectory: stage objects built with these flags never mix with
 # the default full image's objects.
@@ -574,6 +621,22 @@ define fwcfg_check
 	fi
 endef
 
+# console_check(elf): only a CK_CONSOLE_SESSION image may carry the console
+# session code; only a CK_TEST_CONSOLE_MUTATION image its mutation banner.
+define console_check
+	@if [ "$(strip $(CK_CONSOLE_SESSION))" = 1 ]; then \
+	  grep -aqF "console_session: begin" $(1) || { echo "console session image lacks its stage"; rm -f $(1); exit 1; }; \
+	else \
+	  if grep -aqF "console_session:" $(1); then echo "default image carries the console session"; rm -f $(1); exit 1; fi; \
+	  echo "no console session code in $(1)"; \
+	fi
+	@if [ -n "$(strip $(CK_TEST_CONSOLE_MUTATION))" ]; then \
+	  grep -aqF "TEST-ONLY console session MUTATION BUILD" $(1) || { echo "console mutation image lacks its TEST-ONLY banner"; rm -f $(1); exit 1; }; \
+	else \
+	  if grep -aqF "TEST-ONLY console session MUTATION" $(1); then echo "image carries the console mutation without asking"; rm -f $(1); exit 1; fi; \
+	fi
+endef
+
 # xhci_mut_check(elf): only a CK_TEST_XHCI_MUTATION image may carry the
 # TEST-ONLY xHCI mutation banner (and it must carry it).
 define xhci_mut_check
@@ -688,6 +751,7 @@ $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	$(call fwcfg_check,$@)
 	$(call owner_check,$@)
 	$(call xhci_mut_check,$@)
+	$(call console_check,$@)
 	$(call smp_check,$@)
 	$(call crash_check,$@)
 	$(call cont_check,$@)

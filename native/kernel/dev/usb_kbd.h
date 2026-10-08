@@ -67,4 +67,15 @@ int ck_kbd_recovery_requested(void);
  * this CPU for good (interrupts masked, WFI). The caller must have released
  * every device's DMA first. Never returns. */
 __attribute__((noreturn)) void ck_recovery_console_stub(void);
+
+#if defined(CK_CONSOLE_SESSION) && CK_CONSOLE_SESSION
+/* Console session (C3-1a, TEST-ONLY QEMU image): the operator console that
+ * keeps taking serial and USB input until "exit". ck_kbd_session_phase runs
+ * inside the xHCI fence in place of ck_kbd_phase; ck_console_session_serial_only
+ * runs the serial half alone (no keyboard, or its endpoint halted);
+ * ck_console_session_ended is 1 once the shell ran "exit". */
+int ck_kbd_session_phase(volatile uint8_t *bar0, uint8_t *mem, uint64_t phys, size_t bytes);
+void ck_console_session_serial_only(void);
+int ck_console_session_ended(void);
+#endif
 #endif

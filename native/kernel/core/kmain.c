@@ -245,6 +245,15 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
               (unsigned long long)mu.heap_bytes, (unsigned long long)mu.heap_free,
               (unsigned long long)mu.heap_min_free);
 
+    /* Optional final boot stage: the operator console session (TEST-ONLY image
+     * built with CK_CONSOLE_SESSION=1; weak, absent and silent otherwise). */
+    if (ck_stage_console_session) {
+        ck_set_stage("console");
+        int crc = ck_stage_console_session();
+        ck_irq_cpu_enable(0);
+        ck_printf("stage console: %s rc=%d\n", crc == 0 ? "ok" : "FAIL", crc);
+    }
+
     ck_set_stage("final");
     ck_puts("\n");
     ck_report_header("final");

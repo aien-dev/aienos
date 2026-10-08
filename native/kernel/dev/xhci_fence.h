@@ -70,6 +70,11 @@ enum {
  * stream back to abort) before returning, except under the TEST-ONLY
  * no-revoke mutation. Returns CK_XHCI_OK, CK_XHCI_ABSENT or a CK_XHCI_E_*. */
 int ck_xhci_fence(const pci_system *pci);
+#if defined(CK_CONSOLE_SESSION) && CK_CONSOLE_SESSION
+/* Console session (TEST-ONLY QEMU image): the same fence as ck_xhci_fence, with
+ * ck_kbd_session_phase as the operator phase. Same release, same rows. */
+int ck_xhci_session(const pci_system *pci);
+#endif
 /* Halt, bus master off, stream back to abort if still live. Idempotent. */
 void ck_xhci_release(void);
 /* 1 while the controller may still DMA (bus master on or stream confined). */

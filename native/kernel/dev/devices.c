@@ -104,3 +104,25 @@ void ck_stage_quiesce(void)
     if (net_live) ck_printf("devices: quiesce before reset virtio_net=released-now\n");
     if (xhci_live) ck_printf("devices: quiesce before reset xhci=released-now\n");
 }
+
+#if defined(CK_CONSOLE_SESSION) && CK_CONSOLE_SESSION
+/* Final boot stage "console" (C3-1a, TEST-ONLY QEMU image built with
+ * CK_CONSOLE_SESSION=1): runs after every other boot step. Serial (PL011) and
+ * the USB keyboard feed one line editor and the existing shell until "exit".
+ * The USB keyboard runs inside the same xHCI DMA fence as the boot shell
+ * (SMMU window first, no SMMU means no DMA); the fence is re-entered here and
+ * revoked exactly as in the devices stage. Nothing here grants capabilities. */
+int ck_stage_console_session(void)
+{
+#if defined(CK_TEST_CONSOLE_MUTATION)
+    ck_printf("WARNING: TEST-ONLY console session MUTATION BUILD (CK_TEST_CONSOLE_MUTATION=bm-left-on-after-exit, "
+              "QEMU gate self-test only, never a PASS)\n");
+#endif
+    ck_printf("console_session: begin (TEST-ONLY QEMU image, CK_CONSOLE_SESSION=1; QEMU only, hardware NOT_RUN)\n");
+    int xrc = ck_xhci_session(&g_pci);
+    ck_printf("console_session: xhci fence returned rc=%d state=%s\n", xrc, ck_xhci_state());
+    ck_console_session_serial_only(); /* no-op once the exit came inside the fence */
+    ck_printf("console_session: end (exit) xhci=%s\n", ck_xhci_live() ? "LIVE" : "released");
+    return 0;
+}
+#endif
