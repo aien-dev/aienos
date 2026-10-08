@@ -14,13 +14,40 @@
 
 const void *ck_host_mcfg;
 int ck_host_quiet;
+int ck_host_try_map_ok;
+uint64_t ck_host_try_map_fail;
+
+/* Optional text capture so a test can check what a stage printed. */
+static char cap_buf[32768];
+static size_t cap_len;
+static int cap_on;
+void ck_host_capture_start(void) { cap_len = 0; cap_buf[0] = 0; cap_on = 1; }
+const char *ck_host_capture_text(void) { return cap_buf; }
+void ck_host_capture_stop(void) { cap_on = 0; }
+static void cap_add(const char *s, size_t n)
+{
+    if (!cap_on) return;
+    if (n > sizeof cap_buf - 1 - cap_len) n = sizeof cap_buf - 1 - cap_len;
+    memcpy(cap_buf + cap_len, s, n);
+    cap_len += n;
+    cap_buf[cap_len] = 0;
+}
 
 void ck_puts(const char *s)
 {
+    cap_add(s, strlen(s));
     if (!ck_host_quiet) fputs(s, stdout);
 }
 void ck_vprintf(const char *fmt, va_list ap)
 {
+    if (cap_on) {
+        char tmp[512];
+        va_list c;
+        va_copy(c, ap);
+        int n = vsnprintf(tmp, sizeof tmp, fmt, c);
+        va_end(c);
+        if (n > 0) cap_add(tmp, (size_t)n < sizeof tmp ? (size_t)n : sizeof tmp - 1);
+    }
     if (!ck_host_quiet) vprintf(fmt, ap);
 }
 void ck_printf(const char *fmt, ...)
@@ -57,11 +84,14 @@ volatile void *ck_mmio_map(uint64_t phys, size_t len)
     (void)len;
     return (volatile void *)(uintptr_t)phys;
 }
-/* Host: no platform MMIO (the ACPI platform xHCI list is always empty). */
+/* Host: no platform MMIO by default (the ACPI platform xHCI list is always
+ * empty). A test may turn on identity mapping (ck_host_try_map_ok) and make
+ * one exact address fail (ck_host_try_map_fail). */
 volatile void *ck_mmio_try_map(uint64_t phys, size_t len)
 {
-    (void)phys; (void)len;
-    return NULL;
+    (void)len;
+    if (!ck_host_try_map_ok || (ck_host_try_map_fail && phys == ck_host_try_map_fail)) return NULL;
+    return (volatile void *)(uintptr_t)phys;
 }
 /* Host: no DSDT reachable (no FADT in ck_acpi_find). */
 int ck_acpi_platform_devices(const char *const *ids, unsigned nids, struct ck_platform_dev *out, unsigned max,

@@ -45,6 +45,9 @@ int ck_stage_devices(void)
 {
     int rc = pci_stage_probe(&g_pci);
     if (rc) return rc;
+    /* Report-only multi-segment discovery for the boot log (aienos#286); the
+     * result is ignored, nothing below depends on it. */
+    (void)pci_stage_discover_report();
     /* Post-exit bus-master sweep (Rust dma_gate::sweep_bus_master): before any
      * device is given DMA, clear BME on every endpoint firmware left with it
      * set, so each device starts with DMA off. */

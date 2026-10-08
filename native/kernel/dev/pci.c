@@ -491,3 +491,63 @@ int pci_discover(const pci_bus_access *a, uint16_t segment, pci_found *out, uint
     if (bridges_followed) *bridges_followed = d.bridges;
     return rc;
 }
+
+/* ---- Boot discovery report: every MCFG segment, read only. ---- */
+
+#define PCI_MAX_SEGMENTS 32u
+
+static pci_ecam g_disc_ecam[PCI_MAX_SEGMENTS];
+static pci_found g_disc_found[PCI_MAX_FUNCS];
+
+/* Report-only: prints what firmware declared and what answers, changes no
+ * state. Each segment maps only its declared bus range through the
+ * fail-closed ck_mmio_try_map (a refused map is reported, never retried
+ * another way). pci_discover reads config space and nothing else: no BAR
+ * sizing, no config write. Segment 0 was already mapped by pci_stage_probe;
+ * mapping the same pages again is a no-op. The caller ignores the return
+ * value (it is for the log and tests); binding, sweep and assignment do not
+ * depend on it. */
+int pci_stage_discover_report(void)
+{
+    const uint8_t *mcfg = (const uint8_t *)ck_acpi_find("MCFG");
+    if (!mcfg) {
+        ck_printf("pci_disc: no ACPI MCFG table\n");
+        return PCI_E_NO_MCFG;
+    }
+    uint32_t len = le32(mcfg + 4);
+    uint32_t nseg = 0;
+    int rc = pci_mcfg_parse_all(mcfg, len, g_disc_ecam, PCI_MAX_SEGMENTS, &nseg);
+    if (rc) {
+        ck_printf("pci_disc: MCFG malformed or too large (len=%u rc=%d)\n", len, rc);
+        return rc;
+    }
+    uint32_t scanned = 0, total = 0;
+    for (uint32_t i = 0; i < nseg; i++) {
+        const pci_ecam *e = &g_disc_ecam[i];
+        uint64_t first = e->base + ((uint64_t)e->start_bus << 20);
+        uint64_t bytes = (uint64_t)((uint32_t)e->end_bus - e->start_bus + 1u) << 20;
+        volatile uint8_t *m = (volatile uint8_t *)ck_mmio_try_map(first, (size_t)bytes);
+        if (!m) {
+            ck_printf("pci_disc: seg %04x bus %02x-%02x REFUSED (ecam map refused, base=0x%llx)\n", e->segment,
+                      e->start_bus, e->end_bus, (unsigned long long)e->base);
+            continue;
+        }
+        pci_bus_access a;
+        a.ecam = m;
+        a.start_bus = e->start_bus;
+        a.end_bus = e->end_bus;
+        uint32_t n = 0, br = 0;
+        int drc = pci_discover(&a, e->segment, g_disc_found, PCI_MAX_FUNCS, &n, &br);
+        ck_printf("pci_disc: seg %04x bus %02x-%02x functions=%u bridges=%u rc=%d\n", e->segment, e->start_bus,
+                  e->end_bus, n, br, drc);
+        for (uint32_t j = 0; j < n; j++) {
+            const pci_found *f = &g_disc_found[j];
+            ck_printf("pci_disc: %04x:%02x:%02x.%u %04x:%04x class=%06x rev=%02x\n", f->segment, f->bus, f->dev,
+                      f->fn, f->vendor, f->device, f->class_code, f->revision);
+        }
+        scanned++;
+        total += n;
+    }
+    ck_printf("pci_disc: segments=%u functions=%u (read-only, no config writes)\n", scanned, total);
+    return PCI_OK;
+}

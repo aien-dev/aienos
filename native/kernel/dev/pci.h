@@ -182,4 +182,7 @@ const char *pci_class_name(uint32_t class_code);
  * known QEMU virt base (0x4010000000 or 0x3f000000). */
 int pci_stage_probe(pci_system *s);
 
+/* Report-only, read-only multi-segment discovery for the boot log (see pci.c). */
+int pci_stage_discover_report(void);
+
 #endif
