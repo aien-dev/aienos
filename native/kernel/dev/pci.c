@@ -376,3 +376,118 @@ int pci_stage_probe(pci_system *s)
               wp ? " (window: QEMU virt mmio32, QEMU-only assumption)" : " (no window: firmware assignment only)");
     return PCI_OK;
 }
+
+/* ---- Read-only discovery (see pci.h). ---- */
+
+int pci_mcfg_parse_all(const uint8_t *t, size_t len, pci_ecam *out, uint32_t cap, uint32_t *n_out)
+{
+    if (!t || !out || !n_out) return PCI_E_ARG;
+    if (len < 44u + 16u) return PCI_E_MCFG;
+    if (t[0] != 'M' || t[1] != 'C' || t[2] != 'F' || t[3] != 'G') return PCI_E_MCFG;
+    if (le32(t + 4) != len) return PCI_E_MCFG;
+    if ((len - 44u) % 16u != 0) return PCI_E_MCFG;
+    uint32_t n = 0;
+    for (size_t off = 44; off + 16 <= len; off += 16) {
+        const uint8_t *e = t + off;
+        pci_ecam c;
+        c.base = le64(e);
+        c.segment = (uint16_t)(e[8] | e[9] << 8);
+        c.start_bus = e[10];
+        c.end_bus = e[11];
+        if (c.base == 0 || (c.base & 0xfffffu) != 0 || c.start_bus > c.end_bus) return PCI_E_MCFG;
+        uint64_t span = (uint64_t)((uint32_t)c.end_bus + 1u) << 20;
+        if (c.base + span < c.base) return PCI_E_MCFG;
+        for (uint32_t i = 0; i < n; i++) {
+            if (out[i].segment == c.segment && out[i].start_bus <= c.end_bus && c.start_bus <= out[i].end_bus)
+                return PCI_E_MCFG;
+        }
+        if (n >= cap) return PCI_E_FULL;
+        out[n++] = c;
+    }
+    *n_out = n;
+    return PCI_OK;
+}
+
+/* The only config access discovery uses: const volatile, so a store through
+ * it does not compile. */
+static uint32_t rd32(const volatile uint8_t *c, uint32_t off) { return *(const volatile uint32_t *)(c + (off & ~3u)); }
+
+#define DISC_MAX_DEPTH 8u
+
+typedef struct {
+    const pci_bus_access *a;
+    uint16_t segment;
+    pci_found *out;
+    uint32_t cap, n, bridges;
+    uint32_t seen[8]; /* 256-bit visited set of scanned buses */
+} disc_ctx;
+
+static int disc_bus(disc_ctx *d, uint8_t bus, uint32_t depth)
+{
+    d->seen[bus >> 5] |= 1u << (bus & 31u);
+    for (uint32_t dev = 0; dev < 32; dev++) {
+        for (uint32_t fn = 0; fn < 8; fn++) {
+            const volatile uint8_t *c = pci_cfg(d->a, bus, (uint8_t)dev, (uint8_t)fn);
+            if (!c) return PCI_OK;
+            uint32_t id = rd32(c, CFG_VENDOR);
+            uint16_t vendor = (uint16_t)id;
+            if (vendor == 0xffffu || vendor == 0) {
+                if (fn == 0) break; /* no function 0: no device */
+                continue;
+            }
+            uint8_t ht = (uint8_t)(rd32(c, 0x0c) >> 16);
+            if (d->n >= d->cap) return PCI_E_FULL;
+            pci_found *f = &d->out[d->n++];
+            *f = (pci_found){0};
+            f->segment = d->segment;
+            f->bus = bus;
+            f->dev = (uint8_t)dev;
+            f->fn = (uint8_t)fn;
+            f->vendor = vendor;
+            f->device = (uint16_t)(id >> 16);
+            uint32_t cr = rd32(c, CFG_CLASSREV);
+            f->class_code = cr >> 8;
+            f->revision = (uint8_t)cr;
+            f->header_type = ht;
+            uint32_t kind = ht & 0x7fu;
+            uint32_t nbars = kind == 0 ? 6u : (kind == 1 ? 2u : 0u);
+            for (uint32_t i = 0; i < nbars; i++) f->bar_raw[i] = rd32(c, CFG_BAR0 + 4u * i);
+            if (kind == 0) {
+                uint32_t ss = rd32(c, CFG_SUBSYS);
+                f->subsys_vendor = (uint16_t)ss;
+                f->subsys_id = (uint16_t)(ss >> 16);
+            } else if (kind == 1) {
+                uint32_t bn = rd32(c, 0x18);
+                f->secondary = (uint8_t)(bn >> 8);
+                f->subordinate = (uint8_t)(bn >> 16);
+                uint8_t sec = f->secondary;
+                if (sec > bus && sec <= d->a->end_bus && f->subordinate >= sec && depth < DISC_MAX_DEPTH &&
+                    !(d->seen[sec >> 5] & (1u << (sec & 31u)))) {
+                    d->bridges++;
+                    int rc = disc_bus(d, sec, depth + 1u);
+                    if (rc != PCI_OK) return rc;
+                }
+            }
+            if (fn == 0 && !(ht & 0x80u)) break; /* single-function device */
+        }
+    }
+    return PCI_OK;
+}
+
+int pci_discover(const pci_bus_access *a, uint16_t segment, pci_found *out, uint32_t cap, uint32_t *n_out,
+                 uint32_t *bridges_followed)
+{
+    if (!a || !out || !n_out || !a->ecam || a->start_bus > a->end_bus) return PCI_E_ARG;
+    disc_ctx d;
+    d.a = a;
+    d.segment = segment;
+    d.out = out;
+    d.cap = cap;
+    d.n = 0;
+    d.bridges = 0;
+    for (int i = 0; i < 8; i++) d.seen[i] = 0;
+    int rc = disc_bus(&d, a->start_bus, 0);
+    *n_out = d.n;
+    if (bridges_followed) *bridges_followed = d.bridges;
+    return rc;
+}

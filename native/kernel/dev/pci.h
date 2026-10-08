@@ -52,6 +52,49 @@ void pci_w32(volatile uint8_t *cfg, uint32_t off, uint32_t v);
 uint16_t pci_r16(volatile uint8_t *cfg, uint32_t off);
 void pci_w16(volatile uint8_t *cfg, uint32_t off, uint16_t v);
 
+/* ---- Read-only discovery (multi-segment) ----
+ *
+ * pci_enumerate sizes BARs, which writes config space (all-ones BAR writes,
+ * COMMAND changes). The functions below never do: pci_discover reads config
+ * space through a read-only helper (const volatile pointers) and nothing
+ * else, so it is safe to run against a device the kernel must not disturb.
+ *
+ * Discovery never sizes BARs and never writes. bar_raw holds exactly what
+ * firmware left in each BAR register, unsized: the size is unknown, and the
+ * low bits are type flags. The values are bus addresses, not assumed to be
+ * CPU addresses. Header type 0 has 6 BAR registers, type 1 has 2; the
+ * unused entries are 0. */
+
+/* Every MCFG allocation, in table order, up to cap entries. Same header
+ * checks as pci_mcfg_parse. Each entry needs base != 0, 1 MiB aligned,
+ * start_bus <= end_bus and base + ((end_bus + 1) << 20) not overflowing
+ * u64. Two allocations for one segment with overlapping bus ranges (exact
+ * duplicates included) are PCI_E_MCFG. More entries than cap: PCI_E_FULL
+ * (never truncated). `base` is the ECAM address of bus 0 of the segment, so
+ * bus b sits at base + (b << 20). */
+int pci_mcfg_parse_all(const uint8_t *table, size_t len, pci_ecam *out, uint32_t cap, uint32_t *n_out);
+
+typedef struct {
+    uint16_t segment;
+    uint8_t bus, dev, fn;
+    uint16_t vendor, device;
+    uint32_t class_code; /* class << 16 | subclass << 8 | progif */
+    uint8_t revision, header_type;
+    uint16_t subsys_vendor, subsys_id; /* header type 0 only, else 0 */
+    uint32_t bar_raw[PCI_MAX_BARS];    /* as read, unsized */
+    uint8_t secondary, subordinate;    /* header type 1 only, else 0 */
+} pci_found;
+
+/* Scan segment `segment` through `a`: bus start_bus, then every type-1 bridge
+ * whose secondary > its own bus, secondary <= end_bus, subordinate >=
+ * secondary, depth < 8 and whose bus was not scanned already. Vendor 0xffff
+ * or 0 is absent; an absent function 0 skips the device; the multi-function
+ * bit is honored. Fills out[0..*n_out). *bridges_followed (may be NULL)
+ * counts bridges whose secondary bus was scanned. Capacity exhausted:
+ * PCI_E_FULL. */
+int pci_discover(const pci_bus_access *a, uint16_t segment, pci_found *out, uint32_t cap, uint32_t *n_out,
+                 uint32_t *bridges_followed);
+
 /* Window for BARs firmware did not assign. [base, limit) and next. */
 typedef struct {
     uint64_t base, limit, next;

@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
 #include "ck.h"
 #include "ck_host.h"
 #include "devices.h"
@@ -163,6 +166,239 @@ static void test_pci_enum(void)
     CHECK(ck_dev_boot_disk() == NULL);
     ck_host_mcfg = NULL;
     free(ecam);
+}
+
+/* ---------------- Multi-segment MCFG + read-only discovery ---------------- */
+
+/* The recorded GB10 Spark MCFG: 16 allocations, 300 bytes.
+ * Source: docs/GB10_PLATFORM_TOPOLOGY.md, "ACPI MCFG / ECAM". */
+static size_t mk_gb10_mcfg(uint8_t *t)
+{
+    uint64_t b[16];
+    uint16_t sg[16];
+    uint8_t sb[16], eb[16];
+    for (int i = 0; i < 16; i++) {
+        sg[i] = (uint16_t)i;
+        sb[i] = 0;
+        if (i < 15) {
+            b[i] = 0xF300000000ull + (uint64_t)i * 0x10000000ull;
+            eb[i] = i <= 10 ? 15 : 255;
+        } else {
+            b[i] = 0x29000000ull;
+            eb[i] = 1;
+        }
+    }
+    return mk_mcfg(t, 16, b, sg, sb, eb);
+}
+
+static void test_mcfg_all(void)
+{
+    uint8_t t[44 + 16 * 16];
+    pci_ecam e[16];
+    uint32_t n = 99;
+    size_t len = mk_gb10_mcfg(t);
+    CHECK(len == 300);
+    CHECK(pci_mcfg_parse_all(t, len, e, 16, &n) == PCI_OK && n == 16);
+    CHECK(e[0].segment == 0 && e[0].base == 0xF300000000ull && e[0].end_bus == 15);
+    CHECK(e[10].segment == 10 && e[10].base == 0xF300000000ull + 10 * 0x10000000ull && e[10].end_bus == 15);
+    CHECK(e[11].segment == 11 && e[11].end_bus == 255);
+    CHECK(e[14].segment == 14 && e[14].end_bus == 255);
+    CHECK(e[15].segment == 15 && e[15].base == 0x29000000ull && e[15].start_bus == 0 && e[15].end_bus == 1);
+    CHECK(pci_mcfg_parse_all(t, len, e, 15, &n) == PCI_E_FULL);     /* never truncates */
+    CHECK(pci_mcfg_parse_all(t, len, e, 16, NULL) == PCI_E_ARG);
+    CHECK(pci_mcfg_parse_all(NULL, len, e, 16, &n) == PCI_E_ARG);
+    CHECK(pci_mcfg_parse_all(t, len, NULL, 16, &n) == PCI_E_ARG);
+    CHECK(pci_mcfg_parse_all(t, len - 1, e, 16, &n) == PCI_E_MCFG); /* length field mismatch */
+    CHECK(pci_mcfg_parse_all(t, 44, e, 16, &n) == PCI_E_MCFG);      /* no allocation */
+
+    uint64_t b[2] = {0x4010000000ull, 0x4020000000ull};
+    uint16_t s[2] = {3, 3};
+    uint8_t sb[2] = {0, 0}, eb[2] = {7, 7};
+    len = mk_mcfg(t, 2, b, s, sb, eb);
+    CHECK(pci_mcfg_parse_all(t, len, e, 4, &n) == PCI_E_MCFG);      /* exact duplicate range */
+    sb[1] = 7; eb[1] = 9;
+    len = mk_mcfg(t, 2, b, s, sb, eb);
+    CHECK(pci_mcfg_parse_all(t, len, e, 4, &n) == PCI_E_MCFG);      /* overlap on bus 7 */
+    sb[1] = 8;
+    len = mk_mcfg(t, 2, b, s, sb, eb);
+    CHECK(pci_mcfg_parse_all(t, len, e, 4, &n) == PCI_OK && n == 2); /* adjacent ranges are fine */
+    s[1] = 4; sb[1] = 0; eb[1] = 7;
+    len = mk_mcfg(t, 2, b, s, sb, eb);
+    CHECK(pci_mcfg_parse_all(t, len, e, 4, &n) == PCI_OK && n == 2); /* same range, other segment */
+    sb[0] = 2; sb[1] = 0;
+    len = mk_mcfg(t, 2, b, s, sb, eb);
+    CHECK(pci_mcfg_parse_all(t, len, e, 4, &n) == PCI_OK && e[0].start_bus == 2 && e[0].end_bus == 7);
+    uint64_t ov[1] = {0xfffffffffff00000ull};
+    uint16_t s0[1] = {0};
+    uint8_t sbo[1] = {0}, ebo[1] = {1};
+    len = mk_mcfg(t, 1, ov, s0, sbo, ebo);
+    CHECK(pci_mcfg_parse_all(t, len, e, 4, &n) == PCI_E_MCFG);      /* base + span wraps u64 */
+    uint64_t z[1] = {0};
+    len = mk_mcfg(t, 1, z, s0, sbo, ebo);
+    CHECK(pci_mcfg_parse_all(t, len, e, 4, &n) == PCI_E_MCFG);      /* zero base */
+    uint64_t mis[1] = {0x4010080000ull};
+    len = mk_mcfg(t, 1, mis, s0, sbo, ebo);
+    CHECK(pci_mcfg_parse_all(t, len, e, 4, &n) == PCI_E_MCFG);      /* not 1 MiB aligned */
+    uint8_t sbb[1] = {5}, ebb[1] = {4};
+    len = mk_mcfg(t, 1, b, s0, sbb, ebb);
+    CHECK(pci_mcfg_parse_all(t, len, e, 4, &n) == PCI_E_MCFG);      /* start > end */
+}
+
+#define FAKE_SEG 15u
+#define FAKE_BUSES 2u
+#define FAKE_BYTES ((size_t)FAKE_BUSES << 20)
+
+/* Fake segment-15 ECAM: root bridge 00:00.0 (secondary 1) and the GB10 at
+ * 01:00.0. The bridge device id is SYNTHETIC (the topology doc does not
+ * record it); the BAR raw values are SYNTHETIC too. */
+static uint8_t *mk_fake_seg15(void)
+{
+    uint8_t *ecam = mmap(NULL, FAKE_BYTES, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (ecam == MAP_FAILED) return NULL;
+    memset(ecam, 0xff, FAKE_BYTES);
+    uint8_t *c;
+    memset(c = cfgp(ecam, 0, 0, 0), 0, 4096);
+    mkfn(c, 0x10de, 0x7777 /* SYNTHETIC bridge id */, 0x060400, 1);
+    c[0x18] = 0; c[0x19] = 1; c[0x1a] = 1;
+    memset(c = cfgp(ecam, 1, 0, 0), 0, 4096);
+    mkfn(c, 0x10de, 0x2e12, 0x030000, 0);
+    c[0x08] = 0xa1;                                                 /* revision */
+    put32(c + 0x10, 0x0000000cu);                                   /* SYNTHETIC raw BARs */
+    put32(c + 0x14, 0x00000001u);
+    put32(c + 0x18, 0x00000004u);
+    put32(c + 0x2c, 0x000010deu);                                   /* subsys 10de:0000 */
+    return ecam;
+}
+
+static void acc_for(pci_bus_access *a, uint8_t *ecam, uint8_t sb, uint8_t eb)
+{
+    a->ecam = ecam;
+    a->start_bus = sb;
+    a->end_bus = eb;
+}
+
+static void test_discover_seg15(void)
+{
+    uint8_t *ecam = mk_fake_seg15();
+    CHECK(ecam != NULL);
+    if (!ecam) return;
+    static uint8_t copy[FAKE_BYTES];
+    memcpy(copy, ecam, FAKE_BYTES);
+    CHECK(mprotect(ecam, FAKE_BYTES, PROT_READ) == 0);
+    pci_bus_access a;
+    acc_for(&a, ecam, 0, 1);
+    pci_found f[8];
+    uint32_t n = 0, br = 0;
+    CHECK(pci_discover(&a, FAKE_SEG, f, 8, &n, &br) == PCI_OK);
+    CHECK(n == 2 && br == 1);
+    const pci_found *g = NULL;
+    for (uint32_t i = 0; i < n; i++)
+        if (f[i].vendor == 0x10de && f[i].device == 0x2e12) g = &f[i];
+    CHECK(g != NULL);
+    if (g) {
+        CHECK(g->segment == FAKE_SEG && g->bus == 1 && g->dev == 0 && g->fn == 0);
+        CHECK(g->class_code == 0x030000 && g->revision == 0xa1 && g->header_type == 0);
+        CHECK(g->subsys_vendor == 0x10de && g->subsys_id == 0);
+        CHECK(g->bar_raw[0] == 0xcu && g->bar_raw[1] == 1u && g->bar_raw[2] == 4u && g->bar_raw[3] == 0);
+    }
+    CHECK(f[0].bus == 0 && (f[0].header_type & 0x7f) == 1 && f[0].secondary == 1 && f[0].subordinate == 1);
+    CHECK(memcmp(ecam, copy, FAKE_BYTES) == 0);                     /* zero writes */
+    munmap(ecam, FAKE_BYTES);
+}
+
+/* Run fn in a child; return 1 when it died of SIGSEGV/SIGBUS. */
+static int child_died_on_write(void (*fn)(uint8_t *), uint8_t *ecam)
+{
+    fflush(stdout);
+    pid_t p = fork();
+    if (p < 0) return 0;
+    if (p == 0) {
+        signal(SIGSEGV, SIG_DFL); /* sanitizer builds install their own handler */
+        signal(SIGBUS, SIG_DFL);
+        fn(ecam);
+        _exit(0); /* survived the write: the trap did not fire */
+    }
+    int st = 0;
+    if (waitpid(p, &st, 0) != p) return 0;
+    return WIFSIGNALED(st) && (WTERMSIG(st) == SIGSEGV || WTERMSIG(st) == SIGBUS);
+}
+
+static void child_enumerate(uint8_t *ecam)
+{
+    static pci_system s;
+    memset(&s, 0, sizeof s);
+    s.ecam.segment = FAKE_SEG;
+    s.acc.ecam = ecam;
+    s.acc.start_bus = 0;
+    s.acc.end_bus = 1;
+    (void)pci_enumerate(&s, NULL); /* sizes BARs: must write */
+}
+static void child_w32(uint8_t *ecam) { pci_w32(cfgp(ecam, 1, 0, 0), 0x10, 0xffffffffu); }
+
+/* Negative control: the read-only page trap must catch real writes. */
+static void test_discover_trap(void)
+{
+    uint8_t *ecam = mk_fake_seg15();
+    CHECK(ecam != NULL);
+    if (!ecam) return;
+    CHECK(mprotect(ecam, FAKE_BYTES, PROT_READ) == 0);
+    CHECK(child_died_on_write(child_enumerate, ecam));
+    CHECK(child_died_on_write(child_w32, ecam));
+    munmap(ecam, FAKE_BYTES);
+}
+
+static void test_discover_edges(void)
+{
+    pci_found f[8];
+    uint32_t n = 9, br = 9;
+    pci_bus_access a;
+    uint8_t *ecam = mmap(NULL, 4u << 20, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    CHECK(ecam != MAP_FAILED);
+    if (ecam == MAP_FAILED) return;
+    uint8_t *c;
+
+    memset(ecam, 0xff, 4u << 20);                                   /* empty bus */
+    acc_for(&a, ecam, 0, 3);
+    CHECK(pci_discover(&a, 0, f, 8, &n, &br) == PCI_OK && n == 0 && br == 0);
+    CHECK(pci_discover(NULL, 0, f, 8, &n, &br) == PCI_E_ARG);
+    CHECK(pci_discover(&a, 0, f, 8, NULL, &br) == PCI_E_ARG);
+
+    /* Loop: bridge on bus 1 whose secondary points back to bus 0. */
+    memset(c = cfgp(ecam, 0, 0, 0), 0, 4096); mkfn(c, 0x1b36, 1, 0x060400, 1);
+    c[0x19] = 1; c[0x1a] = 3;
+    memset(c = cfgp(ecam, 1, 0, 0), 0, 4096); mkfn(c, 0x1b36, 2, 0x060400, 1);
+    c[0x19] = 0; c[0x1a] = 3;
+    CHECK(pci_discover(&a, 0, f, 8, &n, &br) == PCI_OK);
+    CHECK(n == 2 && br == 1);                                       /* back-edge not followed, counted once */
+
+    /* Secondary beyond end_bus: not followed. */
+    memset(ecam, 0xff, 4u << 20);
+    memset(c = cfgp(ecam, 0, 0, 0), 0, 4096); mkfn(c, 0x1b36, 1, 0x060400, 1);
+    c[0x19] = 5; c[0x1a] = 5;
+    memset(c = cfgp(ecam, 1, 0, 0), 0, 4096); mkfn(c, 0x1b36, 3, 0x020000, 0);
+    CHECK(pci_discover(&a, 0, f, 8, &n, &br) == PCI_OK && n == 1 && br == 0);
+    c = cfgp(ecam, 0, 0, 0); c[0x19] = 2; c[0x1a] = 1;              /* subordinate < secondary */
+    CHECK(pci_discover(&a, 0, f, 8, &n, &br) == PCI_OK && n == 1 && br == 0);
+
+    /* Multi-function and fn0-absent handling on bus 0. */
+    memset(ecam, 0xff, 4u << 20);
+    memset(c = cfgp(ecam, 0, 1, 0), 0, 4096); mkfn(c, 0x8086, 1, 0x020000, 0x80);
+    memset(c = cfgp(ecam, 0, 1, 3), 0, 4096); mkfn(c, 0x8086, 2, 0x020000, 0);
+    memset(c = cfgp(ecam, 0, 2, 1), 0, 4096); mkfn(c, 0x8086, 3, 0x020000, 0); /* fn0 absent: skipped */
+    memset(c = cfgp(ecam, 0, 3, 0), 0, 4096); mkfn(c, 0x8086, 4, 0x020000, 0);
+    memset(c = cfgp(ecam, 0, 3, 1), 0, 4096); mkfn(c, 0x8086, 5, 0x020000, 0); /* not multi-fn: skipped */
+    CHECK(pci_discover(&a, 0, f, 8, &n, &br) == PCI_OK && n == 3);
+
+    /* Capacity exhaustion. */
+    CHECK(pci_discover(&a, 0, f, 2, &n, &br) == PCI_E_FULL);
+
+    /* Nonzero start_bus accessor: ecam maps bus 2 at offset 0. */
+    memset(ecam, 0xff, 4u << 20);
+    memset(c = cfgp(ecam, 0, 4, 0), 0, 4096); mkfn(c, 0x1af4, 9, 0x020000, 0);
+    acc_for(&a, ecam, 2, 3);
+    CHECK(pci_discover(&a, 7, f, 8, &n, &br) == PCI_OK && n == 1);
+    CHECK(f[0].segment == 7 && f[0].bus == 2 && f[0].dev == 4 && f[0].device == 9);
+    munmap(ecam, 4u << 20);
 }
 
 /* ---------------- Store boot ---------------- */
@@ -1026,6 +1262,10 @@ int main(void)
     test_mcfg();
     test_pci_bars();
     test_pci_enum();
+    test_mcfg_all();
+    test_discover_seg15();
+    test_discover_trap();
+    test_discover_edges();
     test_store();
     test_artifact_store();
     test_security();
