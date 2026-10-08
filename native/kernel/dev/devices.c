@@ -62,6 +62,13 @@ int ck_stage_devices(void)
     ck_xhci_after_sweep(&g_pci); /* TEST-ONLY bm-left-on mutation hook; no-op otherwise */
     int nrc = ck_nvme_bind(&g_nvme, &g_pci);
     if (nrc) ck_dev_nvme_release(); /* a failed bind never keeps DMA */
+    /* Report-only (aienos#31, cut S1): the NVMe the multi-segment discovery sees, and whether it is the
+     * function the segment-0 probe bound above. Binding is unchanged. */
+    {
+        uint32_t dn = 0;
+        const pci_found *df = pci_stage_disc_found(&dn);
+        (void)pci_nvme_disc_report(df, dn, g_nvme.pf);
+    }
     virtio_pci_caps caps;
     const pci_func *vf = 0;
     int vrc = ck_virtio_net_probe(&g_pci, &caps, &vf);

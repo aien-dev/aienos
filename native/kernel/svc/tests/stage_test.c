@@ -557,6 +557,144 @@ static void test_discover_in_stage(void)
     munmap(e15, FAKE_BYTES);
 }
 
+/* ---------------- NVMe found through multi-segment discovery (aienos#31, cut S1) ---------------- */
+
+/* Fake segment with a type-1 bridge at 00:00.0 (secondary bus 1) and an NVMe
+ * (class 010802, SYNTHETIC ids, 64-bit BAR0 at `bar0`, memory decode per
+ * `decode`) at 01:00.0. The Spark NVMe segment/BDF is not recorded in
+ * docs/GB10_PLATFORM_TOPOLOGY.md, so every segment number used for it here is
+ * synthetic. */
+static uint8_t *mk_nvme_seg(uint64_t bar0, int decode)
+{
+    uint8_t *ecam = map_aligned(FAKE_BYTES);
+    if (!ecam) return NULL;
+    memset(ecam, 0xff, FAKE_BYTES);
+    uint8_t *c;
+    memset(c = cfgp(ecam, 0, 0, 0), 0, 4096);
+    mkfn(c, 0x1b36, 0x000c /* SYNTHETIC bridge id */, 0x060400, 1);
+    c[0x18] = 0; c[0x19] = 1; c[0x1a] = 1;
+    memset(c = cfgp(ecam, 1, 0, 0), 0, 4096);
+    mkfn(c, 0x144d, 0xa80a /* SYNTHETIC nvme id */, 0x010802, 0);
+    put32(c + 0x10, (uint32_t)bar0 | 4u);
+    put32(c + 0x14, (uint32_t)(bar0 >> 32));
+    put32(c + 0x04, decode ? 0x2u : 0u);
+    return ecam;
+}
+
+static size_t mk_n_mcfg(uint8_t *t, int n, uint8_t *const *e, const uint16_t *seg)
+{
+    uint64_t b[4];
+    uint8_t sb[4] = {0, 0, 0, 0}, eb[4] = {1, 1, 1, 1};
+    for (int i = 0; i < n; i++) b[i] = (uint64_t)(uintptr_t)e[i];
+    return mk_mcfg(t, n, b, seg, sb, eb);
+}
+
+static void test_pci_disc_find_class(void)
+{
+    pci_found f[4];
+    memset(f, 0, sizeof f);
+    f[0].segment = 9; f[0].bus = 1; f[0].class_code = 0x010802;
+    f[1].segment = 2; f[1].bus = 5; f[1].dev = 1; f[1].class_code = 0x010802;
+    f[2].segment = 2; f[2].bus = 5; f[2].dev = 0; f[2].fn = 1; f[2].class_code = 0x010802;
+    f[3].segment = 0; f[3].class_code = 0x060000;
+    uint32_t cnt = 99;
+    const pci_found *p = pci_disc_find_class(f, 4, 0x010802, 0xffffff, &cnt);
+    CHECK(p == &f[2] && cnt == 3);                       /* lowest segment, bus, dev, fn; all three counted */
+    CHECK(pci_disc_find_class(f, 4, 0x010802, 0xffffff, NULL) == &f[2]);
+    CHECK(pci_disc_find_class(f, 4, 0x0c0330, 0xffffff, &cnt) == NULL && cnt == 0);
+    CHECK(pci_disc_find_class(NULL, 0, 0x010802, 0xffffff, &cnt) == NULL && cnt == 0);
+    CHECK(pci_disc_find_class(f, 4, 0x010800, 0xffff00, &cnt) == &f[2] && cnt == 3);   /* mask */
+    CHECK(pci_disc_find_class(f, 4, 0x060000, 0xff0000, &cnt) == &f[3] && cnt == 1);   /* base class only */
+}
+
+static void test_nvme_disc_report(void)
+{
+    uint8_t *e0 = mk_fake_seg0(), *e15 = mk_fake_seg15_aligned();
+    uint8_t *e3 = mk_nvme_seg(0x4000000000ull, 1), *e7 = mk_nvme_seg(0x5000000000ull, 0);
+    CHECK(e0 && e15 && e3 && e7);
+    if (!e0 || !e15 || !e3 || !e7) return;
+    /* Segment 0 here is a host bridge only (no NVMe): GB10 style. */
+    static uint8_t c0[FAKE_BYTES], c3[FAKE_BYTES], c7[FAKE_BYTES], c15[FAKE_BYTES];
+    memset(cfgp(e0, 0, 1, 0), 0xff, 4096);                             /* drop the NIC */
+    memcpy(c0, e0, FAKE_BYTES); memcpy(c3, e3, FAKE_BYTES); memcpy(c7, e7, FAKE_BYTES); memcpy(c15, e15, FAKE_BYTES);
+    CHECK(mprotect(e0, FAKE_BYTES, PROT_READ) == 0 && mprotect(e3, FAKE_BYTES, PROT_READ) == 0);
+    CHECK(mprotect(e7, FAKE_BYTES, PROT_READ) == 0 && mprotect(e15, FAKE_BYTES, PROT_READ) == 0);
+    /* Table order is NOT segment order: 15, 7, 3, 0. */
+    uint8_t *es[4] = {e15, e7, e3, e0};
+    uint16_t ss[4] = {FAKE_SEG, 7, 3, 0};
+    uint8_t t[44 + 16 * 4 + 16];
+    mk_n_mcfg(t, 4, es, ss);
+    ck_host_mcfg = t;
+    ck_host_try_map_ok = 1;
+    ck_host_try_map_fail = 0;
+
+    pci_func bound;
+    memset(&bound, 0, sizeof bound);
+    ck_host_capture_start();
+    CHECK(pci_stage_discover_report() == PCI_OK);
+    uint32_t nf = 0;
+    const pci_found *found = pci_stage_disc_found(&nf);
+
+    /* No segment-0 bind at all: report "none". */
+    CHECK(pci_nvme_disc_report(found, nf, NULL) == 2);
+    /* Bound function is the discovered one (same segment 3, 01:00.0). */
+    bound.segment = 3; bound.bus = 1; bound.dev = 0; bound.fn = 0;
+    CHECK(pci_nvme_disc_report(found, nf, &bound) == 2);
+    /* Bound function differs (segment-0 style 00:02.0). */
+    bound.segment = 0; bound.bus = 0; bound.dev = 2;
+    CHECK(pci_nvme_disc_report(found, nf, &bound) == 2);
+    /* No candidates at all. */
+    CHECK(pci_nvme_disc_report(found, 0, NULL) == 0);
+    CHECK(pci_nvme_disc_report(found, 0, &bound) == 0);
+    ck_host_capture_stop();
+    const char *x = ck_host_capture_text();
+    CHECK(has(x, "pci_disc: segments=4 functions=7"));
+    CHECK(has(x, "nvme_disc: candidate seg 0003 01:00.0 bar0=0x4000000000 decode=1 (report-only; bound via segment-0 probe: none)\n"));
+    CHECK(has(x, "nvme_disc: candidate seg 0003 01:00.0 bar0=0x4000000000 decode=1 (report-only; bound via segment-0 probe: same)\n"));
+    CHECK(has(x, "nvme_disc: candidate seg 0003 01:00.0 bar0=0x4000000000 decode=1 (report-only; bound via segment-0 probe: different)\n"));
+    CHECK(!has(x, "seg 0007 01:00.0 bar0=0x5000000000 decode=0 (report-only; bound"));   /* second one is counted, not chosen */
+    CHECK(has(x, "nvme_disc: candidates=2\n"));
+    CHECK(has(x, "nvme_disc: no class 0x010802 function found by discovery (report-only; bound via segment-0 probe: none)\n"));
+    CHECK(has(x, "nvme_disc: no class 0x010802 function found by discovery (report-only; bound via segment-0 probe: different)\n"));
+    /* Read-only: fake ECAMs are PROT_READ (a config write would have killed the test) and unchanged. */
+    CHECK(memcmp(e0, c0, FAKE_BYTES) == 0 && memcmp(e3, c3, FAKE_BYTES) == 0);
+    CHECK(memcmp(e7, c7, FAKE_BYTES) == 0 && memcmp(e15, c15, FAKE_BYTES) == 0);
+
+    ck_host_mcfg = NULL;
+    ck_host_try_map_ok = 0;
+    munmap(e0, FAKE_BYTES); munmap(e3, FAKE_BYTES); munmap(e7, FAKE_BYTES); munmap(e15, FAKE_BYTES);
+}
+
+/* The devices stage prints the nvme_disc report after the bind, with the
+ * binding unchanged (the NVMe behind segment 3 is reported; the stage's
+ * segment-0 probe finds no NVMe, so nothing binds and the report says "none"). */
+static void test_nvme_disc_in_stage(void)
+{
+    uint8_t *e0 = mk_fake_seg0(), *e3 = mk_nvme_seg(0x4000000000ull, 0); /* decode off: the B3 window report must not read the fake BAR */
+    CHECK(e0 && e3);
+    if (!e0 || !e3) return;
+    uint8_t *es[2] = {e0, e3};
+    uint16_t ss[2] = {0, 3};
+    uint8_t t[44 + 16 * 2 + 16];
+    mk_n_mcfg(t, 2, es, ss);
+    ck_host_mcfg = t;
+    ck_host_try_map_ok = 1;
+    ck_host_quiet = 1;
+    ck_host_capture_start();
+    CHECK(ck_stage_devices() == 0);
+    ck_host_capture_stop();
+    const char *x = ck_host_capture_text();
+    const char *d = strstr(x, "nvme_disc: candidate seg 0003 01:00.0"), *v = strstr(x, "devices: pci=ok");
+    CHECK(d && v && d < v);
+    CHECK(has(x, "decode=0 (report-only; bound via segment-0 probe: none)\n"));
+    CHECK(has(x, "bound via segment-0 probe: none)\n"));
+    CHECK(has(x, "devices: pci=ok nvme=unbound"));
+    ck_host_mcfg = NULL;
+    ck_host_try_map_ok = 0;
+    ck_host_quiet = 0;
+    munmap(e0, FAKE_BYTES); munmap(e3, FAKE_BYTES);
+}
+
 
 /* ---------------- Store boot ---------------- */
 
@@ -1801,6 +1939,9 @@ int main(void)
     test_discover_edges();
     test_discover_report();
     test_discover_in_stage();
+    test_pci_disc_find_class();
+    test_nvme_disc_report();
+    test_nvme_disc_in_stage();
     test_mmio_window();
     test_mmio_unmap();
     test_mmio_stage_report();

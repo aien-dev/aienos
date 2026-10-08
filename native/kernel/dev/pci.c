@@ -564,3 +564,53 @@ const pci_found *pci_stage_disc_found(uint32_t *n)
     *n = g_disc_all_n;
     return g_disc_all;
 }
+
+static int found_before(const pci_found *a, const pci_found *b)
+{
+    if (a->segment != b->segment) return a->segment < b->segment;
+    if (a->bus != b->bus) return a->bus < b->bus;
+    if (a->dev != b->dev) return a->dev < b->dev;
+    return a->fn < b->fn;
+}
+
+const pci_found *pci_disc_find_class(const pci_found *f, uint32_t n, uint32_t class_code, uint32_t mask,
+                                     uint32_t *count)
+{
+    const pci_found *best = 0;
+    uint32_t c = 0;
+    for (uint32_t i = 0; f && i < n; i++) {
+        if ((f[i].class_code & mask) != (class_code & mask)) continue;
+        c++;
+        if (!best || found_before(&f[i], best)) best = &f[i];
+    }
+    if (count) *count = c;
+    return best;
+}
+
+/* BAR0 as firmware left it (type bits stripped), 64-bit when the type says so. */
+static uint64_t found_bar0(const pci_found *f)
+{
+    uint32_t raw = f->bar_raw[0];
+    if (raw & 1u) return 0; /* I/O BAR: not a memory address */
+    uint64_t a = raw & ~0xfu;
+    if (((raw >> 1) & 3u) == 2u) a |= (uint64_t)f->bar_raw[1] << 32;
+    return a;
+}
+
+int pci_nvme_disc_report(const pci_found *f, uint32_t n, const pci_func *bound)
+{
+    uint32_t cnt = 0;
+    const pci_found *c = pci_disc_find_class(f, n, 0x010802u, 0xffffffu, &cnt);
+    if (!c) {
+        ck_printf("nvme_disc: no class 0x010802 function found by discovery (report-only; bound via segment-0 probe: %s)\n",
+                  bound ? "different" : "none");
+        return 0;
+    }
+    const char *rel = !bound ? "none"
+                      : (bound->segment == c->segment && bound->bus == c->bus && bound->dev == c->dev && bound->fn == c->fn)
+                          ? "same" : "different";
+    ck_printf("nvme_disc: candidate seg %04x %02x:%02x.%u bar0=0x%llx decode=%u (report-only; bound via segment-0 probe: %s)\n",
+              c->segment, c->bus, c->dev, c->fn, (unsigned long long)found_bar0(c), (c->command >> 1) & 1u, rel);
+    ck_printf("nvme_disc: candidates=%u\n", cnt);
+    return (int)cnt;
+}
