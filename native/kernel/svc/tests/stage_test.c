@@ -930,6 +930,49 @@ static void test_usb_hid(void)
     for (unsigned i = 0; i < CK_LINE_CAP; i++) (void)ck_line_feed(&l, x, 0);
     CHECK(ck_line_feed(&l, en, 0) == CK_LINE_DONE && l.len == CK_LINE_CAP); /* exactly at the bound is accepted */
 
+    /* console session: source ownership of the shared line and the drop count */
+    {
+        ck_src_gate g;
+        ck_src_gate_reset(&g);
+        ck_key_event ca = {CK_KEY_CHAR, 'a'}, cb = {CK_KEY_CHAR, 'b'}, cn = {CK_KEY_NONE, 0}, ce = {CK_KEY_ESCAPE, 0};
+        CHECK(g.owner == CK_SRC_NONE);
+        CHECK(ck_src_gate_accept(&g, CK_SRC_SERIAL, ca) == 1 && g.owner == CK_SRC_SERIAL); /* first source claims */
+        CHECK(ck_src_gate_accept(&g, CK_SRC_SERIAL, cb) == 1); /* owner keeps typing */
+        CHECK(ck_src_gate_accept(&g, CK_SRC_USB, ca) == 0 && ck_src_gate_accept(&g, CK_SRC_USB, cb) == 0);
+        CHECK(ck_src_gate_accept(&g, CK_SRC_USB, en) == 0); /* other source's Enter is dropped too */
+        CHECK(g.dropped == 3 && g.dropped_all == 3 && g.owner == CK_SRC_SERIAL);
+        CHECK(ck_src_gate_accept(&g, CK_SRC_SERIAL, cn) == 0 && g.dropped == 3); /* NONE is never counted */
+        CHECK(ck_src_gate_accept(&g, 7, ca) == 0 && g.dropped == 3); /* unknown source: refused, not counted */
+        CHECK(ck_src_gate_release(&g) == 3 && g.owner == CK_SRC_NONE && g.dropped == 0 && g.dropped_all == 3);
+        CHECK(ck_src_gate_accept(&g, CK_SRC_USB, ca) == 1 && g.owner == CK_SRC_USB); /* now USB claims */
+        CHECK(ck_src_gate_accept(&g, CK_SRC_SERIAL, ca) == 0 && g.dropped == 1 && g.dropped_all == 4);
+        CHECK(ck_src_gate_accept(&g, CK_SRC_SERIAL, ce) == 0 && g.dropped == 2); /* Escape of the non-owner cannot clear it */
+        CHECK(ck_src_gate_release(&g) == 2);
+        /* end to end with the line editor: only the owner's keys reach the line */
+        ck_line ln;
+        ck_line_reset(&ln);
+        ck_src_gate_reset(&g);
+        int seq[8] = {CK_SRC_SERIAL, CK_SRC_USB, CK_SRC_SERIAL, CK_SRC_USB, CK_SRC_SERIAL};
+        const char keys[8] = {'h', 'x', 'e', 'y', 'l'};
+        for (int i = 0; i < 5; i++) {
+            ck_key_event k = {CK_KEY_CHAR, keys[i]};
+            if (ck_src_gate_accept(&g, seq[i], k)) (void)ck_line_feed(&ln, k, 0);
+        }
+        CHECK(ck_src_gate_accept(&g, CK_SRC_SERIAL, en) == 1 && ck_line_feed(&ln, en, 0) == CK_LINE_DONE);
+        CHECK(strcmp(ln.buf, "hel") == 0 && ck_src_gate_release(&g) == 2);
+        /* serial bytes to keys */
+        uint8_t pv = 0;
+        CHECK(ck_serial_key('a', &pv).kind == CK_KEY_CHAR && ck_serial_key('Z', &pv).c == 'Z');
+        CHECK(ck_serial_key('7', &pv).c == '7' && ck_serial_key(' ', &pv).c == ' ' && ck_serial_key('-', &pv).c == '-');
+        CHECK(ck_serial_key('\r', &pv).kind == CK_KEY_ENTER);
+        CHECK(ck_serial_key('\n', &pv).kind == CK_KEY_NONE); /* LF right after CR: one Enter */
+        CHECK(ck_serial_key('\n', &pv).kind == CK_KEY_ENTER); /* a lone LF is an Enter */
+        CHECK(ck_serial_key(0x7f, &pv).kind == CK_KEY_BACKSPACE && ck_serial_key(0x08, &pv).kind == CK_KEY_BACKSPACE);
+        CHECK(ck_serial_key(0x1b, &pv).kind == CK_KEY_ESCAPE);
+        CHECK(ck_serial_key(';', &pv).kind == CK_KEY_NONE && ck_serial_key(0x00, &pv).kind == CK_KEY_NONE &&
+              ck_serial_key(0xc3, &pv).kind == CK_KEY_NONE && ck_serial_key('"', &pv).kind == CK_KEY_NONE);
+    }
+
     /* shell (Rust shell.rs texts) */
     ck_shell_ctx ctx = {42, 1, 7, "c0ffee"};
     g_sh[0] = 0;

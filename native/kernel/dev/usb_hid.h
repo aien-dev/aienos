@@ -70,6 +70,30 @@ void ck_line_reset(ck_line *l);
  * used). Escape clears the line. */
 int ck_line_feed(ck_line *l, ck_key_event ev, void (*echo)(char c));
 
+/* ---- console session: two input sources, one line (C3-1a) ----
+ * Serial (PL011) and USB keys feed the same ck_line. A line is owned by the
+ * first source that types into it, until Enter (or Escape, which clears the
+ * line, or an overflow refusal). Keys from the other source meanwhile are
+ * dropped and counted; they never reach the line editor. */
+enum { CK_SRC_NONE = 0, CK_SRC_SERIAL = 1, CK_SRC_USB = 2 };
+typedef struct {
+    int owner;            /* CK_SRC_* owning the line being typed, or NONE */
+    unsigned dropped;     /* keys dropped from the non-owner in this line */
+    unsigned dropped_all; /* keys dropped since reset, all lines */
+} ck_src_gate;
+void ck_src_gate_reset(ck_src_gate *g);
+/* 1 when ev from src may enter the line (claiming it when unowned), 0 when
+ * dropped (and counted). A CK_KEY_NONE event is always 0 and never counted. */
+int ck_src_gate_accept(ck_src_gate *g, int src, ck_key_event ev);
+/* The line ended (Enter, Escape, overflow): the line is unowned again and the
+ * per-line drop count restarts. Returns the drop count of the line just ended. */
+unsigned ck_src_gate_release(ck_src_gate *g);
+/* One serial byte to a key event: CR or LF = Enter (an LF right after a CR is
+ * ignored: *prev carries the last byte), 0x08 and 0x7f = Backspace, 0x1b =
+ * Escape, a-z A-Z 0-9 space - . / = CK_KEY_CHAR, everything else CK_KEY_NONE
+ * (printable keys only; the same set as the USB keymap). */
+ck_key_event ck_serial_key(uint8_t byte, uint8_t *prev);
+
 /* ---- console shell (Rust shell.rs commands) ---- */
 enum { CK_SH_INVALID = -1, CK_SH_UNKNOWN = 0, CK_SH_HELP, CK_SH_MEM, CK_SH_EL, CK_SH_REPORT, CK_SH_UPTIME, CK_SH_EXIT,
        CK_SH_EMPTY };

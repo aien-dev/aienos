@@ -173,3 +173,40 @@ void ck_printf(const char *fmt, ...)
     ck_vprintf(fmt, ap);
     va_end(ap);
 }
+
+/* ---- PL011 receive, polled (console session; see include/ck.h) ----
+ * Registers (offsets and bits from Linux include/linux/amba/serial.h, the Arm
+ * PL011 TRM page being unreadable here; see the docs-read record): UARTDR at
+ * 0x00 (DATA bits 7:0, error flags OE/BE/PE/FE bits 11:8), UARTFR at 0x18
+ * (RXFE bit 4 = receive FIFO empty), UARTCR at 0x30 (UARTEN bit 0, RXE bit 9).
+ * The kernel only READS UARTCR; it never reconfigures the UART. */
+static unsigned rx_errs;
+
+int ck_console_rx_ready(uint32_t *cr)
+{
+    if (uart_kind != 1)
+        return 0;
+    uint32_t v = *(volatile uint32_t *)(uart + 0x30);
+    if (cr)
+        *cr = v;
+    return (v & 1u) && (v & (1u << 9));
+}
+
+int ck_console_rx_poll(void)
+{
+    if (uart_kind != 1)
+        return -1;
+    if (*(volatile uint32_t *)(uart + 0x18) & (1u << 4))
+        return -1;
+    uint32_t d = *(volatile uint32_t *)(uart + 0x00);
+    if (d & 0xf00u) {
+        rx_errs++;
+        return -1;
+    }
+    return (int)(d & 0xffu);
+}
+
+unsigned ck_console_rx_errors(void)
+{
+    return rx_errs;
+}

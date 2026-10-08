@@ -175,6 +175,21 @@ __attribute__((weak)) int ck_stage_store(void);    /* sealed Store on NVMe */
 /* Optional devices-stage hook: ck_reset calls it once, before PSCI reset or
  * off (final report, panic, fault), so no device keeps DMA across a reset. */
 __attribute__((weak)) void ck_stage_quiesce(void);
+/* Optional final boot stage (dev/devices.c, only in a TEST-ONLY image built with
+ * CK_CONSOLE_SESSION=1): the operator console session. kmain calls it after every
+ * other boot step and before the final report; absent in every default image. */
+__attribute__((weak)) int ck_stage_console_session(void);
+
+/* PL011 serial receive (core/console.c), polled. ck_console_rx_ready: 1 when the
+ * console UART is a PL011 whose UARTCR has UARTEN and RXE set (*cr gets UARTCR);
+ * 0 otherwise (16550, none, receiver off): then no byte is ever read. ck_console_rx_poll:
+ * -1 when the receive FIFO is empty (UARTFR.RXFE), else the byte of UARTDR[7:0];
+ * a byte with an error flag (UARTDR[11:8]) is dropped and counted. */
+const char *ck_console_uart_name(void);
+uint64_t ck_console_uart_base(void);
+int ck_console_rx_ready(uint32_t *cr);
+int ck_console_rx_poll(void);
+unsigned ck_console_rx_errors(void);
 
 /* Optional Store-stage hook: signed P2 artifact candidates read from the boot
  * disk Store (svc/artifact_store.c) during ck_stage_store, before the NVMe
