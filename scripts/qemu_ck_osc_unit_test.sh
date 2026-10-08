@@ -7,18 +7,23 @@
 # OWNER anchor exists (TRUST-1 has not provisioned one). Admission only: no
 # unit is mapped, launched or scheduled.
 #
-# Four conformance vectors (tests/fixtures/osc_unit/vectors) are written into
+# Five conformance vectors (tests/fixtures/osc_unit/vectors) are written into
 # the sealed C Store of a GPT boot disk image at build time and read back by the
 # kernel's store stage, the same path as the P2 artifacts (svc/artifact_store.h):
 #   a01_valid_min.unit      TEST-signed, valid
+#   a02_valid_caps_kernel_domain.unit  TEST-signed, valid, one domain-1 request
+#                           pinning generation 7 (object 1)
 #   a04_valid_owner_class.unit  OWNER class, valid signature, no OWNER anchor
 #   r14_bad_signature.unit  TEST-signed, signature byte flipped
 #   r37_code_svc.unit       code contains an SVC word
 # Two boots of the full image, each with QEMU iommu=smmuv3 and the NVMe image:
 #   1. qualification build (CK_SEED0B_TEST_ANCHOR=1, TEST ONLY): a01 ACCEPT with
 #      the UnitDigest and program id of the frozen expected.txt; a04
-#      UNTRUSTED_SIGNER; r14 BAD_SIGNATURE; r37 CODE_INSTRUCTION.
-#   2. ordinary (release) build, no anchors: a01 TEST_SIGNER_IN_RELEASE; a04
+#      UNTRUSTED_SIGNER; r14 BAD_SIGNATURE; r37 CODE_INSTRUCTION; a02
+#      CAP_GENERATION_STALE (29): the kernel's own generation lookup knows no
+#      resource, so every nonzero pin is refused (ADR 0014 amendment point 5;
+#      the host test checks the same rule only with a test lookup).
+#   2. ordinary (release) build, no anchors: a01 and a02 TEST_SIGNER_IN_RELEASE; a04
 #      UNTRUSTED_SIGNER; r14 TEST_SIGNER_IN_RELEASE (the class check precedes the
 #      signature); r37 CODE_INSTRUCTION; nothing accepted.
 # Static: the release image carries the TEST public key nowhere.
@@ -64,7 +69,7 @@ make -s -C native/kernel OUT="${out_prod}" store-image gpt-image >/dev/null
 simg="${out_prod}/host/ck_store_image"
 
 fix="native/kernel/tests/fixtures/osc_unit"
-units=(a01_valid_min.unit a04_valid_owner_class.unit r14_bad_signature.unit r37_code_svc.unit)
+units=(a01_valid_min.unit a02_valid_caps_kernel_domain.unit a04_valid_owner_class.unit r14_bad_signature.unit r37_code_svc.unit)
 files=()
 for u in "${units[@]}"; do files+=("${fix}/vectors/${u}"); done
 a01_line=$(grep -E '^a01_valid_min\.unit ' "${fix}/vectors/expected.txt")
@@ -150,10 +155,12 @@ check "${qual}" "policy line: qualification mode, one TEST anchor, no OWNER anch
 unit_line "${qual}" a01_valid_min.unit \
     "ACCEPT unit_digest=${a01_digest} program_id=${a01_prog} funcs=2 caps=0 signer=TEST" \
     "ACCEPT, UnitDigest and program id equal the frozen expected.txt"
+unit_line "${qual}" a02_valid_caps_kernel_domain.unit "REFUSED code=29 name=CAP_GENERATION_STALE" \
+    "REFUSED CAP_GENERATION_STALE (pinned generation 7; the kernel lookup knows no resource)"
 unit_line "${qual}" a04_valid_owner_class.unit "REFUSED code=25 name=UNTRUSTED_SIGNER" "REFUSED UNTRUSTED_SIGNER (OWNER, no OWNER anchor)"
 unit_line "${qual}" r14_bad_signature.unit "REFUSED code=26 name=BAD_SIGNATURE" "REFUSED BAD_SIGNATURE"
 unit_line "${qual}" r37_code_svc.unit "REFUSED code=34 name=CODE_INSTRUCTION" "REFUSED CODE_INSTRUCTION (SVC word)"
-check "${qual}" "qualification totals: 1 accepted, 3 refused" "^osc_units: seen=4 accepted=1 refused=3 "
+check "${qual}" "qualification totals: 1 accepted, 4 refused" "^osc_units: seen=5 accepted=1 refused=4 "
 
 # ---- boot 2: ordinary (release) build, no anchors ----------------------------
 prod="${work}/release.txt"
@@ -165,10 +172,11 @@ check "${prod}" "policy line: release mode, no anchors at all" \
     "^osc_policy: mode=release test_anchors=0 owner_anchors=0 \(none provisioned\) domains=1 gen_width=32; QEMU, not physical$"
 if has "${prod}" "seed0b-test qualification build"; then fail "release build carries the qualification label"; fi
 unit_line "${prod}" a01_valid_min.unit "REFUSED code=24 name=TEST_SIGNER_IN_RELEASE" "REFUSED TEST_SIGNER_IN_RELEASE (a valid TEST-signed unit)"
+unit_line "${prod}" a02_valid_caps_kernel_domain.unit "REFUSED code=24 name=TEST_SIGNER_IN_RELEASE" "REFUSED TEST_SIGNER_IN_RELEASE (class is checked before capability policy)"
 unit_line "${prod}" a04_valid_owner_class.unit "REFUSED code=25 name=UNTRUSTED_SIGNER" "REFUSED UNTRUSTED_SIGNER (OWNER, no anchor)"
 unit_line "${prod}" r14_bad_signature.unit "REFUSED code=24 name=TEST_SIGNER_IN_RELEASE" "REFUSED TEST_SIGNER_IN_RELEASE (class is checked before the signature)"
 unit_line "${prod}" r37_code_svc.unit "REFUSED code=34 name=CODE_INSTRUCTION" "REFUSED CODE_INSTRUCTION"
-check "${prod}" "release totals: nothing accepted" "^osc_units: seen=4 accepted=0 refused=4 "
+check "${prod}" "release totals: nothing accepted" "^osc_units: seen=5 accepted=0 refused=5 "
 
 if [[ -n "${AIENOS_LOG_DIR:-}" ]]; then
     cp "${qual}" "${AIENOS_LOG_DIR}/qemu_ck_osc_unit_qualification_serial.log"
