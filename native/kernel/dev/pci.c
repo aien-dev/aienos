@@ -448,6 +448,7 @@ static int disc_bus(disc_ctx *d, uint8_t bus, uint32_t depth)
             uint32_t cr = rd32(c, CFG_CLASSREV);
             f->class_code = cr >> 8;
             f->revision = (uint8_t)cr;
+            f->command = (uint16_t)rd32(c, CFG_COMMAND); /* read only: decode state as firmware left it */
             f->header_type = ht;
             uint32_t kind = ht & 0x7fu;
             uint32_t nbars = kind == 0 ? 6u : (kind == 1 ? 2u : 0u);

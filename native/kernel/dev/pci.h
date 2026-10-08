@@ -83,6 +83,7 @@ typedef struct {
     uint16_t subsys_vendor, subsys_id; /* header type 0 only, else 0 */
     uint32_t bar_raw[PCI_MAX_BARS];    /* as read, unsized */
     uint8_t secondary, subordinate;    /* header type 1 only, else 0 */
+    uint16_t command;                  /* COMMAND register as read (bit 1: memory decode) */
 } pci_found;
 
 /* Scan segment `segment` through `a`: bus start_bus, then every type-1 bridge
@@ -184,7 +185,7 @@ int pci_stage_probe(pci_system *s);
 
 /* Report-only, read-only multi-segment discovery for the boot log (see pci.c). */
 int pci_stage_discover_report(void);
-/* The functions the last report found (the last segment scanned), for the
+/* Every function the last report found, across segments (capped), for the
  * read-only MMIO window report (mmio_window.h). */
 const pci_found *pci_stage_disc_found(uint32_t *n);
 

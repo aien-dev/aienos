@@ -105,6 +105,11 @@ int ck_mmio_stage_report(void)
         ck_printf("mmio_win: no discovered NVMe function with a firmware-assigned BAR0 (report-only)\n");
         return CK_MMIO_E_BAR;
     }
+    if (!(nv->command & 0x2u)) { /* reading a BAR with memory decode off can abort on real hardware */
+        ck_printf("mmio_win: %04x:%02x:%02x.%u memory decode off, not read (report-only)\n", nv->segment, nv->bus, nv->dev,
+                  nv->fn);
+        return CK_MMIO_E_BAR;
+    }
     uint64_t addr = 0;
     (void)ck_mmio_bar_addr(nv, 0, &addr);
     /* 0x1000 covers the NVMe register file head (CAP, VS); the real BAR size is unknown here. */

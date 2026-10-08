@@ -1593,6 +1593,7 @@ static void test_mmio_stage_report(void)
     uint64_t a = (uint64_t)(uintptr_t)regs;
     put32(c + 0x10, (uint32_t)a | 4u);                              /* 64-bit memory BAR0 */
     put32(c + 0x14, (uint32_t)(a >> 32));
+    put32(c + 0x04, 0x2u);                                          /* COMMAND: memory decode on */
     uint8_t t[44 + 16];
     uint64_t b[1] = {(uint64_t)(uintptr_t)ecam};
     uint16_t s[1] = {0};
@@ -1614,6 +1615,18 @@ static void test_mmio_stage_report(void)
     CHECK(ck_mmio_stage_report() == CK_MMIO_E_BAR);
     ck_host_capture_stop();
     CHECK(has(ck_host_capture_text(), "BAR0 map refused (report-only)\n"));
+    /* Memory decode off: reported, the BAR is never read (registers made
+     * unreadable, so a read would crash the test). */
+    put32(c + 0x04, 0);
+    ck_host_try_map_ok = 1;
+    CHECK(mprotect(regs, WIN_BYTES, PROT_NONE) == 0);
+    ck_host_capture_start();
+    CHECK(pci_stage_discover_report() == PCI_OK);
+    CHECK(ck_mmio_stage_report() == CK_MMIO_E_BAR);
+    ck_host_capture_stop();
+    CHECK(mprotect(regs, WIN_BYTES, PROT_READ | PROT_WRITE) == 0);
+    CHECK(has(ck_host_capture_text(), "mmio_win: 0000:00:02.0 memory decode off, not read (report-only)\n"));
+    put32(c + 0x04, 0x2u);
     /* No NVMe discovered (the NVMe has BAR0 0). */
     put32(c + 0x10, 0);
     put32(c + 0x14, 0);
