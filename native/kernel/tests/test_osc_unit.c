@@ -233,6 +233,28 @@ static void test_words(void)
     CHECK(!osc_a64_word_allowed(0xA9800000u | (3u << 10) | (2u << 5) | 2u));
 }
 
+/* Lookup is by exact name only. Two entries forced to share a name_hash (a
+ * case no signed vector can carry: it needs a SHA-256 collision) must still
+ * resolve by name, and an absent name with that hash must not match. */
+static void test_lookup_ignores_name_hash(void)
+{
+    static struct osc_accept a;
+    memset(&a, 0, sizeof a);
+    a.function_count = 2;
+    const char *nm[2] = {"add", "sub"};
+    for (unsigned i = 0; i < 2; i++) {
+        a.entry[i].fn_index = (uint16_t)(7 + i);
+        a.entry[i].name_len = 3;
+        memcpy(a.entry[i].name, nm[i], 4);
+        memset(a.entry[i].name_hash, 0xAB, 16);
+    }
+    CHECK(osc_unit_lookup(&a, "add", 3) == 7);
+    CHECK(osc_unit_lookup(&a, "sub", 3) == 8);
+    CHECK(osc_unit_lookup(&a, "mul", 3) == -1);
+    CHECK(osc_unit_lookup(&a, "ad", 2) == -1);
+    CHECK(osc_unit_lookup(&a, "addx", 4) == -1);
+}
+
 static void test_anchor_matches_fixture(void)
 {
     CHECK(memcmp(osc_unit_test1_pk, key_test, 32) == 0);
@@ -269,6 +291,7 @@ int main(int argc, char **argv)
     CHECK(ne == 53 && nl == 6 && ns == 3);
     test_staging_maximum();
     test_words();
+    test_lookup_ignores_name_hash();
     test_flips_and_truncations();
     return ck_t_verdict("test_osc_unit");
 }
