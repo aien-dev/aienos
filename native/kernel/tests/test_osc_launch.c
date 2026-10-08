@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include "ck_test.h"
 #include "osc_launch.h"
 #include "osc_unit.h"
@@ -46,14 +48,26 @@ static int ours(const char *kinds, const char *args)
     return osc_launch_args_ok(kk, (unsigned)nk, v, (unsigned)na);
 }
 
+/* Runs the reference checker directly (argv, no shell) and reads its first output line. */
 static int reference(const char *kinds, const char *args)
 {
-    char cmd[1200], out[128];
-    snprintf(cmd, sizeof cmd, "%s '%s' '%s'", OSC_LAUNCH_REF, kinds, args);
-    FILE *p = popen(cmd, "r");
-    if (!p) return -1;
-    if (!fgets(out, sizeof out, p)) { pclose(p); return -1; }
-    pclose(p);
+    char out[128];
+    int fd[2];
+    if (pipe(fd) != 0) return -1;
+    pid_t pid = fork();
+    if (pid < 0) { close(fd[0]); close(fd[1]); return -1; }
+    if (pid == 0) {
+        close(fd[0]);
+        if (dup2(fd[1], STDOUT_FILENO) < 0) _exit(127);
+        close(fd[1]);
+        execl(OSC_LAUNCH_REF, OSC_LAUNCH_REF, kinds, args, (char *)NULL);
+        _exit(127);
+    }
+    close(fd[1]);
+    FILE *p = fdopen(fd[0], "r");
+    int status = 0, got = p && fgets(out, sizeof out, p) != NULL;
+    if (p) fclose(p); else close(fd[0]);
+    if (waitpid(pid, &status, 0) != pid || !got) return -1;
     return strncmp(out, "OK", 2) == 0 ? 1 : strncmp(out, "REFUSED LAUNCH_ARG_SHAPE 41", 27) == 0 ? 0 : -1;
 }
 
@@ -111,8 +125,11 @@ static void differential(void)
         if (rnd() % 17 == 0) cnt = regs + (rnd() % 2 ? 1 : -1); /* wrong register count now and then */
         if (cnt < 0) cnt = 0;
         args[0] = 0;
-        for (int r = 0; r < cnt; r++)
-            at += (size_t)snprintf(args + at, sizeof args - at, "%s0x%llx", r ? "," : "", (unsigned long long)vals[rnd() % nv]);
+        for (int r = 0; r < cnt; r++) {
+            int w = snprintf(args + at, sizeof args - at, "%s0x%llx", r ? "," : "", (unsigned long long)vals[rnd() % nv]);
+            if (w < 0 || (size_t)w >= sizeof args - at) break; /* never step past the buffer */
+            at += (size_t)w;
+        }
         if (cnt == 0) strcpy(args, "0");
         int a = ours(shape, args), b = reference(shape, args);
         if (a != b) { mismatch++; if (mismatch < 5) printf("  MISMATCH kinds=%s args=%s ours=%d ref=%d\n", shape, args, a, b); }
