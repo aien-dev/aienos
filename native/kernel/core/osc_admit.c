@@ -59,6 +59,150 @@ static void policy(struct osc_policy *p)
 #endif
 }
 
+
+#ifdef CK_OSC_LAUNCH_TEST
+/* ======================================================================================================
+ * C3-3a launch self-test (TEST ONLY, qualification build with CK_OSC_LAUNCH_TEST=1).
+ * Runs a fixed script of launches over the admitted units the Store handed over and prints one
+ * "osc_launch:" line each. QEMU (aarch64 virt), TEST signer, not physical.
+ * ==================================================================================================== */
+#include "osc_task.h"
+#define LT_UNITS 4
+#define LT_BYTES 8192
+static struct {
+    char name[48];
+    uint8_t bytes[LT_BYTES];
+    size_t len;
+    struct osc_accept acc;
+} lt_unit[LT_UNITS];
+static unsigned lt_n;
+
+static int lt_streq(const char *a, const char *b)
+{
+    size_t n = strlen(a);
+    return n == strlen(b) && memcmp(a, b, n) == 0;
+}
+
+static void lt_save(const char *name, const uint8_t *b, size_t len)
+{
+    if (lt_n >= LT_UNITS || len > LT_BYTES)
+        return;
+    unsigned i = 0;
+    while (name[i] && i < sizeof lt_unit[0].name - 1) {
+        lt_unit[lt_n].name[i] = name[i];
+        i++;
+    }
+    lt_unit[lt_n].name[i] = 0;
+    memcpy(lt_unit[lt_n].bytes, b, len);
+    lt_unit[lt_n].len = len;
+    lt_unit[lt_n].acc = acc;
+    lt_n++;
+}
+
+#define IN_PTR (1ull << 62) /* placeholders for the task's input and workspace windows */
+#define WS_PTR (1ull << 63)
+struct lt_step {
+    const char *unit, *fn;
+    unsigned nargs;
+    uint64_t a[3];
+    const char *in;
+    int ws; /* 0 none, 1..2 which caller workspace */
+    uint64_t cap;
+};
+
+static struct ck_osc_ws lt_ws[2];
+static unsigned lt_counts[5];
+
+static void lt_run(const struct lt_step *s)
+{
+    for (unsigned u = 0; u < lt_n; u++) {
+        if (!lt_streq(lt_unit[u].name, s->unit))
+            continue;
+        struct ck_osc_launch_req rq;
+        memset(&rq, 0, sizeof rq);
+        rq.name = s->fn;
+        rq.name_len = strlen(s->fn);
+        rq.nargs = s->nargs;
+        rq.max_ticks = s->cap;
+        for (unsigned i = 0; i < s->nargs; i++) {
+            rq.args[i] = s->a[i];
+            if (s->a[i] & IN_PTR)
+                rq.args[i] = ck_osc_va_in() + (s->a[i] & 0xfff);
+            else if (s->a[i] & WS_PTR)
+                rq.args[i] = ck_osc_va_ws() + (s->a[i] & 0xfff);
+        }
+        if (s->in) {
+            rq.in = (const uint8_t *)s->in;
+            rq.in_len = strlen(s->in);
+        }
+        if (s->ws)
+            rq.ws = &lt_ws[s->ws - 1];
+        struct osc_result r;
+        struct ck_osc_launch_info info;
+        ck_osc_launch(lt_unit[u].bytes, lt_unit[u].len, &lt_unit[u].acc, &rq, &r, &info);
+        char rs[96], as[80];
+        ck_osc_result_str(&r, rs, sizeof rs);
+        unsigned n = 0;
+        as[0] = 0;
+        for (unsigned i = 0; i < s->nargs && n < sizeof as - 24; i++) {
+            uint64_t v = s->a[i];
+            if (v & IN_PTR)
+                n += (unsigned)ck_snprintf(as + n, sizeof as - n, "%sin+%u", i ? "," : "", (unsigned)(v & 0xfff));
+            else if (v & WS_PTR)
+                n += (unsigned)ck_snprintf(as + n, sizeof as - n, "%sws+%u", i ? "," : "", (unsigned)(v & 0xfff));
+            else
+                n += (unsigned)ck_snprintf(as + n, sizeof as - n, "%s%llu", i ? "," : "", (unsigned long long)v);
+        }
+        ck_printf("osc_launch: %s %s(%s) -> %s ticks=%llu budget=%llu pages_mapped=%u pages_after=%u slot_free=%u; "
+                  "QEMU (aarch64 virt), TEST signer, not physical\n",
+                  s->unit, s->fn, as, rs, (unsigned long long)r.ticks, (unsigned long long)info.budget,
+                  info.pages_mapped, info.pages_after, (unsigned)info.slot_free_after);
+        lt_counts[r.cls]++;
+        return;
+    }
+    ck_printf("osc_launch: %s %s -> NOT_RUN (unit was not admitted)\n", s->unit, s->fn);
+}
+
+static void lt_all(void)
+{
+    static const struct lt_step steps[] = {
+        { "a01_valid_min.unit", "add", 2, { 1000000007, 998244353 }, 0, 0, 0 },
+        { "a01_valid_min.unit", "add", 1, { 5 }, 0, 0, 0 },
+        { "a01_valid_min.unit", "nosuch", 0, { 0 }, 0, 0, 0 },
+        { "a01_valid_min.unit", "ADD", 2, { 1, 2 }, 0, 0, 0 },
+        { "a01_valid_min.unit", "first_byte", 2, { IN_PTR, 4 }, "Zeta", 0, 0 },
+        { "a01_valid_min.unit", "first_byte", 2, { 0x1000, 16 }, "Zeta", 0, 0 },
+        { "l01_launch_fns.unit", "trap", 1, { 3 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "trap", 1, { 14 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "trap", 1, { 15 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "bare_brk", 0, { 0 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "spin", 0, { 0 }, 0, 0, 5 },
+        { "a01_valid_min.unit", "add", 2, { 40, 2 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "peek0", 0, { 0 }, 0, 0, 0 },
+        { "a01_valid_min.unit", "add", 2, { 20, 22 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "poke_rt", 0, { 0 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "exec_stack", 0, { 0 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "overflow", 0, { 0 }, 0, 0, 0 },
+        { "a01_valid_min.unit", "add", 2, { 6, 36 }, 0, 0, 0 },
+        { "l01_launch_fns.unit", "counter", 2, { WS_PTR, 1 }, 0, 1, 0 },
+        { "l01_launch_fns.unit", "counter", 2, { WS_PTR, 1 }, 0, 1, 0 },
+        { "l01_launch_fns.unit", "counter", 2, { WS_PTR, 1 }, 0, 1, 0 },
+        { "l01_launch_fns.unit", "counter", 2, { WS_PTR, 1 }, 0, 2, 0 },
+        { "l01_launch_fns.unit", "counter", 2, { WS_PTR | 4, 1 }, 0, 1, 0 },
+    };
+    ck_printf("osc_launch_policy: units=%u code_max=%u stack_max=%u in_max=%u ws=%u pages; 1 tick = 10 ms; "
+              "QEMU (aarch64 virt), TEST signer, not physical\n",
+              lt_n, (unsigned)CK_OSC_CODE_MAX_BYTES, (unsigned)CK_OSC_STACK_MAX_BYTES, (unsigned)CK_OSC_IN_MAX_BYTES,
+              (unsigned)CK_OSC_WS_PAGES);
+    for (unsigned i = 0; i < sizeof steps / sizeof steps[0]; i++)
+        lt_run(&steps[i]);
+    ck_printf("osc_launches: returned=%u trapped=%u refused=%u unknown=%u; QEMU (aarch64 virt), TEST signer, not "
+              "physical\n",
+              lt_counts[OSC_RES_RETURNED], lt_counts[OSC_RES_TRAPPED], lt_counts[OSC_RES_REFUSED],
+              lt_counts[OSC_RES_UNKNOWN]);
+}
+#endif
+
 int ck_osc_is_unit(const uint8_t *b, size_t len)
 {
     return b && len >= 8 && memcmp(b, "OSCUNIT\0", 8) == 0;
@@ -85,6 +229,9 @@ unsigned ck_osc_candidate(const char *name, const uint8_t *b, size_t len)
         hex(d, acc.unit_digest, 32);
         hex(i, acc.ir_sha256, 32);
         accepted++;
+#ifdef CK_OSC_LAUNCH_TEST
+        lt_save(name, b, len);
+#endif
         ck_printf("osc_unit: %s ACCEPT unit_digest=%s program_id=%s funcs=%u caps=%u signer=%s\n", name, d, i,
                   (unsigned)acc.function_count, (unsigned)acc.cap_count,
                   acc.signer_class == OSC_SIGNER_TEST ? "TEST" : "OWNER");
@@ -107,6 +254,14 @@ void ck_osc_oversize(const char *name, uint64_t len)
 void ck_osc_summary(void)
 {
     if (seen || oversize)
+#ifdef CK_OSC_LAUNCH_TEST
+    {
+        ck_printf("osc_units: seen=%u accepted=%u refused=%u oversize=%u (admission; launches follow)\n", seen, accepted,
+                  refused, oversize);
+        lt_all();
+    }
+#else
         ck_printf("osc_units: seen=%u accepted=%u refused=%u oversize=%u (admission only, nothing launched)\n", seen, accepted,
                   refused, oversize);
+#endif
 }

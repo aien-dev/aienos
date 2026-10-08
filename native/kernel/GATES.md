@@ -703,3 +703,30 @@ magic `OSCUNIT\0` is judged by this module instead of the Binary Artifact v0 pat
 
 Spec status: OSC_UNIT_ARTIFACT is v1 DRAFT (frozen pending ADR reconciliation), not FROZEN. Passing the host vectors
 is not evidence of the native loader; only the QEMU gate row exercises the in-kernel path, and nothing here is physical.
+
+## OSC_LAUNCH: OSC unit task launch (C-only, Campaign 3 cut C3-3a) -> CK `OSC_LAUNCH` (scripts/qemu_ck_osc_launch_test.sh)
+
+Contract: `OSC_UNIT_ARTIFACT.md` section 9 (calling convention, launch requirements, argument checks, result
+shape), 8.4 and 11. Code: `native/kernel/artifact/osc_launch.{h,c}` (pure: argument rule, range ownership,
+ticks budget, result classification) and `native/kernel/core/osc_task.{h,c}` (maps and runs the EL0 task, tears
+it down). What is enforced, what is not, and the decisions taken: `docs/osc-launch.md`.
+
+- Host tests: `tests/test_osc_launch.c`, part of `make test` and `make sanitize`. It runs every line of
+  `launch.txt` (16), compares the argument rule with the spec's own C reference `osc-launch-check.c` on 3000
+  pseudo-random cases (0 mismatches), and classifies all 64 exception classes, every trap code 0..255 and
+  every stub/SVC placement (RETURNED only from the return stub, TRAPPED only from the trap stub with 1..14).
+- QEMU gate: one boot of the qualification image built with `CK_SEED0B_TEST_ANCHOR=1 CK_OSC_LAUNCH_TEST=1`
+  (TEST ONLY; the flag is refused without the TEST anchor). Two TEST-signed units are in the sealed Store: the
+  spec's `a01_valid_min.unit` and the hand-assembled `l01_launch_fns.unit` (`tests/fixtures/osc_unit/launch/`,
+  built by `make-l01.sh` with the spec's generator helpers; its IR section is min.ir, so the IR does not
+  describe that code, which the spec says the kernel never checks). 23 launches, each printed as one
+  `osc_launch:` line carrying the label: RETURNED with exact values; refused wrong argument count, unknown name,
+  wrong case, slice outside the input window, misaligned cells; TRAPPED 3 and 14 through the trap service; trap
+  code 15 and a brk reached directly are OUTCOME_UNKNOWN (never TRAPPED); budget exhaustion (TICK_OVERRUN);
+  contained faults (null read, write to OscRt, jump into the stack, stack overflow), each followed by a
+  successful launch in the same boot; every task torn down (`pages_after=0 slot_free=1`); a caller-owned
+  workspace keeping state across calls.
+- Mutants (run by hand, restored): dropping the execute-never bit on data turns the W^X line, and the lines
+  after it, red; serving an SVC from unit context turns the host classification test red (no admitted unit can
+  execute an SVC, so only the host test reaches that lock).
+- Labels: QEMU (aarch64 virt), TEST signer, not physical. Nothing here ran on a Spark.
