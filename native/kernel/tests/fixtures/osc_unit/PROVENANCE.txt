@@ -1,0 +1,6 @@
+OSC unit container conformance vectors, copied unchanged (README.md omitted) from
+aien-dev/aien-protocols PR #17, specs/osc-unit-artifact/{vectors,keys}, head cee67fe
+(contract OSC_UNIT_ARTIFACT.md, container version 1, frozen v1).
+Both keys are THROWAWAY TEST keys derived from fixed labels in that spec's
+tools/make-vectors.sh. They protect nothing and must never enter a real anchor set.
+launch.txt (launch code 41) is not copied: launch is a separate cut.

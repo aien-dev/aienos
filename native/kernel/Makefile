@@ -430,8 +430,8 @@ CORE_C := $(BOOT)/efi_main.c $(BOOT)/efi_model.c $(BOOT)/efi_gop.c \
 # P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
 # (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
 # the loader; the TEST-anchor qualification build is CK_SEED0B_TEST_ANCHOR=1.
-ART_C := $(KDIR)/core/artifact_loader.c $(KDIR)/artifact/format.c $(KDIR)/artifact/admission.c \
-	$(KDIR)/artifact/receipt.c $(NATIVE)/argus/sha256.c $(NATIVE)/sig/sha512.c \
+ART_C := $(KDIR)/core/artifact_loader.c $(KDIR)/core/osc_admit.c $(KDIR)/artifact/format.c $(KDIR)/artifact/admission.c \
+	$(KDIR)/artifact/receipt.c $(KDIR)/artifact/osc_unit.c $(NATIVE)/argus/sha256.c $(NATIVE)/sig/sha512.c \
 	$(NATIVE)/sig/ed25519.c $(NATIVE)/sig/ct.c
 ART_INC := -I$(KDIR)/svc/compat -I$(KDIR)/artifact -I$(NATIVE)/sig -I$(NATIVE)/argus
 CORE_C += $(ART_C)
@@ -541,6 +541,10 @@ $(KOBJ)/kernel/core/artifact_loader.o: $(KDIR)/core/artifact_loader.c $(HDRS) $(
 		$(OUT)/commit.stamp $(OUT)/trust.stamp
 	@mkdir -p $(dir $@)
 	$(KCC) $(KCFLAGS) $(ART_TRUST_FLAGS) -DAIENOS_COMMIT='"$(AIENOS_COMMIT)"' -c -o $@ $<
+
+$(KOBJ)/kernel/core/osc_admit.o: $(KDIR)/core/osc_admit.c $(HDRS) $(ART_HDRS) $(OUT)/trust.stamp
+	@mkdir -p $(dir $@)
+	$(KCC) $(KCFLAGS) $(ART_TRUST_FLAGS) -c -o $@ $<
 
 $(KOBJ)/%.o: $(NATIVE)/%.S
 	@mkdir -p $(dir $@)
@@ -698,7 +702,7 @@ $(FULL_EFI): $(FULL_ELF)
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
 	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/acpi_dev.c
-TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_entropy test_handoff test_fbcon \
+TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_entropy test_handoff test_fbcon \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
 	test_continuity_subject test_continuity_subject_provision
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
@@ -805,7 +809,7 @@ $(OUT)/host/ck_udp_echo: $(KDIR)/tools/ck_udp_echo.c
 
 # Artifact library host test and the in-tree C artifact tool (pack, sign with
 # TEST keys, negative corpus, bundle, receipt check) used by the QEMU gate.
-ART_HOST_SRCS := $(KDIR)/artifact/format.c $(KDIR)/artifact/admission.c $(KDIR)/artifact/receipt.c \
+ART_HOST_SRCS := $(KDIR)/artifact/format.c $(KDIR)/artifact/admission.c $(KDIR)/artifact/receipt.c $(KDIR)/artifact/osc_unit.c \
 	$(NATIVE)/argus/sha256.c $(NATIVE)/sig/sha512.c $(NATIVE)/sig/ed25519.c $(NATIVE)/sig/ct.c
 ART_HOST_INC := -I$(KDIR)/artifact -I$(NATIVE)/sig -I$(NATIVE)/argus
 ART_HOST_DEPS := $(ART_HOST_SRCS) $(wildcard $(KDIR)/artifact/*.h) $(ART_HDRS)
@@ -813,6 +817,14 @@ ART_HOST_DEPS := $(ART_HOST_SRCS) $(wildcard $(KDIR)/artifact/*.h) $(ART_HDRS)
 $(OUT)/host/test_artifact: $(KDIR)/tests/test_artifact.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(ART_HOST_INC) -o $@ $< $(ART_HOST_SRCS)
+
+$(OUT)/host/test_osc_unit: $(KDIR)/tests/test_osc_unit.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(ART_HOST_INC) -DOSC_FIXTURE_DIR='"$(abspath $(KDIR)/tests/fixtures/osc_unit)"' -o $@ $< $(ART_HOST_SRCS)
+
+$(OUT)/host-san/test_osc_unit: $(KDIR)/tests/test_osc_unit.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(ART_HOST_INC) -DOSC_FIXTURE_DIR='"$(abspath $(KDIR)/tests/fixtures/osc_unit)"' -o $@ $< $(ART_HOST_SRCS)
 
 $(OUT)/host-san/test_artifact: $(KDIR)/tests/test_artifact.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h
 	@mkdir -p $(dir $@)
