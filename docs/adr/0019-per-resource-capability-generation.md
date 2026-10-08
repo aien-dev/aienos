@@ -1,15 +1,15 @@
 # ADR 0019: Per-resource capability generation (OSC unit `required_generation`, domain 1)
 
-Status: Proposed (operator decision open; nothing is implemented against it)
+Status: Accepted, Option 3 (operator, 2026-10-08). The counter is not built yet; its trigger is tracked in aienos#285.
 Date: 2026-10-08
-Amends, only if accepted: [ADR 0013](0013-aienos-abi-v1.md) (adds a resource generation beside the handle generation), [ADR 0014](0014-binary-artifact-v0-and-native-admission.md) (replaces amendment "the OSC unit is a second container type", point 5).
+Amends: [ADR 0013](0013-aienos-abi-v1.md) (adds a resource generation beside the handle generation), [ADR 0014](0014-binary-artifact-v0-and-native-admission.md) (replaces amendment "the OSC unit is a second container type", point 5).
 Governing: [ADR 0012](0012-self-construction-capability-growth-and-generations.md) (rule 5: no native admission without enforcement), [aien-protocols](https://github.com/aien-dev/aien-protocols) `specs/osc-unit-artifact/OSC_UNIT_ARTIFACT.md` (v1 FROZEN, read at `666100969cedb97eded6533906c42307320ea61c`), sections 6.3, 8.2 step 15 and 15.3 C1.
 
 ## Context
 
 An OSC unit capability request (spec section 6.3, bytes 48 to 63) carries `domain` and `required_generation`. Zero means "no requirement". A nonzero value means "admit this request only if the resource is currently at exactly this generation". The spec says the loader supplies that counter per (`domain`, `resource_kind`, `resource_id`), and forbids filling it from a handle-slot generation or a system Generation "until an AIENOS ADR defines a per-resource generation" (section 6.3, last rule; section 15.3 C1).
 
-No AIENOS ADR defines one. Today's position (ADR 0014 amendment point 5, aienos#277) is fail closed: AIENOS supports domain 1 only and refuses every nonzero pin, in the spec's fixed order: `CAP_DOMAIN_UNSUPPORTED` (27), then `CAP_GEN_NOT_REPRESENTABLE` (28) for a domain-1 value above `0xFFFFFFFF`, then `CAP_GENERATION_STALE` (29) for any remaining nonzero pin. The kernel does this with a lookup that always reports "no such resource" (`native/kernel/core/osc_admit.c`, `no_resource`, passed as `gen_lookup`; the check is `native/kernel/artifact/osc_unit.c`, spec step 15c). Host tests pin the check itself (`native/kernel/tests/test_osc_unit.c`): vector `r18` gives code 28 (`vectors/expected.txt`), and `vectors/state.txt` admits `a02` (domain 1, kind 3, id 1, pin 7) when the test lookup reports 7 and refuses it 29 when the lookup reports 8. The kernel's own always-refuse lookup is not exercised by any host test or QEMU gate today (`scripts/qemu_ck_osc_unit_test.sh` loads a01, a04, r14 and r37 only).
+Before this ADR, no AIENOS ADR defined one. The position until then (ADR 0014 amendment point 5, aienos#277) is fail closed: AIENOS supports domain 1 only and refuses every nonzero pin, in the spec's fixed order: `CAP_DOMAIN_UNSUPPORTED` (27), then `CAP_GEN_NOT_REPRESENTABLE` (28) for a domain-1 value above `0xFFFFFFFF`, then `CAP_GENERATION_STALE` (29) for any remaining nonzero pin. The kernel does this with a lookup that always reports "no such resource" (`native/kernel/core/osc_admit.c`, `no_resource`, passed as `gen_lookup`; the check is `native/kernel/artifact/osc_unit.c`, spec step 15c). Host tests pin the check itself (`native/kernel/tests/test_osc_unit.c`): vector `r18` gives code 28 (`vectors/expected.txt`), and `vectors/state.txt` admits `a02` (domain 1, kind 3, id 1, pin 7) when the test lookup reports 7 and refuses it 29 when the lookup reports 8. The kernel's own always-refuse lookup is exercised by the QEMU gate since aienos#284 (`fa209e45`): `scripts/qemu_ck_osc_unit_test.sh` loads `a02` and requires `REFUSED code=29 name=CAP_GENERATION_STALE` in the qualification build (and `24`, `TEST_SIGNER_IN_RELEASE`, in the release build, where the class check comes first).
 
 ### What AIENOS already counts (none is a per-resource generation)
 
@@ -72,6 +72,15 @@ What it is: this ADR adopts the incarnation counter of Option 2 as the contract 
 
 Option 3. It keeps today's fail-closed behavior, writes down the one meaning that fits the spec's rules, and spends engineering effort only when the kernel can actually reuse a resource number. Option 1 is the right choice if the operator prefers to keep ABI v1 minimal and drop pinning in a later container version.
 
+## Decision
+
+Option 3, accepted by the operator on 2026-10-08. The operator handed over an outside review of this draft that recommended Option 3 and asked for two follow-ups; under the operator's standing rule, material he hands over is his approval. The follow-ups are done here:
+
+1. The evidence text now reflects aienos#284 (the QEMU gate runs the kernel's own lookup).
+2. The implementation trigger is a tracked prerequisite: aienos#285. The first change that lets a domain-1 resource number be reused, or persists a domain-1 resource across reboot or rollback, must build the counter in the same cut, with tests for match, mismatch, reuse and reboot or rollback.
+
+Until aienos#285 is done, every nonzero pin stays refused (`CAP_GENERATION_STALE`), exactly as today.
+
 ## Invariants (all options)
 
 1. A nonzero `required_generation` is admitted only if `gen_lookup` returns a counter equal to it; any lookup failure is STALE.
@@ -82,7 +91,7 @@ Option 3. It keeps today's fail-closed behavior, writes down the one meaning tha
 
 ## Evidence and limits
 
-- Facts above were read on 2026-10-08 from aienos `origin/main` at `827e20f4` and the spec at aien-protocols `666100969ced`. No code was run for this ADR.
+- Facts above were read on 2026-10-08 from aienos `origin/main` at `827e20f4` (rechecked at `fa209e45` for the gate) and the spec at aien-protocols `666100969ced`. No code was run for this ADR.
 - This ADR changes no code, vector or gate. Kernel behavior stays: every nonzero pin refused.
-- Gap recorded, not fixed here: no test runs the kernel's own `no_resource` lookup. A unit that pins a generation (for example `a02`) is not among the units the QEMU admission gate loads, so "the kernel refuses every nonzero pin" rests on code reading, not on a run.
+- The kernel's refusal of a nonzero pin is run, not only read: aienos#284 (`fa209e45`) added `a02` to the QEMU gate. Red first: with the lookup made permissive (uncommitted), the gate failed on exactly the a02 line and the totals; with the real lookup it passed 34 of 34 checks (QEMU aarch64 virt, TEST signer, not physical).
 - QEMU is the only place the OSC unit path has run; nothing here is a physical-Spark result.
