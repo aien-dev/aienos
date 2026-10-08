@@ -5,6 +5,7 @@
 #   1. host unit tests: make test, make sanitize (ASan + UBSan)
 #   2. stage host tests: make stage-test, make stage-sanitize
 #   3. the gate runner's own self-test: scripts/ck_gates.sh --self-test
+#      and the gate hold self-test: scripts/gate_hold_selftest.sh
 #   4. the QEMU gates: scripts/ck_gates.sh (scripts/qemu_ck_boot_test.sh and
 #      scripts/qemu_ck_store_test.sh, and the other children; M0_ROLLBACK from
 #      scripts/qemu_ck_rollback_test.sh also needs cargo and the Rust target
@@ -37,6 +38,8 @@ on:
       - 'crates/aienos-fpu-probe/**'
       - 'crates/aienos-infer-kernel/**'
       - 'scripts/lib_ck_m1_checks.sh'
+      - 'scripts/lib_gate_hold.sh'
+      - 'scripts/gate_hold_selftest.sh'
       - '.github/workflows/ck-kernel.yml'
   pull_request:
     branches: [main]
@@ -47,6 +50,8 @@ on:
       - 'crates/aienos-fpu-probe/**'
       - 'crates/aienos-infer-kernel/**'
       - 'scripts/lib_ck_m1_checks.sh'
+      - 'scripts/lib_gate_hold.sh'
+      - 'scripts/gate_hold_selftest.sh'
       - '.github/workflows/ck-kernel.yml'
 
 permissions:
@@ -84,9 +89,13 @@ jobs:
       - name: Gate runner self-test
         run: bash scripts/ck_gates.sh --self-test
 
+      - name: Gate hold self-test (quiet flag read only, QEMU gate lock in quietlock record format, aienos#278)
+        run: bash scripts/gate_hold_selftest.sh
+
       - name: Hardware staging image refuses TEST keys (build only)
         env:
           AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
+          AIENOS_GATE_LOCK: ${{ runner.temp }}/qemu-gate-lock
         run: bash scripts/ck_owner_keys_check.sh
 
       - name: Check the host tests left the tree clean (the gate runner refuses a dirty tree)
@@ -97,8 +106,8 @@ jobs:
       - name: QEMU TCG gates
         env:
           AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
-          # The FPU, INFER and SCREEN children take the QEMU gate lock by exclusive create;
-          # its default home (~/workspace) does not exist on the runner.
+          # Every child takes the QEMU gate lock (scripts/lib_gate_hold.sh); keep it
+          # in runner temp rather than ~/workspace.
           AIENOS_GATE_LOCK: ${{ runner.temp }}/qemu-gate-lock
         run: |
           mkdir -p "${RUNNER_TEMP}/ck-receipt"

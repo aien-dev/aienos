@@ -109,20 +109,16 @@ cq_default_image_checks() {
 }
 
 cq_quiet_and_trap() {
-    quiet_flag="${AIENOS_QUIET_FLAG:-${HOME}/workspace/.spark-quiet}"
-    quiet_tag="${AIENOS_QUIET_TAG:-${script_tag} $$}"
-    if ! ( set -C; echo "${quiet_tag}" > "${quiet_flag}" ) 2>/dev/null; then
-        echo "NOT_RUN  quiet flag ${quiet_flag} is held: $(head -c 200 "${quiet_flag}" 2>/dev/null || true)"
+    # Machine quiet flag (read only) and the QEMU gate lock (one gate at a time):
+    # scripts/lib_gate_hold.sh (aienos#278).
+    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_gate_hold.sh"
+    if ! gh_quiet_check || ! gh_lock_take "${script_tag}" "${AIENOS_GATE_MINUTES:-60}"; then
+        echo "NOT_RUN  ${gh_why}"
         verdict NOT_RUN
         exit 3
     fi
-    own_flag=1
-    release_flag() {
-        if [[ "${own_flag}" == 1 ]]; then
-            own_flag=0
-            if [[ -f "${quiet_flag}" ]] && grep -qxF -- "${quiet_tag}" "${quiet_flag}"; then rm -f "${quiet_flag}"; fi
-        fi
-    }
+    # Release only this run's own gate lock record, at most once.
+    release_flag() { gh_lock_release; }
     top="$(mktemp -d)"
     qemu_pid=""
     cleanup() { [[ -n "${qemu_pid}" ]] && kill -9 "${qemu_pid}" 2>/dev/null; rm -rf "${top}"; release_flag; }
