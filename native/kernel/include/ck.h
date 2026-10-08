@@ -183,8 +183,9 @@ __attribute__((weak)) int ck_stage_console_session(void);
 /* PL011 serial receive (core/console.c), polled. ck_console_rx_ready: 1 when the
  * console UART is a PL011 whose UARTCR has UARTEN and RXE set (*cr gets UARTCR);
  * 0 otherwise (16550, none, receiver off): then no byte is ever read. ck_console_rx_poll:
- * -1 when the receive FIFO is empty (UARTFR.RXFE), else the byte of UARTDR[7:0];
- * a byte with an error flag (UARTDR[11:8]) is dropped and counted. */
+ * -1 when the receive FIFO is empty (UARTFR.RXFE), -2 for a byte with an error
+ * flag (UARTDR[11:8]; dropped and counted, more may be waiting), else the byte
+ * of UARTDR[7:0]. */
 const char *ck_console_uart_name(void);
 uint64_t ck_console_uart_base(void);
 int ck_console_rx_ready(uint32_t *cr);

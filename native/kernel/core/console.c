@@ -201,7 +201,7 @@ int ck_console_rx_poll(void)
     uint32_t d = *(volatile uint32_t *)(uart + 0x00);
     if (d & 0xf00u) {
         rx_errs++;
-        return -1;
+        return -2; /* an errored byte: dropped and counted, distinct from an empty FIFO */
     }
     return (int)(d & 0xffu);
 }

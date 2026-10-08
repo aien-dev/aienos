@@ -948,6 +948,15 @@ static void test_usb_hid(void)
         CHECK(ck_src_gate_accept(&g, CK_SRC_SERIAL, ca) == 0 && g.dropped == 1 && g.dropped_all == 4);
         CHECK(ck_src_gate_accept(&g, CK_SRC_SERIAL, ce) == 0 && g.dropped == 2); /* Escape of the non-owner cannot clear it */
         CHECK(ck_src_gate_release(&g) == 2);
+        /* only a printable key claims: Backspace, Escape and Enter on an empty line do not lock the other source out */
+        ck_src_gate_reset(&g);
+        ck_key_event cbs = {CK_KEY_BACKSPACE, 0};
+        CHECK(ck_src_gate_accept(&g, CK_SRC_USB, cbs) == 1 && g.owner == CK_SRC_NONE);
+        CHECK(ck_src_gate_accept(&g, CK_SRC_USB, ce) == 1 && g.owner == CK_SRC_NONE);
+        CHECK(ck_src_gate_accept(&g, CK_SRC_USB, en) == 1 && g.owner == CK_SRC_NONE);
+        CHECK(ck_src_gate_accept(&g, CK_SRC_SERIAL, ca) == 1 && g.owner == CK_SRC_SERIAL && g.dropped_all == 0);
+        CHECK(ck_src_gate_accept(&g, CK_SRC_USB, cbs) == 0 && g.dropped == 1); /* once owned, the other source's Backspace is dropped */
+        (void)ck_src_gate_release(&g);
         /* end to end with the line editor: only the owner's keys reach the line */
         ck_line ln;
         ck_line_reset(&ln);

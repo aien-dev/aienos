@@ -243,7 +243,10 @@ int ck_src_gate_accept(ck_src_gate *g, int src, ck_key_event ev)
     if (ev.kind == CK_KEY_NONE || (src != CK_SRC_SERIAL && src != CK_SRC_USB))
         return 0;
     if (g->owner == CK_SRC_NONE) {
-        g->owner = src;
+        /* Only a printable key claims a line. Backspace, Escape and Enter on an
+         * empty line pass through without owning it, so they cannot lock the
+         * other source out. */
+        if (ev.kind == CK_KEY_CHAR) g->owner = src;
         return 1;
     }
     if (g->owner == src)

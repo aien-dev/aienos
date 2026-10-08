@@ -72,7 +72,7 @@ int ck_line_feed(ck_line *l, ck_key_event ev, void (*echo)(char c));
 
 /* ---- console session: two input sources, one line (C3-1a) ----
  * Serial (PL011) and USB keys feed the same ck_line. A line is owned by the
- * first source that types into it, until Enter (or Escape, which clears the
+ * first source that types a printable key into it, until Enter (or Escape, which clears the
  * line, or an overflow refusal). Keys from the other source meanwhile are
  * dropped and counted; they never reach the line editor. */
 enum { CK_SRC_NONE = 0, CK_SRC_SERIAL = 1, CK_SRC_USB = 2 };
@@ -82,7 +82,8 @@ typedef struct {
     unsigned dropped_all; /* keys dropped since reset, all lines */
 } ck_src_gate;
 void ck_src_gate_reset(ck_src_gate *g);
-/* 1 when ev from src may enter the line (claiming it when unowned), 0 when
+/* 1 when ev from src may enter the line (a CK_KEY_CHAR claims it when unowned; other keys on an
+ * unowned line pass without claiming), 0 when
  * dropped (and counted). A CK_KEY_NONE event is always 0 and never counted. */
 int ck_src_gate_accept(ck_src_gate *g, int src, ck_key_event ev);
 /* The line ended (Enter, Escape, overflow): the line is unowned again and the

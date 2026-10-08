@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CONSOLE gate for the AIENOS C kernel (Campaign 3 cut C3-1a): rows 146-153 of
+# CONSOLE gate for the AIENOS C kernel (Campaign 3 cut C3-1a): rows 146-155 of
 # native/kernel/GATES.md "C3-1a console session". C-only (no Rust oracle).
 # QEMU is not hardware: a PASS here qualifies nothing physical.
 #
@@ -38,6 +38,11 @@
 #            DMA grant, xHCI bus master off before the gate, both fences
 #            (devices stage and session) confined and revoked, no bypass
 #   row 153  no panic or fault, final report, QEMU exit 0, M1 checks
+#   row 154  the USB keyboard unplugged mid-session (QEMU device_del): the session
+#            notices, revokes the fence (halt, bus master off, stream abort) and
+#            serial goes on and still runs commands, then exit ends it (own boot)
+#   row 155  a boot with no USB keyboard runs serial-only after the failed attach was
+#            revoked; serial input works and exit ends it (own boot)
 #
 # --mutation (red before green): "make full CK_CONSOLE_SESSION=1
 # CK_TEST_CONSOLE_MUTATION=bm-left-on-after-exit" leaves the xHCI bus master on
@@ -155,12 +160,14 @@ ser_word() { mapfile -t _l < <(letters "$1"); ser_line "${_l[@]}"; }
 usb_word() { mapfile -t _l < <(letters "$1"); usb_line "${_l[@]}"; }
 xs() { local i; for ((i = 0; i < overflow_keys; i++)); do printf 'x\n'; done; }
 
-# boot <name> <efi> <full|mutation>: one QEMU boot driven as described above.
+# boot <name> <efi> <full|mutation|unplug|nokbd>: one QEMU boot driven as described above.
 boot() {
     work="${top}/$1"
     mkdir -p "${work}/esp/EFI/BOOT" "${work}/esp/EFI/AIENOS"
     touch "${work}/esp/EFI/AIENOS/BOOTREPORT.TXT"
     cp "$2" "${work}/esp/EFI/BOOT/BOOTAA64.EFI"
+    kbd_dev="-device usb-kbd,bus=xhci.0,id=kbd0"
+    [[ "$3" != nokbd ]] || kbd_dev=""
     cp "${vars_fd}" "${work}/vars.fd"
     rm -f "${work}/mon.in" "${work}/mon.out" "${work}/ser.in" "${work}/ser.out"
     mkfifo "${work}/mon.in" "${work}/mon.out" "${work}/ser.in" "${work}/ser.out"
@@ -173,7 +180,7 @@ boot() {
         -device virtio-blk-pci,drive=esp \
         -drive if=none,id=nvme0,format=raw,file="${image}" \
         -device nvme,drive=nvme0,serial=aienos-console-test \
-        -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 \
+        -device qemu-xhci,id=xhci $kbd_dev \
         -device ramfb -display none -nic none \
         -chardev pipe,id=mon,path="${work}/mon" -mon chardev=mon,mode=readline \
         -chardev pipe,id=ser,path="${work}/ser" -serial chardev:ser -no-reboot 2>"${work}/qemu.err" &
@@ -197,6 +204,13 @@ boot() {
             # overflow from each source
             mapfile -t _x < <(xs); ser_line "${_x[@]}"; usb_line "${_x[@]}"
             usb_word exit
+        elif [[ "$3" == unplug ]]; then
+            sleep 3
+            echo "device_del kbd0" >&3; sleep 8
+            ser_word el; ser_word exit
+        elif [[ "$3" == nokbd ]]; then
+            sleep 3
+            ser_word el; ser_word exit
         else
             sleep 3
             usb_word exit
@@ -218,7 +232,7 @@ boot() {
     echo "== boot $1 (smmu, $3): qemu exit ${qemu_status}, session ready at host second ${t0}"
 }
 
-all_rows=(146 147 148 149 150 151 152 153)
+all_rows=(146 147 148 149 150 151 152 153 154 155)
 declare -A rowfail rowchk
 reset_rows() { local r; for r in "${all_rows[@]}"; do rowfail[$r]=0; rowchk[$r]=0; done; }
 reset_rows
@@ -353,6 +367,38 @@ eval_final() { # row 153
     if [[ "${qemu_status}" == 0 ]]; then rpass 153 "QEMU exit 0 after PSCI reset"; else rfail 153 "QEMU exit ${qemu_status} (expected 0)"; fi
 }
 
+# rows 154, 155: the keyboard going away. 154: the USB keyboard is unplugged
+# mid-session (QEMU monitor device_del): the session revokes the fence and
+# serial goes on and still works. 155: a boot with no USB keyboard at all runs
+# serial-only, after the failed attach was revoked.
+eval_serial_only() { # row, boot kind (unplug|nokbd)
+    local r="$1" k="$2"
+    f=sess.txt
+    if [[ "${k}" == unplug ]]; then
+        rcheck "${r}" "keyboard attached first" '^console_session: usb keyboard attached '
+        rcheck "${r}" "disconnect noticed, keyboard revoked, serial goes on" '^console_session: usb keyboard disconnected \(port [0-9]+\); the keyboard is revoked, serial goes on$'
+        before "${r}" "ready < disconnect" '^console_session: ready ' '^console_session: usb keyboard disconnected'
+        before "${r}" "disconnect < halt" '^console_session: usb keyboard disconnected' '^xhci: halt before revoke'
+    else
+        rcheck "${r}" "attach refused for lack of a keyboard" '^console_session: usb keyboard unavailable \('
+        rcheck "${r}" "ready line says the keyboard is unavailable" '^console_session: ready \(usb keyboard unavailable; no time limit, no idle exit; ends on exit\)$'
+        before "${r}" "failed attach revoked before the session is ready" '^smmu: xhci stream .* returned to abort' '^console_session: ready '
+    fi
+    rcheck "${r}" "controller halted before the revoke" '^xhci: halt before revoke usbcmd=0x[0-9a-f]{8} usbsts=0x[0-9a-f]{8} halted=yes$'
+    rcheck "${r}" "xHCI bus master revoked" '^dma_gate: xhci bus master revoked$'
+    rcheck "${r}" "COMMAND read back: bus master off" '^xhci_pci: after phase command=0x[0-9a-f]{4} bus_master=off$'
+    rcheck "${r}" "stream returned to abort" '^smmu: xhci stream 0x[0-9a-f]+ returned to abort \(rc=0\)$'
+    before "${r}" "revoke before the serial line runs" '^dma_gate: xhci bus master revoked$' '^console_line: el source=serial$'
+    rcheck "${r}" "serial input works after the keyboard is gone: 'el' echoed and run" '^console_echo: el$'
+    rcheck "${r}" "EL1 printed" '^EL1$'
+    rcheck "${r}" "serial exit ends the session with the controller released" '^console_session: exit \(source=serial\)$'
+    rcheck "${r}" "session end" '^console_session: end \(exit\) xhci=released$'
+    f=serial.txt
+    rabsent "${r}" "no panic or fault" '^report_kind: (panic|fault)'
+    rcheck "${r}" "final report reached" 'report_kind: final'
+    if [[ "${qemu_status}" == 0 ]]; then rpass "${r}" "QEMU exit 0"; else rfail "${r}" "QEMU exit ${qemu_status}"; fi
+}
+
 image_checks() {
     check "image is this commit" "aienos_commit: ${commit}"
     check_absent "no xHCI fence mutation banner" "TEST-ONLY xHCI MUTATION"
@@ -374,6 +420,9 @@ if [[ "${mutation_run}" == 0 ]]; then
     eval_revoke
     eval_dma
     eval_final
+    mode=unplug; boot console-unplug "${session_efi}" unplug; eval_serial_only 154 unplug
+    mode=nokbd; boot console-nokbd "${session_efi}" nokbd; eval_serial_only 155 nokbd
+    mode=smmu
     release_lock
     any_fail=0
     for r in "${all_rows[@]}"; do any_fail=$(( any_fail | rowfail[$r] )); done
@@ -393,10 +442,10 @@ if [[ "${mutation_run}" == 0 ]]; then
         fi
     done
     if [[ "${gate_fail}" != 0 ]]; then
-        echo "${final_tag}: FAIL (rows 146-153; QEMU only)"
+        echo "${final_tag}: FAIL (rows 146-155; QEMU only)"
         exit 1
     fi
-    echo "${final_tag}: PASS (rows 146-153; serial + usb input at ~${t1} s and ~${t2} s, overflow, interleave, exit revoke; boot console-smmu; QEMU only, hardware NOT_RUN)"
+    echo "${final_tag}: PASS (rows 146-155; serial + usb input at ~${t1} s and ~${t2} s, overflow, interleave, exit revoke; boot console-smmu; QEMU only, hardware NOT_RUN)"
     exit 0
 fi
 
