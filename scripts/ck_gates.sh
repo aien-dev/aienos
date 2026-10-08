@@ -401,7 +401,7 @@ self_test() {
     expect M1 PASS; expect M3 PASS; expect M4_NVME PASS; expect M4_STORE PASS; expect ARGUS1_REVOKE PASS; expect SMMU PASS; expect NVME_SHUTDOWN PASS; expect NET PASS; expect SMP PASS; expect_missing_all
     count_rows
     [[ "${n_pass}/${n_fail}/${n_notrun}/${n_total}" == "9/0/15/24" && ${overall} == NOT_ALL_GATES_PASS ]] \
-        && ok "A: counts 9/0/14 of 23, verdict NOT_ALL_GATES_PASS" || bad "A: counts ${n_pass}/${n_fail}/${n_notrun}/${n_total} ${overall}"
+        && ok "A: counts 9/0/15 of 24, verdict NOT_ALL_GATES_PASS" || bad "A: counts ${n_pass}/${n_fail}/${n_notrun}/${n_total} ${overall}"
     [[ "$(nvme_dma_mode)" == "Confined (QEMU SMMUv3 stage 1, out-of-window DMA faulted); no-SMMU boot denied (NoSmmu); TEST-ONLY bypass image checked separately" ]] && ok "A: confined DMA mode recorded from the store PASS lines" || bad "A: dma mode '$(nvme_dma_mode)'"
     grep -qxF "AIENOS_CK_M4_NVME: PASS (${M4_NVME_PASS_NOTE})" "${tmp}/A.out" \
         && ok "A: M4_NVME PASS line carries the confined-mode note" || bad "A: M4_NVME PASS line lacks the note"

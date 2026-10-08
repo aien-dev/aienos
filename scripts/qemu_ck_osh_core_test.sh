@@ -66,7 +66,7 @@ fix="native/kernel/tests/fixtures/osh"
 if cmp -s "${work}/osh_fixtures.h" native/kernel/core/osh_fixtures.h; then pass "core/osh_fixtures.h is exactly what the fixture scripts generate"
 else fail "core/osh_fixtures.h differs from the fixture scripts (run gen-fixtures-h.sh)"; fi
 nsh=$(ls "${fix}"/trace/*.sh | wc -l); ntr=$(ls "${fix}"/trace/*.trace | wc -l)
-[[ "${nsh}" == "${ntr}" && "${nsh}" -ge 8 ]] && pass "${nsh} fixture scripts, ${ntr} expected traces" || fail "fixture scripts (${nsh}) and traces (${ntr}) differ"
+[[ "${nsh}" == "${ntr}" && "${nsh}" == 20 ]] && pass "${nsh} fixture scripts, ${ntr} expected traces (omega#343 has 20)" || fail "fixture scripts (${nsh}) and traces (${ntr}): expected 20 each"
 
 mk OUT="${out_osh}" CK_SEED0B_TEST_ANCHOR=1 CK_OSH_TEST=1 full
 make -s -C native/kernel OUT="${out_prod}" store-image gpt-image >/dev/null
@@ -171,7 +171,7 @@ check "${serial}" "control 2a: workspace len 512 cells -> TRAPPED trap_code 3 (B
     "^osh_neg2a: .* -> TRAPPED trap_code=3 ticks=[0-9]+ budget=[0-9]+ pages_mapped=[1-9][0-9]* page_tables_zeroed=1 slot_free=1 cell17=127 cells_512_up_unchanged=1; ${label}\$"
 check "${serial}" "control 2b: entry point with len 512 cells -> RETURNED 213 (WORKSPACE_SIZE, the unit's own check), nothing written from 512 up" \
     "^osh_neg2b: .* -> RETURNED value=213 ticks=[0-9]+ budget=[0-9]+ pages_mapped=[1-9][0-9]* page_tables_zeroed=1 slot_free=1 cells_512_up_unchanged=1; ${label}\$"
-check "${serial}" "control 3: one flipped CODE byte -> admission REFUSED" "^osc_unit: osh_lex_flipped\\.unit REFUSED code=[0-9]+ name=[A-Z_]+$"
+check "${serial}" "control 3: one flipped CODE byte -> admission REFUSED code=16 CODE_HASH_MISMATCH" "^osc_unit: osh_lex_flipped\\.unit REFUSED code=16 name=CODE_HASH_MISMATCH$"
 check "${serial}" "control 3: nothing of the flipped unit ran" "^osh_neg3: osh_lex_flipped\\.unit -> NOT_RUN \\(unit was not admitted\\); ${label}\$"
 check "${serial}" "control 3b: one flipped signature byte -> admission REFUSED code=26 BAD_SIGNATURE" "^osc_unit: osh_lex_badsig\\.unit REFUSED code=26 name=BAD_SIGNATURE$"
 check "${serial}" "control 4a (limit): max_ticks 1 on the long shell fixture: finishes inside the first tick (ticks=0) or overruns (1); the units are loop-bounded" \
