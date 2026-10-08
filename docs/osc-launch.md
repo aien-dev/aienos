@@ -24,7 +24,7 @@ arguments, copy and re-hash the code, map, enter EL0, wait, classify, tear down.
   Every other register is zero. **sp** is the top of a stack of the declared `max_stack_bytes`.
 - **Slices:** `bytes` pointers must lie in the input window (read-only to the unit, at most 4096 bytes copied
   from the caller, address from `ck_osc_va_in()`). `cells` pointers must be 8-byte aligned and lie in the
-  caller's workspace (read-write, 4 pages, `ck_osc_va_ws()`). A zero-length slice may carry a null pointer and
+  caller's workspace (read-write, caller-sized 0 to 32 pages, `ck_osc_va_ws()`). A zero-length slice may carry a null pointer and
   is never touched. A pointer anywhere else is refused with 41 before the first instruction.
 - **Return value:** one u64 in x0 (`RETURNED.value`); a void function (`ret_kind` 0) reports 0, as the spec says (not exercised by the gate: no
   void function in the test units). Narrow return kinds are not re-canonicalized.
@@ -45,9 +45,10 @@ The other classes: `RETURNED (1)` with `value`, `TRAPPED (2)` with `trap_code` 1
 ## Re-entry: yes, with a caller-owned workspace
 
 A unit can be called again and see state left in a **caller-owned `cells` workspace**: pass the same
-`struct ck_osc_ws` in `ck_osc_launch_req.ws`. The kernel maps the caller's pages read-write (never executable)
+`struct ck_osc_ws` (`{ mem, pages }`, page aligned, `pages` chosen by the caller, 0 to 32) in `ck_osc_launch_req.ws`. The kernel maps the caller's pages read-write (never executable)
 and does not clear them at teardown; the unit's own stack and registers are not kept, nothing else persists.
-The gate calls `counter(ws, 1)` three times on one workspace (1, 2, 3) and once on a fresh one (1 again).
+The gate calls `counter(ws, 1)` three times on one workspace (1, 2, 3), once on a fresh one (1 again), and twice on a
+23-page workspace (the OSH resumable size, 91,648 bytes) touching its very last cell: 1, then 2, state preserved.
 Section 9 allows this: borrows last for one call and the runtime keeps no reference. An OSH step that returns
 NEED_MORE_INPUT and is called again therefore works if all its state lives in that workspace. Not provided:
 `alloc`, arenas and pools (the runtime services behind vtable offsets 0 and 24..96), so a step that allocates
@@ -84,8 +85,14 @@ through `OscRt` ends `OUTCOME_UNKNOWN(OTHER)`.
 3. **A caller cap on the budget** (`max_ticks`), because the declared maximum of a signer is up to 1e9 ticks
    (a loop would run 115 days). The cap only lowers.
 4. **Launcher hard maxima are stricter than the container's:** code 64 KiB, stack 64 KiB, input 4 KiB,
-   workspace 16 KiB. A unit declaring more is refused 30 (`RESOURCE_UNAVAILABLE`) at launch, nothing runs
+   declared workspace 16 KiB. A unit declaring more is refused 30 (`RESOURCE_UNAVAILABLE`) at launch, nothing runs
    (spec 8.2 step 16 lets a loader apply stricter limits). `a06_valid_limits_at_max` is such a unit.
+4a. **The workspace is caller-sized, capped at 32 pages (128 KiB, `OSC_WS_MAX_PAGES`).** OSH needs 23 pages. 0 pages
+   means no workspace. The cap bounds the user pages, page-table slots and kernel bss; it is the kernel's choice,
+   never read from the container (container format and vectors unchanged). A request over the cap, with a null
+   or non-page-aligned `mem`, is refused before the first instruction with 30 (`RESOURCE_UNAVAILABLE`), the
+   code spec 8.3 gives to a failed reservation of pages. The mapping stays read-write and never executable,
+   is not cleared at teardown, and `cells` pointer checks use the actual size.
 5. **Ownership failures use code 41.** The spec gives no separate code for 9.1.1 item 4.
 6. **Unprovided runtime services end the task as `OUTCOME_UNKNOWN(OTHER)`** instead of being faked.
 7. **Hand-assembled test unit.** The extra gate units (trap, spin, faults, counter) are written in assembly

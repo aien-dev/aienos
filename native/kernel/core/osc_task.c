@@ -6,7 +6,7 @@
  *   0x002000  runtime stubs    EL0 read, execute, never writable (`svc #i`; the only SVCs a unit may reach)
  *   0x010000  unit code        EL0 read, execute, never writable
  *   0x200000  input window     EL0 read-only, never executable   (the `bytes` arguments)
- *   0x210000  workspace        EL0 read-write, never executable  (the `cells` arguments, caller-owned)
+ *   0x210000  workspace        EL0 read-write, never executable  (the `cells` arguments, caller-owned, 0..32 pages)
  *   ..0x400000 stack           EL0 read-write, never executable  (top down; the page below it is unmapped)
  * Writable and executable never coincide (W^X). Everything the task can reach is private to the slot
  * except the caller's workspace. */
@@ -170,7 +170,11 @@ void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept
     }
     const struct osc_entry *e = &a->entry[fi];
     uint64_t in_va = ck_osc_va_in(), ws_va = ck_osc_va_ws();
-    uint64_t ws_len = rq->ws ? sizeof rq->ws->mem : 0;
+    if (rq->ws && (!osc_launch_ws_pages_ok(rq->ws->pages) || (rq->ws->pages && (!rq->ws->mem || ((uintptr_t)rq->ws->mem & 4095))))) {
+        refuse(res, OSC_RESOURCE_UNAVAILABLE); /* workspace over the cap or unusable: nothing ran */
+        return;
+    }
+    uint64_t ws_len = rq->ws ? (uint64_t)rq->ws->pages * CK_OSC_PAGE : 0;
     if (rq->nargs > 6 || !osc_launch_args_ok(e->reg_kind, e->nregs, rq->args, rq->nargs) ||
         !osc_launch_ranges_owned(e->reg_kind, e->nregs, rq->args, in_va, rq->in_len, ws_va, ws_len)) {
         refuse(res, OSC_LAUNCH_ARG_SHAPE);
@@ -226,7 +230,7 @@ void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept
         map(s->l3a, 16 + i, s->code + i * CK_OSC_PAGE, ATTR_RX);
     map(s->l3b, 0, s->in, ATTR_RO);
     if (rq->ws)
-        for (unsigned i = 0; i < CK_OSC_WS_PAGES; i++)
+        for (unsigned i = 0; i < rq->ws->pages; i++)
             map(s->l3b, 16 + i, rq->ws->mem + i * CK_OSC_PAGE, ATTR_RW);
     for (unsigned i = 0; i < spages; i++)
         map(s->l3b, 512 - spages + i, s->stack + (CK_OSC_STACK_MAX_BYTES / CK_OSC_PAGE - spages + i) * CK_OSC_PAGE,
@@ -239,7 +243,7 @@ void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept
     clean_range(s->code, sizeof s->code, 1);
     clean_range(s->stack, sizeof s->stack, 0);
     if (rq->ws)
-        clean_range(rq->ws->mem, sizeof rq->ws->mem, 0);
+        clean_range(rq->ws->mem, (size_t)rq->ws->pages * CK_OSC_PAGE, 0);
 
     /* registers: arguments in x0..x5, OscRt in x7, return stub in x30; nothing else */
     uint64_t regs[31] = { 0 };

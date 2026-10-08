@@ -18,6 +18,12 @@
 #define OSC_RT_STUB_BYTES 8u /* `svc #i` then a spare word */
 #define OSC_TRAP_MAX 14u
 
+/* Kernel cap on a caller-owned workspace: 32 pages = 128 KiB. It bounds the user pages and page-table slots one
+ * task can map (the workspace window is 32 of the 512 leaf entries of its L3 table, clear of the stack), and the
+ * bss a caller must set aside. Large enough for the OSH resumable workspace (11,456 cells = 23 pages). The size is
+ * the caller's choice and never comes from the container. */
+#define OSC_WS_MAX_PAGES 32u
+
 /* Section 9.3: four classes, closed. */
 enum { OSC_RES_RETURNED = 1, OSC_RES_TRAPPED = 2, OSC_RES_REFUSED = 3, OSC_RES_UNKNOWN = 4 };
 /* unknown_reason, section 9.3 (diagnostic only; never changes the class). */
@@ -43,6 +49,9 @@ int osc_launch_args_ok(const uint8_t *kinds, unsigned nregs, const uint64_t *arg
  * caller's writable workspace window [ws_va, ws_va+ws_len). 1 = owned. */
 int osc_launch_ranges_owned(const uint8_t *kinds, unsigned nregs, const uint64_t *args, uint64_t in_va,
                             uint64_t in_len, uint64_t ws_va, uint64_t ws_len);
+
+/* 1 if a workspace of this many pages is allowed (0 = none, up to OSC_WS_MAX_PAGES). */
+int osc_launch_ws_pages_ok(uint64_t pages);
 
 /* The ticks the task may run: the unit's declared cpu_ticks, lowered (never raised) by a nonzero caller
  * cap. One tick is one scheduler timer interrupt (10 ms, CNTFRQ/100). */

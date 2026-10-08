@@ -281,11 +281,36 @@ static void fixture_unit(void)
     CHECK(a.code_len == 116);
 }
 
+static void workspace_bounds(void)
+{
+    const uint8_t kc[2] = { 12, 5 };
+    const uint64_t in = 0x200000, ws = 0x210000;
+    CHECK(OSC_WS_MAX_PAGES == 32u);
+    CHECK(osc_launch_ws_pages_ok(0) && osc_launch_ws_pages_ok(1) && osc_launch_ws_pages_ok(32));
+    CHECK(!osc_launch_ws_pages_ok(33) && !osc_launch_ws_pages_ok(0xffffffffull) && !osc_launch_ws_pages_ok(~0ull));
+    for (uint64_t pages = 0; pages <= 33; pages++) {
+        uint64_t len = pages * 4096, cells = len / 8;
+        uint64_t whole[2] = { ws, cells }, over[2] = { ws, cells + 1 };
+        uint64_t last[2] = { ws + len - 8, 1 }, past[2] = { ws + len, 1 };
+        uint64_t before[2] = { ws - 8, 1 };
+        if (pages == 0) {
+            CHECK(!osc_launch_ranges_owned(kc, 2, past, in, 16, ws, 0));   /* no workspace: nothing owned */
+            continue;
+        }
+        CHECK(osc_launch_ranges_owned(kc, 2, whole, in, 16, ws, len));     /* ptr+len ends exactly at the end */
+        CHECK(!osc_launch_ranges_owned(kc, 2, over, in, 16, ws, len));     /* one cell too many */
+        CHECK(osc_launch_ranges_owned(kc, 2, last, in, 16, ws, len));      /* the last cell */
+        CHECK(!osc_launch_ranges_owned(kc, 2, past, in, 16, ws, len));     /* first cell past the end */
+        CHECK(!osc_launch_ranges_owned(kc, 2, before, in, 16, ws, len));
+    }
+}
+
 int main(void)
 {
     launch_txt();
     differential();
     ownership();
+    workspace_bounds();
     budget();
     classify();
     fixture_unit();

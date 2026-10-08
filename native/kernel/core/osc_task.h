@@ -9,16 +9,17 @@
 #include "osc_unit.h"
 
 #define CK_OSC_PAGE 4096u
-#define CK_OSC_WS_PAGES 4u
 #define CK_OSC_CODE_MAX_BYTES (16u * CK_OSC_PAGE)  /* launcher hard maximum (stricter than the spec's 262144) */
 #define CK_OSC_STACK_MAX_BYTES (16u * CK_OSC_PAGE) /* a unit declaring more is refused RESOURCE_UNAVAILABLE */
 #define CK_OSC_IN_MAX_BYTES CK_OSC_PAGE
 
-/* A caller-owned workspace for `cells` arguments. It lives in the caller, is mapped read-write (never
- * executable) into the task for the call, and is NOT cleared by teardown: state a unit leaves in it is
- * there for the next call that is given the same workspace. */
+/* A caller-owned workspace for `cells` arguments: `pages` 4 KiB pages of page-aligned caller memory starting at
+ * `mem`, 0 to OSC_WS_MAX_PAGES (0 = no workspace). It is mapped read-write (never executable) into the task for the
+ * call and is NOT cleared by teardown: state a unit leaves in it is there for the next call that is given the same
+ * workspace. A workspace over the cap, or with unaligned or null memory, is refused 30 before the first instruction. */
 struct ck_osc_ws {
-    uint8_t mem[CK_OSC_WS_PAGES * CK_OSC_PAGE] __attribute__((aligned(4096)));
+    uint8_t *mem;
+    uint32_t pages;
 };
 
 struct ck_osc_launch_req {

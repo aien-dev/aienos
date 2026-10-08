@@ -151,3 +151,8 @@ void osc_launch_classify(const struct osc_event *e, uint64_t rt_code_va, struct 
         return;
     }
 }
+
+int osc_launch_ws_pages_ok(uint64_t pages)
+{
+    return pages <= OSC_WS_MAX_PAGES;
+}

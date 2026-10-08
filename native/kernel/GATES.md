@@ -719,13 +719,14 @@ it down). What is enforced, what is not, and the decisions taken: `docs/osc-laun
   (TEST ONLY; the flag is refused without the TEST anchor). Two TEST-signed units are in the sealed Store: the
   spec's `a01_valid_min.unit` and the hand-assembled `l01_launch_fns.unit` (`tests/fixtures/osc_unit/launch/`,
   built by `make-l01.sh` with the spec's generator helpers; its IR section is min.ir, so the IR does not
-  describe that code, which the spec says the kernel never checks). 23 launches, each printed as one
+  describe that code, which the spec says the kernel never checks). 26 launches, each printed as one
   `osc_launch:` line carrying the label: RETURNED with exact values; refused wrong argument count, unknown name,
   wrong case, slice outside the input window, misaligned cells; TRAPPED 3 and 14 through the trap service; trap
   code 15 and a brk reached directly are OUTCOME_UNKNOWN (never TRAPPED); budget exhaustion (TICK_OVERRUN);
   contained faults (null read, write to OscRt, jump into the stack, stack overflow), each followed by a
   successful launch in the same boot; every task torn down (`pages_after=0 slot_free=1`); a caller-owned
-  workspace keeping state across calls.
+  workspace keeping state across calls, a 23-page workspace touched at its last cell with state kept, and a
+  33-page workspace refused 30 (over the 32-page cap).
 - Mutants (run by hand, restored): dropping the execute-never bit on data turns the W^X line, and the lines
   after it, red; serving an SVC from unit context turns the host classification test red (no admitted unit can
   execute an SVC, so only the host test reaches that lock).

@@ -110,7 +110,9 @@ struct lt_step {
     uint64_t cap;
 };
 
-static struct ck_osc_ws lt_ws[2];
+static uint8_t lt_ws_mem1[4 * 4096], lt_ws_mem2[4 * 4096], lt_ws_mem3[23 * 4096], lt_ws_mem4[33 * 4096]
+    __attribute__((aligned(4096)));
+static struct ck_osc_ws lt_ws[4] = { { lt_ws_mem1, 4 }, { lt_ws_mem2, 4 }, { lt_ws_mem3, 23 }, { lt_ws_mem4, 33 } };
 static unsigned lt_counts[5];
 
 static void lt_run(const struct lt_step *s)
@@ -127,9 +129,9 @@ static void lt_run(const struct lt_step *s)
         for (unsigned i = 0; i < s->nargs; i++) {
             rq.args[i] = s->a[i];
             if (s->a[i] & IN_PTR)
-                rq.args[i] = ck_osc_va_in() + (s->a[i] & 0xfff);
+                rq.args[i] = ck_osc_va_in() + (s->a[i] & 0xffffff);
             else if (s->a[i] & WS_PTR)
-                rq.args[i] = ck_osc_va_ws() + (s->a[i] & 0xfff);
+                rq.args[i] = ck_osc_va_ws() + (s->a[i] & 0xffffff);
         }
         if (s->in) {
             rq.in = (const uint8_t *)s->in;
@@ -147,9 +149,9 @@ static void lt_run(const struct lt_step *s)
         for (unsigned i = 0; i < s->nargs && n < sizeof as - 24; i++) {
             uint64_t v = s->a[i];
             if (v & IN_PTR)
-                n += (unsigned)ck_snprintf(as + n, sizeof as - n, "%sin+%u", i ? "," : "", (unsigned)(v & 0xfff));
+                n += (unsigned)ck_snprintf(as + n, sizeof as - n, "%sin+%u", i ? "," : "", (unsigned)(v & 0xffffff));
             else if (v & WS_PTR)
-                n += (unsigned)ck_snprintf(as + n, sizeof as - n, "%sws+%u", i ? "," : "", (unsigned)(v & 0xfff));
+                n += (unsigned)ck_snprintf(as + n, sizeof as - n, "%sws+%u", i ? "," : "", (unsigned)(v & 0xffffff));
             else
                 n += (unsigned)ck_snprintf(as + n, sizeof as - n, "%s%llu", i ? "," : "", (unsigned long long)v);
         }
@@ -189,11 +191,14 @@ static void lt_all(void)
         { "l01_launch_fns.unit", "counter", 2, { WS_PTR, 1 }, 0, 1, 0 },
         { "l01_launch_fns.unit", "counter", 2, { WS_PTR, 1 }, 0, 2, 0 },
         { "l01_launch_fns.unit", "counter", 2, { WS_PTR | 4, 1 }, 0, 1, 0 },
+        { "l01_launch_fns.unit", "counter", 2, { WS_PTR | 94200, 1 }, 0, 3, 0 },
+        { "l01_launch_fns.unit", "counter", 2, { WS_PTR | 94200, 1 }, 0, 3, 0 },
+        { "l01_launch_fns.unit", "counter", 2, { WS_PTR, 1 }, 0, 4, 0 },
     };
-    ck_printf("osc_launch_policy: units=%u code_max=%u stack_max=%u in_max=%u ws=%u pages; 1 tick = 10 ms; "
+    ck_printf("osc_launch_policy: units=%u code_max=%u stack_max=%u in_max=%u ws_max=%u pages; 1 tick = 10 ms; "
               "QEMU (aarch64 virt), TEST signer, not physical\n",
               lt_n, (unsigned)CK_OSC_CODE_MAX_BYTES, (unsigned)CK_OSC_STACK_MAX_BYTES, (unsigned)CK_OSC_IN_MAX_BYTES,
-              (unsigned)CK_OSC_WS_PAGES);
+              (unsigned)OSC_WS_MAX_PAGES);
     for (unsigned i = 0; i < sizeof steps / sizeof steps[0]; i++)
         lt_run(&steps[i]);
     ck_printf("osc_launches: returned=%u trapped=%u refused=%u unknown=%u; QEMU (aarch64 virt), TEST signer, not "

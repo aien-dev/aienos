@@ -121,7 +121,7 @@ if has "${serial}" "report_kind: (panic|fault)"; then fail "panic or fault repor
 check "${serial}" "a01 admitted with the frozen UnitDigest" "^osc_unit: a01_valid_min\\.unit ACCEPT unit_digest=${a01_digest} "
 check "${serial}" "l01 admitted (every hand-assembled word is in the OSC subset)" "^osc_unit: l01_launch_fns\\.unit ACCEPT .* funcs=8 caps=0 signer=TEST$"
 check "${serial}" "totals: 2 seen, 2 accepted" "^osc_units: seen=2 accepted=2 refused=0 oversize=0 "
-check "${serial}" "launch policy line, labelled" "^osc_launch_policy: units=2 code_max=65536 stack_max=65536 in_max=4096 ws=4 pages; 1 tick = 10 ms; QEMU \\(aarch64 virt\\), TEST signer, not physical$"
+check "${serial}" "launch policy line, labelled" "^osc_launch_policy: units=2 code_max=65536 stack_max=65536 in_max=4096 ws_max=32 pages; 1 tick = 10 ms; QEMU \\(aarch64 virt\\), TEST signer, not physical$"
 
 label='QEMU \(aarch64 virt\), TEST signer, not physical'
 tail_run="ticks=[0-9]+ budget=[0-9]+ pages_mapped=[1-9][0-9]* pages_after=0 slot_free=1; ${label}\$"
@@ -163,12 +163,15 @@ vals=$(grep -E -- "^osc_launch: ${l} counter\\(ws\\+0,1\\) -> RETURNED value=" "
 if [[ "${vals}" == "1 2 3 1 " ]]; then pass "caller-owned workspace persists across calls: values 1 2 3, a fresh workspace starts again at 1"
 else fail "workspace persistence (got: ${vals})"; fi
 lline "refused misaligned cells pointer (ws+4): LAUNCH_ARG_SHAPE (41)" $l 'counter\(ws\+4,1\)' 'REFUSED_AT_ADMISSION code=41 name=LAUNCH_ARG_SHAPE' ref
-check "${serial}" "summary: 9 returned, 2 trapped, 5 refused, 7 unknown" \
-    "^osc_launches: returned=9 trapped=2 refused=5 unknown=7; ${label}\$"
+lline "re-entry with a 23-page workspace, last cell (ws+94200) touched: counter 1" $l 'counter\(ws\+94200,1\)' 'RETURNED value=1'
+lline "re-entry, same 23-page workspace: counter state preserved, 2" $l 'counter\(ws\+94200,1\)' 'RETURNED value=2'
+lline "refused 33-page workspace (over the 32-page cap): RESOURCE_UNAVAILABLE (30), nothing ran" $l 'counter\(ws\+0,1\)' 'REFUSED_AT_ADMISSION code=30 name=RESOURCE_UNAVAILABLE' ref
+check "${serial}" "summary: 11 returned, 2 trapped, 6 refused, 7 unknown" \
+    "^osc_launches: returned=11 trapped=2 refused=6 unknown=7; ${label}\$"
 # every launch line carries the label; the teardown columns never show a page left behind
 nl=$(grep -c '^osc_launch: ' "${serial}" || true)
 nlab=$(grep -cE "^osc_launch: .*; ${label}\$" "${serial}" || true)
-[[ "${nl}" == 23 && "${nlab}" == 23 ]] && pass "all 23 launch lines carry the label" || fail "launch lines labelled (${nlab} of ${nl})"
+[[ "${nl}" == 26 && "${nlab}" == 26 ]] && pass "all 26 launch lines carry the label" || fail "launch lines labelled (${nlab} of ${nl})"
 if grep -E '^osc_launch: ' "${serial}" | grep -vqE 'pages_after=0 slot_free=1;'; then fail "a task left pages mapped or its slot busy"; else pass "every task was torn down: pages_after=0, slot_free=1"; fi
 
 if [[ -n "${AIENOS_LOG_DIR:-}" ]]; then cp "${serial}" "${AIENOS_LOG_DIR}/qemu_ck_osc_launch_serial.log"; fi
