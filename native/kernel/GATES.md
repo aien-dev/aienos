@@ -686,13 +686,15 @@ section 8.4 code scan with the decoder round trip), `native/kernel/core/osc_admi
 Candidates reach it through the same boot-disk Store path as the P2 artifacts; a candidate that begins with the
 magic `OSCUNIT\0` is judged by this module instead of the Binary Artifact v0 path.
 
-- Host conformance: `tests/test_osc_unit.c` runs every line of the frozen `expected.txt` (52), `lookups.txt` (6)
+- Host conformance: `tests/test_osc_unit.c` runs every line of the frozen `expected.txt` (57), `lookups.txt` (6)
   and `state.txt` (3) from `tests/fixtures/osc_unit` (provenance there) and requires the stated verdict; also
   every single-byte flip and every truncation of the valid vector is refused. Part of `make test` and
   `make sanitize`.
-- QEMU gate: two boots (TEST-anchor qualification build; ordinary release build) of four vectors staged in the
+- QEMU gate: two boots (TEST-anchor qualification build; ordinary release build) of five vectors staged in the
   sealed Store. Qualification: valid TEST unit ACCEPT with the frozen UnitDigest; OWNER unit UNTRUSTED_SIGNER;
-  bad signature; SVC word. Release: TEST unit TEST_SIGNER_IN_RELEASE (also for the bad-signature vector: class is
+  bad signature; SVC word; a02 (one domain-1 request pinning generation 7, staged as `a02_valid_caps_kernel.unit`
+  because Store names are at most 32 bytes) CAP_GENERATION_STALE, which runs the kernel's own generation lookup.
+  Release: TEST units TEST_SIGNER_IN_RELEASE (also for the bad-signature and a02 vectors: class is
   checked first); OWNER unit UNTRUSTED_SIGNER; SVC word CODE_INSTRUCTION; nothing accepted. The release image is
   checked not to carry the TEST public key.
 - Labels: QEMU (aarch64 virt), TEST signer, not physical. Admission only: nothing is mapped, launched or
