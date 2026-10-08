@@ -11,7 +11,10 @@
 # the sealed C Store of a GPT boot disk image at build time and read back by the
 # kernel's store stage, the same path as the P2 artifacts (svc/artifact_store.h):
 #   a01_valid_min.unit      TEST-signed, valid
-#   a02_valid_caps_kernel_domain.unit  TEST-signed, valid, one domain-1 request
+#   a02_valid_caps_kernel.unit  vector a02_valid_caps_kernel_domain.unit, staged
+#                           under a shorter Store name (names are at most 32
+#                           bytes, CK_ART_NAME_MAX; same bytes, checked).
+#                           TEST-signed, valid, one domain-1 request
 #                           pinning generation 7 (object 1)
 #   a04_valid_owner_class.unit  OWNER class, valid signature, no OWNER anchor
 #   r14_bad_signature.unit  TEST-signed, signature byte flipped
@@ -69,9 +72,18 @@ make -s -C native/kernel OUT="${out_prod}" store-image gpt-image >/dev/null
 simg="${out_prod}/host/ck_store_image"
 
 fix="native/kernel/tests/fixtures/osc_unit"
-units=(a01_valid_min.unit a02_valid_caps_kernel_domain.unit a04_valid_owner_class.unit r14_bad_signature.unit r37_code_svc.unit)
+units=(a01_valid_min.unit a02_valid_caps_kernel.unit a04_valid_owner_class.unit r14_bad_signature.unit r37_code_svc.unit)
+# Store names are at most 32 bytes (CK_ART_NAME_MAX); the a02 vector file name is 33, so a02 is
+# staged under a shorter name. The bytes are the vector's, checked here.
+stage="${work}/stage"
+mkdir -p "${stage}"
+cp "${fix}/vectors/a02_valid_caps_kernel_domain.unit" "${stage}/a02_valid_caps_kernel.unit"
+cmp -s "${fix}/vectors/a02_valid_caps_kernel_domain.unit" "${stage}/a02_valid_caps_kernel.unit" \
+    && pass "a02 staged as a02_valid_caps_kernel.unit, bytes identical to the vector" || fail "a02 staged copy differs from the vector"
 files=()
-for u in "${units[@]}"; do files+=("${fix}/vectors/${u}"); done
+for u in "${units[@]}"; do
+    if [[ -f "${stage}/${u}" ]]; then files+=("${stage}/${u}"); else files+=("${fix}/vectors/${u}"); fi
+done
 a01_line=$(grep -E '^a01_valid_min\.unit ' "${fix}/vectors/expected.txt")
 a01_digest=$(sed -E 's/.* unit_digest=([0-9a-f]{64}) .*/\1/' <<<"${a01_line}")
 a01_prog=$(sed -E 's/.* program_id=([0-9a-f]{64})$/\1/' <<<"${a01_line}")
@@ -155,7 +167,7 @@ check "${qual}" "policy line: qualification mode, one TEST anchor, no OWNER anch
 unit_line "${qual}" a01_valid_min.unit \
     "ACCEPT unit_digest=${a01_digest} program_id=${a01_prog} funcs=2 caps=0 signer=TEST" \
     "ACCEPT, UnitDigest and program id equal the frozen expected.txt"
-unit_line "${qual}" a02_valid_caps_kernel_domain.unit "REFUSED code=29 name=CAP_GENERATION_STALE" \
+unit_line "${qual}" a02_valid_caps_kernel.unit "REFUSED code=29 name=CAP_GENERATION_STALE" \
     "REFUSED CAP_GENERATION_STALE (pinned generation 7; the kernel lookup knows no resource)"
 unit_line "${qual}" a04_valid_owner_class.unit "REFUSED code=25 name=UNTRUSTED_SIGNER" "REFUSED UNTRUSTED_SIGNER (OWNER, no OWNER anchor)"
 unit_line "${qual}" r14_bad_signature.unit "REFUSED code=26 name=BAD_SIGNATURE" "REFUSED BAD_SIGNATURE"
@@ -172,7 +184,7 @@ check "${prod}" "policy line: release mode, no anchors at all" \
     "^osc_policy: mode=release test_anchors=0 owner_anchors=0 \(none provisioned\) domains=1 gen_width=32; QEMU, not physical$"
 if has "${prod}" "seed0b-test qualification build"; then fail "release build carries the qualification label"; fi
 unit_line "${prod}" a01_valid_min.unit "REFUSED code=24 name=TEST_SIGNER_IN_RELEASE" "REFUSED TEST_SIGNER_IN_RELEASE (a valid TEST-signed unit)"
-unit_line "${prod}" a02_valid_caps_kernel_domain.unit "REFUSED code=24 name=TEST_SIGNER_IN_RELEASE" "REFUSED TEST_SIGNER_IN_RELEASE (class is checked before capability policy)"
+unit_line "${prod}" a02_valid_caps_kernel.unit "REFUSED code=24 name=TEST_SIGNER_IN_RELEASE" "REFUSED TEST_SIGNER_IN_RELEASE (class is checked before capability policy)"
 unit_line "${prod}" a04_valid_owner_class.unit "REFUSED code=25 name=UNTRUSTED_SIGNER" "REFUSED UNTRUSTED_SIGNER (OWNER, no anchor)"
 unit_line "${prod}" r14_bad_signature.unit "REFUSED code=24 name=TEST_SIGNER_IN_RELEASE" "REFUSED TEST_SIGNER_IN_RELEASE (class is checked before the signature)"
 unit_line "${prod}" r37_code_svc.unit "REFUSED code=34 name=CODE_INSTRUCTION" "REFUSED CODE_INSTRUCTION"
