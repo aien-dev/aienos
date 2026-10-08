@@ -28,32 +28,32 @@
         },
         {
           "digest": "84ab76bac91a38fed4e3ff6f1a9fe321af4ca047f2fb1d0f88265e2697ab6c4d",
-          "last_commit": "b4f27b5",
+          "last_commit": "3633a39",
           "name": "docs",
           "purpose": "Directory docs. Purpose not yet described by a human."
         },
         {
-          "digest": "8228da86ac9c35b1bd4f0b595e4d1106e7bdde2f48b8b66a4348a99aa6fa2f46",
-          "last_commit": "b4f27b5",
+          "digest": "e9bf12c5d223e99d98d1971a15ee225dc1c5617e7ac8a043996cca93fff2f176",
+          "last_commit": "3633a39",
           "name": "native",
           "purpose": "Directory native. Purpose not yet described by a human."
         },
         {
-          "digest": "ac7ff9c83c5576e11caee9e1f9f8e22ba4b579c89b62a5f26eac41a2e860c3eb",
-          "last_commit": "b4f27b5",
+          "digest": "7f9e0f7398e121a4d23c273f8a27ca78f1c01678ab02594c946870081b30f36c",
+          "last_commit": "3633a39",
           "name": "scripts",
           "purpose": "Directory scripts. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:057d9b602d99531760fe45faddf9d5e3b8e52114ee38a401f0acc0fe5b8fc759",
-      "compiled_at": "2026-10-08T03:53:04Z",
+      "children_root": "sha256:e2a4799402a694cc2bf670ea881a7f28528c82a235dc3b321d54759b0b26fd3e",
+      "compiled_at": "2026-10-08T04:09:08Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:1d6e4fccf1a7003c463b05922a539eac0c2777f1d89af0e2e946cdb25e3b6bdf",
+      "digest": "sha256:8e14adfa7076806f781eeeeab2a47a0c1822197897975b85c2d3d3d620a926ff",
       "evidence_files": 153,
       "evidence_root": "sha256:29aa8775feb12d9e0e64b41fc1fc48b97e32dc16bf9176562cbe9fe1ea934f00",
       "files": 2967,
-      "generated_at_commit": "86f8d75f7dd87ddb08705a7dfc494d7057a66281",
-      "source_tree": "sha256:8978bb0367d27e559cfa9bf3168552d7347c38df0c59da11226922e695792600"
+      "generated_at_commit": "3633a39470b0a667adff6e45f0385973136a9085",
+      "source_tree": "sha256:2e83fba4b7f64cd0ef52ae13a0a612dc39491491925ee12e755f47f24f64bd97"
     },
     "owner_lane": "",
     "provenance": {
