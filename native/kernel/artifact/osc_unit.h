@@ -89,6 +89,9 @@ struct osc_policy {
      * assumes pinned generations match (host conformance profile only; the kernel passes a
      * callback). */
     int (*gen_lookup)(void *ctx, unsigned domain, unsigned kind, uint32_t id, uint64_t *current);
+    /* Staging maximum in bytes (0: none). A file longer than this is refused RESOURCE_UNAVAILABLE
+     * before step 1 (spec 8.2 step 16; the native Store holds at most CK_ART_MAX_BYTES). */
+    size_t staging_max;
     /* Step 16: nonzero refuses with RESOURCE_UNAVAILABLE. NULL: reservation succeeds. */
     int (*reserve)(void *ctx, const struct osc_accept *a);
     void *ctx;

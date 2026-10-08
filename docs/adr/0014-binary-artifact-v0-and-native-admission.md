@@ -449,3 +449,19 @@ yielding `SEED_0B_MACHINE1`.
 Phase 2 is complete only after the same qualified artifact is admitted,
 executed with attenuated authority, denied an unauthorized write, reclaimed,
 and covered by a valid receipt in QEMU and then on Machine 1.
+
+## Amendment note, 2026-10-08: second TEST key for OSC unit containers
+
+This note adds to section 6 and does not change the status of this ADR or any other text in it.
+
+Section 6 allows a `seed0b-test-anchor` build to add "one known qualification public key". Today that key is the RFC 8032 TEST 1 public key (`d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a`, signer fingerprint `21fe31dfa154a261626bf854046fd2271b7bed4b6abe45aa58877ef47f9721b9`). It verifies Binary Artifact v0.
+
+The OSC unit container ([aien-protocols](https://github.com/aien-dev/aien-protocols) `specs/osc-unit-artifact`, PR #17, v1 draft) is a different format with its own conformance vectors. Those vectors are signed with a different throwaway key, `keys/test1.pub` of that spec, whose signer fingerprint is `7b136f1c9197f8a99a91057f5deced18d5754669e559ee7cc4f7cef64a626abf`. It is not the RFC 8032 TEST 1 key.
+
+Amendment: a `seed0b-test-anchor` qualification build may also hold the OSC unit spec's TEST key (`specs/osc-unit-artifact/keys/test1.pub`, fingerprint `7b136f1c9197f8a99a91057f5deced18d5754669e559ee7cc4f7cef64a626abf`), beside the RFC 8032 TEST 1 key. The OSC unit admission path trusts only the spec key and Binary Artifact v0 admission trusts only the RFC 8032 key; neither key is accepted on the other path.
+
+- This is TEST only. The private seed of the spec key is derivable from a public label in the spec's generator and is not secret.
+- A release image holds neither key, and its trust-anchor sets stay empty.
+- The qualification gate checks this: the OSC unit gate refuses a TEST-signed unit in an ordinary build, and the boot report names the build as a TEST-only qualification tier.
+
+Observation, no change made here: the `execution_status` mapping text in section 7.1 lists codes 0 to 5, while the field table above it also lists `6` (canary failed). The mapping text omits 6.

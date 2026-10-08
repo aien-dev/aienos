@@ -238,6 +238,24 @@ static void test_anchor_matches_fixture(void)
     CHECK(memcmp(osc_unit_test1_pk, key_test, 32) == 0);
 }
 
+/* Spec 8.2 step 16: a loader whose staging maximum is smaller than the file refuses with
+ * RESOURCE_UNAVAILABLE before parsing; a file that fits is judged normally. */
+static void test_staging_maximum(void)
+{
+    static struct osc_accept acc;
+    struct state st;
+    memset(&st, 0, sizeof st);
+    struct osc_policy p = policy_for("qualification", "1", "T", &st);
+    uint8_t *b = 0; size_t n = 0;
+    CHECK(admit_file("a01_valid_min.unit", &p, &acc, &b, &n) == OSC_OK);
+    CHECK(n > 128);
+    p.staging_max = n - 1;
+    CHECK(osc_unit_admit(b, n, &p, &acc) == OSC_RESOURCE_UNAVAILABLE);
+    p.staging_max = n;
+    CHECK(osc_unit_admit(b, n, &p, &acc) == OSC_OK);
+    free(b);
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1) fixdir = argv[1];
@@ -248,7 +266,8 @@ int main(int argc, char **argv)
     int nl = run_file("lookups.txt", 1);
     int ns = run_file("state.txt", 2);
     printf("osc_unit conformance: container=%d lookups=%d state=%d\n", ne, nl, ns);
-    CHECK(ne == 52 && nl == 6 && ns == 3);
+    CHECK(ne == 53 && nl == 6 && ns == 3);
+    test_staging_maximum();
     test_words();
     test_flips_and_truncations();
     return ck_t_verdict("test_osc_unit");

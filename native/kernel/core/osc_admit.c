@@ -27,6 +27,10 @@ static int no_resource(void *ctx, unsigned domain, unsigned kind, uint32_t id, u
     return 1;
 }
 
+/* The Store and the native staging area hold at most 160 pages per artifact (= CK_ART_MAX_BYTES in
+ * svc/artifact_store.h, 655,360 bytes; spec 8.2 step 16). */
+#define OSC_STAGING_MAX (160u * 4096u)
+
 static void hex(char *out, const uint8_t *b, size_t n)
 {
     static const char d[] = "0123456789abcdef";
@@ -43,6 +47,7 @@ static void policy(struct osc_policy *p)
     p->unit_formats = OSC_PROFILE_UNIT_FORMATS;
     p->abi_versions = OSC_PROFILE_ABI;
     p->cap_domains = 1u << 1;
+    p->staging_max = OSC_STAGING_MAX;
     p->gen_lookup = no_resource;
 #ifdef CK_SEED0B_TEST_ANCHOR
     static const uint8_t (*const ta)[32] = &osc_unit_test1_pk;

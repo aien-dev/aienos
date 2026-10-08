@@ -51,3 +51,4 @@ r44_caps_disorder.unit qualification 1 T REFUSED CAPS_TABLE 21
 r45_signature_s_not_canonical.unit qualification 1 T REFUSED BAD_SIGNATURE 26
 r46_section_bounds_u32_wrap.unit qualification 1 T REFUSED SECTION_BOUNDS 11
 r47_slice_kind_in_format_4.unit qualification 1 T REFUSED ENTRY_TABLE 20
+r48_entry_hash_shared_case_variant.unit qualification 1 T REFUSED ENTRY_NAME_HASH 32

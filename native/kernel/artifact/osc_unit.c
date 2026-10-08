@@ -210,6 +210,8 @@ unsigned osc_unit_admit(const uint8_t *f, size_t len, const struct osc_policy *p
 
     if (!f || !pol)
         return OSC_TRUNCATED;
+    if (pol->staging_max && len > pol->staging_max)
+        return OSC_RESOURCE_UNAVAILABLE;
     /* 1 */
     if (len < 128)
         return OSC_TRUNCATED;
