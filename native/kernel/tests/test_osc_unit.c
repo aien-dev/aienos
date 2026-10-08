@@ -288,7 +288,7 @@ int main(int argc, char **argv)
     int nl = run_file("lookups.txt", 1);
     int ns = run_file("state.txt", 2);
     printf("osc_unit conformance: container=%d lookups=%d state=%d\n", ne, nl, ns);
-    CHECK(ne == 53 && nl == 6 && ns == 3);
+    CHECK(ne == 57 && nl == 6 && ns == 3);
     test_staging_maximum();
     test_words();
     test_lookup_ignores_name_hash();

@@ -11,6 +11,10 @@ int ck_osc_is_unit(const uint8_t *b, size_t len);
 /* Admit one container and print its machine-readable "osc_unit:" line. Returns 0 accepted,
  * else the refusal code. */
 unsigned ck_osc_candidate(const char *name, const uint8_t *b, size_t len);
-/* Print the "osc_units:" summary line if any OSC candidate was seen. */
+/* A Store entry the Store refused as too large (RESOURCE_UNAVAILABLE) is never read, so its format is
+ * unknown: print an "osc_unit:" refusal line for it and count it as oversize. The refusal itself stays
+ * with the old firmware path. */
+void ck_osc_oversize(const char *name, uint64_t len);
+/* Print the "osc_units:" summary line if any OSC candidate or oversize entry was seen. */
 void ck_osc_summary(void);
 #endif

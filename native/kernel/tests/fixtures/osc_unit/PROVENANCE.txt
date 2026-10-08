@@ -1,5 +1,5 @@
 OSC unit container conformance vectors, copied unchanged (README.md omitted) from
-aien-dev/aien-protocols PR #17, specs/osc-unit-artifact/{vectors,keys}, head 5e9ec10 (cee67fe plus r48 and the section 15 text)
+aien-dev/aien-protocols PR #17, specs/osc-unit-artifact/{vectors,keys}, head e6669cc (adds r49 to r51 and a06, the declared-limit bound vectors)
 (contract OSC_UNIT_ARTIFACT.md, container version 1, frozen v1).
 Both keys are THROWAWAY TEST keys derived from fixed labels in that spec's
 tools/make-vectors.sh. They protect nothing and must never enter a real anchor set.

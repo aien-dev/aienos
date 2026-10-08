@@ -421,6 +421,7 @@ unsigned osc_unit_admit(const uint8_t *f, size_t len, const struct osc_policy *p
                                : !key_in(pol->owner_anchors, pol->n_owner, f + 64, &key))
         return OSC_UNTRUSTED_SIGNER;
     /* 14: canonical S < L, then pure Ed25519 over the domain-separated digest */
+    /* scalar_below_L is defence in depth: the Ed25519 verifier also rejects a non-canonical S, so no test can separate them. */
     {
         static const char tag[] = "AIENOS-OSC-UNIT-SIGNATURE-V1";
         uint8_t msg[sizeof tag + 32];

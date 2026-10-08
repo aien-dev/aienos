@@ -18,7 +18,7 @@
 #include "osc_unit_test_anchor.h"
 #endif
 
-static unsigned seen, accepted, refused, announced;
+static unsigned seen, accepted, refused, oversize, announced;
 static struct osc_accept acc; /* ~5 KB: static, not on the kernel stack */
 
 static int no_resource(void *ctx, unsigned domain, unsigned kind, uint32_t id, uint64_t *cur)
@@ -95,9 +95,18 @@ unsigned ck_osc_candidate(const char *name, const uint8_t *b, size_t len)
     return rc;
 }
 
+void ck_osc_oversize(const char *name, uint64_t len)
+{
+    oversize++;
+    ck_printf("osc_unit: %s REFUSED code=%u name=%s reason=staging_too_large bytes=%llu limit=%u "
+              "(content not read, format unknown; refusal by the Store size limit)\n",
+              name, (unsigned)OSC_RESOURCE_UNAVAILABLE, osc_code_name(OSC_RESOURCE_UNAVAILABLE),
+              (unsigned long long)len, (unsigned)OSC_STAGING_MAX);
+}
+
 void ck_osc_summary(void)
 {
-    if (seen)
-        ck_printf("osc_units: seen=%u accepted=%u refused=%u (admission only, nothing launched)\n", seen, accepted,
-                  refused);
+    if (seen || oversize)
+        ck_printf("osc_units: seen=%u accepted=%u refused=%u oversize=%u (admission only, nothing launched)\n", seen, accepted,
+                  refused, oversize);
 }

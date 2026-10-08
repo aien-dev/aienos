@@ -52,3 +52,7 @@ r45_signature_s_not_canonical.unit qualification 1 T REFUSED BAD_SIGNATURE 26
 r46_section_bounds_u32_wrap.unit qualification 1 T REFUSED SECTION_BOUNDS 11
 r47_slice_kind_in_format_4.unit qualification 1 T REFUSED ENTRY_TABLE 20
 r48_entry_hash_shared_case_variant.unit qualification 1 T REFUSED ENTRY_NAME_HASH 32
+r49_cpu_ticks_over_max.unit qualification 1 T REFUSED LIMIT_EXCEEDED 14
+r50_stack_over_max.unit qualification 1 T REFUSED LIMIT_EXCEEDED 14
+r51_pool_slots_over_max.unit qualification 1 T REFUSED LIMIT_EXCEEDED 14
+a06_valid_limits_at_max.unit qualification 1 T ACCEPT unit_digest=bb7ee3b6199fcfcbf058eecddaa7e1e1d0e06be1edbb6ae555812a10732a689d program_id=084803c232dc44effcc44704c9ed0600dec1231451e0b76693633e98a48d1a1d
