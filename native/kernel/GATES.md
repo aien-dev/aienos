@@ -700,3 +700,6 @@ magic `OSCUNIT\0` is judged by this module instead of the Binary Artifact v0 pat
   until TRUST-1 provisions one.
 - Kernel policy: capability domain 1 only (32-bit generation); the kernel holds no resource state yet, so any
   pinned generation is refused CAP_GENERATION_STALE.
+
+Spec status: OSC_UNIT_ARTIFACT is v1 DRAFT (frozen pending ADR reconciliation), not FROZEN. Passing the host vectors
+is not evidence of the native loader; only the QEMU gate row exercises the in-kernel path, and nothing here is physical.
