@@ -261,8 +261,14 @@ void pci_enable(const pci_func *f, int bm)
     pci_w16(f->cfg, CFG_COMMAND, cmd);
 }
 
+#ifdef CK_HOST_TEST
+int pci_host_bme_stuck; /* host tests only: model a command register whose bus master bit will not clear */
+#endif
 int pci_bus_master_off(const pci_func *f)
 {
+#ifdef CK_HOST_TEST
+    if (pci_host_bme_stuck) return -1;
+#endif
     uint16_t cmd = pci_r16(f->cfg, CFG_COMMAND);
     pci_w16(f->cfg, CFG_COMMAND, (uint16_t)(cmd & ~CMD_BM));
     return (pci_r16(f->cfg, CFG_COMMAND) & CMD_BM) ? -1 : 0;

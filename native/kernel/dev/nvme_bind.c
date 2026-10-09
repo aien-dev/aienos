@@ -162,8 +162,10 @@ int ck_nvme_bind(ck_nvme *n, const pci_found *found, uint32_t nfound, const pci_
     }
     n->claimed = 1; /* recorded once, before the device is touched */
     if (pci_func_from_found(&n->fn, cand, &acc)) {
-        ck_printf("nvme: unavailable (seg %04x %02x:%02x.%u cannot be read as an endpoint)\n", cand->segment, cand->bus,
-                  cand->dev, cand->fn);
+        /* Refused before any write to the device: as if the bind was never attempted. */
+        n->claimed = 0;
+        ck_printf("nvme: unavailable (seg %04x %02x:%02x.%u cannot be read as an endpoint; nothing written, not owned)\n",
+                  cand->segment, cand->bus, cand->dev, cand->fn);
         return NVME_EARG;
     }
     if (probe) /* keep the log wording for a function the segment-0 stage assigned */
@@ -180,7 +182,7 @@ int ck_nvme_bind(ck_nvme *n, const pci_found *found, uint32_t nfound, const pci_
         int brc = pci_bus_master_off(f);
         ck_printf("nvme: firmware left bus master on, cleared before the DMA gate (%s)\n", brc ? "STUCK" : "ok");
         if (brc) {
-            ck_printf("nvme: unavailable (bus master would not clear)\n");
+            ck_printf("nvme: unavailable (bus master would not clear; the device was written, so it stays owned, fail closed)\n");
             return NVME_ESTATE;
         }
     }

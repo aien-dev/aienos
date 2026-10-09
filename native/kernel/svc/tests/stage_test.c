@@ -666,6 +666,7 @@ static void test_nvme_disc_report(void)
 }
 
 extern uint64_t (*pci_host_bar_size)(volatile uint8_t *cfg, uint32_t i); /* CK_HOST_TEST seam in dev/pci.c */
+extern int pci_host_bme_stuck;
 static uint64_t emu_bar0_16k(volatile uint8_t *cfg, uint32_t i) { (void)cfg; return i == 0 ? 0x4000u : 0; }
 
 /* The devices stage binds the NVMe the discovery found behind segment 3 (the segment-0 probe sees none).
@@ -805,8 +806,31 @@ static void test_nvme_bind_discovery(void)
     CHECK(ck_nvme_bind(&n0, &bad, 1, NULL) == NVME_EARG && !n0.claimed && ck_host_confine_calls == calls0);
     bad = *pci_disc_find_class(found, nf, 0x010802, 0xffffff, NULL);
     bad.device ^= 0x0100;
-    CHECK(ck_nvme_bind(&n0, &bad, 1, NULL) == NVME_EARG && n0.claimed == 1 && !n0.pf && ck_host_confine_calls == calls0);
+    CHECK(ck_nvme_bind(&n0, &bad, 1, NULL) == NVME_EARG && n0.claimed == 0 && !n0.pf && ck_host_confine_calls == calls0);
     CHECK(!n0.bm_on && !n0.confined);
+    /* A refusal before any device write leaves no owner: a later bind of a good fixture on the same state works. */
+    ck_host_confine_rc = 0;
+    memset(&n, 0, sizeof n);
+    ck_host_capture_start();
+    CHECK(ck_nvme_bind(&n0, found, nf, NULL) == NVME_EVS && n0.claimed == 1 && n0.confined == 1 && ck_host_confine_calls == calls0 + 1);
+    ck_host_capture_stop();
+    CHECK(has(ck_host_capture_text(), "dma_gate: nvme granted (Confined), bus master on\n"));
+    calls0 = ck_host_confine_calls;
+
+    /* 5b. Refusal AFTER a device write (bus master will not clear): stays owned (fail closed), rebind refused. */
+    static ck_nvme ns;
+    memset(&ns, 0, sizeof ns);
+    nv_set_cmd(e3, 0x4);
+    pci_host_bme_stuck = 1;
+    ck_host_capture_start();
+    CHECK(ck_nvme_bind(&ns, found, nf, NULL) == NVME_ESTATE);
+    CHECK(ns.claimed == 1 && !ns.bm_on && !ns.confined && ck_host_confine_calls == calls0);
+    CHECK(ck_nvme_bind(&ns, found, nf, NULL) == NVME_ESTATE && ck_host_confine_calls == calls0);
+    ck_host_capture_stop();
+    x = ck_host_capture_text();
+    CHECK(has(x, "it stays owned, fail closed"));
+    CHECK(has(x, "nvme: bind refused, already owned by seg 0003 01:00.0"));
+    pci_host_bme_stuck = 0;
 
     /* 6. Whole devices stage: a bind that fails after the grant releases everything (bus master off, stream
      *    back to abort) and gives ownership back, so the next stage run can bind again. */
