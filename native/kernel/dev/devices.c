@@ -44,7 +44,7 @@ void ck_dev_nvme_release(void)
                   urc == 0 ? "returned to abort" : "abort FAILED", urc);
     }
     /* Ownership is given back only once DMA is fully off (bus master and stream). */
-    if (!g_nvme.bm_on && !g_nvme.confined) g_nvme.claimed = 0;
+    if (!g_nvme.bm_on && !g_nvme.confined && !g_nvme.stuck) g_nvme.claimed = 0;
 }
 
 int ck_stage_devices(void)
@@ -69,8 +69,9 @@ int ck_stage_devices(void)
      * enumeration above is only used for the other devices and for log wording. */
     uint32_t dn = 0;
     const pci_found *df = pci_stage_disc_found(&dn);
+    int was_owned = g_nvme.claimed; /* a refusal as "already owned" must not tear the owner down */
     int nrc = ck_nvme_bind(&g_nvme, df, dn, &g_pci);
-    if (nrc) ck_dev_nvme_release(); /* a failed bind never keeps DMA */
+    if (nrc && !was_owned) ck_dev_nvme_release(); /* a failed bind never keeps DMA */
     (void)pci_nvme_disc_report(df, dn, g_nvme.claimed ? g_nvme.pf : 0);
     virtio_pci_caps caps;
     const pci_func *vf = 0;

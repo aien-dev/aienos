@@ -851,6 +851,28 @@ static void test_nvme_bind_discovery(void)
     CHECK(ck_stage_devices() == NVME_EVS);                          /* ownership was returned: bound again, once */
     CHECK(ck_host_confine_calls == calls0 + 2 && ck_host_unconfine_calls == un0 + 2);
 
+    /* 7. Stage level, firmware bus master that will not clear. The bind refuses (fail closed) and the stage's
+     *    release must NOT hand the owner back: the device was written and may still be a bus master. A second
+     *    stage run is refused as "already owned" and its refusal must not tear anything down; only an operator
+     *    reset ends this (so this case runs last). */
+    nv_set_cmd(e3, 0x4);
+    pci_host_bme_stuck = 1;
+    ck_host_confine_rc = 0;
+    calls0 = ck_host_confine_calls;
+    un0 = ck_host_unconfine_calls;
+    ck_host_capture_start();
+    CHECK(ck_stage_devices() == NVME_ESTATE);
+    CHECK(ck_host_confine_calls == calls0 && ck_host_unconfine_calls == un0);   /* never reached the DMA gate */
+    CHECK(ck_stage_devices() == NVME_ESTATE);                                   /* owner still there: refused */
+    CHECK(ck_stage_devices() == NVME_ESTATE);                                   /* and the refusal did not drop it */
+    ck_host_capture_stop();
+    x = ck_host_capture_text();
+    CHECK(ck_host_confine_calls == calls0 && ck_host_unconfine_calls == un0);
+    CHECK(has(x, "it stays owned, fail closed"));
+    CHECK(has(x, "nvme: bind refused, already owned by seg 0003 01:00.0"));
+    CHECK(!has(x, "dma_gate: nvme granted"));
+    pci_host_bme_stuck = 0;
+
     pci_host_bar_size = NULL;
     ck_host_confine_rc = CK_SMMU_ABSENT;
     ck_host_mcfg = NULL;

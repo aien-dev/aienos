@@ -17,6 +17,7 @@ typedef struct {
     const pci_func *pf;
     pci_func fn;       /* the bound function, built from the discovery result (pf points here) */
     int claimed;       /* ownership recorded once: a second bind is refused until the first is fully released */
+    int stuck;         /* device was written and bus master would not clear: stays owned through release (fail closed) */
     int bound;
     int bm_on; /* bus mastering was enabled for this function */
     int confined;      /* DMA confined by the SMMU (ck_dma_confine) */

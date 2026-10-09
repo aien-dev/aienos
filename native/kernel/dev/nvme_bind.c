@@ -140,6 +140,7 @@ int ck_nvme_bind(ck_nvme *n, const pci_found *found, uint32_t nfound, const pci_
     n->bm_on = 0;
     n->confined = 0;
     n->shut = 0;
+    n->stuck = 0;
     n->stream_id = 0;
     n->pf = 0;
 #if CK_NVME_UNSAFE_BYPASS
@@ -182,6 +183,7 @@ int ck_nvme_bind(ck_nvme *n, const pci_found *found, uint32_t nfound, const pci_
         int brc = pci_bus_master_off(f);
         ck_printf("nvme: firmware left bus master on, cleared before the DMA gate (%s)\n", brc ? "STUCK" : "ok");
         if (brc) {
+            n->stuck = 1; /* release keeps the owner; only a reset ends it */
             ck_printf("nvme: unavailable (bus master would not clear; the device was written, so it stays owned, fail closed)\n");
             return NVME_ESTATE;
         }
