@@ -781,3 +781,27 @@ control 4a (long fixture, `max_ticks=1`) returns inside the tick, and the cap is
 (4b). (2) A list buffer over the 4096-byte input window is refused by the driver on both sides (`event input_window_exceeded`);
 the >4096 fixture shows that, it does not show a >4096-byte list running. (3) `alloc`/arenas are not provided by the launcher;
 the units do not use them. (4) Nothing executes: no environment, files or exec.
+
+## OSH_OP: a real capability-authorized operation through the shared OSH interface (OSH-AIENOS-OP) -> CK `OSH_OP` (scripts/qemu_ck_osh_op_test.sh)
+
+Label: **QEMU (aarch64 virt), TEST signer, not physical.** Part of aien-dev/aien-architecture#158. The OSH_CORE gate above (fixture traces,
+nothing executes) is unchanged and separate. This gate runs the same three shell units as admitted EL0 tasks (build flags
+`CK_SEED0B_TEST_ANCHOR=1 CK_OSH_TEST=1 CK_OSH_OP_TEST=1`; the fixtures are not run in that image). On a ready pipeline the driver
+hands the request record (OSH_PLATFORM_ABI section 7, aien-protocols#16 DRAFT) to the adapter layer `core/osh_op.c`, which does
+no lexing, parsing or expansion. Operation: `klog <words>` writes `osh_op_out: <words>` to the console. Authority: WRITE on the
+console-log resource in the session's kernel IPC capability table (domain 1, `core/ipc.c`). Checked at the effect boundary
+(binding of section 9: principal, domain, index, generation, resource class, operation), after the intent record and before the
+write. Refusals are the contract's names: DENIED, REVOKED, STALE, CAP_DOMAIN_MISMATCH, CAP_GEN_NARROW, NOT_SUPPORTED, NOT_FOUND.
+Cases: allow (two lines; the second carries `$?` = the real status), no capability, read-only capability, revoked after the request
+was built, interrupt before pipeline 2 of 3, adapter lost after the effect (restart reports OUTCOME_UNKNOWN with the digest and
+never replays), a new request after the loss, pipe/redirect/unknown command. Every case: capability released, no task slot held.
+Host test `test_osh_op` (59 checks, also under ASan+UBSan) covers the binding checks and the error paths; a mutant that makes the
+permission check always OK must fail it (`make osh-op-mutant`).
+Limits: (1) intent and outcome records are RAM only: the loss case is simulated by a hook and a restart that keeps the record array;
+a durable store is not exercised (integration point: `struct osh_intent` and `osh_op_recover`, for omega's durable records).
+(2) One command per pipeline: pipes, redirections, assignments and builtins are refused NOT_SUPPORTED, so PARTIAL_LAUNCH cannot
+occur and is not exercised. (3) Revoke, interrupt, loss and sink failure are injected by test hooks at named points, not by
+real asynchronous events. (4) Numeric resource-class and operation ids, the REVOKED/STALE split, the shell statuses 126/127/130/70
+are this adapter's choices (UNVERIFIED against a frozen contract). (5) The request digest covers the request cells and the OUT
+bytes; the contract's exact digest input is not defined (UNVERIFIED). (6) The "task" is the adapter's session; the EL0 shell units
+hold no capability (caps=0) and the check is made by the kernel-side adapter.
