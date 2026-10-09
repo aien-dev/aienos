@@ -83,6 +83,12 @@ uint64_t pci_window_alloc(pci_window *w, uint64_t size)
     return a;
 }
 
+#ifdef CK_HOST_TEST
+/* Host tests only (never in the kernel image): a fake ECAM is plain memory and cannot answer the all-ones
+ * BAR sizing write with a size mask. When set, a non-zero return is the size to pretend BAR `i` has. */
+uint64_t (*pci_host_bar_size)(volatile uint8_t *cfg, uint32_t i);
+#endif
+
 static void size_bars(pci_func *f)
 {
     volatile uint8_t *c = f->cfg;
@@ -108,6 +114,16 @@ static void size_bars(pci_func *f)
         if (is64) pci_w32(c, off + 4, 0xffffffffu);
         uint32_t lo = pci_r32(c, off);
         uint32_t hi = is64 ? pci_r32(c, off + 4) : 0;
+#ifdef CK_HOST_TEST
+        if (pci_host_bar_size) {
+            uint64_t emu = pci_host_bar_size(c, i);
+            if (emu) {
+                uint64_t mask = ~(emu - 1u);
+                lo = (uint32_t)mask | (orig & 0xfu);
+                hi = is64 ? (uint32_t)(mask >> 32) : 0;
+            }
+        }
+#endif
         pci_w32(c, off, orig);
         if (is64) pci_w32(c, off + 4, orig_hi);
         b->is64 = (uint8_t)is64;
@@ -121,12 +137,10 @@ static void size_bars(pci_func *f)
     pci_w16(c, CFG_COMMAND, cmd);
 }
 
-static int add_func(pci_system *s, uint8_t bus, uint8_t dev, uint8_t fn, volatile uint8_t *c)
+static void fill_func(pci_func *f, uint16_t segment, uint8_t bus, uint8_t dev, uint8_t fn, volatile uint8_t *c)
 {
-    if (s->n >= PCI_MAX_FUNCS) return PCI_E_FULL;
-    pci_func *f = &s->f[s->n++];
     uint32_t id = pci_r32(c, CFG_VENDOR);
-    f->segment = s->ecam.segment;
+    f->segment = segment;
     f->bus = bus;
     f->dev = dev;
     f->fn = fn;
@@ -143,6 +157,12 @@ static int add_func(pci_system *s, uint8_t bus, uint8_t dev, uint8_t fn, volatil
         f->bar[i].is64 = f->bar[i].prefetch = f->bar[i].io = f->bar[i].assigned_here = 0;
     }
     size_bars(f);
+}
+
+static int add_func(pci_system *s, uint8_t bus, uint8_t dev, uint8_t fn, volatile uint8_t *c)
+{
+    if (s->n >= PCI_MAX_FUNCS) return PCI_E_FULL;
+    fill_func(&s->f[s->n++], s->ecam.segment, bus, dev, fn, c);
     return PCI_OK;
 }
 
@@ -217,6 +237,22 @@ int pci_enumerate(pci_system *s, pci_window *win)
     return PCI_OK;
 }
 
+int pci_func_from_found(pci_func *out, const pci_found *f, const pci_bus_access *a)
+{
+    if (!out || !f || !a || !a->ecam) return PCI_E_ARG;
+    if ((f->header_type & 0x7fu) != 0) return PCI_E_ARG; /* endpoints only */
+    volatile uint8_t *c = pci_cfg(a, f->bus, f->dev, f->fn);
+    if (!c) return PCI_E_ARG;
+    uint32_t id = pci_r32(c, CFG_VENDOR);
+    /* The ECAM must still answer with the identity discovery recorded. */
+    if ((uint16_t)id != f->vendor || (uint16_t)(id >> 16) != f->device) return PCI_E_ARG;
+    fill_func(out, f->segment, f->bus, f->dev, f->fn, c);
+    out->bars_ok = 1;
+    for (uint32_t i = 0; i < PCI_MAX_BARS; i++)
+        if (!out->bar[i].io && out->bar[i].size && !out->bar[i].addr) out->bars_ok = 0;
+    return PCI_OK;
+}
+
 void pci_enable(const pci_func *f, int bm)
 {
     uint16_t cmd = pci_r16(f->cfg, CFG_COMMAND);
@@ -225,8 +261,14 @@ void pci_enable(const pci_func *f, int bm)
     pci_w16(f->cfg, CFG_COMMAND, cmd);
 }
 
+#ifdef CK_HOST_TEST
+int pci_host_bme_stuck; /* host tests only: model a command register whose bus master bit will not clear */
+#endif
 int pci_bus_master_off(const pci_func *f)
 {
+#ifdef CK_HOST_TEST
+    if (pci_host_bme_stuck) return -1;
+#endif
     uint16_t cmd = pci_r16(f->cfg, CFG_COMMAND);
     pci_w16(f->cfg, CFG_COMMAND, (uint16_t)(cmd & ~CMD_BM));
     return (pci_r16(f->cfg, CFG_COMMAND) & CMD_BM) ? -1 : 0;
@@ -503,6 +545,22 @@ static pci_found g_disc_found[PCI_MAX_FUNCS];
 static pci_found g_disc_all[PCI_MAX_FUNCS];
 static uint32_t g_disc_all_n;
 
+/* ECAM accessors the last report mapped, one per MCFG allocation. */
+static pci_bus_access g_disc_acc[PCI_MAX_SEGMENTS];
+static uint16_t g_disc_acc_seg[PCI_MAX_SEGMENTS];
+static uint32_t g_disc_acc_n;
+
+int pci_stage_disc_access(uint16_t segment, uint8_t bus, pci_bus_access *out)
+{
+    if (!out) return PCI_E_ARG;
+    for (uint32_t i = 0; i < g_disc_acc_n; i++)
+        if (g_disc_acc_seg[i] == segment && bus >= g_disc_acc[i].start_bus && bus <= g_disc_acc[i].end_bus) {
+            *out = g_disc_acc[i];
+            return PCI_OK;
+        }
+    return PCI_E_ARG;
+}
+
 /* Report-only: prints what firmware declared and what answers, changes no
  * state. Each segment maps only its declared bus range through the
  * fail-closed ck_mmio_try_map (a refused map is reported, never retried
@@ -527,6 +585,7 @@ int pci_stage_discover_report(void)
     }
     uint32_t scanned = 0, total = 0;
     g_disc_all_n = 0;
+    g_disc_acc_n = 0;
     for (uint32_t i = 0; i < nseg; i++) {
         const pci_ecam *e = &g_disc_ecam[i];
         uint64_t first = e->base + ((uint64_t)e->start_bus << 20);
@@ -541,6 +600,8 @@ int pci_stage_discover_report(void)
         a.ecam = m;
         a.start_bus = e->start_bus;
         a.end_bus = e->end_bus;
+        g_disc_acc[g_disc_acc_n] = a;
+        g_disc_acc_seg[g_disc_acc_n++] = e->segment;
         uint32_t n = 0, br = 0;
         int drc = pci_discover(&a, e->segment, g_disc_found, PCI_MAX_FUNCS, &n, &br);
         ck_printf("pci_disc: seg %04x bus %02x-%02x functions=%u bridges=%u rc=%d\n", e->segment, e->start_bus,
@@ -602,14 +663,14 @@ int pci_nvme_disc_report(const pci_found *f, uint32_t n, const pci_func *bound)
     uint32_t cnt = 0;
     const pci_found *c = pci_disc_find_class(f, n, 0x010802u, 0xffffffu, &cnt);
     if (!c) {
-        ck_printf("nvme_disc: no class 0x010802 function found by discovery (report-only; bound via segment-0 probe: %s)\n",
+        ck_printf("nvme_disc: no class 0x010802 function found by discovery (bound: %s)\n",
                   bound ? "different" : "none");
         return 0;
     }
     const char *rel = !bound ? "none"
                       : (bound->segment == c->segment && bound->bus == c->bus && bound->dev == c->dev && bound->fn == c->fn)
                           ? "same" : "different";
-    ck_printf("nvme_disc: candidate seg %04x %02x:%02x.%u bar0=0x%llx decode=%u (report-only; bound via segment-0 probe: %s)\n",
+    ck_printf("nvme_disc: candidate seg %04x %02x:%02x.%u bar0=0x%llx decode=%u (bound: %s)\n",
               c->segment, c->bus, c->dev, c->fn, (unsigned long long)found_bar0(c), (c->command >> 1) & 1u, rel);
     ck_printf("nvme_disc: candidates=%u\n", cnt);
     return (int)cnt;

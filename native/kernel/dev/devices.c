@@ -19,7 +19,10 @@ const disk_dev *ck_dev_boot_disk(void) { return g_nvme.bound && g_nvme.part.vali
 
 void ck_dev_nvme_release(void)
 {
-    if (!g_nvme.pf) return;
+    if (!g_nvme.pf) { /* bind stopped before any device access: nothing to quiesce */
+        g_nvme.claimed = 0;
+        return;
+    }
     g_nvme.bound = 0;
     if (g_nvme.bm_on) {
         /* Halt order: NVMe normal shutdown (CC.SHN, wait CSTS.SHST) while the
@@ -40,6 +43,8 @@ void ck_dev_nvme_release(void)
         ck_printf("smmu: nvme stream 0x%x %s (rc=%d)\n", g_nvme.stream_id,
                   urc == 0 ? "returned to abort" : "abort FAILED", urc);
     }
+    /* Ownership is given back only once DMA is fully off (bus master and stream). */
+    if (!g_nvme.bm_on && !g_nvme.confined && !g_nvme.stuck) g_nvme.claimed = 0;
 }
 
 int ck_stage_devices(void)
@@ -60,15 +65,14 @@ int ck_stage_devices(void)
         pci_sweep_report(&g_pci.ecam, &sw);
     }
     ck_xhci_after_sweep(&g_pci); /* TEST-ONLY bm-left-on mutation hook; no-op otherwise */
-    int nrc = ck_nvme_bind(&g_nvme, &g_pci);
-    if (nrc) ck_dev_nvme_release(); /* a failed bind never keeps DMA */
-    /* Report-only (aienos#31, cut S1): the NVMe the multi-segment discovery sees, and whether it is the
-     * function the segment-0 probe bound above. Binding is unchanged. */
-    {
-        uint32_t dn = 0;
-        const pci_found *df = pci_stage_disc_found(&dn);
-        (void)pci_nvme_disc_report(df, dn, g_nvme.pf);
-    }
+    /* NVMe is bound from the multi-segment discovery result (aienos#31), any segment; the segment-0
+     * enumeration above is only used for the other devices and for log wording. */
+    uint32_t dn = 0;
+    const pci_found *df = pci_stage_disc_found(&dn);
+    int was_owned = g_nvme.claimed; /* a refusal as "already owned" must not tear the owner down */
+    int nrc = ck_nvme_bind(&g_nvme, df, dn, &g_pci);
+    if (nrc && !was_owned) ck_dev_nvme_release(); /* a failed bind never keeps DMA */
+    (void)pci_nvme_disc_report(df, dn, g_nvme.claimed ? g_nvme.pf : 0);
     virtio_pci_caps caps;
     const pci_func *vf = 0;
     int vrc = ck_virtio_net_probe(&g_pci, &caps, &vf);
