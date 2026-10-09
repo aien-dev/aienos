@@ -649,13 +649,13 @@ static void test_nvme_disc_report(void)
     ck_host_capture_stop();
     const char *x = ck_host_capture_text();
     CHECK(has(x, "pci_disc: segments=4 functions=7"));
-    CHECK(has(x, "nvme_disc: candidate seg 0003 01:00.0 bar0=0x4000000000 decode=1 (report-only; bound via segment-0 probe: none)\n"));
-    CHECK(has(x, "nvme_disc: candidate seg 0003 01:00.0 bar0=0x4000000000 decode=1 (report-only; bound via segment-0 probe: same)\n"));
-    CHECK(has(x, "nvme_disc: candidate seg 0003 01:00.0 bar0=0x4000000000 decode=1 (report-only; bound via segment-0 probe: different)\n"));
+    CHECK(has(x, "nvme_disc: candidate seg 0003 01:00.0 bar0=0x4000000000 decode=1 (bound: none)\n"));
+    CHECK(has(x, "nvme_disc: candidate seg 0003 01:00.0 bar0=0x4000000000 decode=1 (bound: same)\n"));
+    CHECK(has(x, "nvme_disc: candidate seg 0003 01:00.0 bar0=0x4000000000 decode=1 (bound: different)\n"));
     CHECK(!has(x, "seg 0007 01:00.0 bar0=0x5000000000 decode=0 (report-only; bound"));   /* second one is counted, not chosen */
     CHECK(has(x, "nvme_disc: candidates=2\n"));
-    CHECK(has(x, "nvme_disc: no class 0x010802 function found by discovery (report-only; bound via segment-0 probe: none)\n"));
-    CHECK(has(x, "nvme_disc: no class 0x010802 function found by discovery (report-only; bound via segment-0 probe: different)\n"));
+    CHECK(has(x, "nvme_disc: no class 0x010802 function found by discovery (bound: none)\n"));
+    CHECK(has(x, "nvme_disc: no class 0x010802 function found by discovery (bound: different)\n"));
     /* Read-only: fake ECAMs are PROT_READ (a config write would have killed the test) and unchanged. */
     CHECK(memcmp(e0, c0, FAKE_BYTES) == 0 && memcmp(e3, c3, FAKE_BYTES) == 0);
     CHECK(memcmp(e7, c7, FAKE_BYTES) == 0 && memcmp(e15, c15, FAKE_BYTES) == 0);
@@ -665,9 +665,12 @@ static void test_nvme_disc_report(void)
     munmap(e0, FAKE_BYTES); munmap(e3, FAKE_BYTES); munmap(e7, FAKE_BYTES); munmap(e15, FAKE_BYTES);
 }
 
-/* The devices stage prints the nvme_disc report after the bind, with the
- * binding unchanged (the NVMe behind segment 3 is reported; the stage's
- * segment-0 probe finds no NVMe, so nothing binds and the report says "none"). */
+extern uint64_t (*pci_host_bar_size)(volatile uint8_t *cfg, uint32_t i); /* CK_HOST_TEST seam in dev/pci.c */
+static uint64_t emu_bar0_16k(volatile uint8_t *cfg, uint32_t i) { (void)cfg; return i == 0 ? 0x4000u : 0; }
+
+/* The devices stage binds the NVMe the discovery found behind segment 3 (the segment-0 probe sees none).
+ * Without an SMMU the DMA gate denies it (fail-closed), ownership is released, and the nvme_disc report
+ * printed after the bind says "none" owned. */
 static void test_nvme_disc_in_stage(void)
 {
     uint8_t *e0 = mk_fake_seg0(), *e3 = mk_nvme_seg(0x4000000000ull, 0); /* decode off: the B3 window report must not read the fake BAR */
@@ -680,19 +683,156 @@ static void test_nvme_disc_in_stage(void)
     ck_host_mcfg = t;
     ck_host_try_map_ok = 1;
     ck_host_quiet = 1;
+    pci_host_bar_size = emu_bar0_16k;
     ck_host_capture_start();
-    CHECK(ck_stage_devices() == 0);
+    CHECK(ck_stage_devices() == NVME_ESTATE);
     ck_host_capture_stop();
     const char *x = ck_host_capture_text();
     const char *d = strstr(x, "nvme_disc: candidate seg 0003 01:00.0"), *v = strstr(x, "devices: pci=ok");
     CHECK(d && v && d < v);
-    CHECK(has(x, "decode=0 (report-only; bound via segment-0 probe: none)\n"));
-    CHECK(has(x, "bound via segment-0 probe: none)\n"));
+    CHECK(has(x, "decode=0 (bound: none)\n"));
+    CHECK(has(x, "dma_gate: nvme denied (NoSmmu), bus master stays off\n"));
     CHECK(has(x, "devices: pci=ok nvme=unbound"));
+    pci_host_bar_size = NULL;
     ck_host_mcfg = NULL;
     ck_host_try_map_ok = 0;
     ck_host_quiet = 0;
     munmap(e0, FAKE_BYTES); munmap(e3, FAKE_BYTES);
+}
+
+
+/* ---------------- NVMe bound from the discovery result (aienos#31, discovery-to-binding cut) ---------------- */
+
+static uint8_t nv_regs[0x8000] __attribute__((aligned(0x4000))); /* all-zero "controller": VS reads 0 -> NVME_EVS */
+static uint16_t nv_cmd(uint8_t *ecam) { uint8_t *c = cfgp(ecam, 1, 0, 0); return (uint16_t)(c[4] | c[5] << 8); }
+static void nv_set_cmd(uint8_t *ecam, uint16_t v) { put16(cfgp(ecam, 1, 0, 0) + 4, v); }
+
+static void test_nvme_bind_discovery(void)
+{
+    uint64_t bar0 = (uint64_t)(uintptr_t)nv_regs;
+    uint8_t *e0 = mk_fake_seg0(), *e3 = mk_nvme_seg(bar0, 0), *e7 = mk_nvme_seg(bar0, 0);
+    CHECK(e0 && e3 && e7);
+    if (!e0 || !e3 || !e7) return;
+    memset(cfgp(e0, 0, 1, 0), 0xff, 4096);                          /* segment 0 holds no NVMe (GB10 style) */
+    nv_set_cmd(e3, 0x4);                                            /* firmware left bus master ON on seg 3 */
+    static uint8_t c7[FAKE_BYTES];
+    memcpy(c7, e7, FAKE_BYTES);
+    uint8_t *es[3] = {e0, e7, e3};
+    uint16_t ss[3] = {0, 7, 3};                                     /* table order is not segment order */
+    uint8_t t[44 + 16 * 3 + 16];
+    mk_n_mcfg(t, 3, es, ss);
+    ck_host_mcfg = t;
+    ck_host_try_map_ok = 1;
+    ck_host_quiet = 1;
+    pci_host_bar_size = emu_bar0_16k;
+    CHECK(pci_stage_discover_report() == PCI_OK);
+    uint32_t nf = 0;
+    const pci_found *found = pci_stage_disc_found(&nf);
+    uint32_t ncand = 0;
+    CHECK(pci_disc_find_class(found, nf, 0x010802, 0xffffff, &ncand) && ncand == 2);   /* seg 3 and seg 7; none on seg 0 */
+
+    /* 1. No SMMU: the NVMe outside segment 0 is found, firmware's bus master is cleared, DMA is denied
+     *    (fail-closed), the other NVMe is never touched. */
+    static ck_nvme n;
+    memset(&n, 0, sizeof n);
+    ck_host_confine_rc = CK_SMMU_ABSENT;
+    unsigned calls0 = ck_host_confine_calls;
+    ck_host_capture_start();
+    int rc = ck_nvme_bind(&n, found, nf, NULL);
+    ck_host_capture_stop();
+    const char *x = ck_host_capture_text();
+    CHECK(rc == NVME_ESTATE);
+    CHECK(n.pf == &n.fn && n.fn.segment == 3 && n.fn.bus == 1 && n.fn.dev == 0 && n.fn.fn == 0);
+    CHECK(n.fn.bar[0].size == 0x4000 && n.fn.bar[0].addr == bar0);
+    CHECK(has(x, "nvme: 2 class 0x010802 functions in discovery, binding the lowest segment/bus/dev/fn only\n"));
+    CHECK(has(x, "nvme: firmware left bus master on, cleared before the DMA gate (ok)\n"));
+    CHECK(has(x, "dma_gate: nvme denied (NoSmmu), bus master stays off\n"));
+    CHECK(ck_host_confine_calls == calls0 + 1 && !n.confined && !n.bm_on && !n.bound);
+    CHECK((nv_cmd(e3) & 0x4u) == 0);                                /* no DMA path without the gate */
+    CHECK(memcmp(e7, c7, FAKE_BYTES) == 0);                         /* the second NVMe was never touched */
+
+    /* 2. SMMU present: confinement is asked for this function's own segment and requester id with the
+     *    driver's whole DMA region as the only window; bus master comes on after it. Same policy as the
+     *    segment-0 probe had (the DMA code is unchanged). */
+    memset(&n, 0, sizeof n);
+    ck_host_confine_rc = 0;
+    calls0 = ck_host_confine_calls;
+    ck_host_capture_start();
+    rc = ck_nvme_bind(&n, found, nf, NULL);
+    ck_host_capture_stop();
+    x = ck_host_capture_text();
+    CHECK(rc == NVME_EVS);                                          /* host has no controller behind the BAR */
+    CHECK(ck_host_confine_calls == calls0 + 1);
+    CHECK(ck_host_confine_segment == 3 && ck_host_confine_rid == 0x0100u);
+    CHECK(ck_host_confine_len == (((uint64_t)CK_NVME_DMA_BYTES + NVME_PAGE - 1u) & ~(uint64_t)(NVME_PAGE - 1u)));
+    CHECK(ck_host_confine_phys != 0 && (ck_host_confine_phys & (NVME_PAGE - 1u)) == 0);
+    CHECK(n.confined == 1 && n.bm_on == 1 && n.claimed == 1 && n.stream_id == (0x40u | 0x0100u));
+    CHECK((nv_cmd(e3) & 0x6u) == 0x6u);                             /* memory decode + bus master after the grant */
+    CHECK(has(x, "dma_gate: nvme granted (Confined), bus master on\n"));
+    CHECK(memcmp(e7, c7, FAKE_BYTES) == 0);
+
+    /* 3. Double bind: refused, nothing touched (no second confinement, state unchanged). */
+    calls0 = ck_host_confine_calls;
+    ck_host_capture_start();
+    int rc2 = ck_nvme_bind(&n, found, nf, NULL);
+    ck_host_capture_stop();
+    x = ck_host_capture_text();
+    CHECK(rc2 == NVME_ESTATE);
+    CHECK(ck_host_confine_calls == calls0);
+    CHECK(n.confined == 1 && n.bm_on == 1 && n.claimed == 1 && n.fn.segment == 3);
+    CHECK(has(x, "nvme: bind refused, already owned by seg 0003 01:00.0"));
+    CHECK(!has(x, "dma_gate:"));
+
+    /* 4. No NVMe in the discovery result: clean refusal, nothing claimed, no DMA gate. */
+    static ck_nvme n0;
+    memset(&n0, 0, sizeof n0);
+    calls0 = ck_host_confine_calls;
+    ck_host_capture_start();
+    CHECK(ck_nvme_bind(&n0, found, 0, NULL) == -1);
+    ck_host_capture_stop();
+    CHECK(has(ck_host_capture_text(), "nvme: no class 0x010802 function\n"));
+    CHECK(!n0.claimed && !n0.pf && !n0.bound && ck_host_confine_calls == calls0);
+    pci_found only_nic[1];                                          /* non-NVMe class only */
+    memset(only_nic, 0, sizeof only_nic);
+    only_nic[0].class_code = 0x020000; only_nic[0].vendor = 0x8086;
+    CHECK(ck_nvme_bind(&n0, only_nic, 1, NULL) == -1 && !n0.claimed && ck_host_confine_calls == calls0);
+
+    /* 5. A discovered NVMe whose segment has no mapped ECAM, or whose identity no longer matches the
+     *    ECAM, is refused before DMA is gated. */
+    pci_found bad = *pci_disc_find_class(found, nf, 0x010802, 0xffffff, NULL);
+    bad.segment = 9;
+    memset(&n0, 0, sizeof n0);
+    CHECK(ck_nvme_bind(&n0, &bad, 1, NULL) == NVME_EARG && !n0.claimed && ck_host_confine_calls == calls0);
+    bad = *pci_disc_find_class(found, nf, 0x010802, 0xffffff, NULL);
+    bad.device ^= 0x0100;
+    CHECK(ck_nvme_bind(&n0, &bad, 1, NULL) == NVME_EARG && n0.claimed == 1 && !n0.pf && ck_host_confine_calls == calls0);
+    CHECK(!n0.bm_on && !n0.confined);
+
+    /* 6. Whole devices stage: a bind that fails after the grant releases everything (bus master off, stream
+     *    back to abort) and gives ownership back, so the next stage run can bind again. */
+    nv_set_cmd(e3, 0);
+    ck_host_confine_rc = 0;
+    calls0 = ck_host_confine_calls;
+    unsigned un0 = ck_host_unconfine_calls;
+    ck_host_capture_start();
+    CHECK(ck_stage_devices() == NVME_EVS);
+    ck_host_capture_stop();
+    x = ck_host_capture_text();
+    CHECK(ck_host_confine_calls == calls0 + 1 && ck_host_unconfine_calls == un0 + 1);
+    CHECK(ck_host_confine_segment == 3 && ck_host_confine_rid == 0x0100u);
+    CHECK((nv_cmd(e3) & 0x4u) == 0);
+    CHECK(has(x, "dma_gate: nvme bus master revoked\n") && has(x, "returned to abort"));
+    CHECK(has(x, "devices: pci=ok nvme=unbound"));
+    CHECK(has(x, "nvme_disc: candidate seg 0003 01:00.0") && has(x, "(bound: none)\n"));
+    CHECK(ck_stage_devices() == NVME_EVS);                          /* ownership was returned: bound again, once */
+    CHECK(ck_host_confine_calls == calls0 + 2 && ck_host_unconfine_calls == un0 + 2);
+
+    pci_host_bar_size = NULL;
+    ck_host_confine_rc = CK_SMMU_ABSENT;
+    ck_host_mcfg = NULL;
+    ck_host_try_map_ok = 0;
+    ck_host_quiet = 0;
+    munmap(e0, FAKE_BYTES); munmap(e3, FAKE_BYTES); munmap(e7, FAKE_BYTES);
 }
 
 
@@ -1942,6 +2082,7 @@ int main(void)
     test_pci_disc_find_class();
     test_nvme_disc_report();
     test_nvme_disc_in_stage();
+    test_nvme_bind_discovery();
     test_mmio_window();
     test_mmio_unmap();
     test_mmio_stage_report();

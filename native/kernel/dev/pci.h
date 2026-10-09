@@ -189,6 +189,19 @@ int pci_stage_discover_report(void);
  * read-only MMIO window report (mmio_window.h). */
 const pci_found *pci_stage_disc_found(uint32_t *n);
 
+/* ECAM accessor the last pci_stage_discover_report mapped for `segment` whose
+ * bus range holds `bus`. PCI_E_ARG when that report mapped none. */
+int pci_stage_disc_access(uint16_t segment, uint8_t bus, pci_bus_access *out);
+
+/* Turn one discovered endpoint (header type 0) into a pci_func through its
+ * segment's accessor, so a driver can bind a function outside segment 0
+ * (aienos#31, discovery-to-binding cut). Re-reads vendor/device and refuses
+ * (PCI_E_ARG) if they differ from `f`. Sizes the BARs like pci_enumerate
+ * (decode turned off around the all-ones writes and restored), so unlike
+ * pci_discover this WRITES config space of that one function; it never assigns
+ * a BAR (bars_ok = 0 when a sized BAR is unassigned). */
+int pci_func_from_found(pci_func *out, const pci_found *f, const pci_bus_access *a);
+
 /* NVMe through multi-segment discovery (aienos#31, cut S1). Pure selector over
  * a discovery result: the first function (lowest segment, then bus, device,
  * function) whose class_code & mask == class_code & mask of the argument, or
@@ -196,7 +209,7 @@ const pci_found *pci_stage_disc_found(uint32_t *n);
 const pci_found *pci_disc_find_class(const pci_found *f, uint32_t n, uint32_t class_code, uint32_t mask,
                                      uint32_t *count);
 /* Report-only: print the discovery's NVMe (class 0x010802) candidate and
- * whether the function the segment-0 probe bound (`bound`, NULL when none)
+ * whether the function the NVMe bind owns (`bound`, NULL when none)
  * is the same. Changes no state; returns the number of candidates. */
 int pci_nvme_disc_report(const pci_found *f, uint32_t n, const pci_func *bound);
 

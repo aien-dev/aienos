@@ -91,7 +91,7 @@ stage-free: $(STAGE_OUT)/stage_all.o
 # ---- host tests ----------------------------------------------------------
 STAGE_HOST_SRCS := $(STAGE_OWN_SRCS) $(STAGE_DIR)/core/ipc.c $(STAGE_NATIVE_SRCS) $(STAGE_NATIVE)/disk/disk_file.c \
   $(STAGE_DIR)/svc/tests/ck_host.c $(STAGE_DIR)/svc/tests/stage_test.c
-STAGE_HOST_FLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -pthread -DCK_ART_STORE_WRITER
+STAGE_HOST_FLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -pthread -DCK_ART_STORE_WRITER -DCK_HOST_TEST
 STAGE_SAN_FLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
 $(STAGE_OUT)/stage_test: $(STAGE_HOST_SRCS) $(wildcard $(STAGE_DIR)/dev/*.h $(STAGE_DIR)/svc/*.h $(STAGE_DIR)/include/*.h)

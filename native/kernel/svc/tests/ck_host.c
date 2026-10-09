@@ -70,6 +70,13 @@ void ck_panic(const char *fmt, ...)
 }
 void *ck_alloc(size_t bytes) { return calloc(1, bytes ? bytes : 1); }
 void ck_free(void *p) { free(p); }
+/* Host: the kernel never frees DMA regions; the shim remembers them and frees at exit so leak checks stay useful. */
+static void *host_dma[32];
+static unsigned host_dma_n;
+static void host_dma_free_all(void)
+{
+    while (host_dma_n) free(host_dma[--host_dma_n]);
+}
 void *ck_dma_alloc(size_t bytes, size_t align, uint64_t *phys)
 {
     if (align < 16) align = 16;
@@ -77,6 +84,10 @@ void *ck_dma_alloc(size_t bytes, size_t align, uint64_t *phys)
     void *p = aligned_alloc(align, n);
     if (!p) return NULL;
     memset(p, 0, n);
+    if (host_dma_n < 32) {
+        if (host_dma_n == 0) atexit(host_dma_free_all);
+        host_dma[host_dma_n++] = p;
+    }
     if (phys) *phys = (uint64_t)(uintptr_t)p;
     return p;
 }
@@ -200,18 +211,38 @@ int ck_compat_entropy_source(void) { return CK_ENTROPY_HOST; }
 int ck_entropy_status(void) { return 0; }
 const char *ck_entropy_reason(void) { return "host-urandom"; }
 
-/* Host: no IORT, so no SMMU (the NVMe gate stays fail-closed). */
+/* Host: no IORT by default, so no SMMU (the NVMe gate stays fail-closed). A test may set
+ * ck_host_confine_rc = 0 to model an SMMU that confines; every call is recorded. */
+int ck_host_confine_rc = CK_SMMU_ABSENT;
+unsigned ck_host_confine_calls, ck_host_unconfine_calls;
+uint32_t ck_host_confine_segment, ck_host_confine_rid;
+uint64_t ck_host_confine_phys, ck_host_confine_len;
 int ck_dma_confine(uint32_t segment, uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
 {
-    (void)segment; (void)rid; (void)phys; (void)len; (void)out;
-    return CK_SMMU_ABSENT;
+    ck_host_confine_calls++;
+    ck_host_confine_segment = segment;
+    ck_host_confine_rid = rid;
+    ck_host_confine_phys = phys;
+    ck_host_confine_len = len;
+    if (ck_host_confine_rc == 0 && out) {
+        out->smmu_base = 0x2b400000ull;
+        out->stream_id = 0x40u | rid;
+        out->iova = phys;
+        out->len = len;
+    }
+    return ck_host_confine_rc;
 }
 int ck_dma_confine_named(const char *acpi_name, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
 {
     (void)acpi_name; (void)phys; (void)len; (void)out;
     return CK_SMMU_ABSENT;
 }
-int ck_dma_unconfine(uint32_t stream_id) { (void)stream_id; return CK_SMMU_EARG; }
+int ck_dma_unconfine(uint32_t stream_id)
+{
+    (void)stream_id;
+    ck_host_unconfine_calls++;
+    return ck_host_confine_rc == 0 ? 0 : CK_SMMU_EARG;
+}
 int ck_dma_faults(uint32_t stream_id, struct ck_dma_fault *first)
 {
     (void)stream_id; (void)first;

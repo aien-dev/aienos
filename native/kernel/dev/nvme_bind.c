@@ -128,13 +128,20 @@ int ck_disk_rw_probe(const disk_dev *d, uint32_t seed, uint64_t *lba_out)
     return match ? DISK_OK : DISK_EIO;
 }
 
-int ck_nvme_bind(ck_nvme *n, const pci_system *pci)
+int ck_nvme_bind(ck_nvme *n, const pci_found *found, uint32_t nfound, const pci_system *probe)
 {
+    /* Ownership first: one owner at a time. A refused call changes nothing. */
+    if (n->claimed) {
+        ck_printf("nvme: bind refused, already owned by seg %04x %02x:%02x.%u (bound=%d bm_on=%d confined=%d)\n",
+                  n->fn.segment, n->fn.bus, n->fn.dev, n->fn.fn, n->bound, n->bm_on, n->confined);
+        return NVME_ESTATE;
+    }
     n->bound = 0;
     n->bm_on = 0;
     n->confined = 0;
     n->shut = 0;
     n->stream_id = 0;
+    n->pf = 0;
 #if CK_NVME_UNSAFE_BYPASS
     ck_printf("WARNING: UNSAFE NVME DMA BYPASS BUILD (CK_QEMU_UNSAFE_DMA=1, QEMU debug only, TEST-ONLY)\n");
 #endif
@@ -142,12 +149,41 @@ int ck_nvme_bind(ck_nvme *n, const pci_system *pci)
     ck_printf("WARNING: TEST-ONLY DISK TRANSLATION BYPASS BUILD (CK_TEST_DISK_XLATE_BYPASS=1, DISK_LAYOUT "
               "mutation; never counts toward a PASS)\n");
 #endif
-    const pci_func *f = pci_find_class(pci, 0x010802u, 0xffffffu);
-    if (!f) {
+    uint32_t cands = 0;
+    const pci_found *cand = pci_disc_find_class(found, nfound, 0x010802u, 0xffffffu, &cands);
+    if (!cand) {
         ck_printf("nvme: no class 0x010802 function\n");
         return -1;
     }
-    n->pf = f;
+    pci_bus_access acc;
+    if (pci_stage_disc_access(cand->segment, cand->bus, &acc)) {
+        ck_printf("nvme: unavailable (no mapped ECAM for seg %04x bus %02x)\n", cand->segment, cand->bus);
+        return NVME_EARG;
+    }
+    n->claimed = 1; /* recorded once, before the device is touched */
+    if (pci_func_from_found(&n->fn, cand, &acc)) {
+        ck_printf("nvme: unavailable (seg %04x %02x:%02x.%u cannot be read as an endpoint)\n", cand->segment, cand->bus,
+                  cand->dev, cand->fn);
+        return NVME_EARG;
+    }
+    if (probe) /* keep the log wording for a function the segment-0 stage assigned */
+        for (uint32_t i = 0; i < probe->n; i++) {
+            const pci_func *p = &probe->f[i];
+            if (p->segment == n->fn.segment && p->bus == n->fn.bus && p->dev == n->fn.dev && p->fn == n->fn.fn)
+                for (uint32_t b = 0; b < PCI_MAX_BARS; b++) n->fn.bar[b].assigned_here = p->bar[b].assigned_here;
+        }
+    const pci_func *f = n->pf = &n->fn;
+    if (cands > 1)
+        ck_printf("nvme: %u class 0x010802 functions in discovery, binding the lowest segment/bus/dev/fn only\n", cands);
+    /* A function firmware left with bus mastering on must not be live before the DMA gate. */
+    if (cand->command & 0x4u) {
+        int brc = pci_bus_master_off(f);
+        ck_printf("nvme: firmware left bus master on, cleared before the DMA gate (%s)\n", brc ? "STUCK" : "ok");
+        if (brc) {
+            ck_printf("nvme: unavailable (bus master would not clear)\n");
+            return NVME_ESTATE;
+        }
+    }
     const pci_bar *b = &f->bar[0];
     ck_printf("nvme: discovery %02x:%02x.%u vid=0x%04x did=0x%04x bar0=0x%llx size=0x%llx%s\n", f->bus, f->dev,
               f->fn, f->vendor, f->device, (unsigned long long)b->addr, (unsigned long long)b->size,
