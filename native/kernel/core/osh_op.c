@@ -65,8 +65,9 @@ void osh_session_init(struct osh_session *s, unsigned grant_rights)
     zero(s, sizeof *s);
     ck_cap_init(&s->caps, 0x4f534800u, 4);
     sha256_hash((const uint8_t *)"aienos-osh-test-session", 23, s->principal);
-    if (grant_rights)
-        (void)ck_cap_insert(&s->caps, OSH_RES_CONSOLE_LOG, grant_rights, &s->console_cap);
+    if (grant_rights && ck_cap_insert(&s->caps, OSH_RES_CONSOLE_LOG, grant_rights, &s->console_cap) == CK_CAP_OK)
+        for (unsigned i = 0; i < 32; i++)
+            s->cap_holder[i] = s->principal[i];
 }
 
 int osh_session_close(struct osh_session *s)
@@ -92,6 +93,22 @@ static void note(const struct osh_env *env, const char *fmt, uint32_t seq, const
     char d[65], line[200];
     hex32(dg, d);
     ck_snprintf(line, sizeof line, fmt, (unsigned)seq, what, d);
+    env->log(env->ctx, line);
+}
+
+/* Mandatory security receipt (section 13): every use of a grant, every denial and every refusal at the effect boundary.
+ * Names principal, capability domain/index/generation, resource class, operation and the request digest. */
+static void receipt(const struct osh_env *env, const struct osh_result *r, const struct osh_binding *b, const char *result,
+                    const char *effect)
+{
+    char d[65], p[65], line[420];
+    hex32(r->digest, d);
+    hex32(b->principal_id, p);
+    ck_snprintf(line, sizeof line,
+                "osh_op_receipt: seq=%u op=console_write result=%s request_digest=%s effect=%s principal=%s cap_domain=%u "
+                "cap_index=%u cap_generation=%llu resource_class=%u operation=%u",
+                (unsigned)r->seq, result, d, effect, p, (unsigned)b->domain, (unsigned)b->cap_index,
+                (unsigned long long)b->cap_generation, (unsigned)b->resource_class, (unsigned)b->operation);
     env->log(env->ctx, line);
 }
 
@@ -129,7 +146,7 @@ unsigned osh_op_perm_check(const struct osh_session *s, const struct osh_binding
         return OSH_E_CAP_GEN_NARROW;
     if (b->resource_class != OSH_RC_CONSOLE_LOG || b->operation != OSH_OP_WRITE)
         return OSH_E_DENIED;
-    if (!same(b->principal_id, s->principal, 32))
+    if (!same(b->principal_id, s->cap_holder, 32)) /* the capability belongs to the principal it was granted to */
         return OSH_E_DENIED;
     uint32_t gen = (uint32_t)b->cap_generation;
     if (gen == 0 || b->cap_index >= s->caps.n)
@@ -265,22 +282,7 @@ void osh_op_exec(struct osh_session *s, const struct osh_env *env, const uint64_
     line[n++] = '\n';
     line[n] = 0; /* the sink may print it as a C string */
 
-    /* 4. the intent record, before the effect (section 10) */
-    struct osh_intent *t = 0;
-    for (unsigned i = 0; i < OSH_INTENT_MAX && !t; i++)
-        if (!s->intents[i].used)
-            t = &s->intents[i];
-    if (!t) {
-        finish(r, OSH_E_LIMIT, OSH_O_NOT_STARTED);
-        return;
-    }
-    t->used = 1;
-    t->closed = 0;
-    t->seq = r->seq;
-    for (unsigned i = 0; i < 32; i++)
-        t->digest[i] = r->digest[i];
-
-    /* 5. the binding this effect carries, built from what the task holds. Nothing here grants anything. */
+    /* 4. the binding this effect carries, built from what the task holds. Nothing here grants anything. */
     struct osh_binding b;
     zero(&b, sizeof b);
     for (unsigned i = 0; i < 32; i++)
@@ -291,6 +293,26 @@ void osh_op_exec(struct osh_session *s, const struct osh_env *env, const uint64_
     b.resource_class = OSH_RC_CONSOLE_LOG;
     b.operation = OSH_OP_WRITE;
 
+    /* 5. the intent record, before the effect (section 10). A slot is free when never used or when its outcome is
+     * already written (and logged); only OPEN intents count against the limit. */
+    struct osh_intent *t = 0;
+    for (unsigned i = 0; i < OSH_INTENT_MAX && !t; i++)
+        if (!s->intents[i].used)
+            t = &s->intents[i];
+    for (unsigned i = 0; i < OSH_INTENT_MAX && !t; i++)
+        if (s->intents[i].closed)
+            t = &s->intents[i];
+    if (!t) {
+        finish(r, OSH_E_LIMIT, OSH_O_NOT_STARTED);
+        receipt(env, r, &b, osh_err_name(OSH_E_LIMIT), "none");
+        return;
+    }
+    t->used = 1;
+    t->closed = 0;
+    t->seq = r->seq;
+    for (unsigned i = 0; i < 32; i++)
+        t->digest[i] = r->digest[i];
+
     if (s->hooks.revoke_before_perm_at == r->seq && s->console_cap.generation)
         (void)ck_cap_remove(&s->caps, s->console_cap); /* revoked between building the request and using it */
 
@@ -299,8 +321,7 @@ void osh_op_exec(struct osh_session *s, const struct osh_env *env, const uint64_
     if (pc != OSH_E_OK) {
         close_intent(t, OSH_O_FAILED_NO_EFFECT, pc, status_for(pc));
         finish(r, pc, OSH_O_FAILED_NO_EFFECT);
-        note(env, "osh_op_receipt: seq=%u op=console_write result=%s request_digest=%s effect=none", r->seq, osh_err_name(pc),
-             r->digest);
+        receipt(env, r, &b, osh_err_name(pc), "none");
         return;
     }
     if (s->hooks.interrupt_before_effect_at == r->seq) {
@@ -320,6 +341,8 @@ void osh_op_exec(struct osh_session *s, const struct osh_env *env, const uint64_
         note(env, "osh_op_record: seq=%u outcome=%s request_digest=%s effect=unknown", r->seq, "OUTCOME_UNKNOWN", r->digest);
         return;
     }
+    /* the grant was used: a security receipt, always (section 13), written even if the adapter is lost right after */
+    receipt(env, r, &b, "OK", "console_write");
     if (s->hooks.crash_after_effect_at == r->seq) {
         r->crashed = 1; /* the adapter is lost here: the effect happened, the outcome is never written */
         r->stop = 1;

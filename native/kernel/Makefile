@@ -463,6 +463,9 @@ OSH_TEST_C := $(KDIR)/core/osh_test.c
 # OSH-AIENOS-OP: instead of the fixture traces, drive a real capability-authorized operation (core/osh_op.c) through the same shell units.
 CK_OSH_OP_TEST ?=
 ifeq ($(strip $(CK_OSH_OP_TEST)),1)
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_OSH_OP_TEST (test-only OSH adapter with injection hooks) cannot be combined with CK_HARDWARE_STAGING)
+endif
 ART_TRUST_FLAGS += -DCK_OSH_OP_TEST=1
 OSH_TEST_C += $(KDIR)/core/osh_op.c
 endif
@@ -619,6 +622,11 @@ $(KOBJ)/kernel/core/artifact_loader.o: $(KDIR)/core/artifact_loader.c $(HDRS) $(
 	$(KCC) $(KCFLAGS) $(ART_TRUST_FLAGS) -DAIENOS_COMMIT='"$(AIENOS_COMMIT)"' -c -o $@ $<
 
 $(KOBJ)/kernel/core/osc_admit.o: $(KDIR)/core/osc_admit.c $(HDRS) $(ART_HDRS) $(OUT)/trust.stamp
+	@mkdir -p $(dir $@)
+	$(KCC) $(KCFLAGS) $(ART_TRUST_FLAGS) -c -o $@ $<
+
+# core/osh_op.c refuses to build without CK_OSH_OP_TEST (and with CK_HARDWARE_STAGING): it takes the trust flags too.
+$(KOBJ)/kernel/core/osh_op.o: $(KDIR)/core/osh_op.c $(KDIR)/core/osh_op.h $(HDRS) $(OUT)/trust.stamp
 	@mkdir -p $(dir $@)
 	$(KCC) $(KCFLAGS) $(ART_TRUST_FLAGS) -c -o $@ $<
 
@@ -819,17 +827,17 @@ $(OUT)/host-san/%: $(KDIR)/tests/%.c $(HOST_SRCS) $(KDIR)/tests/ck_test.h $(HDRS
 OSH_OP_SRCS := $(KDIR)/core/osh_op.c $(KDIR)/core/ipc.c $(KDIR)/core/fmt.c $(NATIVE)/argus/sha256.c
 $(OUT)/host/test_osh_op: $(KDIR)/tests/test_osh_op.c $(OSH_OP_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
 	@mkdir -p $(dir $@)
-	$(HOSTCC) $(HCFLAGS) -I$(NATIVE)/argus -o $@ $< $(OSH_OP_SRCS)
+	$(HOSTCC) $(HCFLAGS) -DCK_OSH_OP_TEST -I$(NATIVE)/argus -o $@ $< $(OSH_OP_SRCS)
 
 $(OUT)/host-san/test_osh_op: $(KDIR)/tests/test_osh_op.c $(OSH_OP_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
 	@mkdir -p $(dir $@)
-	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -I$(NATIVE)/argus -o $@ $< $(OSH_OP_SRCS)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -DCK_OSH_OP_TEST -I$(NATIVE)/argus -o $@ $< $(OSH_OP_SRCS)
 
 # TEST-ONLY mutant of core/osh_op.c: the permission check always says OK. test_osh_op must FAIL against it (red before
 # green); "make test" fails if the test stops catching it. Host only (osh_op.c refuses the flag freestanding).
 $(OUT)/host/test_osh_op_mutant: $(KDIR)/tests/test_osh_op.c $(OSH_OP_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
 	@mkdir -p $(dir $@)
-	$(HOSTCC) $(HCFLAGS) -I$(NATIVE)/argus -DCK_OSH_OP_MUTANT_SKIP_PERM -o $@ $< $(OSH_OP_SRCS)
+	$(HOSTCC) $(HCFLAGS) -DCK_OSH_OP_TEST -I$(NATIVE)/argus -DCK_OSH_OP_MUTANT_SKIP_PERM -o $@ $< $(OSH_OP_SRCS)
 
 osh-op-mutant: $(OUT)/host/test_osh_op_mutant
 	@if $< > $<.log 2>&1; then cat $<.log; echo "test_osh_op mutant (permission check always OK): PASSED, test does not catch it"; exit 1; \

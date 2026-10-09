@@ -16,6 +16,15 @@
 #include <stdint.h>
 #include "ipc.h"
 
+/* This layer is a QEMU/host TEST adapter (RAM-only records, injection hooks that can revoke a capability). It is built only
+ * with CK_OSH_OP_TEST and never into a production or hardware-staging image. */
+#ifndef CK_OSH_OP_TEST
+#error "osh_op is test-only: define CK_OSH_OP_TEST (make CK_OSH_TEST=1 CK_OSH_OP_TEST=1, or the host test rules)"
+#endif
+#ifdef CK_HARDWARE_STAGING
+#error "CK_OSH_OP_TEST cannot be combined with CK_HARDWARE_STAGING"
+#endif
+
 /* section 8.6 platform error codes (numbers as in the draft) */
 enum osh_err {
     OSH_E_OK = 0, OSH_E_DENIED = 1, OSH_E_REVOKED = 2, OSH_E_STALE = 3, OSH_E_NOT_FOUND = 4, OSH_E_UNAVAILABLE = 5,
@@ -67,10 +76,14 @@ struct osh_env {
     void (*log)(void *ctx, const char *line);            /* receipts and records, one line, no newline */
 };
 
+/* One principal per session is the current limit: `principal` is the task running the shell, `cap_holder` is the principal the
+ * console capability was granted to (recorded at grant). The binding carries `principal`; PERM_CHECK requires it to equal
+ * `cap_holder`, so a capability is only usable by the principal it was granted to. */
 struct osh_session {
     struct ck_cap_table caps;
     struct ck_handle console_cap; /* generation 0 = none held */
     uint8_t principal[32];
+    uint8_t cap_holder[32]; /* zero when no capability was granted */
     struct osh_intent intents[OSH_INTENT_MAX];
     uint32_t pipelines;
     struct osh_hooks hooks;

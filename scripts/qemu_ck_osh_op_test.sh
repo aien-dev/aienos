@@ -8,7 +8,7 @@
 #
 # Label: QEMU (aarch64 virt), TEST signer, not physical. Nothing here ran on a Spark or any real machine.
 # Cases (one boot, CK_SEED0B_TEST_ANCHOR=1 CK_OSH_TEST=1 CK_OSH_OP_TEST=1):
-#   allow           WRITE held: two lines on the console (the second shows $? = the real status 0 flowing back into the shell core)
+#   allow           WRITE held: two lines and two "grant used" receipts on the console (the second shows $? = the real status 0 flowing back into the shell core)
 #   deny_no_cap     no capability: DENIED, no bytes, outcome FAILED_NO_EFFECT, a security receipt line
 #   deny_read_only  READ only: DENIED, no bytes
 #   revoked         revoked between request build and effect: REVOKED, no bytes
@@ -124,7 +124,7 @@ check "${serial}" "allow: 2 console writes, no task slot held, capability releas
 for c in deny_no_cap deny_read_only; do
     check "${serial}" "${c}: refused DENIED before any effect (status 126, FAILED_NO_EFFECT)" "${P}${c} n=1 status=126 error=DENIED outcome=FAILED_NO_EFFECT stop=0 crashed=0 request_digest=[0-9a-f]{64}; ${label}\$"
     check "${serial}" "${c}: no console write, capability released" "${E}${c} rc=0 final_status=126 sink_calls=0 launches=[0-9]+ slots_held=0 cap_table_empty=1 cap_released=1; ${label}\$"
-    check "${serial}" "${c}: a security receipt names the denial" "^osh_op_receipt: seq=1 op=console_write result=DENIED request_digest=[0-9a-f]{64} effect=none case=${c}; ${label}\$"
+    check "${serial}" "${c}: a security receipt names the denial, principal and capability" "^osh_op_receipt: seq=1 op=console_write result=DENIED request_digest=[0-9a-f]{64} effect=none principal=[0-9a-f]{64} cap_domain=1 cap_index=[0-9]+ cap_generation=[0-9]+ resource_class=1 operation=1 case=${c}; ${label}\$"
 done
 check "${serial}" "revoked: REVOKED at the effect boundary, FAILED_NO_EFFECT" "${P}revoked n=1 status=126 error=REVOKED outcome=FAILED_NO_EFFECT stop=0 crashed=0 "
 check "${serial}" "revoked: no console write, capability released" "${E}revoked rc=0 final_status=126 sink_calls=0 launches=[0-9]+ slots_held=0 cap_table_empty=1 cap_released=1; "
@@ -151,6 +151,11 @@ check "${serial}" "unsupported: a redirection is NOT_SUPPORTED" "${P}unsupported
 check "${serial}" "unsupported: an unknown command is NOT_FOUND (127)" "${P}unsupported n=3 status=127 error=NOT_FOUND outcome=NOT_STARTED "
 check "${serial}" "unsupported: no console write, no task slot held" "${E}unsupported rc=0 final_status=127 sink_calls=0 launches=[0-9]+ slots_held=0 cap_table_empty=1 cap_released=1; "
 # totals
+G="^osh_op_receipt: seq=[0-9]+ op=console_write result=OK request_digest=[0-9a-f]{64} effect=console_write principal=[0-9a-f]{64} cap_domain=1 cap_index=[0-9]+ cap_generation=[0-9]+ resource_class=1 operation=1"
+exact "grant used: one security receipt per console write, 5 in all" "${G} case=[a-z_]+; ${label}\$" 5
+exact "grant used: allow wrote 2 lines, 2 receipts" "${G} case=allow; " 2
+exact "grant used: even the lost-after-effect case has its receipt" "${G} case=lost; " 1
+exact "grant used: no receipt for a refused case" "^osh_op_receipt: .* result=OK .* case=(deny_no_cap|deny_read_only|revoked|unsupported); " 0
 exact "the whole boot wrote exactly five console lines through the operation" "^osh_op_out: " 5
 exact "no case leaked a task slot" "^osh_op_end: .* slots_held=[1-9]" 0
 exact "every case released its capability" "^osh_op_end: .* cap_released=1; " 8

@@ -6,7 +6,7 @@
 
 static char cap_buf[4096];
 static int cap_calls;
-static char logs[16][240];
+static char logs[16][480];
 static int nlogs;
 
 static int sink(void *ctx, const char *line, size_t len)
@@ -164,6 +164,7 @@ int main(void)
         /* a capability on another resource does not authorize the console */
         osh_session_init(&s, 0);
         CHECK(ck_cap_insert(&s.caps, 0x1234u, CK_R_WRITE, &s.console_cap) == CK_CAP_OK);
+        memcpy(s.cap_holder, s.principal, 32); /* the principal matches: only the resource is wrong */
         r = run(&s, hello);
         CHECK(r.error == OSH_E_DENIED && cap_calls == 0);
     }
@@ -262,14 +263,59 @@ int main(void)
     r = run(&s, bg);
     CHECK(r.error == OSH_E_LIMIT && cap_calls == 0);
 
-    /* the intent log is bounded: a full log refuses the next effect before it happens */
+    /* closed intents are reclaimed (their outcome is already logged): 40 sequential klogs succeed, each with a
+     * "grant used" receipt; only OPEN intents count against the limit */
     reset_capture();
     osh_session_init(&s, CK_R_WRITE);
-    for (int i = 0; i < OSH_INTENT_MAX; i++)
+    int okn = 0;
+    for (int i = 0; i < 40; i++)
+        okn += run(&s, hello).error == OSH_E_OK;
+    CHECK(okn == 40 && cap_calls == 40);
+    CHECK(nlogs == 16); /* the log array keeps the first 16 lines */
+    CHECK(strstr(logs[0], "osh_op_receipt: seq=1 op=console_write result=OK ") && strstr(logs[0], "effect=console_write"));
+    CHECK(strstr(logs[0], "cap_domain=1 cap_index=0 cap_generation=1 resource_class=1 operation=1") && strstr(logs[0], "principal="));
+    /* the receipt names the request digest */
+    {
+        reset_capture();
+        osh_session_init(&s, CK_R_WRITE);
         r = run(&s, hello);
-    CHECK(r.error == OSH_E_OK && cap_calls == OSH_INTENT_MAX);
+        char want[64 + 32];
+        int w = 0;
+        for (int i = 0; i < 32; i++)
+            w += snprintf(want + w, sizeof want - w, "%02x", r.digest[i]);
+        CHECK(nlogs == 1 && strstr(logs[0], want));
+    }
+    /* 16 open intents (the adapter lost after each effect) fill the log; the next pipeline is refused LIMIT with a receipt */
+    reset_capture();
+    osh_session_init(&s, CK_R_WRITE);
+    for (int i = 0; i < OSH_INTENT_MAX; i++) {
+        s.hooks.crash_after_effect_at = s.pipelines + 1;
+        r = run(&s, hello);
+        CHECK(r.crashed);
+    }
+    CHECK(cap_calls == OSH_INTENT_MAX);
+    nlogs = 0;
     r = run(&s, hello);
-    CHECK(r.error == OSH_E_LIMIT && cap_calls == OSH_INTENT_MAX);
+    CHECK(r.error == OSH_E_LIMIT && r.outcome == OSH_O_NOT_STARTED && cap_calls == OSH_INTENT_MAX);
+    CHECK(nlogs == 1 && strstr(logs[0], "osh_op_receipt:") && strstr(logs[0], "result=LIMIT") && strstr(logs[0], "effect=none"));
+    /* the denial receipts carry the binding too */
+    reset_capture();
+    osh_session_init(&s, 0);
+    r = run(&s, hello);
+    CHECK(nlogs == 1 && strstr(logs[0], "result=DENIED") && strstr(logs[0], "cap_domain=1") && strstr(logs[0], "principal="));
+
+    /* the capability belongs to the principal it was granted to: another principal presenting it is DENIED */
+    reset_capture();
+    osh_session_init(&s, CK_R_WRITE);
+    CHECK(memcmp(s.cap_holder, s.principal, 32) == 0);
+    s.principal[0] ^= 1; /* a different task now runs the shell session */
+    r = run(&s, hello);
+    CHECK(r.error == OSH_E_DENIED && cap_calls == 0);
+    osh_session_init(&s, 0);
+    {
+        static const uint8_t zero32[32];
+        CHECK(memcmp(s.cap_holder, zero32, 32) == 0); /* nothing granted, no holder */
+    }
 
     /* names */
     CHECK(strcmp(osh_err_name(OSH_E_PARTIAL_LAUNCH), "PARTIAL_LAUNCH") == 0 && strcmp(osh_err_name(99), "IO") == 0);
