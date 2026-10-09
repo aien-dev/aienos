@@ -24,6 +24,9 @@
 #include "sha256.h"
 #include "../tests/fixtures/osh/osh_layout.h"
 #include "osh_fixtures.h"
+#ifdef CK_OSH_OP_TEST
+#include "osh_op.h"
+#endif
 
 #define LABEL "QEMU (aarch64 virt), TEST signer, not physical"
 #define CKOSH_WS_CELLS 11456u
@@ -112,6 +115,8 @@ static void hex(const uint8_t *p, size_t n, char *o)
     o[64] = 0;
 }
 
+static unsigned long launches, slots_held; /* every launch is one EL0 task; a task slot not free after its call is a leak */
+
 /* One entry call through the launch interface. 0 = RETURNED (value in *ret), else the result is printed and 1. */
 static int launch(unsigned u, size_t in_len, uint64_t ws_cells, struct ck_osc_ws *wsr, uint64_t max_ticks, struct osc_result *r,
                   struct ck_osc_launch_info *info)
@@ -130,6 +135,9 @@ static int launch(unsigned u, size_t in_len, uint64_t ws_cells, struct ck_osc_ws
     rq.ws = wsr;
     rq.max_ticks = max_ticks;
     ck_osc_launch(unit[u].bytes, unit[u].len, &unit[u].acc, &rq, r, info);
+    launches++;
+    if (!info->slot_free_after)
+        slots_held++;
     return r->cls != OSC_RES_RETURNED;
 }
 
@@ -362,6 +370,11 @@ static void answer(void)
         w[OSH_STAGING + 4 + i] = val[i];
 }
 
+#ifdef CK_OSH_OP_TEST
+static int real_mode, real_stop;
+static int real_pipeline(void);
+#endif
+
 /* returns 1 when the driver must stop */
 static int run_list(void)
 {
@@ -384,6 +397,15 @@ static int run_list(void)
                 return 1;
             }
             size_t cells = (size_t)(REQ_HDR_CELLS + nc * CMD_CELLS);
+#ifdef CK_OSH_OP_TEST
+            if (real_mode) {
+                last_status = real_pipeline();
+                if (real_stop)
+                    return 1;
+                w[OSH_S_LAST_STATUS] = (uint64_t)(unsigned)last_status;
+                continue;
+            }
+#endif
             char h[65];
             hex((const uint8_t *)(w + OSH_REQUEST), cells * 8, h);
             ck_printf("request %lu sha256=%s\n", ++req_no, h);
@@ -548,6 +570,112 @@ static void negatives(void)
     neg_line("4n", "after the overrun, lex_run(in+0,8) on the same workspace", &r, &info, "");
 }
 
+#ifdef CK_OSH_OP_TEST
+/* ---- OSH-AIENOS-OP: a real, capability-authorized operation through the same shell units ----
+ * The fixture driver above is unchanged and is NOT run in this build (the OSH_CORE gate runs it). Here each script goes
+ * through the same lex/parse/expand EL0 tasks; on PIPELINE_READY the request record goes to core/osh_op.c instead of
+ * a fake status. Operation: `klog <words>` writes "osh_op_out: <words>" to the console; it needs WRITE on the console-log
+ * resource in the session's kernel capability table. QEMU (aarch64 virt), TEST signer, not physical. */
+static struct osh_session sess;
+static const char *case_name;
+static unsigned sink_calls;
+static int real_crashed;
+
+static int op_sink(void *ctx, const char *line, size_t len)
+{
+    (void)ctx;
+    (void)len;
+    sink_calls++;
+    ck_printf("%s", line);
+    return 0;
+}
+
+static void op_log(void *ctx, const char *line)
+{
+    (void)ctx;
+    ck_printf("%s case=%s; %s\n", line, case_name, LABEL);
+}
+
+static const struct osh_env op_env = { 0, op_sink, op_log };
+
+static void hex32(const uint8_t d[32], char o[65])
+{
+    static const char x[] = "0123456789abcdef";
+    for (unsigned i = 0; i < 32; i++) {
+        o[2 * i] = x[d[i] >> 4];
+        o[2 * i + 1] = x[d[i] & 15];
+    }
+    o[64] = 0;
+}
+
+static int real_pipeline(void)
+{
+    struct osh_result r;
+    char h[65];
+    osh_op_exec(&sess, &op_env, w + OSH_REQUEST, w + OSH_OUT, (size_t)(CKOSH_WS_CELLS - OSH_OUT), &r);
+    hex32(r.digest, h);
+    ck_printf("osh_op_pipeline: case=%s n=%u status=%d error=%s outcome=%s stop=%d crashed=%d request_digest=%s; %s\n", case_name,
+              (unsigned)r.seq, r.status, osh_err_name(r.error), osh_outcome_name(r.outcome), r.stop, r.crashed, h, LABEL);
+    if (r.stop)
+        real_stop = 1;
+    if (r.crashed)
+        real_crashed = 1;
+    return r.status;
+}
+
+static void scenario(const char *name, unsigned rights, const char *script, struct osh_hooks hk)
+{
+    case_name = name;
+    osh_session_init(&sess, rights);
+    sess.hooks = hk;
+    sink_calls = 0;
+    real_mode = 1;
+    real_stop = 0;
+    real_crashed = 0;
+    stop = 0;
+    step_no = req_no = 0;
+    nfake = fake_i = have_status = npos = exhausted = 0;
+    last_status = 0;
+    src_text = (const unsigned char *)script;
+    src_len = strlen(script);
+    src_pos = 0;
+    unsigned long l0 = launches, s0 = slots_held;
+    ck_printf("osh_op_begin: case=%s cap_rights=%u; %s\n", name, rights, LABEL);
+    int rc = run_src();
+    struct ck_handle held = sess.console_cap;
+    int empty = osh_session_close(&sess);
+    int released = ck_cap_lookup(&sess.caps, held, 0, 0) != CK_CAP_OK;
+    ck_printf("osh_op_end: case=%s rc=%d final_status=%d sink_calls=%u launches=%lu slots_held=%lu cap_table_empty=%d cap_released=%d; %s\n",
+              name, rc, last_status, sink_calls, launches - l0, slots_held - s0, empty, released, LABEL);
+    if (real_crashed) {
+        /* the adapter was lost after the effect: a restart keeps only the intent records and holds no capability */
+        struct osh_session fresh;
+        unsigned before = sink_calls;
+        osh_session_restart(&fresh, &sess);
+        unsigned n = osh_op_recover(&fresh, &op_env);
+        unsigned again = osh_op_recover(&fresh, &op_env);
+        ck_printf("osh_op_restart: case=%s open_intents=%u second_scan=%u sink_calls_before=%u sink_calls_after=%u held_cap=%u; %s\n",
+                  name, n, again, before, sink_calls, (unsigned)fresh.console_cap.generation, LABEL);
+    }
+    real_mode = 0;
+}
+
+static void op_scenarios(void)
+{
+    struct osh_hooks none = { 0, 0, 0, 0 };
+    struct osh_hooks rv = { 1, 0, 0, 0 }, ir = { 0, 2, 0, 0 }, cr = { 0, 0, 1, 0 };
+    scenario("allow", CK_R_WRITE, "klog hello from osh\nklog \"status=$?\"\n", none);
+    scenario("deny_no_cap", 0, "klog SECRET-no-cap\n", none);
+    scenario("deny_read_only", CK_R_READ, "klog SECRET-read-only\n", none);
+    scenario("revoked", CK_R_WRITE, "klog SECRET-revoked\n", rv);
+    scenario("interrupt", CK_R_WRITE, "klog one; klog two; klog three\n", ir);
+    scenario("lost", CK_R_WRITE, "klog LOST-MARKER\n", cr);
+    scenario("after_restart", CK_R_WRITE, "klog fresh decision\n", none);
+    scenario("unsupported", CK_R_WRITE, "klog a | klog SECRET-pipe\nklog SECRET-redir >f\nnosuchcmd\n", none);
+    ck_printf("osh_op_done: cases=8; %s\n", LABEL);
+}
+#endif
+
 void ck_osh_all(void)
 {
     unsigned have = 0;
@@ -558,6 +686,10 @@ void ck_osh_all(void)
         ck_printf("osh_core: NOT_RUN (a shell unit was not admitted); %s\n", LABEL);
         return;
     }
+#ifdef CK_OSH_OP_TEST
+    op_scenarios();
+    return;
+#endif
     unsigned nfx = (unsigned)(sizeof osh_fx / sizeof osh_fx[0]);
     unsigned long best = 0;
     for (unsigned i = 0; i < nfx; i++) {

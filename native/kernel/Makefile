@@ -460,6 +460,12 @@ $(error CK_OSH_TEST and CK_OSC_LAUNCH_TEST are exclusive)
 endif
 ART_TRUST_FLAGS += -DCK_OSH_TEST=1
 OSH_TEST_C := $(KDIR)/core/osh_test.c
+# OSH-AIENOS-OP: instead of the fixture traces, drive a real capability-authorized operation (core/osh_op.c) through the same shell units.
+CK_OSH_OP_TEST ?=
+ifeq ($(strip $(CK_OSH_OP_TEST)),1)
+ART_TRUST_FLAGS += -DCK_OSH_OP_TEST=1
+OSH_TEST_C += $(KDIR)/core/osh_op.c
+endif
 endif
 
 # Screen hold before reset (core/console.c ck_console_fb_hold): seconds the
@@ -613,6 +619,11 @@ $(KOBJ)/kernel/core/artifact_loader.o: $(KDIR)/core/artifact_loader.c $(HDRS) $(
 	$(KCC) $(KCFLAGS) $(ART_TRUST_FLAGS) -DAIENOS_COMMIT='"$(AIENOS_COMMIT)"' -c -o $@ $<
 
 $(KOBJ)/kernel/core/osc_admit.o: $(KDIR)/core/osc_admit.c $(HDRS) $(ART_HDRS) $(OUT)/trust.stamp
+	@mkdir -p $(dir $@)
+	$(KCC) $(KCFLAGS) $(ART_TRUST_FLAGS) -c -o $@ $<
+
+# core/osh_test.c reads CK_OSH_OP_TEST, so it takes the trust flags too (and is rebuilt when they change).
+$(KOBJ)/kernel/core/osh_test.o: $(KDIR)/core/osh_test.c $(HDRS) $(ART_HDRS) $(OUT)/trust.stamp
 	@mkdir -p $(dir $@)
 	$(KCC) $(KCFLAGS) $(ART_TRUST_FLAGS) -c -o $@ $<
 
@@ -789,7 +800,7 @@ $(FULL_EFI): $(FULL_ELF)
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
 	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/acpi_dev.c
-TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon \
+TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
 	test_continuity_subject test_continuity_subject_provision
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
@@ -802,6 +813,27 @@ $(OUT)/host/%: $(KDIR)/tests/%.c $(HOST_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
 $(OUT)/host-san/%: $(KDIR)/tests/%.c $(HOST_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -o $@ $< $(HOST_SRCS)
+
+# OSH adapter operation layer (core/osh_op.c, aien-architecture#158): pure logic over ipc.c capabilities, SHA-256 for the
+# request digest. Its own rule because it needs the argus SHA-256 source.
+OSH_OP_SRCS := $(KDIR)/core/osh_op.c $(KDIR)/core/ipc.c $(KDIR)/core/fmt.c $(NATIVE)/argus/sha256.c
+$(OUT)/host/test_osh_op: $(KDIR)/tests/test_osh_op.c $(OSH_OP_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -I$(NATIVE)/argus -o $@ $< $(OSH_OP_SRCS)
+
+$(OUT)/host-san/test_osh_op: $(KDIR)/tests/test_osh_op.c $(OSH_OP_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -I$(NATIVE)/argus -o $@ $< $(OSH_OP_SRCS)
+
+# TEST-ONLY mutant of core/osh_op.c: the permission check always says OK. test_osh_op must FAIL against it (red before
+# green); "make test" fails if the test stops catching it. Host only (osh_op.c refuses the flag freestanding).
+$(OUT)/host/test_osh_op_mutant: $(KDIR)/tests/test_osh_op.c $(OSH_OP_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -I$(NATIVE)/argus -DCK_OSH_OP_MUTANT_SKIP_PERM -o $@ $< $(OSH_OP_SRCS)
+
+osh-op-mutant: $(OUT)/host/test_osh_op_mutant
+	@if $< > $<.log 2>&1; then cat $<.log; echo "test_osh_op mutant (permission check always OK): PASSED, test does not catch it"; exit 1; \
+	else grep -F "test_osh_op: FAIL" $<.log && echo "test_osh_op mutant (permission check always OK): FAILS as required"; fi
 
 # TEST-ONLY mutant of core/handoff_check.c (reserved0 check removed): the
 # handoff test must FAIL against it, so "make test" fails if the test stops
@@ -874,8 +906,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants test-continuity-subject-restart
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants test-continuity-subject-restart,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
