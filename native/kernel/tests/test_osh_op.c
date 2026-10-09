@@ -279,10 +279,13 @@ int main(void)
         reset_capture();
         osh_session_init(&s, CK_R_WRITE);
         r = run(&s, hello);
-        char want[64 + 32];
-        int w = 0;
-        for (int i = 0; i < 32; i++)
-            w += snprintf(want + w, sizeof want - w, "%02x", r.digest[i]);
+        static const char hex[] = "0123456789abcdef";
+        char want[64 + 1];
+        for (int i = 0; i < 32; i++) {
+            want[2 * i] = hex[r.digest[i] >> 4];
+            want[2 * i + 1] = hex[r.digest[i] & 0xf];
+        }
+        want[64] = '\0';
         CHECK(nlogs == 1 && strstr(logs[0], want));
     }
     /* 16 open intents (the adapter lost after each effect) fill the log; the next pipeline is refused LIMIT with a receipt */
