@@ -63,8 +63,8 @@
           "purpose": "Directory native/kernel/core. Purpose not yet described by a human."
         },
         {
-          "digest": "8bec4ed4dbf4745c8f311bebfbd58eab460696ec9651b1d3ac7b2f712e72a4cf",
-          "last_commit": "2bc7146",
+          "digest": "6362ed20710dfdb3188a2519e9c71bc3af2db78504ad88600358f066f2cb8ab8",
+          "last_commit": "cb2586f",
           "name": "dev",
           "purpose": "Directory native/kernel/dev. Purpose not yet described by a human."
         },
@@ -81,8 +81,8 @@
           "purpose": "Directory native/kernel/mm. Purpose not yet described by a human."
         },
         {
-          "digest": "92746c0561f8e54e2164b2616421fe55acb34bd38aff2461110a437d483b4053",
-          "last_commit": "2bc7146",
+          "digest": "3c802b3a7e9aae256e5ba9ee5f5b326d374fa9787c1b90e16a25ceb68be6570d",
+          "last_commit": "cb2586f",
           "name": "svc",
           "purpose": "Directory native/kernel/svc. Purpose not yet described by a human."
         },
@@ -99,15 +99,15 @@
           "purpose": "Directory native/kernel/tools. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:0a2830745e83800fe517e2f9e374b269aeeb689bbda5368d02735bf3566190cf",
-      "compiled_at": "2026-10-08T20:55:41Z",
+      "children_root": "sha256:60a98f5471c47cf3c3eb9d0052d3f2302288c1f05c36c658bc68476a30fb62fc",
+      "compiled_at": "2026-10-09T01:17:06Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:b47571fa3b5eb47059f00780535c46cf82c21af7956bc4eb3eb7d75e7450acab",
+      "digest": "sha256:ded0408d5226e01ba15e34f7cd627a156502a3799dc5bab82fb2c296dde49fa9",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 289,
-      "generated_at_commit": "2bc7146ee21806d0537c16fe70acabf5f0f6126f",
-      "source_tree": "sha256:086e9508300b8e643c6ecb3c8f1a18af237068cdafbdc979682d82700eded2d1"
+      "generated_at_commit": "cb2586fd8c4f7a7ce07986334761cfb87a04cc5c",
+      "source_tree": "sha256:037d596593ba3707cb11b78af7bf5dfbf0a2c2ba5ae14f17983ce44785f50a98"
     },
     "owner_lane": "",
     "provenance": {
