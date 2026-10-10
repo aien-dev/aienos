@@ -220,3 +220,86 @@ fn forward_matches_llama_cpp_q8k_emulation() {
 fn forward_matches_llama_cpp_int8_dot() {
     check(false, true, 1.0);
 }
+
+/// Parity of the int8 path against the f32 path over the recorded 64-token
+/// sequence (docs/l6b-int8-qualification.md, condition 2). PASS RULE: the
+/// int8 tokens equal the f32 tokens. The per-position maximum absolute logit
+/// difference is reported, not gated. Prints `PARITY_*` lines for
+/// scripts/l6_host_receipt.sh. Run with:
+/// `cargo test --release -p aienos-infer --test forward int8_parity -- --ignored --nocapture --test-threads=1`
+#[test]
+#[ignore = "model-backed, minutes on one core; run locally"]
+fn int8_parity_64_tokens_vs_f32() {
+    const N: usize = 64;
+    let Some(bytes) = model_bytes() else {
+        panic!("model file required");
+    };
+    let g = Gguf::parse(&bytes).unwrap();
+    let m = Model::new(&g).unwrap();
+    let tok = Tokenizer::new(&g.tokenizer().unwrap()).unwrap();
+    let ids = tok.encode_chat("What is the capital of France?").unwrap();
+    // Same loop as examples/l6_host.rs: greedy, end-of-turn ignored.
+    let run = |int8: bool| -> (Vec<u32>, Vec<Vec<f32>>) {
+        let mut st = DecodeState::new(&m, ids.len() + N + 8);
+        st.int8_dot = int8;
+        st.prefill(&m, &ids).unwrap();
+        let (mut out, mut logits) = (Vec::new(), Vec::new());
+        loop {
+            let t = argmax(&st.logits);
+            out.push(t);
+            logits.push(st.logits.clone());
+            if out.len() == N {
+                break;
+            }
+            st.forward(&m, t, true).unwrap();
+        }
+        (out, logits)
+    };
+    let (ft, fl) = run(false);
+    let (it, il) = run(true);
+    let first_div = ft.iter().zip(&it).position(|(a, b)| a != b);
+    // Positions after the first divergence have different histories.
+    let upto = first_div.map_or(N, |p| p + 1);
+    let per_pos: Vec<f32> = (0..upto)
+        .map(|p| {
+            fl[p]
+                .iter()
+                .zip(&il[p])
+                .map(|(a, b)| (a - b).abs())
+                .fold(0f32, f32::max)
+        })
+        .collect();
+    let (maxpos, maxdiff) =
+        per_pos
+            .iter()
+            .enumerate()
+            .fold((0, 0f32), |(bp, bv), (p, &v)| if v > bv { (p, v) } else { (bp, bv) });
+    let join = |v: &[String]| v.join(" ");
+    println!(
+        "PARITY_TOKENS_IDENTICAL: {}",
+        if first_div.is_none() { "yes" } else { "no" }
+    );
+    println!(
+        "PARITY_FIRST_DIVERGENCE: {}",
+        first_div.map_or("none".to_string(), |p| p.to_string())
+    );
+    println!("PARITY_COMPARED_POSITIONS: {upto}");
+    println!("PARITY_MAX_LOGIT_ABS_DIFF: {maxdiff}");
+    println!("PARITY_MAX_LOGIT_ABS_DIFF_POSITION: {maxpos}");
+    println!(
+        "PARITY_PER_POSITION_MAX: {}",
+        join(&per_pos.iter().map(|v| v.to_string()).collect::<Vec<_>>())
+    );
+    println!(
+        "PARITY_F32_TOKENS: {}",
+        join(&ft.iter().map(|v| v.to_string()).collect::<Vec<_>>())
+    );
+    println!(
+        "PARITY_INT8_TOKENS: {}",
+        join(&it.iter().map(|v| v.to_string()).collect::<Vec<_>>())
+    );
+    assert!(
+        first_div.is_none(),
+        "int8 tokens diverge from f32 at index {first_div:?}"
+    );
+}

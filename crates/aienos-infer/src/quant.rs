@@ -833,4 +833,99 @@ mod tests {
         let x = [1f32; QK_K];
         assert_eq!(dot_row(GgmlType::Q4K, &[0u8; Q4K_BYTES], &x), Ok(0.0));
     }
+
+    /// `y[i] = ((m i + c) mod 255) - 127`, the golden activation pattern.
+    fn golden_y(m: usize, c: usize) -> ([i8; QK_K], [i32; 16]) {
+        let mut y = [0i8; QK_K];
+        for (i, v) in y.iter_mut().enumerate() {
+            *v = (((m * i + c) % 255) as i32 - 127) as i8;
+        }
+        let mut ys = [0i32; 16];
+        for (g, s) in ys.iter_mut().enumerate() {
+            *s = y[16 * g..16 * g + 16].iter().map(|&v| v as i32).sum();
+        }
+        (y, ys)
+    }
+
+    /// Fixed block, expected values derived by hand-rolled arithmetic from the
+    /// ggml layout (see docs/l6b-int8-qualification.md), not from this crate.
+    #[test]
+    fn golden_q4k_q8k_i32_accumulations() {
+        let mut b = [0u8; Q4K_BYTES];
+        b[0..2].copy_from_slice(&[0x00, 0x3c]); // d = 1.0
+        b[2..4].copy_from_slice(&[0x00, 0x38]); // dmin = 0.5
+        b[4..16].copy_from_slice(&[
+            0x41, 0x82, 0xC3, 0x14, 0x25, 0x76, 0x37, 0x08, 0x9A, 0x5B, 0xDC, 0x2D,
+        ]);
+        for i in 0..128 {
+            b[16 + i] = ((37 * i + 11) % 256) as u8;
+        }
+        let (y, ys) = golden_y(29, 7);
+        assert_eq!(q4k_q8k_accum(&b, &y, &ys), (-284188, -7913));
+        // yd * (d * sumi - dmin * mins), all exact in f32.
+        assert_eq!(dot_q4k_q8k(&b, &y, 0.25, &ys), -70057.875);
+    }
+
+    #[test]
+    fn golden_q6k_q8k_i32_accumulations() {
+        let mut b = [0u8; Q6K_BYTES];
+        for i in 0..128 {
+            b[i] = ((53 * i + 5) % 256) as u8;
+        }
+        for i in 0..64 {
+            b[128 + i] = ((91 * i + 17) % 256) as u8;
+        }
+        for i in 0..16 {
+            b[192 + i] = (((23 * i + 3) % 61) as i32 - 30) as i8 as u8;
+        }
+        b[208..210].copy_from_slice(&[0x00, 0x34]); // d = 0.25
+        let (y, ys) = golden_y(31, 5);
+        assert_eq!(q6k_q8k_isum(&b, &y, &ys), -275808);
+        assert_eq!(dot_q6k_q8k(&b, &y, 0.5, &ys), -34476.0);
+    }
+
+    #[test]
+    fn q8k_properties_bounds_and_error() {
+        let mut seed = 23u64;
+        let mut act = Q8Act::with_capacity(QK_K);
+        let mut neg = Q8Act::with_capacity(QK_K);
+        let mut scaled = Q8Act::with_capacity(QK_K);
+        for _ in 0..100 {
+            let mut x = [0f32; QK_K];
+            random_x(&mut seed, &mut x);
+            act.quantize(&x).unwrap();
+            let d = act.scales()[0];
+            // Bounds, and the largest-magnitude value lands on -127.
+            assert!(act.values().iter().all(|&v| v >= -127));
+            let imax = (0..QK_K)
+                .fold(0, |m, i| if x[i].abs() > x[m].abs() { i } else { m });
+            assert_eq!(act.values()[imax], -127);
+            // Reconstruction error is at most half a step (plus rounding slack).
+            for (&xi, &qi) in x.iter().zip(act.values()) {
+                let err = (xi - qi as f32 * d).abs();
+                assert!(err <= 0.5 * d.abs() * 1.001 + 1e-6, "err {err} d {d}");
+            }
+            // Group sums are the sums of the values.
+            for (g, &s) in act.group_sums().iter().enumerate() {
+                let want: i32 = act.values()[16 * g..16 * g + 16]
+                    .iter()
+                    .map(|&v| v as i32)
+                    .sum();
+                assert_eq!(s, want);
+            }
+            // Negating the input negates the values (ties to even is symmetric)
+            // and the scale.
+            let nx = x.map(|v| -v);
+            neg.quantize(&nx).unwrap();
+            assert_eq!(neg.scales()[0], -d);
+            for (&a, &b) in act.values().iter().zip(neg.values()) {
+                assert_eq!(a, b);
+            }
+            // Scaling by a power of two keeps the values and scales d.
+            let sx = x.map(|v| v * 4.0);
+            scaled.quantize(&sx).unwrap();
+            assert_eq!(scaled.values(), act.values());
+            assert_eq!(scaled.scales()[0], d * 4.0);
+        }
+    }
 }

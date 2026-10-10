@@ -21,6 +21,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod decode;
+pub mod dotpath;
 pub mod gguf;
 pub mod half;
 pub mod math;
