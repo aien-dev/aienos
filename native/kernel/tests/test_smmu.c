@@ -422,6 +422,24 @@ static void iort_end(uint8_t *t, uint32_t at, uint32_t nodes)
     w32(t + 4, at);
     w32(t + 36, nodes);
 }
+/* RMR node (type 6) with `nr` ranges and one mapping covering streams
+ * [in, in + cnt] of node `ref`: flags @16, rmr_count @20, rmr_offset @24,
+ * mapping array @28, descriptors (20 bytes each) after it. */
+static uint32_t iort_rmr(uint8_t *t, uint32_t at, uint32_t flags, uint32_t in, uint32_t cnt, uint32_t ref,
+                         const uint64_t *ranges, uint32_t nr)
+{
+    uint32_t roff = 28 + 20, nlen = roff + 20 * nr;
+    t[at] = 6; w16(t + at + 1, (uint16_t)nlen);
+    w32(t + at + 8, 1); w32(t + at + 12, 28);
+    w32(t + at + 16, flags); w32(t + at + 20, nr); w32(t + at + 24, roff);
+    uint8_t *e = t + at + 28;
+    w32(e, in); w32(e + 4, cnt); w32(e + 8, in); w32(e + 12, ref);
+    for (uint32_t i = 0; i < nr; i++) {
+        w64(t + at + roff + 20 * i, ranges[2 * i]);
+        w64(t + at + roff + 20 * i + 8, ranges[2 * i + 1]);
+    }
+    return at + nlen;
+}
 
 static void test_iort_spark_shape(void)
 {
@@ -458,6 +476,57 @@ static void test_iort_spark_shape(void)
      * starts at stream 0x50000, so 0x50000 + 0x100 = 0x50100. */
     CHECK(ck_iort_stream_id(&s, 4, 0x100, &sid) == 0 && sid == 0x50100);
     CHECK(ck_iort_stream_id(&s, 0, 0x100, &sid) == 0 && sid == 0x10100);
+    /* Cut B7a: every SMMUv3 node is kept in table order and a requester is
+     * routed to the node it reaches. */
+    CHECK(s.nsmmus == 2 && s.smmus[0].off == a && s.smmus[0].base == 0x13800000ull && s.smmus[1].off == b &&
+          s.smmus[1].base == 0x13000000ull);
+    struct ck_iort_route rt;
+    CHECK(ck_iort_route(&s, 4, 0x100, &rt) == 0 && rt.smmu_index == 0 && rt.smmu_base == 0x13800000ull &&
+          rt.sid == 0x50100 && rt.nrmr == 0);
+    CHECK(ck_iort_route(&s, 15, 0x100, &rt) == 0 && rt.smmu_index == 1 && rt.smmu_base == 0x13000000ull &&
+          rt.smmu_off == b && rt.sid == 0x100 && rt.nrmr == 0); /* no RMR node in this table */
+    CHECK(ck_iort_route(&s, 16, 0x100, &rt) == -1);
+    CHECK(ck_iort_route(&s, 15, 0x10000, &rt) == -1);
+    /* The same shape with the Spark's RMR node (MEASURED 2026-10-10,
+     * docs/GB10_IORT_DECODE.md): flags 0x10 (Normal NC, remap not
+     * permitted), streams 0x0..=0x100 of the second SMMUv3, three ranges. */
+    static const uint64_t spark_rmr[6] = { 0x300000000ull, 0x3000000ull, 0x280000000ull, 0x80000000ull,
+                                           0xa1600000ull, 0x18200000ull };
+    at = iort_rmr(t, at, 0x10, 0, 0x100, b, spark_rmr, 3);
+    iort_end(t, at, 19);
+    CHECK(ck_iort_parse(t, &s) == 1 && s.nrmr == 1 && s.rmr[0].smmu_index == 1 && s.rmr[0].sid_lo == 0 &&
+          s.rmr[0].sid_hi == 0x100 && s.rmr[0].flags == 0x10 && s.rmr[0].nranges == 3 &&
+          s.rmr[0].range[1].base == 0x280000000ull && s.rmr[0].range[1].len == 0x80000000ull);
+    CHECK(CK_IORT_RMR_ATTR(s.rmr[0].flags) == CK_IORT_RMR_ATTR_NORMAL_NC && !(s.rmr[0].flags & CK_IORT_RMR_REMAP_PERMITTED));
+    /* The GB10 stream (0x100, the last one, inclusive) is covered; 0x101 is not. */
+    CHECK(ck_iort_route(&s, 15, 0x100, &rt) == 0 && rt.smmu_index == 1 && rt.nrmr == 1 && rt.rmr[0] == &s.rmr[0] &&
+          rt.rmr[0]->range[2].base == 0xa1600000ull);
+    CHECK(ck_iort_route(&s, 15, 0x101, &rt) == 0 && rt.smmu_index == 1 && rt.nrmr == 0);
+    CHECK(ck_iort_route(&s, 15, 0x0, &rt) == 0 && rt.nrmr == 1);
+    /* Stream 0x100 of the FIRST SMMU (segment 0 rid 0x100 is 0x10100; here
+     * use a table where the first node has a stream 0x100): the RMR names
+     * the second node only, so the first node's stream 0x100 gets none. */
+    CHECK(ck_iort_rmr_for(&s, a, 0x100, &rt) == 0);
+    CHECK(ck_iort_rmr_for(&s, b, 0x100, &rt) == 1);
+    /* Malformed RMR nodes refuse the whole table: unaligned range, empty
+     * range, zero descriptors, descriptor array past the node. */
+    uint32_t rmr_at = at - (28 + 20 + 20 * 3);
+    w64(t + rmr_at + 48 + 20 * 0, 0x300000001ull);
+    CHECK(ck_iort_parse(t, &s) == -1);
+    w64(t + rmr_at + 48 + 20 * 0, 0x300000000ull);
+    w64(t + rmr_at + 48 + 20 * 0 + 8, 0);
+    CHECK(ck_iort_parse(t, &s) == -1);
+    w64(t + rmr_at + 48 + 20 * 0 + 8, 0x3000000ull);
+    w32(t + rmr_at + 20, 0);
+    CHECK(ck_iort_parse(t, &s) == -1);
+    w32(t + rmr_at + 20, 4); /* claims 4 descriptors, the node holds 3 */
+    CHECK(ck_iort_parse(t, &s) == -1);
+    w32(t + rmr_at + 20, 3);
+    CHECK(ck_iort_parse(t, &s) == 1 && s.nrmr == 1);
+    /* An RMR mapping to a non-SMMU node (the root complex) is ignored, not a range. */
+    w32(t + rmr_at + 28 + 12, rc15);
+    CHECK(ck_iort_parse(t, &s) == 1 && s.nrmr == 0);
+    w32(t + rmr_at + 28 + 12, b);
     CHECK(ck_iort_stream_id(&s, 0, 0x0, &sid) == 0 && sid == 0x10000);
     CHECK(ck_iort_stream_id(&s, 14, 0xffff, &sid) == 0 && sid == 0xfffff);
     /* Wrong segment: segment 15 belongs to the second SMMU, segment 16

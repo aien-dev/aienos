@@ -2,11 +2,28 @@
  * friends) over core/smmu.c, the IORT parser and the DMA pool. Kernel only
  * (the host tests drive core/smmu.c directly against a model SMMU).
  *
- * Memory: stream table (two-level when the SMMU supports it: an L1 table of
- * at most 128 KiB plus one 4 KiB L2 page per granted span; else linear, 4096
- * STEs, 256 KiB), command and event queues, the
- * context descriptors and every stage-1 table come from ck_dma_alloc, which
- * is Normal Non-cacheable, so a dsb orders them before register writes. */
+ * One instance block per SMMUv3 node the IORT lists (cut B7a, aienos#286):
+ * a requester is routed to the node its root complex or named component
+ * maps it to (ck_iort_route / ck_iort_named), and that node is brought up
+ * the first time a stream behind it is confined. The DGX Spark lists three
+ * (docs/GB10_IORT_DECODE.md): A at 0x13800000 (PCI segments 0..14, the
+ * USB controllers), B at 0x13000000 (segment 15: the GB10, stream 0x100,
+ * and HDA0), C for the small platform peripherals. QEMU virt lists one.
+ *
+ * Firmware-reserved ranges (IORT RMR nodes): a stream the RMR names gets
+ * its ranges identity-mapped in the same stage-1 table as its DMA window,
+ * so the device keeps reaching what the firmware set up for it while
+ * everything else still faults and aborts. Only Normal memory attributes
+ * (Non-cacheable, or Inner/Outer Write-back, both mapped Normal
+ * Non-cacheable like the window) are honoured; any other attribute refuses
+ * the confinement (fail closed). A stream the RMR names but nobody confines
+ * stays aborted like every other stream.
+ *
+ * Memory: per instance a stream table (two-level when the SMMU supports it:
+ * an L1 table of at most 128 KiB plus one 4 KiB L2 page per granted span;
+ * else linear, 4096 STEs, 256 KiB), command and event queues, the context
+ * descriptors and every stage-1 table come from ck_dma_alloc, which is
+ * Normal Non-cacheable, so a dsb orders them before register writes. */
 #include "ck_internal.h"
 #include "pt.h"
 #include "smmu.h"
@@ -18,37 +35,41 @@
  * (PCIe requests are usually unprivileged), never executable. */
 #define WINDOW_ATTRS (CK_PT_NORMAL_NC | (1ull << 6))
 
-static struct {
-    int state; /* 0 not tried, 1 up, CK_SMMU_ABSENT / CK_SMMU_FAILED */
+struct inst {
+    int state; /* 0 not tried, 1 up, CK_SMMU_FAILED */
+    uint32_t index; /* position in g.iort.smmus */
     uint64_t base;
-    struct ck_iort_smmu iort;
+    uint32_t node_off;
+    struct ck_smmu_regs regs; /* ctx = this instance */
     struct ck_smmu_tables t;
     uint64_t *cds; /* CK_DMA_MAX_STREAMS context descriptors, one page */
     uint32_t sid[CK_DMA_MAX_STREAMS];
     int used[CK_DMA_MAX_STREAMS];
+};
+
+static struct {
+    int state; /* IORT: 0 not read, 1 parsed, CK_SMMU_ABSENT / CK_SMMU_FAILED */
+    struct ck_iort_smmu iort;
+    struct inst inst[CK_IORT_MAX_SMMUS];
 } g;
 
 static uint32_t r_rd32(void *ctx, uint32_t off)
 {
-    (void)ctx;
-    return *(volatile uint32_t *)(uintptr_t)(g.base + off);
+    return *(volatile uint32_t *)(uintptr_t)(((struct inst *)ctx)->base + off);
 }
 static void r_wr32(void *ctx, uint32_t off, uint32_t v)
 {
-    (void)ctx;
-    *(volatile uint32_t *)(uintptr_t)(g.base + off) = v;
+    *(volatile uint32_t *)(uintptr_t)(((struct inst *)ctx)->base + off) = v;
 }
 static void r_wr64(void *ctx, uint32_t off, uint64_t v)
 {
-    (void)ctx;
-    *(volatile uint64_t *)(uintptr_t)(g.base + off) = v;
+    *(volatile uint64_t *)(uintptr_t)(((struct inst *)ctx)->base + off) = v;
 }
 static void r_bar(void *ctx)
 {
     (void)ctx;
     ck_mb();
 }
-static const struct ck_smmu_regs regs = { 0, r_rd32, r_wr32, r_wr64, r_bar };
 
 static int pt_alloc(void *ctx, uint64_t *phys)
 {
@@ -69,29 +90,31 @@ static int l2_alloc(void *ctx, uint64_t **page)
  * StreamID bits, so the DGX Spark's PCI streams (up to 0xfffff, MEASURED
  * from its IORT) fit; L2 spans are allocated per grant. Otherwise the
  * linear table of STE_N entries. 0 ok, -1 allocation failed. */
-static int alloc_strtab(void)
+static int alloc_strtab(struct inst *in)
 {
     uint64_t p;
-    uint32_t idr0 = r_rd32(0, CK_SMMU_IDR0), sidsize = r_rd32(0, CK_SMMU_IDR1) & CK_SMMU_IDR1_SIDSIZE_MASK;
+    uint32_t idr0 = r_rd32(in, CK_SMMU_IDR0), sidsize = r_rd32(in, CK_SMMU_IDR1) & CK_SMMU_IDR1_SIDSIZE_MASK;
     if (((idr0 >> CK_SMMU_IDR0_ST_LEVEL_SHIFT) & CK_SMMU_IDR0_ST_LEVEL_MASK) == 1u && sidsize >= CK_SMMU_L2_MIN_BITS) {
         uint32_t bits = sidsize < CK_SMMU_L2_MAX_BITS ? sidsize : CK_SMMU_L2_MAX_BITS;
         uint32_t l1_bytes = (1u << (bits - CK_SMMU_SPLIT)) * 8u;
         if (l1_bytes < 64u)
             l1_bytes = 64u;
-        g.t.sid_bits = bits;
-        g.t.l2_alloc = l2_alloc;
-        g.t.l1 = ck_dma_alloc(l1_bytes, l1_bytes, &p);
+        in->t.sid_bits = bits;
+        in->t.l2_alloc = l2_alloc;
+        in->t.l1 = ck_dma_alloc(l1_bytes, l1_bytes, &p);
         ck_printf("smmu: stream table 2-level log2size=%u split=%u (spans allocated per grant)\n", bits,
                   CK_SMMU_SPLIT);
-        return g.t.l1 ? 0 : -1;
+        return in->t.l1 ? 0 : -1;
     }
-    g.t.ste_n = STE_N;
-    g.t.strtab = ck_dma_alloc(STE_N * CK_SMMU_STE_BYTES, STE_N * CK_SMMU_STE_BYTES, &p);
+    in->t.ste_n = STE_N;
+    in->t.strtab = ck_dma_alloc(STE_N * CK_SMMU_STE_BYTES, STE_N * CK_SMMU_STE_BYTES, &p);
     ck_printf("smmu: stream table linear entries=%u\n", STE_N);
-    return g.t.strtab ? 0 : -1;
+    return in->t.strtab ? 0 : -1;
 }
 
-static int bring_up(void)
+/* Read and parse the IORT once per boot. 0 parsed, else CK_SMMU_ABSENT /
+ * CK_SMMU_FAILED (fail closed). */
+static int parse_iort(void)
 {
     if (g.state)
         return g.state == 1 ? 0 : g.state;
@@ -102,65 +125,78 @@ static int bring_up(void)
     int rc = ck_iort_parse(iort, &g.iort);
     if (rc == 0)
         return g.state;
-    g.state = CK_SMMU_FAILED;
     if (rc < 0) {
+        g.state = CK_SMMU_FAILED;
         ck_printf("smmu: IORT malformed, SMMU unusable (fail closed)\n");
-        return g.state;
-    }
-    g.base = g.iort.base;
-    ck_mmio_map(g.base, CK_SMMU_MMIO_BYTES);
-    uint64_t p;
-    int st = alloc_strtab(); /* first, as before: the largest aligned block */
-    g.t.cmd_n = QUEUE_N;
-    g.t.evt_n = QUEUE_N;
-    g.t.cmdq = ck_dma_alloc(4096, 4096, &p);
-    g.t.evtq = ck_dma_alloc(4096, 4096, &p);
-    g.cds = ck_dma_alloc(4096, 4096, &p);
-    if (st || !g.t.cmdq || !g.t.evtq || !g.cds) {
-        ck_printf("smmu: table allocation failed (fail closed)\n");
-        return g.state;
-    }
-    rc = ck_smmu_enable(&regs, &g.t, CK_SMMU_DEFAULT_SPINS);
-    if (rc) {
-        ck_printf("smmu: bring-up failed rc=%d base=0x%llx (fail closed)\n", rc, (unsigned long long)g.base);
         return g.state;
     }
     g.state = 1;
     return 0;
 }
 
-static int confine_sid(uint32_t sid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out);
+/* Bring up the SMMUv3 node at g.iort.smmus[index] the first time it is
+ * needed. 0 up, else CK_SMMU_FAILED (fail closed). */
+static int bring_up(uint32_t index)
+{
+    struct inst *in = &g.inst[index];
+    if (in->state)
+        return in->state == 1 ? 0 : in->state;
+    in->state = CK_SMMU_FAILED;
+    in->index = index;
+    in->base = g.iort.smmus[index].base;
+    in->node_off = g.iort.smmus[index].off;
+    in->regs.ctx = in;
+    in->regs.rd32 = r_rd32;
+    in->regs.wr32 = r_wr32;
+    in->regs.wr64 = r_wr64;
+    in->regs.barrier = r_bar;
+    ck_mmio_map(in->base, CK_SMMU_MMIO_BYTES);
+    uint64_t p;
+    int st = alloc_strtab(in); /* first, as before: the largest aligned block */
+    in->t.cmd_n = QUEUE_N;
+    in->t.evt_n = QUEUE_N;
+    in->t.cmdq = ck_dma_alloc(4096, 4096, &p);
+    in->t.evtq = ck_dma_alloc(4096, 4096, &p);
+    in->cds = ck_dma_alloc(4096, 4096, &p);
+    if (st || !in->t.cmdq || !in->t.evtq || !in->cds) {
+        ck_printf("smmu: table allocation failed (fail closed)\n");
+        return in->state;
+    }
+    int rc = ck_smmu_enable(&in->regs, &in->t, CK_SMMU_DEFAULT_SPINS);
+    if (rc) {
+        ck_printf("smmu: bring-up failed rc=%d base=0x%llx (fail closed)\n", rc, (unsigned long long)in->base);
+        return in->state;
+    }
+    if (index)
+        ck_printf("smmu: instance %u up base=0x%llx\n", index, (unsigned long long)in->base);
+    in->state = 1;
+    return 0;
+}
+
+static int confine_sid(uint32_t index, uint32_t sid, uint64_t phys, uint64_t len, const struct ck_iort_route *rt,
+                       struct ck_dma_confinement *out);
 
 int ck_dma_confine(uint32_t segment, uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
 {
     if (!len || (phys & 0xfffu) || (len & 0xfffu) || phys + len < phys)
         return CK_SMMU_EARG;
-    int rc = bring_up();
+    int rc = parse_iort();
     if (rc)
         return rc;
-    uint32_t sid;
-    if (ck_iort_stream_id(&g.iort, segment, rid, &sid)) {
-        /* Behind an SMMUv3 this kernel does not drive (Spark: the GB10,
-         * segment 15, on the IORT's second SMMUv3): refused as
-         * CK_SMMU_OTHER with that SMMU and stream named, len 0, exactly
-         * as the named-component path does. Never granted unconfined. */
-        uint64_t other_base;
-        if (ck_iort_other_stream(&g.iort, segment, rid, &sid, &other_base) == 0) {
-            out->smmu_base = other_base; /* reported, never used */
-            out->stream_id = sid;
-            out->iova = out->len = 0;
-            return CK_SMMU_OTHER;
-        }
+    struct ck_iort_route rt;
+    if (ck_iort_route(&g.iort, segment, rid, &rt))
         return CK_SMMU_NOSTREAM;
-    }
-    return confine_sid(sid, phys, len, out);
+    rc = bring_up(rt.smmu_index);
+    if (rc)
+        return rc;
+    return confine_sid(rt.smmu_index, rt.sid, phys, len, &rt, out);
 }
 
 int ck_dma_confine_named(const char *acpi_name, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
 {
     if (!acpi_name || !len || (phys & 0xfffu) || (len & 0xfffu) || phys + len < phys)
         return CK_SMMU_EARG;
-    int rc = bring_up();
+    int rc = parse_iort();
     if (rc)
         return rc;
     const void *iort = ck_acpi_find("IORT");
@@ -168,91 +204,164 @@ int ck_dma_confine_named(const char *acpi_name, uint64_t phys, uint64_t len, str
     int nrc = iort ? ck_iort_named(iort, acpi_name, &nc) : 0;
     if (nrc != 1 || !nc.target_off)
         return nrc == -2 ? CK_SMMU_EARG : CK_SMMU_NOSTREAM;
-    /* Only the SMMU this kernel drives (the IORT's first SMMUv3 node) can
-     * confine a stream; a stream behind another SMMU is refused, never
-     * granted unconfined. */
-    if (nc.target_off != g.iort.node_off) {
+    /* The SMMUv3 node the component maps to; one the parser did not keep
+     * (beyond CK_IORT_MAX_SMMUS) is refused, never granted unconfined. */
+    uint32_t index;
+    for (index = 0; index < g.iort.nsmmus; index++)
+        if (g.iort.smmus[index].off == nc.target_off)
+            break;
+    if (index == g.iort.nsmmus) {
         out->smmu_base = nc.target_base; /* reported, never used */
         out->stream_id = nc.stream_id;
         out->iova = out->len = 0;
         return CK_SMMU_OTHER;
     }
-    return confine_sid(nc.stream_id, phys, len, out);
+    rc = bring_up(index);
+    if (rc)
+        return rc;
+    struct ck_iort_route rt = { 0 };
+    (void)ck_iort_rmr_for(&g.iort, nc.target_off, nc.stream_id, &rt);
+    return confine_sid(index, nc.stream_id, phys, len, &rt, out);
 }
 
-/* Stage-1 window [phys, phys+len) for stream sid on the SMMU brought up. */
-static int confine_sid(uint32_t sid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out)
+/* Identity-map every firmware-reserved range the IORT names for this
+ * stream into pt, Normal Non-cacheable. 0 ok (ranges mapped in *n), -1 an
+ * attribute this kernel does not honour or a range that collides with the
+ * window (fail closed). */
+static int map_reserved(struct ck_pt *pt, const struct ck_iort_route *rt, uint32_t sid, uint32_t *n)
 {
+    *n = 0;
+    for (uint32_t i = 0; i < rt->nrmr; i++) {
+        const struct ck_iort_rmr *r = rt->rmr[i];
+        uint32_t attr = CK_IORT_RMR_ATTR(r->flags);
+        if (attr != CK_IORT_RMR_ATTR_NORMAL_NC && attr != CK_IORT_RMR_ATTR_NORMAL_IWB_OWB) {
+            ck_printf("smmu: stream 0x%x reserved range attr %u unsupported (fail closed)\n", sid, attr);
+            return -1;
+        }
+        for (uint32_t k = 0; k < r->nranges; k++) {
+            if (ck_pt_map(pt, r->range[k].base, r->range[k].base, r->range[k].len, WINDOW_ATTRS)) {
+                ck_printf("smmu: stream 0x%x reserved range 0x%llx+0x%llx not mappable (fail closed)\n", sid,
+                          (unsigned long long)r->range[k].base, (unsigned long long)r->range[k].len);
+                return -1;
+            }
+            (*n)++;
+        }
+    }
+    return 0;
+}
+
+/* Stage-1 window [phys, phys+len) (plus the stream's reserved ranges) for
+ * stream sid on instance index, which is up. */
+static int confine_sid(uint32_t index, uint32_t sid, uint64_t phys, uint64_t len, const struct ck_iort_route *rt,
+                       struct ck_dma_confinement *out)
+{
+    struct inst *in = &g.inst[index];
     int rc;
-    if (!ck_smmu_sid_in_range(&g.t, sid))
+    if (!ck_smmu_sid_in_range(&in->t, sid))
         return CK_SMMU_NOSTREAM; /* beyond the stream table this SMMU runs */
     int slot = -1;
     for (int i = 0; i < CK_DMA_MAX_STREAMS; i++) {
-        if (g.used[i] && g.sid[i] == sid)
+        if (in->used[i] && in->sid[i] == sid)
             return CK_SMMU_EARG;
-        if (!g.used[i] && slot < 0)
+        if (!in->used[i] && slot < 0)
             slot = i;
     }
     if (slot < 0)
         return CK_SMMU_EARG;
     struct ck_pt pt;
-    if (ck_pt_init(&pt, pt_alloc, 0) || ck_pt_map(&pt, phys, phys, len, WINDOW_ATTRS))
+    uint32_t reserved;
+    if (ck_pt_init(&pt, pt_alloc, 0) || ck_pt_map(&pt, phys, phys, len, WINDOW_ATTRS) ||
+        map_reserved(&pt, rt, sid, &reserved))
         return CK_SMMU_FAILED;
-    uint64_t *cd = g.cds + (uint64_t)slot * 8u;
+    uint64_t *cd = in->cds + (uint64_t)slot * 8u;
     if (ck_smmu_cd_stage1(cd, pt.root, (uint16_t)(slot + 1), CK_MAIR_VALUE, 16))
         return CK_SMMU_FAILED;
     uint64_t ste[8];
     ck_smmu_ste_stage1(ste, (uint64_t)(uintptr_t)cd);
     ck_mb(); /* tables and CD written before the STE goes live */
-    rc = ck_smmu_install_ste(&regs, &g.t, sid, ste, CK_SMMU_DEFAULT_SPINS);
+    rc = ck_smmu_install_ste(&in->regs, &in->t, sid, ste, CK_SMMU_DEFAULT_SPINS);
     if (rc) {
-        (void)ck_smmu_abort_ste(&regs, &g.t, sid, CK_SMMU_DEFAULT_SPINS);
+        (void)ck_smmu_abort_ste(&in->regs, &in->t, sid, CK_SMMU_DEFAULT_SPINS);
         ck_printf("smmu: stream 0x%x install failed rc=%d (stream aborts)\n", sid, rc);
         return CK_SMMU_FAILED;
     }
-    g.used[slot] = 1;
-    g.sid[slot] = sid;
-    out->smmu_base = g.base;
+    if (reserved)
+        ck_printf("smmu: stream 0x%x on 0x%llx: %u firmware-reserved range(s) identity-mapped beside the window\n",
+                  sid, (unsigned long long)in->base, reserved);
+    in->used[slot] = 1;
+    in->sid[slot] = sid;
+    out->smmu_base = in->base;
     out->stream_id = sid;
     out->iova = phys;
     out->len = len;
     return 0;
 }
 
+/* The one live instance holding stream_id confined, or NULL. Two instances
+ * holding the same stream id (the namespace is per SMMU) is ambiguous:
+ * *ambiguous is set and NULL returned. */
+static struct inst *holder(uint32_t stream_id, int *slot, int *ambiguous)
+{
+    struct inst *found = 0;
+    *ambiguous = 0;
+    for (uint32_t k = 0; k < CK_IORT_MAX_SMMUS; k++) {
+        struct inst *in = &g.inst[k];
+        if (in->state != 1)
+            continue;
+        for (int i = 0; i < CK_DMA_MAX_STREAMS; i++) {
+            if (!in->used[i] || in->sid[i] != stream_id)
+                continue;
+            if (found) {
+                *ambiguous = 1;
+                return 0;
+            }
+            found = in;
+            *slot = i;
+        }
+    }
+    return found;
+}
+
 int ck_dma_unconfine(uint32_t stream_id)
 {
-    for (int i = 0; i < CK_DMA_MAX_STREAMS; i++) {
-        if (!g.used[i] || g.sid[i] != stream_id)
-            continue;
-        if (ck_smmu_abort_ste(&regs, &g.t, stream_id, CK_SMMU_DEFAULT_SPINS))
-            return CK_SMMU_FAILED;
-        g.used[i] = 0;
-        return 0;
-    }
-    return CK_SMMU_EARG;
+    int slot = 0, amb;
+    struct inst *in = holder(stream_id, &slot, &amb);
+    if (!in)
+        return CK_SMMU_EARG; /* not confined, or confined on two SMMUs */
+    if (ck_smmu_abort_ste(&in->regs, &in->t, stream_id, CK_SMMU_DEFAULT_SPINS))
+        return CK_SMMU_FAILED;
+    in->used[slot] = 0;
+    return 0;
 }
 
 int ck_dma_faults(uint32_t stream_id, struct ck_dma_fault *first)
 {
-    if (g.state != 1)
-        return -1;
-    int matched = 0, ovf = 0, n;
-    struct ck_smmu_event ev[4];
-    do {
-        int o = 0;
-        n = ck_smmu_read_events(&regs, &g.t, ev, 4, &o);
-        ovf |= o;
-        for (int i = 0; i < n; i++) {
-            if (ev[i].sid != stream_id)
-                continue;
-            if (!matched && first) {
-                first->type = ev[i].type;
-                first->stream_id = ev[i].sid;
-                first->addr = ev[i].addr;
+    int matched = 0, ovf = 0, any = 0;
+    for (uint32_t k = 0; k < CK_IORT_MAX_SMMUS; k++) {
+        struct inst *in = &g.inst[k];
+        if (in->state != 1)
+            continue;
+        any = 1;
+        int n;
+        struct ck_smmu_event ev[4];
+        do {
+            int o = 0;
+            n = ck_smmu_read_events(&in->regs, &in->t, ev, 4, &o);
+            ovf |= o;
+            for (int i = 0; i < n; i++) {
+                if (ev[i].sid != stream_id)
+                    continue;
+                if (!matched && first) {
+                    first->type = ev[i].type;
+                    first->stream_id = ev[i].sid;
+                    first->addr = ev[i].addr;
+                }
+                matched++;
             }
-            matched++;
-        }
-    } while (n == 4);
+        } while (n == 4);
+    }
+    if (!any)
+        return -1;
     if (first)
         first->overflow = ovf;
     return matched;

@@ -113,13 +113,55 @@ struct ck_iort_other {
     uint64_t smmu_base; /* register base of the SMMUv3 node the mapping targets */
     uint32_t smmu_off;  /* offset of that node in the table */
 };
+/* Every SMMUv3 node of the table in table order (aienos#286 cut B7a): index
+ * 0 is the first node (`base`, `node_off` above repeat it); the kernel may
+ * bring up any of them (core/smmu_svc.c keeps one instance per entry). */
+struct ck_iort_node {
+    uint64_t base;
+    uint32_t off;
+};
+/* IORT RMR node (type 6, reserved memory ranges; ACPICA actbl2.h
+ * acpi_iort_rmr: flags u32 @16, rmr_count u32 @20, rmr_offset u32 @24;
+ * acpi_iort_rmr_desc: base_address u64, length u64, reserved u32, 20 bytes
+ * each). One entry per ID mapping of the node: the mapping names the SMMUv3
+ * and the inclusive StreamID range (output_base .. output_base + id_count,
+ * as Linux iort.c iort_rmr_alloc_sids reads it) whose transactions the
+ * firmware expects to reach these ranges untranslated. flags: bit 0 remap
+ * permitted, bit 1 privileged, bits [9:2] access attributes (ACPICA
+ * ACPI_IORT_RMR_ATTR_*: 4 = Normal Non-cacheable, 5 = Normal IWB-OWB, 0..3
+ * Device). On the DGX Spark (MEASURED 2026-10-10, docs/GB10_IORT_DECODE.md)
+ * one RMR node, flags 0x10 (Normal NC, remap not permitted), streams
+ * 0x0..=0x100 of the second SMMUv3 (0x13000000), three ranges:
+ * 0x280000000+2 GiB, 0x300000000+48 MiB, 0xa1600000+386 MiB. */
+#define CK_IORT_MAX_RMR 4        /* RMR (node, mapping) pairs remembered (Spark: 1) */
+#define CK_IORT_MAX_RMR_RANGES 4 /* ranges per RMR node (Spark: 3) */
+#define CK_IORT_RMR_REMAP_PERMITTED 1u
+#define CK_IORT_RMR_PRIVILEGED 2u
+#define CK_IORT_RMR_ATTR(flags) (((flags) >> 2) & 0xffu)
+#define CK_IORT_RMR_ATTR_NORMAL_NC 4u
+#define CK_IORT_RMR_ATTR_NORMAL_IWB_OWB 5u
+struct ck_iort_rmr_range {
+    uint64_t base, len;
+};
+struct ck_iort_rmr {
+    uint32_t node_off;        /* the RMR node */
+    uint32_t smmu_index;      /* index into ck_iort_smmu.smmus */
+    uint32_t sid_lo, sid_hi;  /* inclusive StreamID range on that SMMU */
+    uint32_t flags;
+    uint32_t nranges;
+    struct ck_iort_rmr_range range[CK_IORT_MAX_RMR_RANGES];
+};
 struct ck_iort_smmu {
-    uint64_t base;      /* SMMUv3 register base */
-    uint32_t node_off;  /* offset of the SMMUv3 node in the table */
+    uint64_t base;      /* SMMUv3 register base (= smmus[0].base) */
+    uint32_t node_off;  /* offset of the SMMUv3 node in the table (= smmus[0].off) */
     uint32_t nmaps;
     struct ck_iort_map map[CK_IORT_MAX_MAPS];
     uint32_t nother;
     struct ck_iort_other other[CK_IORT_MAX_OTHER];
+    uint32_t nsmmus;
+    struct ck_iort_node smmus[CK_IORT_MAX_SMMUS];
+    uint32_t nrmr;
+    struct ck_iort_rmr rmr[CK_IORT_MAX_RMR];
 };
 /* 1 found, 0 no SMMUv3 node, -1 malformed (bad signature, truncation, a
  * node or mapping array outside the table, base 0, a root complex node
@@ -141,6 +183,25 @@ int ck_iort_stream_id(const struct ck_iort_smmu *s, uint32_t segment, uint32_t r
  * window; it only names what refuses the requester. */
 int ck_iort_other_stream(const struct ck_iort_smmu *s, uint32_t segment, uint32_t rid, uint32_t *sid,
                          uint64_t *smmu_base);
+/* Route for PCI requester (segment, rid) (aienos#286 cut B7a): which SMMUv3
+ * node (index into s->smmus, base, offset) and StreamID it reaches, through
+ * the first-node mappings or the other-SMMU mappings, plus every RMR entry
+ * that covers that stream on that SMMU (pointers into s). 0 found, -1 no
+ * mapping covers the requester. Pure: reads the parse only. */
+struct ck_iort_route {
+    uint32_t smmu_index;
+    uint64_t smmu_base;
+    uint32_t smmu_off;
+    uint32_t sid;
+    uint32_t nrmr;
+    const struct ck_iort_rmr *rmr[CK_IORT_MAX_RMR];
+};
+int ck_iort_route(const struct ck_iort_smmu *s, uint32_t segment, uint32_t rid, struct ck_iort_route *out);
+/* RMR entries covering stream `sid` of the SMMUv3 node at table offset
+ * `smmu_off` (used for named components, whose target the IORT names by
+ * node). Fills out->rmr/nrmr only (and smmu_index when the node is known);
+ * returns that count. */
+uint32_t ck_iort_rmr_for(const struct ck_iort_smmu *s, uint32_t smmu_off, uint32_t sid, struct ck_iort_route *out);
 
 /* IORT named component (node type 1) whose device object name has the same
  * final segment as `name` ("USB0" matches "\\_SB_.USB0"). out gets the node

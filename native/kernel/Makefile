@@ -871,9 +871,14 @@ acpi-dev-mutant: $(KDIR)/tests/test_acpi_dev.c $(HOST_SRCS) $(KDIR)/tests/ck_tes
 # refused; SEGMENT_BLIND: lookup ignores the PCI segment; OVERLAP_OK:
 # overlapping input ranges in one segment accepted; OTHER_BLIND: mappings to
 # a second SMMUv3 node forgotten, so a GB10-shaped requester reads as "no
-# stream" instead of "behind another SMMU"). Host only (acpi.c refuses them
+# stream" instead of "behind another SMMU"; RMR_BLIND: RMR nodes ignored, so
+# the GB10 stream would lose its firmware-reserved ranges; RMR_EXCLUSIVE:
+# the RMR stream range read as exclusive, dropping the last stream (the
+# GB10, 0x100); ROUTE_FIRST: every requester routed to the first SMMU, so the
+# GB10 would be programmed on the wrong SMMU). Host only (acpi.c refuses them
 # freestanding and with CK_HARDWARE_STAGING).
-IORT_MUTANTS := CK_IORT_MUTANT_TRUNCATE CK_IORT_MUTANT_SEGMENT_BLIND CK_IORT_MUTANT_OVERLAP_OK CK_IORT_MUTANT_OTHER_BLIND
+IORT_MUTANTS := CK_IORT_MUTANT_TRUNCATE CK_IORT_MUTANT_SEGMENT_BLIND CK_IORT_MUTANT_OVERLAP_OK CK_IORT_MUTANT_OTHER_BLIND \
+                CK_IORT_MUTANT_RMR_BLIND CK_IORT_MUTANT_RMR_EXCLUSIVE CK_IORT_MUTANT_ROUTE_FIRST
 iort-mutants: $(OUT)/host/test_smmu
 	@mkdir -p $(OUT)/host-mut; fail=0; \
 	$(OUT)/host/test_smmu > $(OUT)/host-mut/iort-base.log 2>&1 || { echo "unmutated test_smmu fails"; fail=1; }; \
