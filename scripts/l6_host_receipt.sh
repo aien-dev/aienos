@@ -37,9 +37,11 @@ run_parity() {
   cargo test --release -p aienos-infer --test forward --no-run
   echo "RUN: AIENOS_MODEL=$MODEL taskset -c $PARITY_CORE $pcmd"
   taskset -c "$PARITY_CORE" $pcmd >"$TMP/parity.txt" 2>"$TMP/parity.err" || rc=$?
-  echo "exit=$rc"; grep -E '^(PARITY_[A-Z0-9_]+):' "$TMP/parity.txt" | cut -c1-200
-  grep -q '^PARITY_TOKENS_IDENTICAL:' "$TMP/parity.txt" || { echo "parity test produced no PARITY lines (see build/test error)"; tail -20 "$TMP/parity.err"; exit 3; }
-  local pv; pv() { sed -n "s/^$1: //p" "$TMP/parity.txt"; }
+  # libtest prints "test name ... " without a newline, so the first PARITY line is not at line start.
+  grep -oE "PARITY_[A-Z0-9_]+: .*" "$TMP/parity.txt" >"$TMP/parity.lines" || true
+  echo "exit=$rc"; cut -c1-200 "$TMP/parity.lines"
+  grep -q "^PARITY_TOKENS_IDENTICAL:" "$TMP/parity.lines" || { echo "parity test produced no PARITY lines (see build/test error)"; tail -20 "$TMP/parity.err"; exit 3; }
+  local pv; pv() { sed -n "s/^$1: //p" "$TMP/parity.lines"; }
   local recorded="[]"; [ -f "$rec" ] && recorded="$(jq -c '.legs.f32_core19.tokens' "$rec")"
   jq -n --arg ident "$(pv PARITY_TOKENS_IDENTICAL)" --arg div "$(pv PARITY_FIRST_DIVERGENCE)" \
     --argjson cmp "$(pv PARITY_COMPARED_POSITIONS)" --argjson mx "$(pv PARITY_MAX_LOGIT_ABS_DIFF)" \

@@ -125,3 +125,20 @@ its output is pasted into the PR body.
 - Default path stays f32. No kernel source outside `crates/aienos-infer`. Nothing about the accelerator.
 - The f32 dot code and results stay bit-identical. No new dependencies. No Python.
 - The speed receipt `evidence/l6_host_3f5a22426976_l6b.json` is not rewritten.
+
+## Results (appended after the run; the sections above are unchanged)
+
+Run on the Spark (spark-b87b) at commit b2c4710 plus the receipt-script parsing fix, release build,
+`RUSTFLAGS="-C target-feature=+dotprod,+i8mm"`, pinned to cpu19 (Cortex-X925), `quietlock check` clear.
+Evidence: `evidence/l6_host_3f5a22426976_l6b_parity.json`. The run was repeated once after fixing the script's
+line parsing (libtest prints `test name ... ` without a newline); the numbers were identical both times.
+
+- Condition 2, parity: **FAIL**. The in-run f32 tokens equal the recorded f32 tokens (`f32_matches_recorded: true`).
+  The int8 tokens match for indexes 0 to 11 (the whole first reply, "The capital of France is Paris." and the
+  end-of-turn that follows) and diverge at index 12 (f32 4897, int8 53692). Max absolute logit difference over the
+  13 comparable positions 0 to 12: 1.2880421 at position 11 (per position: 0.670, 0.676, 0.639, 0.501, 0.566,
+  0.552, 0.434, 0.733, 0.597, 0.612, 0.781, 1.288, 1.068). Nothing was tuned. The same divergence is visible in
+  the already committed speed receipt (int8 text continues "Actually, ..." where f32 says "I apologize ...").
+- Conditions 1, 3 and 4: tests as registered, all PASS (`cargo test --release -p aienos-infer`: 32 library
+  tests, 4 model-backed forward tests (llama.cpp comparison, int8 included) and 15 other tests pass, 2 ignored).
+- Therefore the PR stays a draft: condition 2 is not met.
