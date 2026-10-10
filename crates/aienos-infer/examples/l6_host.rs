@@ -7,12 +7,15 @@
 //! times each `forward` call in microseconds.
 //!
 //! Env: AIENOS_MODEL (default $HOME/models/aien-mail/Llama-3.2-1B-Instruct-Q4_K_M.gguf),
-//! AIENOS_N (default 64), AIENOS_COMMIT (printed as `commit`), AIENOS_DOT
-//! (`f32`, the default, or `int8`: activations on the Q8_K grid, i32 dots;
-//! build with `RUSTFLAGS="-C target-feature=+dotprod,+i8mm"` for `usdot`).
+//! AIENOS_N (default 64), AIENOS_COMMIT (printed as `commit`), AIENOS_DOT:
+//! `f32` forces the f32 path whatever the CPU features are (the rollback),
+//! `int8` forces activations on the Q8_K grid with i32 dots, unset or `auto`
+//! runs `DotPath::select` with the features read from the Linux auxiliary
+//! vector (f32 while `INT8_PROMOTION_DEFAULT` is false). Build with
+//! `RUSTFLAGS="-C target-feature=+dotprod,+i8mm"` for `usdot`.
 //! Output: one `key: value` line per fact. Exit 0 ok, 1 parity FAIL, 2 wrong model.
 
-use aienos_infer::{argmax, DecodeState, Gguf, Model, Tokenizer};
+use aienos_infer::{argmax, DecodeState, DotPath, DotSetting, Features, Gguf, Model, Tokenizer};
 use std::time::Instant;
 
 const PROMPT: &str = "What is the capital of France?";
@@ -92,6 +95,32 @@ fn sha256_hex(data: &[u8]) -> String {
     h.iter().map(|x| format!("{x:08x}")).collect()
 }
 
+/// CPU features from the Linux auxiliary vector (`AT_HWCAP`, `AT_HWCAP2`),
+/// read from `/proc/self/auxv` (the vector `getauxval` returns) so that no
+/// `unsafe` is needed. aarch64 only: the bit meanings are arm64's. Any read
+/// problem means no features, which keeps the f32 path.
+fn host_features() -> Features {
+    if !cfg!(target_arch = "aarch64") {
+        return Features::NONE;
+    }
+    const AT_HWCAP: u64 = 16;
+    const AT_HWCAP2: u64 = 26;
+    let Ok(raw) = std::fs::read("/proc/self/auxv") else {
+        return Features::NONE;
+    };
+    let (mut hwcap, mut hwcap2) = (0u64, 0u64);
+    for pair in raw.as_chunks::<16>().0 {
+        let key = u64::from_ne_bytes(pair[..8].try_into().expect("8 bytes"));
+        let val = u64::from_ne_bytes(pair[8..].try_into().expect("8 bytes"));
+        match key {
+            AT_HWCAP => hwcap = val,
+            AT_HWCAP2 => hwcap2 = val,
+            _ => {}
+        }
+    }
+    Features::from_hwcap(hwcap, hwcap2)
+}
+
 fn join(v: &[impl ToString]) -> String {
     v.iter()
         .map(|x| x.to_string())
@@ -134,17 +163,24 @@ fn main() {
     println!("prompt_ids: {}", join(&ids));
     println!("threads: 1");
 
-    let dot = std::env::var("AIENOS_DOT").unwrap_or_else(|_| "f32".into());
+    let raw = std::env::var("AIENOS_DOT").ok();
+    let setting = DotSetting::parse(raw.as_deref()).unwrap_or_else(|| {
+        eprintln!("AIENOS_DOT must be f32, int8 or auto, got {raw:?}");
+        std::process::exit(2);
+    });
+    let features = host_features();
+    let path = DotPath::resolve(features, setting);
     let mut st = DecodeState::new(&m, ids.len() + n + 8);
-    match dot.as_str() {
-        "f32" => {}
-        "int8" => st.int8_dot = true,
-        other => {
-            eprintln!("AIENOS_DOT must be f32 or int8, got {other:?}");
-            std::process::exit(2);
-        }
-    }
-    println!("dot: {dot}");
+    st.int8_dot = path == DotPath::Int8;
+    println!(
+        "features: dotprod={} i8mm={}",
+        features.dotprod, features.i8mm
+    );
+    println!("dot_setting: {}", raw.as_deref().unwrap_or("auto"));
+    println!(
+        "dot: {}",
+        if path == DotPath::Int8 { "int8" } else { "f32" }
+    );
     let t0 = Instant::now();
     st.prefill(&m, &ids).expect("prefill");
     let prefill_us = t0.elapsed().as_micros() as u64;

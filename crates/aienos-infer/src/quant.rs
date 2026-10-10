@@ -387,17 +387,13 @@ fn nibble_dot_i8(q: &[u8; Q4K_SUB], y: &[i8; 2 * Q4K_SUB]) -> (i32, i32) {
     (lo, hi)
 }
 
-/// Dot of one Q4_K block with 256 Q8_K activations (`y`, block scale `yd`,
-/// 16 group sums `ys`): ggml's `ggml_vec_dot_q4_K_q8_K`, i32 accumulation,
-/// `d*sum(sc*q.y) - dmin*sum(m*sum(y))`.
-pub fn dot_q4k_q8k(
+/// The two i32 accumulations of one Q4_K block against 256 Q8_K activations:
+/// `(sum(sc*q.y), sum(m*sum(y)))`.
+pub(crate) fn q4k_q8k_accum(
     block: &[u8; Q4K_BYTES],
     y: &[i8; QK_K],
-    yd: f32,
     ys: &[i32; QK_K / Q8K_GROUP],
-) -> f32 {
-    let d = rd_f16(block, 0);
-    let dmin = rd_f16(block, 2);
+) -> (i32, i32) {
     let scales = &block[4..16];
     let qs: &[u8; 128] = block[16..144].try_into().expect("128 nibble bytes");
     let mut sumi = 0i32;
@@ -412,6 +408,21 @@ pub fn dot_q4k_q8k(
         mins +=
             m1 as i32 * (ys[4 * j] + ys[4 * j + 1]) + m2 as i32 * (ys[4 * j + 2] + ys[4 * j + 3]);
     }
+    (sumi, mins)
+}
+
+/// Dot of one Q4_K block with 256 Q8_K activations (`y`, block scale `yd`,
+/// 16 group sums `ys`): ggml's `ggml_vec_dot_q4_K_q8_K`, i32 accumulation,
+/// `d*sum(sc*q.y) - dmin*sum(m*sum(y))`.
+pub fn dot_q4k_q8k(
+    block: &[u8; Q4K_BYTES],
+    y: &[i8; QK_K],
+    yd: f32,
+    ys: &[i32; QK_K / Q8K_GROUP],
+) -> f32 {
+    let d = rd_f16(block, 0);
+    let dmin = rd_f16(block, 2);
+    let (sumi, mins) = q4k_q8k_accum(block, y, ys);
     yd * (d * sumi as f32 - dmin * mins as f32)
 }
 
@@ -443,15 +454,12 @@ fn q6_quarter_i8<const SL: u32, const SH: u32>(
     acc
 }
 
-/// Dot of one Q6_K block with 256 Q8_K activations: ggml's
-/// `ggml_vec_dot_q6_K_q8_K` (i32 accumulation).
-pub fn dot_q6k_q8k(
+/// The i32 accumulation of one Q6_K block against 256 Q8_K activations.
+pub(crate) fn q6k_q8k_isum(
     block: &[u8; Q6K_BYTES],
     y: &[i8; QK_K],
-    yd: f32,
     ys: &[i32; QK_K / Q8K_GROUP],
-) -> f32 {
-    let d = rd_f16(block, 208);
+) -> i32 {
     let mut isum = 0i32;
     for half in 0..2 {
         let ql = &block[64 * half..64 * half + 64];
@@ -483,7 +491,19 @@ pub fn dot_q6k_q8k(
         isum += q6_quarter_i8::<4, 4>(ql0, qh, s2, y2, b2);
         isum += q6_quarter_i8::<4, 6>(ql1, qh, s3, y3, b3);
     }
-    yd * d * isum as f32
+    isum
+}
+
+/// Dot of one Q6_K block with 256 Q8_K activations: ggml's
+/// `ggml_vec_dot_q6_K_q8_K` (i32 accumulation).
+pub fn dot_q6k_q8k(
+    block: &[u8; Q6K_BYTES],
+    y: &[i8; QK_K],
+    yd: f32,
+    ys: &[i32; QK_K / Q8K_GROUP],
+) -> f32 {
+    let d = rd_f16(block, 208);
+    yd * d * q6k_q8k_isum(block, y, ys) as f32
 }
 
 /// Dot of a whole quantized row (`act.len()` weights) with Q8_K activations.
@@ -897,8 +917,7 @@ mod tests {
             let d = act.scales()[0];
             // Bounds, and the largest-magnitude value lands on -127.
             assert!(act.values().iter().all(|&v| v >= -127));
-            let imax = (0..QK_K)
-                .fold(0, |m, i| if x[i].abs() > x[m].abs() { i } else { m });
+            let imax = (0..QK_K).fold(0, |m, i| if x[i].abs() > x[m].abs() { i } else { m });
             assert_eq!(act.values()[imax], -127);
             // Reconstruction error is at most half a step (plus rounding slack).
             for (&xi, &qi) in x.iter().zip(act.values()) {

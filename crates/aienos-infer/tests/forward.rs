@@ -270,10 +270,10 @@ fn int8_parity_64_tokens_vs_f32() {
         })
         .collect();
     let (maxpos, maxdiff) =
-        per_pos
-            .iter()
-            .enumerate()
-            .fold((0, 0f32), |(bp, bv), (p, &v)| if v > bv { (p, v) } else { (bp, bv) });
+        per_pos.iter().enumerate().fold(
+            (0, 0f32),
+            |(bp, bv), (p, &v)| if v > bv { (p, v) } else { (bp, bv) },
+        );
     let join = |v: &[String]| v.join(" ");
     println!(
         "PARITY_TOKENS_IDENTICAL: {}",

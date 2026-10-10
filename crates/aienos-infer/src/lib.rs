@@ -30,6 +30,7 @@ pub mod quant;
 pub mod tokenizer;
 
 pub use decode::{argmax, generate_greedy, DecodeState};
+pub use dotpath::{DotPath, DotSetting, Features, INT8_PROMOTION_DEFAULT};
 pub use gguf::{ArrayView, GgmlType, Gguf, GgufError, TensorInfo, Value, ValueType};
 pub use model::{InferError, Model};
 pub use tokenizer::Tokenizer;

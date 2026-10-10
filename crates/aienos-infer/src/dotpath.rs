@@ -1,3 +1,128 @@
+//! Choice between the f32 and the int8 activation dot path (aienos#34 L6-B,
+//! qualification in `docs/l6b-int8-qualification.md`).
+//!
+//! The crate is `no_std` and `forbid(unsafe_code)`, so it cannot read CPU
+//! registers. The caller detects CPU features and passes a [`Features`] value.
+//! The host harness (`examples/l6_host.rs`) fills it from the Linux auxiliary
+//! vector.
+//!
+//! Kernel hook point (not implemented here; kernel register reads go through
+//! the manual-guard process): the native kernel must fill [`Features`] from
+//! the AArch64 ID registers, `dotprod` from `ID_AA64ISAR0_EL1.DP` (field value
+//! 1 or more) and `i8mm` from `ID_AA64ISAR1_EL1.I8MM` (field value 1 or more),
+//! read at EL1 on the boot core and checked on every core that will decode.
+//!
+//! Rollback: [`INT8_PROMOTION_DEFAULT`] is `false`. With it `false` nothing
+//! selects int8 unless the caller explicitly asks for it. On a host,
+//! `AIENOS_DOT=f32` forces f32 regardless of features.
+
+/// Build-time switch for the kernel. `false`: int8 is never chosen by feature
+/// detection alone, the f32 path stays the default. Changing it to `true` is
+/// the promotion, changing it back is the rollback.
+pub const INT8_PROMOTION_DEFAULT: bool = false;
+
+/// CPU features that make the int8 path fast (`sdot`/`udot` and `usdot`).
+/// Supplied by the caller; this crate never probes the CPU.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Features {
+    /// Armv8.2 dot product (`HWCAP_ASIMDDP`, `ID_AA64ISAR0_EL1.DP`).
+    pub dotprod: bool,
+    /// Armv8.6 int8 matrix multiply (`HWCAP2_I8MM`, `ID_AA64ISAR1_EL1.I8MM`).
+    pub i8mm: bool,
+}
+
+/// `HWCAP_ASIMDDP` in the Linux `AT_HWCAP` word (arm64).
+pub const HWCAP_ASIMDDP: u64 = 1 << 20;
+/// `HWCAP2_I8MM` in the Linux `AT_HWCAP2` word (arm64).
+pub const HWCAP2_I8MM: u64 = 1 << 13;
+
+impl Features {
+    /// No feature present.
+    pub const NONE: Features = Features {
+        dotprod: false,
+        i8mm: false,
+    };
+
+    /// Decode the arm64 Linux auxiliary-vector words `AT_HWCAP` and `AT_HWCAP2`.
+    pub fn from_hwcap(hwcap: u64, hwcap2: u64) -> Self {
+        Self {
+            dotprod: hwcap & HWCAP_ASIMDDP != 0,
+            i8mm: hwcap2 & HWCAP2_I8MM != 0,
+        }
+    }
+
+    /// Both features present.
+    pub fn both(&self) -> bool {
+        self.dotprod && self.i8mm
+    }
+}
+
+/// Which activation path the decoder runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DotPath {
+    /// f32 activations (the default and the fallback).
+    F32,
+    /// Q8_K int8 activations with i32 dots.
+    Int8,
+}
+
+impl DotPath {
+    /// Selector with the build-time default ([`INT8_PROMOTION_DEFAULT`]).
+    pub fn select(features: Features, requested: bool) -> Self {
+        Self::select_with(features, requested, INT8_PROMOTION_DEFAULT)
+    }
+
+    /// Int8 only when the caller requests it, or when promotion is enabled and
+    /// both features are present. Otherwise f32. An explicit request is
+    /// honoured without the features: the int8 code is portable, only slower.
+    pub fn select_with(features: Features, requested: bool, promotion: bool) -> Self {
+        if requested || (promotion && features.both()) {
+            DotPath::Int8
+        } else {
+            DotPath::F32
+        }
+    }
+
+    /// Apply an operator setting (`AIENOS_DOT`) with the build-time default.
+    pub fn resolve(features: Features, setting: DotSetting) -> Self {
+        Self::resolve_with(features, setting, INT8_PROMOTION_DEFAULT)
+    }
+
+    /// `F32` forces f32 whatever the features and promotion say (the
+    /// rollback). `Int8` forces int8. `Auto` runs the selector.
+    pub fn resolve_with(features: Features, setting: DotSetting, promotion: bool) -> Self {
+        match setting {
+            DotSetting::F32 => DotPath::F32,
+            DotSetting::Int8 => DotPath::Int8,
+            DotSetting::Auto => Self::select_with(features, false, promotion),
+        }
+    }
+}
+
+/// The operator's choice (host: the `AIENOS_DOT` environment variable).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DotSetting {
+    /// Let the selector decide (variable unset or `auto`).
+    Auto,
+    /// Force f32, the rollback.
+    F32,
+    /// Force int8.
+    Int8,
+}
+
+impl DotSetting {
+    /// Parse the variable's value (`None` when unset). Unknown text is `None`
+    /// so the caller can refuse it rather than guess.
+    pub fn parse(value: Option<&str>) -> Option<Self> {
+        match value {
+            None | Some("auto") => Some(DotSetting::Auto),
+            Some("f32") => Some(DotSetting::F32),
+            Some("int8") => Some(DotSetting::Int8),
+            Some(_) => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -21,7 +146,7 @@ mod tests {
 
     #[test]
     fn select_matrix_all_combinations() {
-        use DotPath::{F32, Int8};
+        use DotPath::{Int8, F32};
         // (features, requested, promotion, expected)
         let rows: [(Features, bool, bool, DotPath); 16] = [
             (NONE, false, false, F32),
@@ -67,7 +192,7 @@ mod tests {
 
     #[test]
     fn default_constant_off_and_auto_is_f32_with_features() {
-        assert!(!INT8_PROMOTION_DEFAULT);
+        assert!(!core::hint::black_box(INT8_PROMOTION_DEFAULT));
         assert_eq!(DotPath::select(BOTH, false), DotPath::F32);
         assert_eq!(DotPath::resolve(BOTH, DotSetting::Auto), DotPath::F32);
         assert_eq!(DotPath::select(BOTH, true), DotPath::Int8);
