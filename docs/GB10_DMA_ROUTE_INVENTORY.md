@@ -99,13 +99,17 @@ system memory this will not be coherent with direct CPU mappings."
 
 Our layer: `nvrm_alloc` forces `GPU_CACHEABLE_YES`; `nvrm_alloc_gpu_uncached`
 forces `NO` and says it is "for memory both sides poll, not for bulk data".
-[SOURCE physics:nvrm/nvrm.c:465-474,500] The GPFIFO ring plus USERD and the
-error notifier are allocated with `nvrm_alloc`, so GPU-cacheable YES at this
-commit. [SOURCE physics:nvrm/nvrm.c:631-633] The project rule says GPFIFO/USERD
-must be GPU-uncached (CHIPWAIT root cause, omega HD-16); I did not re-read the
-omega evidence, and I did not check whether omega overrides this elsewhere.
-[UNKNOWN] If it does not, the Linux path allocates them cached, and the native
-backend must decide this on purpose. [INFERRED]
+[SOURCE physics:nvrm/nvrm.c:465-474,500] On physics main `9f96f25` the GPFIFO
+ring plus USERD are allocated with `nvrm_alloc_gpu_uncached` (comment: a
+GPU-cached allocation can retain their previous contents on GB10; CPU store
+barriers alone do not invalidate that cached copy), so the Linux path already
+honours the project rule for them (CHIPWAIT root cause, omega HD-16, physics#28).
+The error notifier is still allocated with `nvrm_alloc`, GPU-cacheable YES.
+[SOURCE physics:nvrm/nvrm.c:628-632 at 9f96f25, read from GitHub by the reviewer;
+an older local checkout e95e3ed predates the fix and showed both cached] Whether
+the cached notifier matters depends on who reads it and when; not examined here.
+[UNKNOWN] The native backend must make the same choice explicitly for every
+host-polled word. [INFERRED]
 
 What aienos does today:
 
