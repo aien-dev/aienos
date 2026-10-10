@@ -121,6 +121,14 @@ static void iort_notes(const uint8_t *t)
         uint32_t mcount = rd32(n + 8), moff = rd32(n + 12);
         if (n[0] == 4 && nlen >= 24)
             printf("# iort: node@0x%x smmuv3 base=0x%llx\n", off, (unsigned long long)rd64(n + 16));
+        else if (n[0] == 6 && nlen >= 28) {
+            uint32_t flags = rd32(n + 16), rcount = rd32(n + 20), roff = rd32(n + 24);
+            printf("# iort: node@0x%x rmr flags=0x%x (attr=%u remap=%u priv=%u) ranges=%u maps=%u\n", off, flags,
+                   (flags >> 2) & 0xff, flags & 1, (flags >> 1) & 1, rcount, mcount);
+            for (uint32_t r = 0; r < rcount && roff + (r + 1) * 20 <= nlen; r++)
+                printf("#   reserved base=0x%llx len=0x%llx\n", (unsigned long long)rd64(n + roff + r * 20),
+                       (unsigned long long)rd64(n + roff + r * 20 + 8));
+        }
         else if (n[0] == 1 && nlen > 29) {
             char name[64];
             uint32_t end = mcount ? moff : nlen, k = 0;
@@ -225,16 +233,31 @@ int main(int argc, char **argv)
     if (iort) {
         iort_notes(iort);
         prc = ck_iort_parse(iort, &first);
-        if (prc == 1)
-            printf("# smmu: the kernel drives the first SMMUv3 node: node@0x%x base=0x%llx (pci maps=%u, maps to other SMMUs=%u)\n",
-                   first.node_off, (unsigned long long)first.base, first.nmaps, first.nother);
-        if (prc == 1)
-            for (uint32_t i = 0; i < first.nother; i++)
-                printf("# smmu: segment %u rid 0x%x..0x%x -> stream 0x%x.. on SMMUv3 node@0x%x base=0x%llx (not driven: CK_SMMU_OTHER)\n",
+        if (prc == 1) {
+            printf("# smmu: %u SMMUv3 node(s), each brought up by its first confined stream (cut B7a); first: node@0x%x base=0x%llx (pci maps=%u, maps to other SMMUs=%u, rmr nodes=%u)\n",
+                   first.nsmmus, first.node_off, (unsigned long long)first.base, first.nmaps, first.nother, first.nrmr);
+            for (uint32_t i = 1; i < first.nsmmus; i++)
+                printf("# smmu: instance %u: node@0x%x base=0x%llx\n", i, first.smmus[i].off,
+                       (unsigned long long)first.smmus[i].base);
+            for (uint32_t i = 0; i < first.nother; i++) {
+                struct ck_iort_route rt;
+                int rrc = ck_iort_route(&first, first.other[i].map.segment, first.other[i].map.input_base, &rt);
+                printf("# smmu: segment %u rid 0x%x..0x%x -> stream 0x%x.. on SMMUv3 node@0x%x base=0x%llx (route: instance %d, reserved ranges for the first rid: %u)\n",
                        first.other[i].map.segment, first.other[i].map.input_base,
                        first.other[i].map.input_base + first.other[i].map.id_count, first.other[i].map.output_base,
-                       first.other[i].smmu_off, (unsigned long long)first.other[i].smmu_base);
-        else
+                       first.other[i].smmu_off, (unsigned long long)first.other[i].smmu_base,
+                       rrc == 0 ? (int)rt.smmu_index : -1, rrc == 0 ? rt.nrmr : 0u);
+            }
+            for (uint32_t i = 0; i < first.nrmr; i++) {
+                uint32_t attr = CK_IORT_RMR_ATTR(first.rmr[i].flags);
+                printf("# smmu: rmr node@0x%x: streams 0x%x..0x%x of instance %u, %u range(s), attr %u (%s)\n",
+                       first.rmr[i].node_off, first.rmr[i].sid_lo, first.rmr[i].sid_hi, first.rmr[i].smmu_index,
+                       first.rmr[i].nranges, attr,
+                       attr == CK_IORT_RMR_ATTR_NORMAL_NC || attr == CK_IORT_RMR_ATTR_NORMAL_IWB_OWB
+                           ? "identity-mapped beside a confined window"
+                           : "unsupported: confinement refused");
+            }
+        } else
             printf("# smmu: ck_iort_parse=%d (%s)\n", prc, prc == 0 ? "no SMMUv3 node" : "malformed");
         parse_notes(iort);
     } else

@@ -113,7 +113,7 @@ void ck_irq_cpu_enable(int on);
 #define CK_SMMU_FAILED (-2)
 #define CK_SMMU_NOSTREAM (-3)
 #define CK_SMMU_EARG (-4)
-#define CK_SMMU_OTHER (-5) /* the device's stream belongs to an SMMU this kernel does not drive */
+#define CK_SMMU_OTHER (-5) /* the stream belongs to an SMMUv3 node the IORT parser did not keep (beyond CK_IORT_MAX_SMMUS) */
 #define CK_DMA_MAX_STREAMS 8
 struct ck_dma_confinement {
     uint64_t smmu_base;
@@ -122,10 +122,12 @@ struct ck_dma_confinement {
 };
 /* `segment` is the PCI segment of the device and `rid` its requester id
  * (bus<<8 | dev<<3 | fn) inside that segment: the IORT resolves the stream
- * id within that segment's root complex only. Also CK_SMMU_OTHER when that
- * root complex maps the requester to an SMMUv3 other than the one this
- * kernel brings up (the IORT's first); *out then names that SMMU and the
- * stream, with len 0, for the report. Never grants unconfined. */
+ * id within that segment's root complex only, and names the SMMUv3 node
+ * it sits behind; that node is brought up on its first confined stream
+ * (cut B7a: several SMMUs, the Spark GB10 is stream 0x100 of the second).
+ * Firmware-reserved ranges the IORT (RMR) names for the stream are
+ * identity-mapped beside the window; an RMR attribute other than Normal
+ * memory refuses the confinement (CK_SMMU_FAILED). Never grants unconfined. */
 int ck_dma_confine(uint32_t segment, uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out);
 /* Same window for an ACPI platform device (no PCI requester id), added for
  * the platform xHCI path (NEXT-PHASE-3 cut 2): the stream comes from the
@@ -133,9 +135,9 @@ int ck_dma_confine(uint32_t segment, uint32_t rid, uint64_t phys, uint64_t len, 
  * acpi_name ("USB0" for "\\_SB_.USB0"), through its single mapping. Returns
  * as ck_dma_confine, plus CK_SMMU_NOSTREAM when no named component or no
  * stream mapping exists, CK_SMMU_EARG when two named components carry that
- * name, and CK_SMMU_OTHER when the stream belongs to an SMMUv3 other than
- * the one this kernel brings up (the IORT's first; *out then names that
- * SMMU and the stream, with len 0, for the report). Never grants unconfined. */
+ * name, and CK_SMMU_OTHER when the stream belongs to an SMMUv3 node the
+ * parser did not keep (*out then names that SMMU and the stream, with len
+ * 0, for the report). Never grants unconfined. */
 int ck_dma_confine_named(const char *acpi_name, uint64_t phys, uint64_t len, struct ck_dma_confinement *out);
 
 /* ACPI platform devices (core/acpi_platform.c, NEXT-PHASE-3 cut 2): a
@@ -161,11 +163,13 @@ struct ck_acpi_scan_info {
 int ck_acpi_platform_devices(const char *const *ids, unsigned nids, struct ck_platform_dev *out, unsigned max,
                              struct ck_acpi_scan_info *info);
 /* Return a confined stream to abort (after the device's bus mastering is
- * off). 0 ok, CK_SMMU_EARG if not confined, CK_SMMU_FAILED on a command
+ * off). 0 ok, CK_SMMU_EARG if not confined (or, stream ids being per SMMU,
+ * confined on two SMMUs at once: ambiguous), CK_SMMU_FAILED on a command
  * timeout. */
 int ck_dma_unconfine(uint32_t stream_id);
-/* Drain the SMMU event queue. Returns how many records named `stream_id`
- * (others are dropped); *first gets the first of them. -1 if no SMMU. */
+/* Drain the event queue of every SMMU brought up. Returns how many records
+ * named `stream_id` (others are dropped); *first gets the first of them.
+ * -1 if no SMMU is up. */
 #define CK_DMA_FAULT_TRANSLATION 0x10u /* SMMUv3 F_TRANSLATION event */
 struct ck_dma_fault {
     uint32_t type, stream_id;

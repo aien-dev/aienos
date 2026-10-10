@@ -32,10 +32,9 @@ lines cited below match the pinned lines in that map).
 | IORT table is present (3904 bytes); Linux reports one Arm SMMUv3, 40-bit output, 2-level stream table covering 25 of 32 stream-ID bits, default domain Translated | [SOURCE docs/GB10_PLATFORM_TOPOLOGY.md:68-74] (Linux observed) |
 | GB10 is alone in IOMMU group 20 | [SOURCE docs/GB10_PLATFORM_TOPOLOGY.md:73-74] |
 | The GB10's IORT stream ID and stream table entry are not decoded by this project | [SOURCE docs/GB10_PLATFORM_TOPOLOGY.md:76-78,165] |
-| Resolved in cut B5: GB10 = StreamID 0x100 on the IORT's second SMMUv3 node (base 0x13000000); the kernel today drives only the first (0x13800000) | [SOURCE docs/GB10_IORT_DECODE.md] |
-| Which SMMU node the GB10's IORT mapping points at (the kernel drives only the IORT's first SMMUv3 node) | [UNKNOWN] |
-| Whether the GB10's stream ID is below the 4096 stream IDs the aienos stream table covers (`STE_N`) | [UNKNOWN] |
-| Number of SMMUs on the machine, beyond "an Arm SMMUv3" | [UNKNOWN] (platform USB nodes may sit behind a second one; see `CK_SMMU_OTHER`, native/kernel/include/ck.h:99-100) |
+| Resolved in cut B5: GB10 = StreamID 0x100 on the IORT's second SMMUv3 node (base 0x13000000). Cut B7a (QEMU/host only): the kernel routes a requester to its own SMMUv3 node and brings that node up on first use, mapping the RMR ranges beside the window; running this on SMMUv3 B is cut B7b (machine window) | [SOURCE docs/GB10_IORT_DECODE.md sections 4, 9] |
+| Stream 0x100 fits both the linear table (`STE_N` 4096) and the two-level table | [SOURCE native/kernel/core/smmu_svc.c] |
+| Three SMMUv3 nodes in the IORT (A 0x13800000 PCI segments 0..14 + USB, B 0x13000000 segment 15 + HDA0, C platform peripherals) | [SOURCE docs/GB10_IORT_DECODE.md section 3] |
 
 Note: the kernel's lookup is `ck_iort_stream_id(segment, rid)`. For the GB10 the
 inputs would be segment 15 and rid 0x0100 (bus 1, device 0, function 0).

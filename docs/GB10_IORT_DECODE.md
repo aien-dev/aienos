@@ -103,14 +103,14 @@ regions for group 20. [SOURCE linux iort.c:361; sysfs above]
 
 | Fact | Where in the kernel | Consequence |
 |---|---|---|
-| Parser keeps only the first SMMUv3 node (`pass == 0 && type == IORT_NODE_SMMUV3 && !found`) | native/kernel/core/acpi.c:368-375 | SMMUv3 A is the only SMMU aienos can bring up; SMMUv3 B (GB10) is never programmed |
+| Parser kept only the first SMMUv3 node (until cut B7a, section 9: now every node, `smmus[]`) | native/kernel/core/acpi.c | until B7a SMMUv3 A was the only SMMU aienos could bring up; B is now brought up by its first confined stream |
 | Root-complex mappings whose output is another SMMU are skipped (`rd32(e + 12) != s.node_off`) | native/kernel/core/acpi.c:386-387 | segment 15 has no mapping in `g.iort`; `ck_iort_stream_id(15, 0x100)` returns -1 |
-| `ck_dma_confine` then returns `CK_SMMU_NOSTREAM` | native/kernel/core/smmu_svc.c:142-143 | fail closed: a GB10 DMA window is refused today, never granted unconfined |
+| `ck_dma_confine` returned `CK_SMMU_NOSTREAM` (B5), `CK_SMMU_OTHER` (B6); since B7a it routes to SMMUv3 B | native/kernel/core/smmu_svc.c | fail closed throughout: never granted unconfined; a GB10 window now needs a caller (B7b) |
 | Only the named-component path knows the "other SMMU" case (`CK_SMMU_OTHER`) | native/kernel/core/smmu_svc.c:162-167; native/kernel/include/ck.h:116 | the PCI path reports NOSTREAM where OTHER is the truth; a report-only mismatch, not a safety hole |
 | Range test `rel > m->id_count` | native/kernel/core/acpi.c:430 | inclusive, agrees with Linux; no change needed |
 | `STE_N 4096` | native/kernel/core/smmu_svc.c:14 | StreamID 0x100 fits |
 | Window leaf is Normal Non-cacheable | native/kernel/core/smmu_svc.c:16-19 | same attribute the RMR demands (Normal NC), so the RMR ranges could be expressed as windows [INFERRED] |
-| One contiguous span per stream | native/kernel/core/smmu_svc.c:15-19 (B4 report section 1) | the three RMR ranges plus a ring/completion window need at least four spans for StreamID 0x100 [INFERRED] |
+| One window plus the stream's RMR ranges per stream (B7a) | native/kernel/core/smmu_svc.c `map_reserved` | the three RMR ranges are identity-mapped beside the window in one stage-1 table |
 
 Gaps a future cut would have to close before any GB10 DMA (design facts, not a plan):
 1. Bring up SMMUv3 B (base 0x13000000) in addition to or instead of A: own
@@ -144,3 +144,62 @@ on 0x13000000), `iort-mutants` with the new `CK_IORT_MUTANT_OTHER_BLIND`
 killed, and `ck_acpi_scan --iort` on the real table printing the segment 15
 mapping as not driven. The second SMMU is still not brought up; that is a
 later cut with its own approval.
+
+## 9. Cut B7a (done, QEMU/host only): several SMMUs, RMR honoured
+
+Approval: aienos#286 (comment of 2026-10-10). Hardware boot is cut B7b and
+needs a machine window; nothing here was run on the Spark's SMMUs.
+
+What changed:
+
+- `ck_iort_parse` keeps every SMMUv3 node in table order (`smmus[]`,
+  `nsmmus`, cap `CK_IORT_MAX_SMMUS`) and every RMR node (type 6) that maps
+  to one of them (`rmr[]`: SMMU index, inclusive stream range, flags, up to
+  `CK_IORT_MAX_RMR_RANGES` page-aligned non-empty ranges). A malformed RMR
+  node (zero or too many descriptors, descriptor array past the node,
+  unaligned or empty range) refuses the whole table, like every other
+  malformed node.
+- `ck_iort_route(segment, rid)` is the one routing lookup: the SMMU index,
+  base and node offset, the stream id, and the RMR nodes covering that
+  stream. `ck_iort_rmr_for(smmu_off, sid)` serves the named-component path.
+- `core/smmu_svc.c` holds one instance block per SMMUv3 node. The IORT is
+  parsed once per boot; an instance is brought up (own stream table, queues,
+  context descriptors, `GBPA.ABORT` first) the first time a stream behind it
+  is confined. `ck_dma_confine` routes through `ck_iort_route`;
+  `ck_dma_confine_named` finds the instance by the component's target node.
+  `CK_SMMU_OTHER` is now reported only for a node the parser did not keep
+  (beyond `CK_IORT_MAX_SMMUS`). `ck_dma_unconfine` looks through every live
+  instance (the same stream id confined on two SMMUs at once is ambiguous
+  and refused with `CK_SMMU_EARG`; stream ids are per SMMU, IHI0070H.a
+  "The StreamID namespace is per-SMMU."). `ck_dma_faults` drains every live
+  instance.
+- RMR: when a confined stream is covered by an RMR node, its ranges are
+  identity-mapped in the same stage-1 table as the DMA window, Normal
+  Non-cacheable, and the confine log says how many. Attributes 4 (Normal NC)
+  and 5 (Normal IWB-OWB) are honoured, both as Normal NC like the window; any
+  other attribute refuses the confinement (`CK_SMMU_FAILED`, fail closed).
+  A stream the RMR names that nobody confines stays aborted. The page-table
+  mapper uses 1 GiB and 2 MiB blocks, so the Spark's 2 GiB range costs two
+  level-1 entries, not a page table per 4 KiB.
+
+Behaviour on the Spark that this cut does NOT change: USB0..USB5 and
+UBF0..UBF3 (the xHCI path) sit on SMMUv3 A (section 3), so the keyboard and
+recovery flows still touch only the first SMMU. SMMUv3 B is brought up only
+when a caller confines a segment 15 requester (the GB10) or HDA0; no such
+caller exists yet (that is cut B7b, with its own approval and a machine
+window).
+
+Checks (host, QEMU): `test_smmu` Spark-shape case with the RMR node
+(`route(15, 0x100)` -> instance 1, base 0x13000000, stream 0x100, one RMR
+with three ranges; `0x101` has none; `route(4, 0x100)` -> instance 0 stream
+0x50100; malformed RMR nodes refused), `iort-mutants` with three new killed
+mutants (`CK_IORT_MUTANT_RMR_BLIND`: RMR nodes ignored;
+`CK_IORT_MUTANT_RMR_EXCLUSIVE`: stream range read as exclusive, dropping
+stream 0x100; `CK_IORT_MUTANT_ROUTE_FIRST`: every requester routed to the
+first SMMU), sanitizer build, the freestanding build, the QEMU gates (one
+SMMU on QEMU virt: behaviour unchanged), and `ck_acpi_scan --iort` on the
+real table printing the three instances, the segment 15 route to instance 1
+and the RMR node.
+
+Still unknown after this cut: everything in section 7, plus whether SMMUv3 B
+comes up with this driver's geometry (IDR0/IDR1 read only at B7b).
