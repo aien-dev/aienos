@@ -133,10 +133,14 @@ Gaps a future cut would have to close before any GB10 DMA (design facts, not a p
 - Whether Linux's stream table entry for 0x100 uses stage 1, stage 2 or
   bypass (not decoded; needs a register read, out of scope here). [UNKNOWN]
 
-## 8. Next candidate cut
+## 8. Cut B6 (done, QEMU/host only)
 
-B6 (needs coordinator approval): QEMU-only design and test of multi-SMMU IORT
-parsing in `ck_iort_parse` (keep every SMMUv3 node; resolve root complex to its
-own node) with an `iort-mutants` case carrying two SMMUv3 nodes, so the GB10
-path reports `CK_SMMU_OTHER` instead of `CK_SMMU_NOSTREAM` and a later cut can
-bring SMMUv3 B up. No hardware step is proposed.
+`ck_iort_parse` now remembers every SMMUv3 node and the root-complex mappings
+that target one other than the first (`struct ck_iort_other`,
+`ck_iort_other_stream`), and `ck_dma_confine` returns `CK_SMMU_OTHER` with that
+SMMU and stream named (len 0, never granted) instead of `CK_SMMU_NOSTREAM`.
+Host checks: test_smmu Spark-shape case (segment 15 rid 0x100 -> stream 0x100
+on 0x13000000), `iort-mutants` with the new `CK_IORT_MUTANT_OTHER_BLIND`
+killed, and `ck_acpi_scan --iort` on the real table printing the segment 15
+mapping as not driven. The second SMMU is still not brought up; that is a
+later cut with its own approval.

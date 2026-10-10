@@ -355,6 +355,9 @@ static void test_iort(void)
     CHECK(ck_iort_stream_id(&s, 0, 0x0010, &sid) == 0 && sid == 0x10);
     CHECK(ck_iort_stream_id(&s, 0, 0xffff, &sid) == 0 && sid == 0xffff);
     CHECK(ck_iort_stream_id(&s, 0, 0x10000, &sid) == -1); /* the ITS-only mapping is not an SMMU stream */
+    /* ... and not an "other SMMU" entry either: only SMMUv3 nodes count. */
+    uint64_t ob = 0;
+    CHECK(s.nother == 0 && ck_iort_other_stream(&s, 0, 0x10000, &sid, &ob) == -1);
     build_iort(t, 0);
     CHECK(ck_iort_parse(t, &s) == 0);
     /* Malformed: node length past the table, mapping array past the node,
@@ -378,7 +381,7 @@ static void test_iort(void)
     w32(t + 40, 40); /* node array inside the 48-byte IORT header */
     CHECK(ck_iort_parse(t, &s) == -1);
     /* A mapping whose output would wrap is never a stream. */
-    struct ck_iort_smmu w = { 1, 0, 1, { { 0, 0, 0xffff, 0xfffffff0u } } };
+    struct ck_iort_smmu w = { .base = 1, .nmaps = 1, .map = { { 0, 0, 0xffff, 0xfffffff0u } } };
     CHECK(ck_iort_stream_id(&w, 0, 0x20, &sid) == -1);
 }
 
@@ -437,6 +440,19 @@ static void test_iort_spark_shape(void)
     CHECK(ck_iort_parse(t, &s) == 1);
     CHECK(s.base == 0x13800000ull && s.node_off == a && s.nmaps == 15);
     CHECK(s.map[4].segment == 4 && s.map[4].output_base == 0x50000);
+    /* GB10 000f:01:00.0 (MEASURED 2026-10-10, docs/GB10_IORT_DECODE.md):
+     * segment 15 maps rid 0..0xffff one-to-one onto the second SMMUv3
+     * (0x13000000), so rid 0x100 is stream 0x100 behind an SMMU this
+     * kernel does not drive. The first-SMMU lookup must refuse it and
+     * the other-SMMU lookup must name it. */
+    uint64_t ob = 0;
+    CHECK(s.nother == 1 && s.other[0].map.segment == 15 && s.other[0].smmu_off == b &&
+          s.other[0].smmu_base == 0x13000000ull && s.other[0].map.id_count == 0xffff);
+    CHECK(ck_iort_other_stream(&s, 15, 0x100, &sid, &ob) == 0 && sid == 0x100 && ob == 0x13000000ull);
+    CHECK(ck_iort_other_stream(&s, 15, 0x0, &sid, &ob) == 0 && sid == 0x0);
+    CHECK(ck_iort_other_stream(&s, 15, 0x10000, &sid, &ob) == -1); /* past the range */
+    CHECK(ck_iort_other_stream(&s, 4, 0x100, &sid, &ob) == -1);    /* on the first SMMU, not "other" */
+    CHECK(ck_iort_other_stream(&s, 16, 0x100, &sid, &ob) == -1);   /* no such segment */
     /* NVMe 0004:01:00.0 (MEASURED: segment 4, behind smmu 0x13800000):
      * rid = bus 1 << 8 | dev 0 << 3 | fn 0 = 0x100; segment 4's mapping
      * starts at stream 0x50000, so 0x50000 + 0x100 = 0x50100. */

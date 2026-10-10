@@ -122,7 +122,10 @@ struct ck_dma_confinement {
 };
 /* `segment` is the PCI segment of the device and `rid` its requester id
  * (bus<<8 | dev<<3 | fn) inside that segment: the IORT resolves the stream
- * id within that segment's root complex only. */
+ * id within that segment's root complex only. Also CK_SMMU_OTHER when that
+ * root complex maps the requester to an SMMUv3 other than the one this
+ * kernel brings up (the IORT's first); *out then names that SMMU and the
+ * stream, with len 0, for the report. Never grants unconfined. */
 int ck_dma_confine(uint32_t segment, uint32_t rid, uint64_t phys, uint64_t len, struct ck_dma_confinement *out);
 /* Same window for an ACPI platform device (no PCI requester id), added for
  * the platform xHCI path (NEXT-PHASE-3 cut 2): the stream comes from the

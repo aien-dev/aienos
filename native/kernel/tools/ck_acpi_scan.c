@@ -226,8 +226,14 @@ int main(int argc, char **argv)
         iort_notes(iort);
         prc = ck_iort_parse(iort, &first);
         if (prc == 1)
-            printf("# smmu: the kernel drives the first SMMUv3 node: node@0x%x base=0x%llx (pci maps=%u)\n",
-                   first.node_off, (unsigned long long)first.base, first.nmaps);
+            printf("# smmu: the kernel drives the first SMMUv3 node: node@0x%x base=0x%llx (pci maps=%u, maps to other SMMUs=%u)\n",
+                   first.node_off, (unsigned long long)first.base, first.nmaps, first.nother);
+        if (prc == 1)
+            for (uint32_t i = 0; i < first.nother; i++)
+                printf("# smmu: segment %u rid 0x%x..0x%x -> stream 0x%x.. on SMMUv3 node@0x%x base=0x%llx (not driven: CK_SMMU_OTHER)\n",
+                       first.other[i].map.segment, first.other[i].map.input_base,
+                       first.other[i].map.input_base + first.other[i].map.id_count, first.other[i].map.output_base,
+                       first.other[i].smmu_off, (unsigned long long)first.other[i].smmu_base);
         else
             printf("# smmu: ck_iort_parse=%d (%s)\n", prc, prc == 0 ? "no SMMUv3 node" : "malformed");
         parse_notes(iort);

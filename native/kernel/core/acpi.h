@@ -99,23 +99,48 @@ struct ck_iort_map {
     uint32_t segment;   /* PCI segment number of the root complex */
     uint32_t input_base, id_count, output_base; /* id_count = number of IDs - 1 */
 };
+/* Root complex mappings that target an SMMUv3 node other than the first
+ * (aienos#286 cut B5/B6: on the DGX Spark, MEASURED 2026-10-10, segment 15,
+ * the GB10's, maps to the second SMMUv3 at 0x13000000). The kernel does not
+ * drive those SMMUs; it records the mapping so a requester behind one is
+ * reported as CK_SMMU_OTHER (base and stream named) instead of "no stream".
+ * CK_IORT_MAX_SMMUS bounds the SMMUv3 nodes remembered in a parse (Spark:
+ * 3) and CK_IORT_MAX_OTHER the mappings to them (Spark: 1). */
+#define CK_IORT_MAX_SMMUS 8
+#define CK_IORT_MAX_OTHER 8
+struct ck_iort_other {
+    struct ck_iort_map map;
+    uint64_t smmu_base; /* register base of the SMMUv3 node the mapping targets */
+    uint32_t smmu_off;  /* offset of that node in the table */
+};
 struct ck_iort_smmu {
     uint64_t base;      /* SMMUv3 register base */
     uint32_t node_off;  /* offset of the SMMUv3 node in the table */
     uint32_t nmaps;
     struct ck_iort_map map[CK_IORT_MAX_MAPS];
+    uint32_t nother;
+    struct ck_iort_other other[CK_IORT_MAX_OTHER];
 };
 /* 1 found, 0 no SMMUv3 node, -1 malformed (bad signature, truncation, a
  * node or mapping array outside the table, base 0, a root complex node
  * too short to carry its segment number, more than CK_IORT_MAX_MAPS
- * mappings to the SMMU, or two mappings to the SMMU whose input ranges
- * overlap in the same segment: an ambiguous requester id is refused, not
- * resolved by table order). */
+ * mappings to the SMMU, more than CK_IORT_MAX_SMMUS SMMUv3 nodes or
+ * CK_IORT_MAX_OTHER mappings to the other SMMUs, or two mappings to the
+ * SMMU whose input ranges overlap in the same segment: an ambiguous
+ * requester id is refused, not resolved by table order). A mapping to a
+ * node that is not an SMMUv3 (an ITS group) is neither a stream nor an
+ * "other" entry. */
 int ck_iort_parse(const void *iort, struct ck_iort_smmu *out);
 /* Stream ID for PCI requester id `rid` (bus<<8 | dev<<3 | fn) in PCI
  * segment `segment`; 0 ok, -1 if no mapping of that segment covers it. A
  * mapping of another segment never matches. */
 int ck_iort_stream_id(const struct ck_iort_smmu *s, uint32_t segment, uint32_t rid, uint32_t *sid);
+/* Same lookup over the mappings to SMMUs this kernel does not drive: 0 and
+ * the stream id plus that SMMU's register base when (segment, rid) is
+ * covered by one of them, -1 otherwise. Never consulted for granting a
+ * window; it only names what refuses the requester. */
+int ck_iort_other_stream(const struct ck_iort_smmu *s, uint32_t segment, uint32_t rid, uint32_t *sid,
+                         uint64_t *smmu_base);
 
 /* IORT named component (node type 1) whose device object name has the same
  * final segment as `name` ("USB0" matches "\\_SB_.USB0"). out gets the node

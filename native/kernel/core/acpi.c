@@ -314,7 +314,8 @@ int ck_acpi_spans(uint64_t rsdp, void (*fn)(uint64_t lo, uint64_t hi, void *ctx)
 
 /* TEST-only IORT mutants (make iort-mutants): each must make test_smmu
  * FAIL. Host builds only; never part of an image. */
-#if defined(CK_IORT_MUTANT_TRUNCATE) || defined(CK_IORT_MUTANT_SEGMENT_BLIND) || defined(CK_IORT_MUTANT_OVERLAP_OK)
+#if defined(CK_IORT_MUTANT_TRUNCATE) || defined(CK_IORT_MUTANT_SEGMENT_BLIND) || defined(CK_IORT_MUTANT_OVERLAP_OK) || \
+    defined(CK_IORT_MUTANT_OTHER_BLIND)
 #if !__STDC_HOSTED__
 #error "CK_IORT_MUTANT_* are host test mutants only"
 #endif
@@ -349,6 +350,11 @@ int ck_iort_parse(const void *iort, struct ck_iort_smmu *out)
     if (iort_nodes(t, len, &count, &at))
         return -1;
     int found = 0;
+    /* Every SMMUv3 node seen in pass 0 (offset, base); the first one is
+     * the SMMU this kernel drives, the rest only name what refuses a
+     * requester mapped to them (ck_iort_other_stream). */
+    struct { uint32_t off; uint64_t base; } smmus[CK_IORT_MAX_SMMUS];
+    uint32_t nsmmus = 0;
     for (int pass = 0; pass < 2; pass++) {
         uint32_t off = at;
         for (uint32_t i = 0; i < count; i++) {
@@ -365,14 +371,22 @@ int ck_iort_parse(const void *iort, struct ck_iort_smmu *out)
                     (uint64_t)mcount * IORT_MAP_BYTES > (uint64_t)(nlen - moff))
                     return -1;
             }
-            if (pass == 0 && type == IORT_NODE_SMMUV3 && !found) {
+            if (pass == 0 && type == IORT_NODE_SMMUV3) {
                 if (nlen < 24)
                     return -1;
-                s.base = rd64(n + 16);
-                if (!s.base)
+                uint64_t base = rd64(n + 16);
+                if (!base)
                     return -1;
-                s.node_off = off;
-                found = 1;
+                if (nsmmus >= CK_IORT_MAX_SMMUS)
+                    return -1;
+                smmus[nsmmus].off = off;
+                smmus[nsmmus].base = base;
+                nsmmus++;
+                if (!found) {
+                    s.base = base;
+                    s.node_off = off;
+                    found = 1;
+                }
             }
             if (pass == 1 && type == IORT_NODE_ROOT_COMPLEX) {
                 /* Root complex node: PCI segment number at +28 (ACPICA
@@ -383,8 +397,32 @@ int ck_iort_parse(const void *iort, struct ck_iort_smmu *out)
                 uint32_t seg = rd32(n + IORT_RC_SEGMENT);
                 for (uint32_t m = 0; m < mcount; m++) {
                     const uint8_t *e = n + moff + m * IORT_MAP_BYTES;
-                    if (rd32(e + 12) != s.node_off)
+                    uint32_t ref = rd32(e + 12);
+                    if (ref != s.node_off) {
+#ifndef CK_IORT_MUTANT_OTHER_BLIND
+                        /* A mapping to another SMMUv3 node: remembered so
+                         * the requester is reported as behind that SMMU.
+                         * A mapping to anything else (an ITS group) is not
+                         * a stream at all. */
+                        for (uint32_t k = 0; k < nsmmus; k++) {
+                            if (smmus[k].off != ref)
+                                continue;
+                            if (s.nother >= CK_IORT_MAX_OTHER)
+                                return -1;
+                            struct ck_iort_other *o = &s.other[s.nother++];
+                            o->map.segment = seg;
+                            o->map.input_base = rd32(e);
+                            o->map.id_count = rd32(e + 4);
+                            o->map.output_base = rd32(e + 8);
+                            o->smmu_base = smmus[k].base;
+                            o->smmu_off = smmus[k].off;
+                            break;
+                        }
+#else
+                        (void)smmus; (void)nsmmus; /* TEST mutant: other SMMUs forgotten */
+#endif
                         continue;
+                    }
                     if (s.nmaps >= CK_IORT_MAX_MAPS) {
 #ifdef CK_IORT_MUTANT_TRUNCATE
                         continue; /* TEST mutant: drop the extra mappings silently */
@@ -430,6 +468,23 @@ int ck_iort_stream_id(const struct ck_iort_smmu *s, uint32_t segment, uint32_t r
         if (rel > m->id_count || m->output_base + rel < m->output_base)
             continue;
         *sid = m->output_base + rel;
+        return 0;
+    }
+    return -1;
+}
+
+int ck_iort_other_stream(const struct ck_iort_smmu *s, uint32_t segment, uint32_t rid, uint32_t *sid,
+                         uint64_t *smmu_base)
+{
+    for (uint32_t i = 0; i < s->nother; i++) {
+        const struct ck_iort_map *m = &s->other[i].map;
+        if (m->segment != segment || rid < m->input_base)
+            continue;
+        uint32_t rel = rid - m->input_base;
+        if (rel > m->id_count || m->output_base + rel < m->output_base)
+            continue;
+        *sid = m->output_base + rel;
+        *smmu_base = s->other[i].smmu_base;
         return 0;
     }
     return -1;

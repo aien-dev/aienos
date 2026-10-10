@@ -139,8 +139,20 @@ int ck_dma_confine(uint32_t segment, uint32_t rid, uint64_t phys, uint64_t len, 
     if (rc)
         return rc;
     uint32_t sid;
-    if (ck_iort_stream_id(&g.iort, segment, rid, &sid))
+    if (ck_iort_stream_id(&g.iort, segment, rid, &sid)) {
+        /* Behind an SMMUv3 this kernel does not drive (Spark: the GB10,
+         * segment 15, on the IORT's second SMMUv3): refused as
+         * CK_SMMU_OTHER with that SMMU and stream named, len 0, exactly
+         * as the named-component path does. Never granted unconfined. */
+        uint64_t other_base;
+        if (ck_iort_other_stream(&g.iort, segment, rid, &sid, &other_base) == 0) {
+            out->smmu_base = other_base; /* reported, never used */
+            out->stream_id = sid;
+            out->iova = out->len = 0;
+            return CK_SMMU_OTHER;
+        }
         return CK_SMMU_NOSTREAM;
+    }
     return confine_sid(sid, phys, len, out);
 }
 
