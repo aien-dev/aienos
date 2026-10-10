@@ -32,6 +32,7 @@ lines cited below match the pinned lines in that map).
 | IORT table is present (3904 bytes); Linux reports one Arm SMMUv3, 40-bit output, 2-level stream table covering 25 of 32 stream-ID bits, default domain Translated | [SOURCE docs/GB10_PLATFORM_TOPOLOGY.md:68-74] (Linux observed) |
 | GB10 is alone in IOMMU group 20 | [SOURCE docs/GB10_PLATFORM_TOPOLOGY.md:73-74] |
 | The GB10's IORT stream ID and stream table entry are not decoded by this project | [SOURCE docs/GB10_PLATFORM_TOPOLOGY.md:76-78,165] |
+| Resolved in cut B5: GB10 = StreamID 0x100 on the IORT's second SMMUv3 node (base 0x13000000); the kernel today drives only the first (0x13800000) | [SOURCE docs/GB10_IORT_DECODE.md] |
 | Which SMMU node the GB10's IORT mapping points at (the kernel drives only the IORT's first SMMUv3 node) | [UNKNOWN] |
 | Whether the GB10's stream ID is below the 4096 stream IDs the aienos stream table covers (`STE_N`) | [UNKNOWN] |
 | Number of SMMUs on the machine, beyond "an Arm SMMUv3" | [UNKNOWN] (platform USB nodes may sit behind a second one; see `CK_SMMU_OTHER`, native/kernel/include/ck.h:99-100) |

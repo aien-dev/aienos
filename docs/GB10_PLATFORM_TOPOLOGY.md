@@ -162,7 +162,7 @@ on the boot and handoff code:
 
 ## Unresolved unknowns
 
-- The IORT stream ID and SMMUv3 stream table entry for the GB10.
+- The SMMUv3 stream table entry for the GB10 (its stream ID is now decoded: StreamID 0x100 on the SMMUv3 at 0x13000000, see docs/GB10_IORT_DECODE.md).
 - The disposition of the ninth MSI-X vector.
 - Whether the negotiated PCIe width stays at x1 after link training settles,
   and why the current speed reads 2.5 GT/s while the link can go wider. Kernel
