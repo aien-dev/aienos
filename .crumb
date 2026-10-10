@@ -27,14 +27,14 @@
           "purpose": "Directory crates. Purpose not yet described by a human."
         },
         {
-          "digest": "162874613694f33bea2e90a01d7091c80153fe9771edfe09132c92b82004be63",
-          "last_commit": "f759310",
+          "digest": "30f908b47375e088c78fe9123dac1ef2df0551c10de30c8c19ba7b053c065f91",
+          "last_commit": "ed308de",
           "name": "docs",
           "purpose": "Directory docs. Purpose not yet described by a human."
         },
         {
-          "digest": "14192734c76840815c344af42af21c84274265dcc374a3ce2bccb01113bc83a9",
-          "last_commit": "f759310",
+          "digest": "1dd726352055e65ac3c21d6f8c4e0c841a8c4912ba8384dfa8968fb7ce4d82fb",
+          "last_commit": "ed308de",
           "name": "native",
           "purpose": "Directory native. Purpose not yet described by a human."
         },
@@ -45,15 +45,15 @@
           "purpose": "Directory scripts. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:34d62464cea587ebc0a1f72b1cc4cd5c9b4fa50e475f8e28bd957b12bd7d64ff",
-      "compiled_at": "2026-10-10T03:01:04Z",
+      "children_root": "sha256:03cc72c852977cfbb531f9c497786a19a44ad112cdcee9756cb05db438fae2b4",
+      "compiled_at": "2026-10-10T04:29:33Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:703cd9045f671a3cb2c64f0c4f6c3278d1e56b9afb293bd06991d16bfcf87a82",
+      "digest": "sha256:87605929e4a875c96f065abb54460aec06c7c835b38ab2b97c4f2bff361a000e",
       "evidence_files": 155,
       "evidence_root": "sha256:d59c0cef4e7dd5172923754a95b411ca54b01f35baca4587f792f1b259f1eaf7",
       "files": 3036,
-      "generated_at_commit": "f759310fc87760e56432e734db76c540c6e936ae",
-      "source_tree": "sha256:b6e8f6e84d267f0e1ea11d6b9ad12bc7a1395df970f9f4bacae0b6449ce72194"
+      "generated_at_commit": "ed308de52ede1d4c8a211d88e0e4a3ac5c92ec23",
+      "source_tree": "sha256:84adae421ac7242801cac74a09f3a3b660fa3d1d44b540034700bed7f0b4d852"
     },
     "owner_lane": "",
     "provenance": {
