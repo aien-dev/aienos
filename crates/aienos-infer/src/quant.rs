@@ -110,19 +110,20 @@ pub fn sub_block_sums(x: &[f32], sums: &mut [f32]) {
     }
 }
 
-/// `sum(nibble(q[l]) * x[l])` over 32 weights; `hi` picks the high nibble.
+/// Sum of `v` by lanes, then a short tail: fixed order, vectorizable.
 #[inline(always)]
-fn nibble_dot(q: &[u8; Q4K_SUB], hi: bool, x: &[f32; Q4K_SUB]) -> f32 {
+fn lane_sum<const N: usize>(v: &[f32; N]) -> f32 {
     let mut lanes = [0f32; LANES];
-    for c in 0..Q4K_SUB / LANES {
-        let qb: &[u8; LANES] = q[LANES * c..LANES * c + LANES].try_into().expect("8 bytes");
-        let xb: &[f32; LANES] = x[LANES * c..LANES * c + LANES].try_into().expect("8 x");
+    for c in v.chunks_exact(LANES) {
         for i in 0..LANES {
-            let n = if hi { qb[i] >> 4 } else { qb[i] & 0x0f };
-            lanes[i] += n as f32 * xb[i];
+            lanes[i] += c[i];
         }
     }
-    lanes.iter().sum()
+    let mut s = 0f32;
+    for l in lanes {
+        s += l;
+    }
+    s
 }
 
 /// Dot product of one Q4_K block with 256 f32 activations, given the eight
@@ -130,8 +131,9 @@ fn nibble_dot(q: &[u8; Q4K_SUB], hi: bool, x: &[f32; Q4K_SUB]) -> f32 {
 ///
 /// Same quantity as `dequant_q4k_block` followed by a dot (f32 throughout, no
 /// int8 rounding of `x`), evaluated per sub-block as
-/// `d*sc * sum(q*x) - dmin*m * sum(x)`. Only the floating-point summation
-/// order differs from the serial reference.
+/// `d*sc * sum(q*x) - dmin*m * sum(x)`: products into a 32-wide array, then
+/// a lane sum (two plain loops, each vectorizes). Only the floating-point
+/// summation order differs from the serial reference.
 pub fn dot_q4k_f32_sums(block: &[u8; Q4K_BYTES], x: &[f32; QK_K], xs: &[f32; 8]) -> f32 {
     let d = rd_f16(block, 0);
     let dmin = rd_f16(block, 2);
@@ -144,8 +146,14 @@ pub fn dot_q4k_f32_sums(block: &[u8; Q4K_BYTES], x: &[f32; QK_K], xs: &[f32; 8])
         let q: &[u8; Q4K_SUB] = qs[32 * j..32 * j + 32].try_into().expect("32 bytes");
         let x1: &[f32; Q4K_SUB] = x[64 * j..64 * j + 32].try_into().expect("32 x");
         let x2: &[f32; Q4K_SUB] = x[64 * j + 32..64 * j + 64].try_into().expect("32 x");
-        acc += d * sc1 as f32 * nibble_dot(q, false, x1) - dmin * m1 as f32 * xs[2 * j];
-        acc += d * sc2 as f32 * nibble_dot(q, true, x2) - dmin * m2 as f32 * xs[2 * j + 1];
+        let mut p1 = [0f32; Q4K_SUB];
+        let mut p2 = [0f32; Q4K_SUB];
+        for l in 0..Q4K_SUB {
+            p1[l] = (q[l] & 0x0f) as f32 * x1[l];
+            p2[l] = (q[l] >> 4) as f32 * x2[l];
+        }
+        acc += d * sc1 as f32 * lane_sum(&p1) - dmin * m1 as f32 * xs[2 * j];
+        acc += d * sc2 as f32 * lane_sum(&p2) - dmin * m2 as f32 * xs[2 * j + 1];
     }
     acc
 }
@@ -158,48 +166,37 @@ pub fn dot_q4k_f32(block: &[u8; Q4K_BYTES], x: &[f32; QK_K]) -> f32 {
     dot_q4k_f32_sums(block, x, &xs)
 }
 
-/// `sum((q-32) * x)` over 16 weights of one Q6_K scale group, from two
-/// quarter-row nibble sources and the two high bits in `qh`.
-#[inline(always)]
-fn q6_group_dot(ql: &[u8; 16], shift_l: u32, qh: &[u8; 16], shift_h: u32, x: &[f32; 16]) -> f32 {
-    let mut lanes = [0f32; LANES];
-    for c in 0..2 {
-        for i in 0..LANES {
-            let l = LANES * c + i;
-            let q = (((ql[l] >> shift_l) & 0x0f) | (((qh[l] >> shift_h) & 3) << 4)) as i32 - 32;
-            lanes[i] += q as f32 * x[l];
-        }
-    }
-    lanes.iter().sum()
-}
-
 /// Dot product of one Q6_K block with 256 f32 activations (same scheme as
 /// [`dot_q4k_f32_sums`]: per 16-weight scale group, `d*sc * sum((q-32)*x)`).
 pub fn dot_q6k_f32(block: &[u8; Q6K_BYTES], x: &[f32; QK_K]) -> f32 {
     let d = rd_f16(block, 208);
     let mut acc = 0f32;
     for half in 0..2 {
-        let ql = &block[64 * half..64 * half + 64];
-        let qh = &block[128 + 32 * half..128 + 32 * half + 32];
+        let ql: &[u8; 64] = block[64 * half..64 * half + 64].try_into().expect("64 ql");
+        let qh: &[u8; 32] = block[128 + 32 * half..128 + 32 * half + 32]
+            .try_into()
+            .expect("32 qh");
         let sc = &block[192 + 8 * half..192 + 8 * half + 8];
-        let xs = &x[128 * half..128 * half + 128];
-        // Quarter k of this half uses ql bytes (k&1)*32.. with nibble shift
-        // 4*(k>>1) and qh bit pair 2k, exactly as dequant_q6k_block.
-        for k in 0..4 {
-            let qlo = 32 * (k & 1);
-            let shift_l = 4 * (k >> 1) as u32;
-            let shift_h = 2 * k as u32;
-            for g in 0..2 {
-                let qlg: &[u8; 16] = ql[qlo + 16 * g..qlo + 16 * g + 16]
-                    .try_into()
-                    .expect("16 ql");
-                let qhg: &[u8; 16] = qh[16 * g..16 * g + 16].try_into().expect("16 qh");
-                let xg: &[f32; 16] = xs[32 * k + 16 * g..32 * k + 16 * g + 16]
-                    .try_into()
-                    .expect("16 x");
-                acc +=
-                    d * (sc[2 * k + g] as i8) as f32 * q6_group_dot(qlg, shift_l, qhg, shift_h, xg);
-            }
+        let xs: &[f32; 128] = x[128 * half..128 * half + 128].try_into().expect("128 x");
+        // Four 32-weight quarters; each quarter has two 16-weight scale groups
+        // (same bit layout as dequant_q6k_block).
+        let mut p = [[0f32; 32]; 4];
+        for l in 0..32 {
+            let h = qh[l];
+            let q1 = ((ql[l] & 0x0f) | ((h & 3) << 4)) as i32 - 32;
+            let q2 = ((ql[l + 32] & 0x0f) | (((h >> 2) & 3) << 4)) as i32 - 32;
+            let q3 = ((ql[l] >> 4) | (((h >> 4) & 3) << 4)) as i32 - 32;
+            let q4 = ((ql[l + 32] >> 4) | (((h >> 6) & 3) << 4)) as i32 - 32;
+            p[0][l] = q1 as f32 * xs[l];
+            p[1][l] = q2 as f32 * xs[l + 32];
+            p[2][l] = q3 as f32 * xs[l + 64];
+            p[3][l] = q4 as f32 * xs[l + 96];
+        }
+        for (k, pk) in p.iter().enumerate() {
+            let lo: &[f32; 16] = pk[..16].try_into().expect("16");
+            let hi: &[f32; 16] = pk[16..].try_into().expect("16");
+            acc += d * (sc[2 * k] as i8) as f32 * lane_sum(lo);
+            acc += d * (sc[2 * k + 1] as i8) as f32 * lane_sum(hi);
         }
     }
     acc
