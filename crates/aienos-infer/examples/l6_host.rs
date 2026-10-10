@@ -7,7 +7,9 @@
 //! times each `forward` call in microseconds.
 //!
 //! Env: AIENOS_MODEL (default $HOME/models/aien-mail/Llama-3.2-1B-Instruct-Q4_K_M.gguf),
-//! AIENOS_N (default 64), AIENOS_COMMIT (printed as `commit`).
+//! AIENOS_N (default 64), AIENOS_COMMIT (printed as `commit`), AIENOS_DOT
+//! (`f32`, the default, or `int8`: activations on the Q8_K grid, i32 dots;
+//! build with `RUSTFLAGS="-C target-feature=+dotprod,+i8mm"` for `usdot`).
 //! Output: one `key: value` line per fact. Exit 0 ok, 1 parity FAIL, 2 wrong model.
 
 use aienos_infer::{argmax, DecodeState, Gguf, Model, Tokenizer};
@@ -132,7 +134,17 @@ fn main() {
     println!("prompt_ids: {}", join(&ids));
     println!("threads: 1");
 
+    let dot = std::env::var("AIENOS_DOT").unwrap_or_else(|_| "f32".into());
     let mut st = DecodeState::new(&m, ids.len() + n + 8);
+    match dot.as_str() {
+        "f32" => {}
+        "int8" => st.int8_dot = true,
+        other => {
+            eprintln!("AIENOS_DOT must be f32 or int8, got {other:?}");
+            std::process::exit(2);
+        }
+    }
+    println!("dot: {dot}");
     let t0 = Instant::now();
     st.prefill(&m, &ids).expect("prefill");
     let prefill_us = t0.elapsed().as_micros() as u64;

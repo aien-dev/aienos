@@ -187,12 +187,21 @@ fn dot_helpers_match_dequant_then_dot() {
     let xa: &[f32; QK_K] = x.as_slice().try_into().unwrap();
     let blk: &[u8; 144] = bin[..144].try_into().unwrap();
     let want: f32 = w[..QK_K].iter().zip(&x).map(|(a, b)| a * b).sum();
-    assert_eq!(dot_q4k_f32(blk, xa), want);
+    // Lane-summed, so only the f32 summation order differs from `want`.
+    let got = dot_q4k_f32(blk, xa);
+    assert!(
+        (got - want).abs() <= 1e-4 * want.abs().max(1.0),
+        "{got} vs {want}"
+    );
     let bin6 = fx("q6k.bin");
     let w6 = f32s(&fx("q6k.f32"));
     let blk6: &[u8; 210] = bin6[..210].try_into().unwrap();
     let want6: f32 = w6[..QK_K].iter().zip(&x).map(|(a, b)| a * b).sum();
-    assert_eq!(dot_q6k_f32(blk6, xa), want6);
+    let got6 = dot_q6k_f32(blk6, xa);
+    assert!(
+        (got6 - want6).abs() <= 1e-4 * want6.abs().max(1.0),
+        "{got6} vs {want6}"
+    );
     // Row of 4 blocks.
     let x4: Vec<f32> = (0..4 * QK_K).map(|i| (i % 5) as f32 - 2.0).collect();
     let w4: f32 = w[..4 * QK_K].iter().zip(&x4).map(|(a, b)| a * b).sum();

@@ -91,7 +91,7 @@ fn decode_round_trips_text() {
     }
 }
 
-fn check(q8k: bool, max_logit_diff: f32) {
+fn check(q8k: bool, int8: bool, max_logit_diff: f32) {
     let Some(bytes) = model_bytes() else { return };
     let g = Gguf::parse(&bytes).unwrap();
     let m = Model::new(&g).unwrap();
@@ -104,6 +104,7 @@ fn check(q8k: bool, max_logit_diff: f32) {
         // (c) free-running greedy
         let mut st = DecodeState::new(&m, 256);
         st.emulate_q8k = q8k;
+        st.int8_dot = int8;
         let t0 = Instant::now();
         st.prefill(&m, &ids).unwrap();
         if name == "cow" {
@@ -177,6 +178,7 @@ fn check(q8k: bool, max_logit_diff: f32) {
         // teacher-forced top-1 match rate
         let mut st = DecodeState::new(&m, 256);
         st.emulate_q8k = q8k;
+        st.int8_dot = int8;
         st.prefill(&m, &ids).unwrap();
         let mut hit = 0;
         for (i, &(t, gap)) in r.steps.iter().enumerate() {
@@ -202,12 +204,19 @@ fn check(q8k: bool, max_logit_diff: f32) {
 /// small, bounded logit difference is expected).
 #[test]
 fn forward_matches_llama_cpp_f32_activations() {
-    check(false, 1.0);
+    check(false, false, 1.0);
 }
 
 /// Activations rounded to ggml's Q8_K grid before every quantized dot.
 #[test]
 #[ignore = "slow; run with --ignored"]
 fn forward_matches_llama_cpp_q8k_emulation() {
-    check(true, 1.0);
+    check(true, false, 1.0);
+}
+
+/// Int8 activations with i32 dots (aienos#34 L6 speed path): the same
+/// arithmetic ggml runs, so the same bound as the Q8_K emulation.
+#[test]
+fn forward_matches_llama_cpp_int8_dot() {
+    check(false, true, 1.0);
 }
