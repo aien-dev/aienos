@@ -13,21 +13,21 @@
     "generated": {
       "children": [
         {
-          "digest": "787370cdc08874f27a8e87c34a46b17011913f6ab01ea412c103129d24482953",
-          "last_commit": "e3ec8a5",
+          "digest": "1cb093121e30c7650490bef5f1b0d9d7daeba6b02576ceb70c063924375e8458",
+          "last_commit": "6d17b22",
           "name": "src",
           "purpose": "Directory crates/aienos-capability-ffi/src. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:3a5fc94d92942610ce31824c2157e369a5c983246a898d54728c8749a3bc31c7",
-      "compiled_at": "2026-10-04T13:47:18Z",
+      "children_root": "sha256:951f011130547622847c6176f56210f3d984788efdbbfecc80a553721dfef1bb",
+      "compiled_at": "2026-10-11T21:20:24Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:ddcab59814a675942fbea09cd734c6d9726359da319efd962a9abd1a4949e9af",
+      "digest": "sha256:c63ab3d5643ac3c0974eee276273a0ab80584c54926cbb62c637294b5b857718",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 2,
-      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
-      "source_tree": "sha256:eeae684ddb4213d1a9af41a15c6662c39f573f2182b0121620605d7bdc429009"
+      "generated_at_commit": "362cba9653c8021996a21b17ead00d5d1140b371",
+      "source_tree": "sha256:96faad31a59d21e328ed818589933b387d5487b69b7e046ee5c40ed8a9574e4e"
     },
     "owner_lane": "",
     "provenance": {
