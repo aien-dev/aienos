@@ -1,0 +1,863 @@
+{
+  "commit": "a362beb416a06b93d79d09bc6448bbc44238ef17",
+  "core_pinned": 19,
+  "cpu_part": "0xd85",
+  "drift_int8_vs_emulation": [
+    {
+      "class": "qkv:",
+      "emulation_vs_f32": 0.007108,
+      "int8_vs_emulation": 0.000005722,
+      "int8_vs_f32": 0.007111,
+      "tokens": 1
+    },
+    {
+      "class": "wo:",
+      "emulation_vs_f32": 0.005120,
+      "int8_vs_emulation": 0.000001907,
+      "int8_vs_f32": 0.005121,
+      "tokens": 1
+    },
+    {
+      "class": "gate_up:",
+      "emulation_vs_f32": 0.4916,
+      "int8_vs_emulation": 0.000001669,
+      "int8_vs_f32": 0.4916,
+      "tokens": 1
+    },
+    {
+      "class": "down:",
+      "emulation_vs_f32": 0.1292,
+      "int8_vs_emulation": 0.000002414,
+      "int8_vs_f32": 0.1292,
+      "tokens": 1
+    },
+    {
+      "class": "output:",
+      "emulation_vs_f32": 0.2276,
+      "int8_vs_emulation": 0.000001207,
+      "int8_vs_f32": 0.2276,
+      "tokens": 1
+    },
+    {
+      "class": "all:",
+      "emulation_vs_f32": 0.5775,
+      "int8_vs_emulation": 0.000002027,
+      "int8_vs_f32": 0.5775,
+      "tokens": 1
+    },
+    {
+      "class": "qkv:",
+      "emulation_vs_f32": 0.3234,
+      "int8_vs_emulation": 0.00001335,
+      "int8_vs_f32": 0.3234,
+      "tokens": 2
+    },
+    {
+      "class": "wo:",
+      "emulation_vs_f32": 0.1919,
+      "int8_vs_emulation": 0.000009418,
+      "int8_vs_f32": 0.1919,
+      "tokens": 2
+    },
+    {
+      "class": "gate_up:",
+      "emulation_vs_f32": 0.2215,
+      "int8_vs_emulation": 0.1270,
+      "int8_vs_f32": 0.2137,
+      "tokens": 2
+    },
+    {
+      "class": "down:",
+      "emulation_vs_f32": 0.4196,
+      "int8_vs_emulation": 0.000008583,
+      "int8_vs_f32": 0.4196,
+      "tokens": 2
+    },
+    {
+      "class": "output:",
+      "emulation_vs_f32": 0.06733,
+      "int8_vs_emulation": 0.000001907,
+      "int8_vs_f32": 0.06733,
+      "tokens": 2
+    },
+    {
+      "class": "all:",
+      "emulation_vs_f32": 0.5169,
+      "int8_vs_emulation": 0.3758,
+      "int8_vs_f32": 0.6659,
+      "tokens": 2
+    },
+    {
+      "class": "qkv:",
+      "emulation_vs_f32": 0.7561,
+      "int8_vs_emulation": 0.1570,
+      "int8_vs_f32": 0.7381,
+      "tokens": 3
+    },
+    {
+      "class": "wo:",
+      "emulation_vs_f32": 0.3303,
+      "int8_vs_emulation": 0.1541,
+      "int8_vs_f32": 0.2575,
+      "tokens": 3
+    },
+    {
+      "class": "gate_up:",
+      "emulation_vs_f32": 0.4036,
+      "int8_vs_emulation": 0.2154,
+      "int8_vs_f32": 0.4871,
+      "tokens": 3
+    },
+    {
+      "class": "down:",
+      "emulation_vs_f32": 0.7202,
+      "int8_vs_emulation": 0.00001454,
+      "int8_vs_f32": 0.7202,
+      "tokens": 3
+    },
+    {
+      "class": "output:",
+      "emulation_vs_f32": 0.07191,
+      "int8_vs_emulation": 0.000001907,
+      "int8_vs_f32": 0.07191,
+      "tokens": 3
+    },
+    {
+      "class": "all:",
+      "emulation_vs_f32": 1.488,
+      "int8_vs_emulation": 0.3826,
+      "int8_vs_f32": 1.463,
+      "tokens": 3
+    },
+    {
+      "class": "qkv:",
+      "emulation_vs_f32": 0.1840,
+      "int8_vs_emulation": 0.04784,
+      "int8_vs_f32": 0.1652,
+      "tokens": 8
+    },
+    {
+      "class": "wo:",
+      "emulation_vs_f32": 0.08392,
+      "int8_vs_emulation": 0.05367,
+      "int8_vs_f32": 0.09495,
+      "tokens": 8
+    },
+    {
+      "class": "gate_up:",
+      "emulation_vs_f32": 0.1501,
+      "int8_vs_emulation": 0.1454,
+      "int8_vs_f32": 0.1135,
+      "tokens": 8
+    },
+    {
+      "class": "down:",
+      "emulation_vs_f32": 0.2600,
+      "int8_vs_emulation": 0.2797,
+      "int8_vs_f32": 0.2249,
+      "tokens": 8
+    },
+    {
+      "class": "output:",
+      "emulation_vs_f32": 0.1228,
+      "int8_vs_emulation": 0.000002861,
+      "int8_vs_f32": 0.1228,
+      "tokens": 8
+    },
+    {
+      "class": "all:",
+      "emulation_vs_f32": 0.3264,
+      "int8_vs_emulation": 0.3486,
+      "int8_vs_f32": 0.3478,
+      "tokens": 8
+    },
+    {
+      "class": "qkv:",
+      "emulation_vs_f32": 0.5407,
+      "int8_vs_emulation": 0.1676,
+      "int8_vs_f32": 0.3965,
+      "tokens": 17
+    },
+    {
+      "class": "wo:",
+      "emulation_vs_f32": 0.2122,
+      "int8_vs_emulation": 0.1253,
+      "int8_vs_f32": 0.1813,
+      "tokens": 17
+    },
+    {
+      "class": "gate_up:",
+      "emulation_vs_f32": 0.2143,
+      "int8_vs_emulation": 0.3230,
+      "int8_vs_f32": 0.2502,
+      "tokens": 17
+    },
+    {
+      "class": "down:",
+      "emulation_vs_f32": 0.4431,
+      "int8_vs_emulation": 0.5574,
+      "int8_vs_f32": 0.4776,
+      "tokens": 17
+    },
+    {
+      "class": "output:",
+      "emulation_vs_f32": 0.08368,
+      "int8_vs_emulation": 0.000003815,
+      "int8_vs_f32": 0.08368,
+      "tokens": 17
+    },
+    {
+      "class": "all:",
+      "emulation_vs_f32": 0.6431,
+      "int8_vs_emulation": 0.6728,
+      "int8_vs_f32": 0.6703,
+      "tokens": 17
+    }
+  ],
+  "exit_codes": {
+    "diagnosis": 0,
+    "drift": 0,
+    "real_activation": 0
+  },
+  "f32_repeat_max_logit_diff": 0,
+  "generated_at_utc": "2026-10-11T01:15:39Z",
+  "history": "prompt (17 ids) + recorded common tokens 0..11; decision at index 12",
+  "host": "spark-b87b",
+  "kernel": "7.0.0-1019-nvidia",
+  "llama_cpp": {
+    "argmax": 53692,
+    "commit": "4a89937",
+    "fixture_reproduced": true,
+    "top1_top2_gap": 0.090738
+  },
+  "load1_at_start": 7.79,
+  "model": {
+    "path": "/home/drakestapleton/models/aien-mail/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+    "sha256": "3f5a22426976ab26cfe84dba63c1d08391717abb1af893e10f1b2968d862dcc1"
+  },
+  "modes_at_index_12": [
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.349283,
+      "logit_4897": 20.681486,
+      "logit_53692": 20.332203,
+      "maxdiff_vs_f32": 0.000000,
+      "maxdiff_vs_llama": 1.059041,
+      "mode": "f32",
+      "top1_top2_gap": 0.349283
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.393490,
+      "logit_4897": 20.282204,
+      "logit_53692": 20.675694,
+      "maxdiff_vs_f32": 1.068317,
+      "maxdiff_vs_llama": 1.303616,
+      "mode": "int8",
+      "top1_top2_gap": 0.393490
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.124151,
+      "logit_4897": 20.614862,
+      "logit_53692": 20.490711,
+      "maxdiff_vs_f32": 0.785524,
+      "maxdiff_vs_llama": 1.397524,
+      "mode": "emulate_q8k_f32_dots",
+      "top1_top2_gap": 0.124151
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.090738,
+      "logit_4897": 20.286430,
+      "logit_53692": 20.377169,
+      "maxdiff_vs_f32": 1.059041,
+      "maxdiff_vs_llama": 0.000000,
+      "mode": "llama_cpp",
+      "top1_top2_gap": 0.090738
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.133486,
+      "logit_4897": 20.469990,
+      "logit_53692": 20.336504,
+      "maxdiff_vs_f32": 0.403699,
+      "maxdiff_vs_llama": 1.085854,
+      "mode": "int8_only_qkv",
+      "top1_top2_gap": 0.133486
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.473511,
+      "logit_4897": 20.743996,
+      "logit_53692": 20.270485,
+      "maxdiff_vs_f32": 0.884953,
+      "maxdiff_vs_llama": 1.242867,
+      "mode": "int8_except_qkv",
+      "top1_top2_gap": 0.473511
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.194111,
+      "logit_4897": 20.690647,
+      "logit_53692": 20.496536,
+      "maxdiff_vs_f32": 0.429628,
+      "maxdiff_vs_llama": 1.081858,
+      "mode": "int8_only_wo",
+      "top1_top2_gap": 0.194111
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.663363,
+      "logit_4897": 20.242369,
+      "logit_53692": 20.905731,
+      "maxdiff_vs_f32": 1.345973,
+      "maxdiff_vs_llama": 1.101498,
+      "mode": "int8_except_wo",
+      "top1_top2_gap": 0.663363
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.447498,
+      "logit_4897": 20.899208,
+      "logit_53692": 20.451710,
+      "maxdiff_vs_f32": 0.364813,
+      "maxdiff_vs_llama": 1.179406,
+      "mode": "int8_only_gate_up",
+      "top1_top2_gap": 0.447498
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.329693,
+      "logit_4897": 20.079603,
+      "logit_53692": 20.409296,
+      "maxdiff_vs_f32": 0.847629,
+      "maxdiff_vs_llama": 1.119980,
+      "mode": "int8_except_gate_up",
+      "top1_top2_gap": 0.329693
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.422346,
+      "logit_4897": 20.803083,
+      "logit_53692": 20.380737,
+      "maxdiff_vs_f32": 0.580110,
+      "maxdiff_vs_llama": 1.289439,
+      "mode": "int8_only_down",
+      "top1_top2_gap": 0.422346
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.217571,
+      "logit_4897": 20.441067,
+      "logit_53692": 20.658638,
+      "maxdiff_vs_f32": 0.715139,
+      "maxdiff_vs_llama": 1.491215,
+      "mode": "int8_except_down",
+      "top1_top2_gap": 0.217571
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.349512,
+      "logit_4897": 20.694056,
+      "logit_53692": 20.344543,
+      "maxdiff_vs_f32": 0.077365,
+      "maxdiff_vs_llama": 1.059503,
+      "mode": "int8_only_output",
+      "top1_top2_gap": 0.349512
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.391722,
+      "logit_4897": 20.270634,
+      "logit_53692": 20.662355,
+      "maxdiff_vs_f32": 1.082744,
+      "maxdiff_vs_llama": 1.314652,
+      "mode": "int8_except_output",
+      "top1_top2_gap": 0.391722
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.391722,
+      "logit_4897": 20.270634,
+      "logit_53692": 20.662355,
+      "maxdiff_vs_f32": 1.082744,
+      "maxdiff_vs_llama": 1.314652,
+      "mode": "int8_all_layers_f32_output",
+      "top1_top2_gap": 0.391722
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.294594,
+      "logit_4897": 20.636736,
+      "logit_53692": 20.342142,
+      "maxdiff_vs_f32": 0.307768,
+      "maxdiff_vs_llama": 0.950948,
+      "mode": "int8_only_layer_00",
+      "top1_top2_gap": 0.294594
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.188274,
+      "logit_4897": 20.348719,
+      "logit_53692": 20.536993,
+      "maxdiff_vs_f32": 0.824976,
+      "maxdiff_vs_llama": 1.768735,
+      "mode": "int8_except_layer_00",
+      "top1_top2_gap": 0.188274
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.396362,
+      "logit_4897": 20.689140,
+      "logit_53692": 20.292778,
+      "maxdiff_vs_f32": 0.093840,
+      "maxdiff_vs_llama": 1.065825,
+      "mode": "int8_only_layer_01",
+      "top1_top2_gap": 0.396362
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.299984,
+      "logit_4897": 20.147137,
+      "logit_53692": 20.447121,
+      "maxdiff_vs_f32": 0.998443,
+      "maxdiff_vs_llama": 1.142616,
+      "mode": "int8_except_layer_01",
+      "top1_top2_gap": 0.299984
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.205231,
+      "logit_4897": 20.596018,
+      "logit_53692": 20.390787,
+      "maxdiff_vs_f32": 0.160588,
+      "maxdiff_vs_llama": 1.110361,
+      "mode": "int8_only_layer_02",
+      "top1_top2_gap": 0.205231
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.049994,
+      "logit_4897": 20.554298,
+      "logit_53692": 20.604292,
+      "maxdiff_vs_f32": 0.948065,
+      "maxdiff_vs_llama": 1.040179,
+      "mode": "int8_except_layer_02",
+      "top1_top2_gap": 0.049994
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.288240,
+      "logit_4897": 20.719004,
+      "logit_53692": 20.430763,
+      "maxdiff_vs_f32": 0.277499,
+      "maxdiff_vs_llama": 1.180737,
+      "mode": "int8_only_layer_03",
+      "top1_top2_gap": 0.288240
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 1.136850,
+      "logit_4897": 21.099407,
+      "logit_53692": 19.962557,
+      "maxdiff_vs_f32": 0.816967,
+      "maxdiff_vs_llama": 1.371063,
+      "mode": "int8_except_layer_03",
+      "top1_top2_gap": 1.136850
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.429228,
+      "logit_4897": 20.693184,
+      "logit_53692": 20.263956,
+      "maxdiff_vs_f32": 0.190213,
+      "maxdiff_vs_llama": 1.145400,
+      "mode": "int8_only_layer_04",
+      "top1_top2_gap": 0.429228
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.265354,
+      "logit_4897": 20.210264,
+      "logit_53692": 20.475618,
+      "maxdiff_vs_f32": 0.940178,
+      "maxdiff_vs_llama": 1.188543,
+      "mode": "int8_except_layer_04",
+      "top1_top2_gap": 0.265354
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.195238,
+      "logit_4897": 20.612564,
+      "logit_53692": 20.417326,
+      "maxdiff_vs_f32": 0.197753,
+      "maxdiff_vs_llama": 1.077413,
+      "mode": "int8_only_layer_05",
+      "top1_top2_gap": 0.195238
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.045589,
+      "logit_4897": 20.263563,
+      "logit_53692": 20.309153,
+      "maxdiff_vs_f32": 0.766078,
+      "maxdiff_vs_llama": 1.087765,
+      "mode": "int8_except_layer_05",
+      "top1_top2_gap": 0.045589
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.392818,
+      "logit_4897": 20.645054,
+      "logit_53692": 20.252235,
+      "maxdiff_vs_f32": 0.220980,
+      "maxdiff_vs_llama": 1.058017,
+      "mode": "int8_only_layer_06",
+      "top1_top2_gap": 0.392818
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.068096,
+      "logit_4897": 20.833042,
+      "logit_53692": 20.901138,
+      "maxdiff_vs_f32": 1.026503,
+      "maxdiff_vs_llama": 1.322717,
+      "mode": "int8_except_layer_06",
+      "top1_top2_gap": 0.068096
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.410656,
+      "logit_4897": 20.738209,
+      "logit_53692": 20.327553,
+      "maxdiff_vs_f32": 0.246415,
+      "maxdiff_vs_llama": 1.146324,
+      "mode": "int8_only_layer_07",
+      "top1_top2_gap": 0.410656
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.277079,
+      "logit_4897": 20.286650,
+      "logit_53692": 20.563728,
+      "maxdiff_vs_f32": 0.874780,
+      "maxdiff_vs_llama": 1.170940,
+      "mode": "int8_except_layer_07",
+      "top1_top2_gap": 0.277079
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.189495,
+      "logit_4897": 20.710863,
+      "logit_53692": 20.521368,
+      "maxdiff_vs_f32": 0.407899,
+      "maxdiff_vs_llama": 1.163232,
+      "mode": "int8_only_layer_08",
+      "top1_top2_gap": 0.189495
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.547405,
+      "logit_4897": 20.526550,
+      "logit_53692": 21.073956,
+      "maxdiff_vs_f32": 1.092899,
+      "maxdiff_vs_llama": 1.192272,
+      "mode": "int8_except_layer_08",
+      "top1_top2_gap": 0.547405
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.120136,
+      "logit_4897": 20.441254,
+      "logit_53692": 20.321117,
+      "maxdiff_vs_f32": 0.346622,
+      "maxdiff_vs_llama": 1.108879,
+      "mode": "int8_only_layer_09",
+      "top1_top2_gap": 0.120136
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.558666,
+      "logit_4897": 20.276678,
+      "logit_53692": 20.835344,
+      "maxdiff_vs_f32": 0.961213,
+      "maxdiff_vs_llama": 1.419636,
+      "mode": "int8_except_layer_09",
+      "top1_top2_gap": 0.558666
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.257851,
+      "logit_4897": 20.652367,
+      "logit_53692": 20.394516,
+      "maxdiff_vs_f32": 0.285835,
+      "maxdiff_vs_llama": 1.143673,
+      "mode": "int8_only_layer_10",
+      "top1_top2_gap": 0.257851
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.143721,
+      "logit_4897": 20.516214,
+      "logit_53692": 20.659935,
+      "maxdiff_vs_f32": 1.062120,
+      "maxdiff_vs_llama": 1.329426,
+      "mode": "int8_except_layer_10",
+      "top1_top2_gap": 0.143721
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.280693,
+      "logit_4897": 20.663231,
+      "logit_53692": 20.382538,
+      "maxdiff_vs_f32": 0.251834,
+      "maxdiff_vs_llama": 1.078825,
+      "mode": "int8_only_layer_11",
+      "top1_top2_gap": 0.280693
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.677683,
+      "logit_4897": 20.014799,
+      "logit_53692": 20.692482,
+      "maxdiff_vs_f32": 1.133844,
+      "maxdiff_vs_llama": 1.425602,
+      "mode": "int8_except_layer_11",
+      "top1_top2_gap": 0.677683
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.391989,
+      "logit_4897": 20.747198,
+      "logit_53692": 20.355209,
+      "maxdiff_vs_f32": 0.155494,
+      "maxdiff_vs_llama": 1.110196,
+      "mode": "int8_only_layer_12",
+      "top1_top2_gap": 0.391989
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.252529,
+      "logit_4897": 20.377575,
+      "logit_53692": 20.630104,
+      "maxdiff_vs_f32": 1.162828,
+      "maxdiff_vs_llama": 1.525602,
+      "mode": "int8_except_layer_12",
+      "top1_top2_gap": 0.252529
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.288017,
+      "logit_4897": 20.684746,
+      "logit_53692": 20.396729,
+      "maxdiff_vs_f32": 0.214527,
+      "maxdiff_vs_llama": 1.098061,
+      "mode": "int8_only_layer_13",
+      "top1_top2_gap": 0.288017
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.397198,
+      "logit_4897": 20.203304,
+      "logit_53692": 20.600502,
+      "maxdiff_vs_f32": 1.011240,
+      "maxdiff_vs_llama": 1.245282,
+      "mode": "int8_except_layer_13",
+      "top1_top2_gap": 0.397198
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.352953,
+      "logit_4897": 20.665443,
+      "logit_53692": 20.312490,
+      "maxdiff_vs_f32": 0.221511,
+      "maxdiff_vs_llama": 1.072706,
+      "mode": "int8_only_layer_14",
+      "top1_top2_gap": 0.352953
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.353621,
+      "logit_4897": 20.264103,
+      "logit_53692": 20.617723,
+      "maxdiff_vs_f32": 0.995482,
+      "maxdiff_vs_llama": 1.218500,
+      "mode": "int8_except_layer_14",
+      "top1_top2_gap": 0.353621
+    },
+    {
+      "argmax": 4897,
+      "f32tok_minus_int8tok": 0.388020,
+      "logit_4897": 20.748285,
+      "logit_53692": 20.360266,
+      "maxdiff_vs_f32": 0.282944,
+      "maxdiff_vs_llama": 1.145030,
+      "mode": "int8_only_layer_15",
+      "top1_top2_gap": 0.388020
+    },
+    {
+      "argmax": 53692,
+      "f32tok_minus_int8tok": -0.486233,
+      "logit_4897": 20.289013,
+      "logit_53692": 20.775246,
+      "maxdiff_vs_f32": 1.093235,
+      "maxdiff_vs_llama": 1.257932,
+      "mode": "int8_except_layer_15",
+      "top1_top2_gap": 0.486233
+    }
+  ],
+  "positions": [
+    {
+      "emulation_vs_int8": 0.672785,
+      "f32_argmax": 791,
+      "f32_gap": 5.159847,
+      "index": 0,
+      "int8_argmax": 791,
+      "int8_gap": 5.141813,
+      "max_logit_abs_diff": 0.670289
+    },
+    {
+      "emulation_vs_int8": 0.781150,
+      "f32_argmax": 6864,
+      "f32_gap": 11.479628,
+      "index": 1,
+      "int8_argmax": 6864,
+      "int8_gap": 11.454018,
+      "max_logit_abs_diff": 0.675531
+    },
+    {
+      "emulation_vs_int8": 0.604889,
+      "f32_argmax": 315,
+      "f32_gap": 9.061489,
+      "index": 2,
+      "int8_argmax": 315,
+      "int8_gap": 9.070347,
+      "max_logit_abs_diff": 0.639278
+    },
+    {
+      "emulation_vs_int8": 0.684391,
+      "f32_argmax": 9822,
+      "f32_gap": 11.230284,
+      "index": 3,
+      "int8_argmax": 9822,
+      "int8_gap": 11.192930,
+      "max_logit_abs_diff": 0.501313
+    },
+    {
+      "emulation_vs_int8": 0.717548,
+      "f32_argmax": 374,
+      "f32_gap": 13.698101,
+      "index": 4,
+      "int8_argmax": 374,
+      "int8_gap": 13.801851,
+      "max_logit_abs_diff": 0.565537
+    },
+    {
+      "emulation_vs_int8": 0.604215,
+      "f32_argmax": 12366,
+      "f32_gap": 4.966125,
+      "index": 5,
+      "int8_argmax": 12366,
+      "int8_gap": 4.830284,
+      "max_logit_abs_diff": 0.552169
+    },
+    {
+      "emulation_vs_int8": 0.677788,
+      "f32_argmax": 13,
+      "f32_gap": 8.488819,
+      "index": 6,
+      "int8_argmax": 13,
+      "int8_gap": 8.504349,
+      "max_logit_abs_diff": 0.433726
+    },
+    {
+      "emulation_vs_int8": 0.873827,
+      "f32_argmax": 128009,
+      "f32_gap": 8.213617,
+      "index": 7,
+      "int8_argmax": 128009,
+      "int8_gap": 7.891104,
+      "max_logit_abs_diff": 0.733281
+    },
+    {
+      "emulation_vs_int8": 0.860786,
+      "f32_argmax": 128006,
+      "f32_gap": 13.969904,
+      "index": 8,
+      "int8_argmax": 128006,
+      "int8_gap": 13.897326,
+      "max_logit_abs_diff": 0.597072
+    },
+    {
+      "emulation_vs_int8": 0.956993,
+      "f32_argmax": 78191,
+      "f32_gap": 13.508966,
+      "index": 9,
+      "int8_argmax": 78191,
+      "int8_gap": 13.490692,
+      "max_logit_abs_diff": 0.612268
+    },
+    {
+      "emulation_vs_int8": 0.957607,
+      "f32_argmax": 128007,
+      "f32_gap": 12.665781,
+      "index": 10,
+      "int8_argmax": 128007,
+      "int8_gap": 12.587048,
+      "max_logit_abs_diff": 0.781019
+    },
+    {
+      "emulation_vs_int8": 1.180955,
+      "f32_argmax": 271,
+      "f32_gap": 14.398211,
+      "index": 11,
+      "int8_argmax": 271,
+      "int8_gap": 14.592617,
+      "max_logit_abs_diff": 1.288042
+    },
+    {
+      "emulation_vs_int8": 1.416652,
+      "f32_argmax": 4897,
+      "f32_gap": 0.349283,
+      "index": 12,
+      "int8_argmax": 53692,
+      "int8_gap": 0.393490,
+      "max_logit_abs_diff": 1.068317
+    }
+  ],
+  "real_activation_matvec": [
+    {
+      "f32_vs_f64_ref": 3.002E-7,
+      "int8_vs_f64_ref": 1.979E-7,
+      "max_abs_ref": 1.325,
+      "weight": "layer0.wq"
+    },
+    {
+      "f32_vs_f64_ref": 6.562E-7,
+      "int8_vs_f64_ref": 4.389E-7,
+      "max_abs_ref": 5.369,
+      "weight": "layer0.wk"
+    },
+    {
+      "f32_vs_f64_ref": 1.127E-8,
+      "int8_vs_f64_ref": 3.396E-8,
+      "max_abs_ref": 0.4167,
+      "weight": "layer0.wv"
+    },
+    {
+      "f32_vs_f64_ref": 2.194E-7,
+      "int8_vs_f64_ref": 8.372E-8,
+      "max_abs_ref": 0.7062,
+      "weight": "layer0.w_gate"
+    },
+    {
+      "f32_vs_f64_ref": 7.717E-8,
+      "int8_vs_f64_ref": 3.876E-8,
+      "max_abs_ref": 0.4384,
+      "weight": "layer0.w_up"
+    }
+  ],
+  "rustflags": "-C target-feature=+dotprod,+i8mm",
+  "scope": "diagnosis only; parity rule, default path and INT8_PROMOTION_DEFAULT unchanged"
+}

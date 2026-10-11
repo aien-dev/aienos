@@ -142,3 +142,10 @@ line parsing (libtest prints `test name ... ` without a newline); the numbers we
 - Conditions 1, 3 and 4: tests as registered, all PASS (`cargo test --release -p aienos-infer`: 32 library
   tests, 4 model-backed forward tests (llama.cpp comparison, int8 included) and 15 other tests pass, 2 ignored).
 - Therefore the PR stays a draft: condition 2 is not met.
+
+## Diagnosis of the condition 2 failure (appended 2026-10-11; the sections above are unchanged)
+
+`docs/l6b-int8-divergence-diagnosis.md`, evidence `evidence/l6b_int8_divergence_3f5a22426976.json`. Finding:
+no int8 arithmetic defect; the split at index 12 is Q8_K activation-rounding noise against a 0.35-logit f32
+margin, and llama.cpp makes the int8 choice there. The verdict of condition 2 stays FAIL, the rule is unchanged
+and the PR stays a draft.
