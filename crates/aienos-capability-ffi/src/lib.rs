@@ -391,8 +391,10 @@ pub unsafe extern "C" fn aienos_cap32_kill(admin: *mut AienosCapAdmin) -> i32 {
     OK
 }
 
-/// Replace the table with the next boot generation. Outstanding references
-/// fail against the new table. The office token is replaced.
+/// Replace the table with the next boot generation. The new table starts
+/// above every generation the old one used (fix mirrored from the native
+/// authority, b1fa747), so outstanding references fail against it even
+/// after reclaims. The office token is replaced.
 ///
 /// # Safety
 /// `admin` came from [`aienos_cap32_start`].
@@ -401,20 +403,19 @@ pub unsafe extern "C" fn aienos_cap32_restart(admin: *mut AienosCapAdmin) -> i32
     if admin.is_null() {
         return ERR_STATE;
     }
-    let boot = match aienos_capability::take_boot_gen() {
-        Ok(boot) => boot,
-        Err(code) => return code,
-    };
-    let state = match AuthorityState::bootstrap(boot) {
-        Ok(state) => state,
-        Err(code) => return code,
-    };
     let mut token = [0u8; 32];
     if !fill_token(&mut token) {
         return ERR_IO;
     }
     let shared = &unsafe { &*admin }.shared;
-    with_state_mut(shared, |slot| *slot = state);
+    let swapped = with_state_mut(shared, |slot| {
+        let boot = aienos_capability::take_boot_gen_above(slot.generation_floor())?;
+        *slot = AuthorityState::bootstrap(boot)?;
+        Ok::<(), i32>(())
+    });
+    if let Err(code) = swapped {
+        return code;
+    }
     let mut admin_token = shared
         .admin
         .lock()
@@ -551,6 +552,7 @@ pub unsafe extern "C" fn aienos_cap32_force_generation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aienos_capability::{ERR_STALE_GEN, RIGHT_READ};
     use core::ptr;
 
     #[test]
@@ -570,5 +572,99 @@ mod tests {
         // caller that checks this report cannot mistake one for the other.
         assert_ne!(words[0], 16);
         assert_ne!(words[1], 8);
+    }
+
+    struct Auth {
+        admin: *mut AienosCapAdmin,
+        view: *mut AienosCapView,
+    }
+
+    impl Auth {
+        fn start() -> Self {
+            let mut admin = ptr::null_mut();
+            let mut view = ptr::null_mut();
+            assert_eq!(unsafe { aienos_cap32_start(&mut admin, &mut view) }, OK);
+            Self { admin, view }
+        }
+
+        fn office(&self) -> AienosCapRef {
+            let mut out = AienosCapRef {
+                cap_id: 0,
+                generation: 0,
+            };
+            assert_eq!(unsafe { aienos_cap32_office(self.admin, &mut out) }, OK);
+            out
+        }
+
+        fn mint(&self, subject: u32, resource: u64) -> AienosCapRef {
+            let request = AienosCapMint {
+                issuer: 3,
+                subject,
+                resource,
+                rights: RIGHT_READ,
+                lease_ticks: 0,
+                parent: AienosCapRef {
+                    cap_id: aienos_capability::PARENT_NONE,
+                    generation: 0,
+                },
+                authority: self.office(),
+            };
+            let mut out = AienosCapRef {
+                cap_id: 0,
+                generation: 0,
+            };
+            assert_eq!(
+                unsafe { aienos_cap32_mint(self.admin, &request, &mut out) },
+                OK
+            );
+            out
+        }
+
+        fn validate(&self, cap: AienosCapRef, subject: u32, resource: u64) -> i32 {
+            unsafe {
+                aienos_cap32_validate(
+                    self.view,
+                    cap,
+                    subject,
+                    resource,
+                    RIGHT_READ,
+                    ptr::null_mut(),
+                )
+            }
+        }
+    }
+
+    impl Drop for Auth {
+        fn drop(&mut self) {
+            unsafe { aienos_cap32_stop(self.admin, self.view) };
+        }
+    }
+
+    /// Mirror of the C test reclaimed_reference_stays_dead_after_restart
+    /// (fix b1fa747): a reference minted after one reclaim must not validate
+    /// again once the same slot is minted for the same subject and resource
+    /// after a restart.
+    #[test]
+    fn reclaimed_reference_stays_dead_after_restart() {
+        let a = Auth::start();
+        let first = a.mint(1, 0x40);
+        assert_eq!(
+            unsafe { aienos_cap32_revoke(a.admin, a.office(), first) },
+            OK
+        );
+        assert_eq!(
+            unsafe { aienos_cap32_reclaim(a.admin, a.office(), first.cap_id) },
+            OK
+        );
+        let second = a.mint(1, 0x40);
+        assert_eq!(second.cap_id, first.cap_id);
+        assert_eq!(second.generation, first.generation + 1);
+        assert_eq!(unsafe { aienos_cap32_restart(a.admin) }, OK);
+        let fresh = a.mint(1, 0x40);
+        assert_eq!(fresh.cap_id, second.cap_id);
+        assert!(fresh.generation > second.generation);
+        assert_eq!(a.validate(second, 1, 0x40), ERR_STALE_GEN);
+        assert_eq!(a.validate(first, 1, 0x40), ERR_STALE_GEN);
+        assert_eq!(a.validate(fresh, 1, 0x40), OK);
     }
 }
