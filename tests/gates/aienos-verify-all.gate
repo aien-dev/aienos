@@ -1,0 +1,21 @@
+# tests/gates/aienos-verify-all.gate
+# Mirrors hosted: ci.yml (disabled_manually on GitHub) 'bash scripts/verify_all.sh' (verification harness + QEMU boot test); declared, not an active hosted job
+gate: AIENOS-VERIFY-ALL
+manifest_version: 2
+owner: aienos
+requires:
+  - qemu
+inputs:
+  - scripts/verify_all.sh
+  - crates/
+  - native/boot/
+  - tests/gates/
+run:
+  exec: tests/gates/run.sh
+  args: ["verify-all"]
+expects:
+  exit: 0
+  verdict: PASS
+timeout: 30m
+exactness: EXACT
+cache_scope: machine

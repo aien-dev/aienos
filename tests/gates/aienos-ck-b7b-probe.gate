@@ -1,0 +1,27 @@
+# tests/gates/aienos-ck-b7b-probe.gate
+# Mirrors hosted: ck-kernel.yml 'B7b preparation probe' (aienos#286): scripts/qemu_ck_b7b_probe_test.sh --self-test, plain, --positive
+gate: AIENOS-CK-B7B-PROBE
+manifest_version: 2
+owner: aienos
+requires:
+  - qemu
+inputs:
+  - native/kernel/
+  - scripts/ck_gates.sh
+  - scripts/lib_ck_m1_checks.sh
+  - scripts/lib_gate_hold.sh
+  - scripts/gate_hold_selftest.sh
+  - scripts/ck_owner_keys_check.sh
+  - crates/aienos-fpu-probe/
+  - crates/aienos-infer-kernel/
+  - tests/gates/
+  - scripts/
+run:
+  exec: tests/gates/run.sh
+  args: ["ck-b7b-probe"]
+expects:
+  exit: 0
+  verdict: PASS
+timeout: 30m
+exactness: EXACT
+cache_scope: machine

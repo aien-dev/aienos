@@ -1,0 +1,20 @@
+# tests/gates/aienos-native-disk.gate
+# Mirrors hosted: native-suites.yml matrix suite disk: make -C native/disk plus explicit pass markers, no NOT_RUN (hosted 185 s)
+gate: AIENOS-NATIVE-DISK
+manifest_version: 2
+owner: aienos
+requires:
+  - host
+inputs:
+  - native/disk/
+  - tests/gates/
+run:
+  exec: tests/gates/run.sh
+  args: ["native-disk"]
+expects:
+  exit: 0
+  observe: ["not_run_in_log == false"]
+  verdict: PASS
+timeout: 15m
+exactness: EXACT
+cache_scope: machine

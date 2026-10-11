@@ -1,0 +1,20 @@
+# tests/gates/aienos-native-argus.gate
+# Mirrors hosted: native-suites.yml matrix suite argus: make -C native/argus plus explicit pass markers, no NOT_RUN (hosted 87 s)
+gate: AIENOS-NATIVE-ARGUS
+manifest_version: 2
+owner: aienos
+requires:
+  - host
+inputs:
+  - native/argus/
+  - tests/gates/
+run:
+  exec: tests/gates/run.sh
+  args: ["native-argus"]
+expects:
+  exit: 0
+  observe: ["not_run_in_log == false"]
+  verdict: PASS
+timeout: 10m
+exactness: EXACT
+cache_scope: machine

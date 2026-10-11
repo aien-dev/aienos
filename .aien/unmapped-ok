@@ -1,0 +1,10 @@
+# Changed paths matching these globs need only the always-run set (.aien/always).
+# Everything else must be covered by a manifest's inputs or the commit is NOT_RUN.
+# Conservative: only paths every hosted workflow path-filter leaves out and no suite
+# compiles or reads. Read from the base ref.
+docs/**
+*.md
+LICENSE
+NOTICE
+.gitignore
+funding.json

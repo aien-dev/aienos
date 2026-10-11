@@ -1,0 +1,20 @@
+# tests/gates/aienos-native-capability.gate
+# Mirrors hosted: native-suites.yml matrix suite capability: make -C native/capability plus explicit pass markers, no NOT_RUN (hosted 47 s)
+gate: AIENOS-NATIVE-CAPABILITY
+manifest_version: 2
+owner: aienos
+requires:
+  - host
+inputs:
+  - native/capability/
+  - tests/gates/
+run:
+  exec: tests/gates/run.sh
+  args: ["native-capability"]
+expects:
+  exit: 0
+  observe: ["not_run_in_log == false"]
+  verdict: PASS
+timeout: 10m
+exactness: EXACT
+cache_scope: machine

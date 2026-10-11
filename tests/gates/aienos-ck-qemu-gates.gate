@@ -1,0 +1,28 @@
+# tests/gates/aienos-ck-qemu-gates.gate
+# Mirrors hosted: ck-kernel.yml 'QEMU TCG gates': bash scripts/ck_gates.sh --out DIR, every C-implemented gate except FPU/INFER must print AIENOS_CK_<G>: PASS (hosted job 2340 s total)
+gate: AIENOS-CK-QEMU-GATES
+manifest_version: 2
+owner: aienos
+requires:
+  - qemu
+inputs:
+  - native/kernel/
+  - scripts/ck_gates.sh
+  - scripts/lib_ck_m1_checks.sh
+  - scripts/lib_gate_hold.sh
+  - scripts/gate_hold_selftest.sh
+  - scripts/ck_owner_keys_check.sh
+  - crates/aienos-fpu-probe/
+  - crates/aienos-infer-kernel/
+  - tests/gates/
+  - scripts/
+run:
+  exec: tests/gates/run.sh
+  args: ["ck-qemu-gates"]
+expects:
+  exit: 0
+  observe: ["required_gates_pass >= 1"]
+  verdict: PASS
+timeout: 60m
+exactness: EXACT
+cache_scope: machine

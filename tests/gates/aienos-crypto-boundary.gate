@@ -1,0 +1,23 @@
+# tests/gates/aienos-crypto-boundary.gate
+# Mirrors hosted: crypto-boundary.yml: cargo test/clippy of aienos-crypto, aienos-kernel crypto:: tests, no_std check of aienos-kernel (hosted 23 s; always-run)
+gate: AIENOS-CRYPTO-BOUNDARY
+manifest_version: 2
+owner: aienos
+requires:
+  - host
+inputs:
+  - crates/aienos-crypto/
+  - crates/aienos-kernel/
+  - Cargo.toml
+  - Cargo.lock
+  - vendor/
+  - tests/gates/
+run:
+  exec: tests/gates/run.sh
+  args: ["crypto-boundary"]
+expects:
+  exit: 0
+  verdict: PASS
+timeout: 15m
+exactness: EXACT
+cache_scope: machine
