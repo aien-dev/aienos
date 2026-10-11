@@ -366,3 +366,90 @@ int ck_dma_faults(uint32_t stream_id, struct ck_dma_fault *first)
         first->overflow = ovf;
     return matched;
 }
+
+#ifdef CK_B7B_PROBE
+/* Cut B7b preparation (aienos#286; Drake's ruling of 2026-10-10 authorizes the
+ * preparation, not the boot): a probe build (make CK_B7B_PROBE=1, own OUT)
+ * that, once per boot, confines PCI segment 15 requester 0x100 (the GB10, IORT
+ * stream 0x100 on SMMUv3 B at 0x13000000 on the DGX Spark, docs/GB10_IORT_DECODE.md)
+ * on a one-page DMA window, reports the route, the RMR count and SMMU_IDR0 /
+ * SMMU_IDR1 of the node it came up on (read only: "Access to this field is RO",
+ * IHI0070H.a 6.3.1 / 6.3.2), unconfines, and prints one summary line. No DMA is
+ * started; the window page is never handed to a device. After the probe the
+ * node stays enabled with every stream aborting (as after any unconfine).
+ * QEMU virt has no segment 15, so there the expected result is a fail-closed
+ * refusal. CK_B7B_PROBE_TEST_SEGMENT0=1 (TEST-ONLY, QEMU positive path,
+ * refused with CK_HARDWARE_STAGING) probes segment 0 instead.
+ * Lines judged by scripts/qemu_ck_b7b_probe_test.sh. */
+#if defined(CK_B7B_PROBE_TEST_SEGMENT0) && defined(CK_HARDWARE_STAGING)
+#error "CK_B7B_PROBE_TEST_SEGMENT0 (TEST-only QEMU positive path) cannot be combined with CK_HARDWARE_STAGING"
+#endif
+#ifdef CK_B7B_PROBE_TEST_SEGMENT0
+#define B7B_SEGMENT 0u
+#else
+#define B7B_SEGMENT 15u
+#endif
+#define B7B_RID 0x100u
+
+static const char *b7b_rc(int rc)
+{
+    switch (rc) {
+    case 0: return "ok";
+    case CK_SMMU_ABSENT: return "absent";
+    case CK_SMMU_FAILED: return "failed";
+    case CK_SMMU_NOSTREAM: return "nostream";
+    case CK_SMMU_EARG: return "earg";
+    case CK_SMMU_OTHER: return "other";
+    default: return "unknown";
+    }
+}
+
+void ck_b7b_probe(void)
+{
+#ifdef CK_B7B_PROBE_TEST_SEGMENT0
+    ck_puts("b7b_probe: TEST-ONLY B7b probe on PCI segment 0 (QEMU positive path); never hardware evidence\n");
+#endif
+    ck_printf("b7b_probe: start segment=%u rid=0x%x window_bytes=4096 no_dma=yes\n", B7B_SEGMENT, B7B_RID);
+    int rc = parse_iort();
+    struct ck_iort_route rt;
+    if (rc) {
+        ck_printf("b7b_probe: iort rc=%d (%s)\n", rc, b7b_rc(rc));
+    } else if (ck_iort_route(&g.iort, B7B_SEGMENT, B7B_RID, &rt)) {
+        ck_printf("b7b_probe: route none (smmus=%u)\n", g.iort.nsmmus);
+    } else {
+        ck_printf("b7b_probe: route instance=%u base=0x%llx stream=0x%x rmr_nodes=%u (smmus=%u)\n", rt.smmu_index,
+                  (unsigned long long)rt.smmu_base, rt.sid, rt.nrmr, g.iort.nsmmus);
+    }
+    uint64_t phys = 0;
+    if (!ck_dma_alloc(4096, 4096, &phys)) {
+        ck_puts("b7b_probe: no DMA page\nAIENOS_B7B_PROBE: FAIL\n");
+        return;
+    }
+    struct ck_dma_confinement cf;
+    rc = ck_dma_confine(B7B_SEGMENT, B7B_RID, phys, 4096, &cf);
+    if (rc) {
+        ck_printf("b7b_probe: confine refused rc=%d (%s); nothing granted\n", rc, b7b_rc(rc));
+        ck_puts("AIENOS_B7B_PROBE: REFUSED\n");
+        return;
+    }
+    ck_printf("b7b_probe: confined stream=0x%x smmu_base=0x%llx iova=0x%llx len=0x%llx\n", cf.stream_id,
+              (unsigned long long)cf.smmu_base, (unsigned long long)cf.iova, (unsigned long long)cf.len);
+    int idr_ok = 0;
+    for (uint32_t k = 0; k < CK_IORT_MAX_SMMUS; k++) {
+        struct inst *in = &g.inst[k];
+        if (in->state != 1 || in->base != cf.smmu_base)
+            continue;
+        uint32_t idr0 = r_rd32(in, CK_SMMU_IDR0), idr1 = r_rd32(in, CK_SMMU_IDR1);
+        ck_printf("b7b_probe: instance=%u idr0=0x%08x idr1=0x%08x st_level=%u sidsize=%u\n", k, idr0, idr1,
+                  (idr0 >> CK_SMMU_IDR0_ST_LEVEL_SHIFT) & CK_SMMU_IDR0_ST_LEVEL_MASK,
+                  idr1 & CK_SMMU_IDR1_SIDSIZE_MASK);
+        idr_ok = 1;
+        break;
+    }
+    if (!idr_ok)
+        ck_puts("b7b_probe: no live instance at the confined base\n");
+    int urc = ck_dma_unconfine(cf.stream_id);
+    ck_printf("b7b_probe: unconfine rc=%d (%s); stream 0x%x aborts again\n", urc, b7b_rc(urc), cf.stream_id);
+    ck_puts(urc || !idr_ok ? "AIENOS_B7B_PROBE: FAIL\n" : "AIENOS_B7B_PROBE: CONFINED_AND_RELEASED\n");
+}
+#endif
