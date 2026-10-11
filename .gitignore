@@ -9,3 +9,5 @@ native/argus/out-d/
 native/argus/out-*/
 native/store/out/
 .crumb.local
+native/crypto/out/
+native/disk/qemu/build.log
