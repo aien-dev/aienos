@@ -22,6 +22,13 @@ export AIENOS_GATE_LOCK="$TMP/qemu-gate-lock"
 native_suite() {
   local suite="$1" targets="$2" req="$3" log="$TMP/suite.log" found=0
   set -o pipefail
+  # native/crypto has no .gitignore for its out/ (the other suites do), so the build output
+  # would stay in the tree; the hosted job throws its checkout away. Remove an out/ that this
+  # step created, and only when git does not already ignore it. The gate itself is unchanged.
+  if [ ! -e "native/$suite/out" ] && ! git check-ignore -q "native/$suite/out"; then
+    CLEAN_OUT="$ROOT/native/$suite/out"
+    trap 'rm -rf "$TMP" "$CLEAN_OUT"' EXIT
+  fi
   # shellcheck disable=SC2086
   make -C "native/$suite" $targets 2>&1 | tee "$log"
   while IFS= read -r m; do
@@ -35,7 +42,18 @@ native_suite() {
 
 case "$step" in
   crumb-verify)
-    "${CRUMB:-crumb}" verify .
+    # Hosted crumb.yml builds the crumb tool from the aien-architecture commit in crumb.lock.
+    # Same here, from the sibling checkout ../aien-architecture into a temp dir outside the
+    # tree, so a newer crumb on PATH can never change the verdict.
+    if [ ! -d ../aien-architecture ]; then
+      echo "run.sh: ../aien-architecture is missing; the hosted job checks out aien-dev/aien-architecture at crumb.lock" >&2
+      exit 3
+    fi
+    pin=$(tr -d '[:space:]' < crumb.lock)
+    git -C ../aien-architecture archive "$pin" tools/crumb | tar -x -C "$TMP"
+    make -s -C "$TMP/tools/crumb" crumb
+    obs crumb_tool_commit "\"$pin\""
+    "$TMP/tools/crumb/crumb" verify .
     ;;
   # ck-kernel.yml, host steps (ubuntu-24.04-arm there, AArch64 here)
   ck-host-tests)      make -C native/kernel test sanitize ;;
