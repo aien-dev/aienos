@@ -29,7 +29,9 @@ pub mod model;
 pub mod quant;
 pub mod tokenizer;
 
-pub use decode::{argmax, generate_greedy, DecodeState};
+pub use decode::{
+    argmax, generate_greedy, DecodeState, Q8_ALL, Q8_DOWN, Q8_GATE_UP, Q8_OUTPUT, Q8_QKV, Q8_WO,
+};
 pub use dotpath::{DotPath, DotSetting, Features, INT8_PROMOTION_DEFAULT};
 pub use gguf::{ArrayView, GgmlType, Gguf, GgufError, TensorInfo, Value, ValueType};
 pub use model::{InferError, Model};

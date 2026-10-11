@@ -8,7 +8,10 @@
 //! model file (`AIENOS_MODEL`, default `~/models/aien-mail/
 //! Llama-3.2-1B-Instruct-Q4_K_M.gguf`) and print SKIPPED when it is absent.
 
-use aienos_infer::{argmax, DecodeState, Gguf, Model, Tokenizer};
+use aienos_infer::{
+    argmax, DecodeState, Gguf, Model, Tokenizer, Q8_ALL, Q8_DOWN, Q8_GATE_UP, Q8_OUTPUT, Q8_QKV,
+    Q8_WO,
+};
 use std::time::Instant;
 
 fn model_bytes() -> Option<Vec<u8>> {
@@ -302,4 +305,282 @@ fn int8_parity_64_tokens_vs_f32() {
         first_div.is_none(),
         "int8 tokens diverge from f32 at index {first_div:?}"
     );
+}
+
+/// aienos#34 int8 parity diagnosis (2026-10-11). Diagnosis only: it does not
+/// change the parity rule, the default path or `INT8_PROMOTION_DEFAULT`.
+///
+/// The recorded parity run (`evidence/l6_host_3f5a22426976_l6b_parity.json`)
+/// has f32 and int8 agree on indexes 0 to 11 and split at index 12 (f32 4897,
+/// int8 53692). This test replays that common history teacher-forced (prompt
+/// plus the 12 shared tokens) and compares the index-12 decision across paths:
+/// plain f32, int8, f32 dots on Q8_K-rounded activations (`emulate_q8k`), int8
+/// restricted to one matvec class or one layer, and int8 everywhere except one
+/// class or layer. It also compares against llama.cpp's logits for the same
+/// history (`tests/fixtures/ref_fr_idx12_logits.f32`, from
+/// `tests/ref/llama_ref_hist.c`). Prints `DIAG_*` lines; asserts only that the
+/// recorded split reproduces and that the f32 path is deterministic.
+/// `cargo test --release -p aienos-infer --test forward int8_divergence -- --ignored --nocapture --test-threads=1`
+#[test]
+#[ignore = "model-backed, minutes on one core; run locally"]
+fn int8_divergence_diagnosis_index_12() {
+    const F32_TOK: u32 = 4897;
+    const INT8_TOK: u32 = 53692;
+    const COMMON: [u32; 12] = [
+        791, 6864, 315, 9822, 374, 12366, 13, 128009, 128006, 78191, 128007, 271,
+    ];
+    let Some(bytes) = model_bytes() else {
+        panic!("model file required");
+    };
+    let g = Gguf::parse(&bytes).unwrap();
+    let m = Model::new(&g).unwrap();
+    let tok = Tokenizer::new(&g.tokenizer().unwrap()).unwrap();
+    let ids = tok.encode_chat("What is the capital of France?").unwrap();
+    assert_eq!(ids, reference("fr").ids, "prompt ids differ from llama.cpp");
+    let n_layer = m.layers.len();
+    assert!(n_layer <= 64);
+
+    // Logits after every position of the history (13 decisions, indexes 0..=12).
+    let run = |int8: bool, round: bool, layers: u64, classes: u8| -> Vec<Vec<f32>> {
+        let mut st = DecodeState::new(&m, ids.len() + COMMON.len() + 1);
+        st.int8_dot = int8;
+        st.emulate_q8k = round;
+        st.q8_layers = layers;
+        st.q8_classes = classes;
+        st.prefill(&m, &ids).unwrap();
+        let mut out = vec![st.logits.clone()];
+        for &t in &COMMON {
+            st.forward(&m, t, true).unwrap();
+            out.push(st.logits.clone());
+        }
+        out
+    };
+    let top2 = |l: &[f32]| -> (u32, f32) {
+        let (mut b1, mut b2, mut bi) = (f32::NEG_INFINITY, f32::NEG_INFINITY, 0u32);
+        for (i, &v) in l.iter().enumerate() {
+            if v > b1 {
+                (b2, b1, bi) = (b1, v, i as u32);
+            } else if v > b2 {
+                b2 = v;
+            }
+        }
+        (bi, b1 - b2)
+    };
+    let maxdiff = |a: &[f32], b: &[f32]| {
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0f32, f32::max)
+    };
+    let raw = std::fs::read(format!(
+        "{}/tests/fixtures/ref_fr_idx12_logits.f32",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    let llama: Vec<f32> = raw
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
+
+    let f32l = run(false, false, u64::MAX, Q8_ALL);
+    let base = &f32l[12];
+    assert_eq!(llama.len(), base.len());
+    let report = |name: &str, l: &[f32]| {
+        let (am, gap) = top2(l);
+        println!(
+            "DIAG_MODE {name}: argmax {am} top1_top2_gap {gap:.6} logit_{F32_TOK} {:.6} logit_{INT8_TOK} {:.6} \
+             f32tok_minus_int8tok {:.6} maxdiff_vs_f32 {:.6} maxdiff_vs_llama {:.6}",
+            l[F32_TOK as usize],
+            l[INT8_TOK as usize],
+            l[F32_TOK as usize] - l[INT8_TOK as usize],
+            maxdiff(l, base),
+            maxdiff(l, &llama),
+        );
+        am
+    };
+
+    // Negative control: the f32 path is deterministic.
+    let again = run(false, false, u64::MAX, Q8_ALL);
+    let repeat_diff = maxdiff(&again[12], base);
+    println!("DIAG_F32_REPEAT_MAXDIFF: {repeat_diff}");
+
+    let i8l = run(true, false, u64::MAX, Q8_ALL);
+    let eml = run(false, true, u64::MAX, Q8_ALL);
+    for p in 0..=12 {
+        let (fa, fg) = top2(&f32l[p]);
+        let (ia, ig) = top2(&i8l[p]);
+        println!(
+            "DIAG_POS {p}: f32 argmax {fa} gap {fg:.6} | int8 argmax {ia} gap {ig:.6} | maxdiff {:.6} | emul_vs_int8 {:.6}",
+            maxdiff(&f32l[p], &i8l[p]),
+            maxdiff(&eml[p], &i8l[p]),
+        );
+    }
+    let a_f32 = report("f32", base);
+    let a_int8 = report("int8", &i8l[12]);
+    report("emulate_q8k_f32_dots", &eml[12]);
+    report("llama_cpp", &llama);
+
+    let classes = [
+        ("qkv", Q8_QKV),
+        ("wo", Q8_WO),
+        ("gate_up", Q8_GATE_UP),
+        ("down", Q8_DOWN),
+        ("output", Q8_OUTPUT),
+    ];
+    for (n, c) in classes {
+        report(
+            &format!("int8_only_{n}"),
+            &run(true, false, u64::MAX, c)[12],
+        );
+        report(
+            &format!("int8_except_{n}"),
+            &run(true, false, u64::MAX, Q8_ALL & !c)[12],
+        );
+    }
+    // Layer masks leave the output head on f32, so only layer effects show.
+    let no_out = Q8_ALL & !Q8_OUTPUT;
+    let all_layers = if n_layer == 64 {
+        u64::MAX
+    } else {
+        (1u64 << n_layer) - 1
+    };
+    report(
+        "int8_all_layers_f32_output",
+        &run(true, false, u64::MAX, no_out)[12],
+    );
+    for l in 0..n_layer {
+        report(
+            &format!("int8_only_layer_{l:02}"),
+            &run(true, false, 1 << l, no_out)[12],
+        );
+        report(
+            &format!("int8_except_layer_{l:02}"),
+            &run(true, false, all_layers & !(1 << l), no_out)[12],
+        );
+    }
+
+    assert_eq!(repeat_diff, 0.0, "f32 path not deterministic");
+    assert_eq!(
+        a_f32, F32_TOK,
+        "recorded f32 choice at index 12 not reproduced"
+    );
+    assert_eq!(
+        a_int8, INT8_TOK,
+        "recorded int8 choice at index 12 not reproduced"
+    );
+}
+
+/// Part of the aienos#34 int8 parity diagnosis: on a real activation (layer 0
+/// attention RMSNorm of the BOS embedding), the int8 matvec and the f32
+/// matvec over the same Q8_K-rounded activations both equal an f64 reference
+/// of `row . round(x)` to rounding error, for every K-quant weight that layer
+/// 0 feeds from that activation. So the int8 arithmetic itself adds nothing
+/// beyond the activation rounding.
+#[test]
+fn int8_matvec_equals_rounded_f32_on_real_activation() {
+    use aienos_infer::decode::{q8k_round, rms_norm};
+    use aienos_infer::quant::Q8Act;
+    let Some(bytes) = model_bytes() else { return };
+    let g = Gguf::parse(&bytes).unwrap();
+    let m = Model::new(&g).unwrap();
+    let l0 = &m.layers[0];
+    let e = m.params.embedding_length as usize;
+    let mut emb = vec![0f32; e];
+    m.tok_embd.row_into(128000, &mut emb).unwrap();
+    let mut h = vec![0f32; e];
+    rms_norm(&emb, &l0.attn_norm, m.params.rms_norm_eps, &mut h);
+    let mut xr = h.clone();
+    q8k_round(&mut xr);
+    let mut q8 = Q8Act::with_capacity(e);
+    q8.quantize(&h).unwrap();
+    let ws = [
+        ("wq", &l0.wq),
+        ("wk", &l0.wk),
+        ("wv", &l0.wv),
+        ("w_gate", &l0.w_gate),
+        ("w_up", &l0.w_up),
+    ];
+    for (name, w) in ws {
+        assert!(w.is_kquant());
+        let mut a = vec![0f32; w.rows];
+        let mut scr = vec![0f32; w.cols];
+        w.matvec(&xr, &mut a, &mut scr).unwrap();
+        let mut b = vec![0f32; w.rows];
+        w.matvec_q8(&q8, &mut b).unwrap();
+        let mut row = vec![0f32; w.cols];
+        let (mut da, mut db, mut mc) = (0f64, 0f64, 0f64);
+        for r in 0..w.rows {
+            w.row_into(r, &mut row).unwrap();
+            let c: f64 = row
+                .iter()
+                .zip(&xr)
+                .map(|(p, q)| *p as f64 * *q as f64)
+                .sum();
+            da = da.max((a[r] as f64 - c).abs());
+            db = db.max((b[r] as f64 - c).abs());
+            mc = mc.max(c.abs());
+        }
+        println!("REAL_ACT {name}: max|f32-ref| {da:.3e} max|int8-ref| {db:.3e} max|ref| {mc:.3e}");
+        assert!(
+            da <= 1e-5 * mc.max(1.0),
+            "{name}: f32 path off the f64 reference"
+        );
+        assert!(
+            db <= 1e-5 * mc.max(1.0),
+            "{name}: int8 path off the f64 reference"
+        );
+    }
+}
+
+/// Part of the aienos#34 int8 parity diagnosis: int8 against the f32 path on
+/// the same Q8_K-rounded activations (`emulate_q8k`), per matvec class, over
+/// the first `n` prompt tokens. Prints `DRIFT` lines. The two compute the same
+/// values per matvec (test above) but in a different summation order; the
+/// rounding to the Q8_K grid is a step function, so a last-bit difference
+/// upstream can move an activation to the neighbouring grid point.
+/// `cargo test --release -p aienos-infer --test forward int8_vs_q8k_emulation_drift -- --ignored --nocapture`
+#[test]
+#[ignore = "model-backed, about a minute; run locally"]
+fn int8_vs_q8k_emulation_drift() {
+    let Some(bytes) = model_bytes() else {
+        panic!("model file required");
+    };
+    let g = Gguf::parse(&bytes).unwrap();
+    let m = Model::new(&g).unwrap();
+    let tok = Tokenizer::new(&g.tokenizer().unwrap()).unwrap();
+    let ids = tok.encode_chat("What is the capital of France?").unwrap();
+    let md = |a: &[f32], b: &[f32]| {
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0f32, f32::max)
+    };
+    for n in [1usize, 2, 3, 8, ids.len()] {
+        let run = |int8: bool, round: bool, c: u8| {
+            let mut st = DecodeState::new(&m, ids.len() + 1);
+            st.int8_dot = int8;
+            st.emulate_q8k = round;
+            st.q8_classes = c;
+            st.prefill(&m, &ids[..n]).unwrap();
+            st.logits.clone()
+        };
+        let f = run(false, false, Q8_ALL);
+        for (name, c) in [
+            ("qkv", Q8_QKV),
+            ("wo", Q8_WO),
+            ("gate_up", Q8_GATE_UP),
+            ("down", Q8_DOWN),
+            ("output", Q8_OUTPUT),
+            ("all", Q8_ALL),
+        ] {
+            let i = run(true, false, c);
+            let e = run(false, true, c);
+            println!(
+                "DRIFT tokens {n} class {name}: int8_vs_emul {:.3e} int8_vs_f32 {:.3e} emul_vs_f32 {:.3e}",
+                md(&i, &e),
+                md(&i, &f),
+                md(&e, &f)
+            );
+        }
+    }
 }
