@@ -69,6 +69,15 @@
 
 #define AIENOS_CAP_PARENT_NONE UINT32_MAX
 
+/* Width of every generation field in this ABI (AienosCapRef.generation,
+ * AienosCapEntry.generation/parent_generation/minted_by_generation). This
+ * library is the production capability ABI; aienos_capability.c pins the
+ * struct layouts below with _Static_assert. The Rust crates
+ * aienos-capability and aienos-capability-ffi are a separate 32-bit
+ * implementation that exports aienos_cap32_* symbols and is not
+ * interchangeable with this one. */
+#define AIENOS_CAP_GENERATION_BITS 64
+
 typedef struct AienosCapAdmin AienosCapAdmin;
 typedef struct AienosCapView AienosCapView;
 

@@ -12,10 +12,47 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/* Production ABI layout (LP64: aarch64, x86_64). These values are the binary
+ * contract omega and every other C caller compile against; a change to any
+ * public struct must fail the build here first. The Rust crates use a
+ * different, 32-bit layout under their own aienos_cap32_* symbols. */
+_Static_assert(AIENOS_CAP_GENERATION_BITS == 64, "generation width");
+_Static_assert(sizeof(((AienosCapRef *)0)->generation) * 8 == AIENOS_CAP_GENERATION_BITS,
+               "AienosCapRef.generation width");
+_Static_assert(sizeof(AienosCapRef) == 16, "AienosCapRef size");
+_Static_assert(_Alignof(AienosCapRef) == 8, "AienosCapRef align");
+_Static_assert(offsetof(AienosCapRef, cap_id) == 0, "AienosCapRef.cap_id offset");
+_Static_assert(offsetof(AienosCapRef, generation) == 8, "AienosCapRef.generation offset");
+_Static_assert(sizeof(AienosCapEntry) == 88, "AienosCapEntry size");
+_Static_assert(offsetof(AienosCapEntry, cap_id) == 0, "AienosCapEntry.cap_id");
+_Static_assert(offsetof(AienosCapEntry, generation) == 8, "AienosCapEntry.generation");
+_Static_assert(offsetof(AienosCapEntry, state) == 16, "AienosCapEntry.state");
+_Static_assert(offsetof(AienosCapEntry, issuer) == 20, "AienosCapEntry.issuer");
+_Static_assert(offsetof(AienosCapEntry, subject) == 24, "AienosCapEntry.subject");
+_Static_assert(offsetof(AienosCapEntry, rights) == 28, "AienosCapEntry.rights");
+_Static_assert(offsetof(AienosCapEntry, resource) == 32, "AienosCapEntry.resource");
+_Static_assert(offsetof(AienosCapEntry, epoch) == 40, "AienosCapEntry.epoch");
+_Static_assert(offsetof(AienosCapEntry, lease_expiry) == 48, "AienosCapEntry.lease_expiry");
+_Static_assert(offsetof(AienosCapEntry, parent_id) == 56, "AienosCapEntry.parent_id");
+_Static_assert(offsetof(AienosCapEntry, parent_generation) == 64,
+               "AienosCapEntry.parent_generation");
+_Static_assert(offsetof(AienosCapEntry, minted_by_id) == 72, "AienosCapEntry.minted_by_id");
+_Static_assert(offsetof(AienosCapEntry, minted_by_generation) == 80,
+               "AienosCapEntry.minted_by_generation");
+_Static_assert(sizeof(AienosCapMint) == 64, "AienosCapMint size");
+_Static_assert(offsetof(AienosCapMint, issuer) == 0, "AienosCapMint.issuer");
+_Static_assert(offsetof(AienosCapMint, subject) == 4, "AienosCapMint.subject");
+_Static_assert(offsetof(AienosCapMint, resource) == 8, "AienosCapMint.resource");
+_Static_assert(offsetof(AienosCapMint, rights) == 16, "AienosCapMint.rights");
+_Static_assert(offsetof(AienosCapMint, lease_ticks) == 24, "AienosCapMint.lease_ticks");
+_Static_assert(offsetof(AienosCapMint, parent) == 32, "AienosCapMint.parent");
+_Static_assert(offsetof(AienosCapMint, authority) == 48, "AienosCapMint.authority");
 
 typedef struct {
     uint64_t boot_gen;
