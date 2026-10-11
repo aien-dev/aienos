@@ -552,7 +552,9 @@ pub unsafe extern "C" fn aienos_cap32_force_generation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aienos_capability::{ERR_STALE_GEN, RIGHT_READ};
+    use aienos_capability::{
+        ERR_EXHAUSTED, ERR_REVOKED, ERR_STALE_GEN, ERR_SUBJECT, ERR_UNAUTHORIZED, RIGHT_READ,
+    };
     use core::ptr;
 
     #[test]
@@ -666,5 +668,101 @@ mod tests {
         assert_eq!(a.validate(second, 1, 0x40), ERR_STALE_GEN);
         assert_eq!(a.validate(first, 1, 0x40), ERR_STALE_GEN);
         assert_eq!(a.validate(fresh, 1, 0x40), OK);
+    }
+
+    /// Mirror of the C test generation_exhaustion_fails_closed.
+    #[test]
+    fn generation_exhaustion_fails_closed() {
+        let mut next = 0u32;
+        assert_eq!(
+            unsafe { aienos_cap32_generation_advance(u32::MAX, &mut next) },
+            ERR_EXHAUSTED
+        );
+        assert_eq!(
+            unsafe { aienos_cap32_generation_advance(u32::MAX - 1, &mut next) },
+            OK
+        );
+        assert_eq!(next, u32::MAX);
+        let a = Auth::start();
+        let cap = a.mint(1, 0x10);
+        assert_eq!(unsafe { aienos_cap32_revoke(a.admin, a.office(), cap) }, OK);
+        assert_eq!(
+            unsafe { aienos_cap32_force_generation(a.admin, cap.cap_id, u32::MAX) },
+            OK
+        );
+        assert_eq!(
+            unsafe { aienos_cap32_reclaim(a.admin, a.office(), cap.cap_id) },
+            ERR_EXHAUSTED
+        );
+        assert_eq!(a.validate(cap, 1, 0x10), ERR_STALE_GEN);
+        let replacement = a.mint(1, 0x11);
+        assert_ne!(replacement.cap_id, cap.cap_id);
+        assert_eq!(
+            unsafe { aienos_cap32_force_generation(a.admin, replacement.cap_id, 99) },
+            ERR_STATE
+        );
+        // No start above an exhausted generation exists, so restart refuses
+        // rather than reuse one, and the table is left as it was.
+        assert_eq!(unsafe { aienos_cap32_restart(a.admin) }, ERR_EXHAUSTED);
+        assert_eq!(a.validate(replacement, 1, 0x11), OK);
+    }
+
+    #[test]
+    fn stale_and_unauthorized_use_is_refused() {
+        let a = Auth::start();
+        let cap = a.mint(1, 0x20);
+        assert_eq!(a.validate(cap, 2, 0x20), ERR_SUBJECT);
+        let before = unsafe { aienos_cap32_clock(a.view) };
+        let request = AienosCapMint {
+            issuer: 1,
+            subject: 1,
+            resource: 1,
+            rights: RIGHT_READ,
+            lease_ticks: 0,
+            parent: AienosCapRef {
+                cap_id: aienos_capability::PARENT_NONE,
+                generation: 0,
+            },
+            authority: a.office(),
+        };
+        let guess = [0u8; 32];
+        assert_eq!(
+            unsafe { aienos_cap32_cognition_mint(a.view, &request, guess.as_ptr()) },
+            ERR_UNAUTHORIZED
+        );
+        assert_eq!(
+            unsafe { aienos_cap32_cognition_admin(a.view, 1, a.office(), cap) },
+            ERR_UNAUTHORIZED
+        );
+        assert_eq!(unsafe { aienos_cap32_clock(a.view) }, before);
+        // An ordinary reference cannot act as the office.
+        let mut as_office = request;
+        as_office.authority = cap;
+        let mut out = AienosCapRef {
+            cap_id: 0,
+            generation: 0,
+        };
+        assert_eq!(
+            unsafe { aienos_cap32_mint(a.admin, &as_office, &mut out) },
+            ERR_UNAUTHORIZED
+        );
+        assert_eq!(
+            unsafe { aienos_cap32_advance_clock(a.admin, cap, 1) },
+            ERR_UNAUTHORIZED
+        );
+        assert_eq!(unsafe { aienos_cap32_revoke(a.admin, a.office(), cap) }, OK);
+        assert_eq!(a.validate(cap, 1, 0x20), ERR_REVOKED);
+        assert_eq!(
+            unsafe { aienos_cap32_reclaim(a.admin, a.office(), cap.cap_id) },
+            OK
+        );
+        assert_eq!(a.validate(cap, 1, 0x20), ERR_STALE_GEN);
+        // Null handles fail closed.
+        assert_eq!(
+            unsafe {
+                aienos_cap32_validate(ptr::null(), cap, 1, 0x20, RIGHT_READ, ptr::null_mut())
+            },
+            ERR_STATE
+        );
     }
 }

@@ -1086,4 +1086,190 @@ mod tests {
         });
         assert_eq!(too_deep.unwrap_err(), ERR_CHAIN);
     }
+
+    // ---- ABI-qualification regression set (mirrors native/capability/tests) ----
+
+    #[test]
+    fn stale_reference_after_revoke_is_refused() {
+        let mut state = boot();
+        let cap = root_mint(&mut state, 1, 0x60, RIGHT_READ).unwrap();
+        assert!(state.validate(cap, 1, 0x60, RIGHT_READ).is_ok());
+        state.revoke(office(&state), cap).unwrap();
+        assert_eq!(
+            state.validate(cap, 1, 0x60, RIGHT_READ).unwrap_err(),
+            ERR_REVOKED
+        );
+        assert_eq!(state.revoke(office(&state), cap).unwrap_err(), ERR_STATE);
+        state.reclaim(office(&state), cap.cap_id).unwrap();
+        assert_eq!(
+            state.validate(cap, 1, 0x60, RIGHT_READ).unwrap_err(),
+            ERR_STALE_GEN
+        );
+        assert_eq!(state.inspect(cap).unwrap_err(), ERR_STALE_GEN);
+        // A revoked minting authority cannot mint.
+        let minter = root_mint(&mut state, 0, RES_AUTHORITY, RIGHT_MINT).unwrap();
+        state.revoke(office(&state), minter).unwrap();
+        let refused = state.mint(Mint {
+            issuer: 3,
+            subject: 1,
+            resource: 0x61,
+            rights: RIGHT_READ,
+            lease_ticks: 0,
+            parent: CapRef::NONE,
+            authority: minter,
+        });
+        assert_eq!(refused.unwrap_err(), ERR_REVOKED);
+    }
+
+    #[test]
+    fn recycled_slot_does_not_honour_old_reference() {
+        let mut state = boot();
+        let old = root_mint(&mut state, 1, 0x70, RIGHT_READ | RIGHT_DELEGATE).unwrap();
+        state.revoke(office(&state), old).unwrap();
+        state.reclaim(office(&state), old.cap_id).unwrap();
+        let new = root_mint(&mut state, 1, 0x70, RIGHT_READ | RIGHT_DELEGATE).unwrap();
+        assert_eq!(new.cap_id, old.cap_id);
+        assert!(new.generation > old.generation);
+        assert_eq!(
+            state.validate(old, 1, 0x70, RIGHT_READ).unwrap_err(),
+            ERR_STALE_GEN
+        );
+        assert_eq!(state.inspect(old).unwrap_err(), ERR_STALE_GEN);
+        // The old reference cannot revoke or delegate from the new holder.
+        assert_eq!(
+            state.revoke(office(&state), old).unwrap_err(),
+            ERR_STALE_GEN
+        );
+        let via_old = state.mint(Mint {
+            issuer: 1,
+            subject: 2,
+            resource: 0x70,
+            rights: RIGHT_READ,
+            lease_ticks: 0,
+            parent: old,
+            authority: old,
+        });
+        assert_eq!(via_old.unwrap_err(), ERR_STALE_GEN);
+        assert!(state.validate(new, 1, 0x70, RIGHT_READ).is_ok());
+    }
+
+    #[test]
+    fn generation_exhaustion_fails_closed() {
+        assert_eq!(generation_advance(u32::MAX).unwrap_err(), ERR_EXHAUSTED);
+        assert_eq!(generation_advance(u32::MAX - 1), Ok(u32::MAX));
+        let mut state = boot();
+        let cap = root_mint(&mut state, 1, 0x10, RIGHT_READ).unwrap();
+        state.revoke(office(&state), cap).unwrap();
+        state.set_generation_for_test(cap.cap_id, u32::MAX).unwrap();
+        assert_eq!(
+            state.reclaim(office(&state), cap.cap_id).unwrap_err(),
+            ERR_EXHAUSTED
+        );
+        assert_eq!(
+            state.validate(cap, 1, 0x10, RIGHT_READ).unwrap_err(),
+            ERR_STALE_GEN
+        );
+        let replacement = root_mint(&mut state, 1, 0x11, RIGHT_READ).unwrap();
+        assert_ne!(replacement.cap_id, cap.cap_id);
+        // A live slot cannot be moved onto a chosen generation.
+        assert_eq!(
+            state
+                .set_generation_for_test(replacement.cap_id, 99)
+                .unwrap_err(),
+            ERR_STATE
+        );
+        // Every free slot exhausted: mint refuses rather than reuse one.
+        for id in 0..CAP_MAX as u32 {
+            let _ = state.set_generation_for_test(id, u32::MAX);
+        }
+        assert_eq!(
+            root_mint(&mut state, 1, 0x12, RIGHT_READ).unwrap_err(),
+            ERR_EXHAUSTED
+        );
+    }
+
+    #[test]
+    fn unauthorized_capability_use_is_refused() {
+        let mut state = boot();
+        let cap = root_mint(&mut state, 1, 0x80, RIGHT_READ).unwrap();
+        assert_eq!(
+            state.validate(cap, 2, 0x80, RIGHT_READ).unwrap_err(),
+            ERR_SUBJECT
+        );
+        assert_eq!(
+            state.validate(cap, 1, 0x81, RIGHT_READ).unwrap_err(),
+            ERR_RESOURCE
+        );
+        assert_eq!(
+            state.validate(cap, 1, 0x80, RIGHT_WRITE).unwrap_err(),
+            ERR_RIGHTS
+        );
+        let request = |authority: CapRef, rights: u32| Mint {
+            issuer: 3,
+            subject: 1,
+            resource: 0x82,
+            rights,
+            lease_ticks: 0,
+            parent: CapRef::NONE,
+            authority,
+        };
+        // An ordinary capability is not an office authority.
+        assert_eq!(
+            state.mint(request(cap, RIGHT_READ)).unwrap_err(),
+            ERR_UNAUTHORIZED
+        );
+        // A slot never handed out, and one out of range, authorize nothing.
+        let undelivered = CapRef {
+            cap_id: 200,
+            generation: state.boot_gen(),
+        };
+        assert_eq!(
+            state.mint(request(undelivered, RIGHT_READ)).unwrap_err(),
+            ERR_UNAUTHORIZED
+        );
+        let out_of_range = CapRef {
+            cap_id: CAP_MAX as u32,
+            generation: state.boot_gen(),
+        };
+        assert_eq!(
+            state.mint(request(out_of_range, RIGHT_READ)).unwrap_err(),
+            ERR_UNAUTHORIZED
+        );
+        // A minting authority cannot hand out a privilege it does not hold.
+        let minter = root_mint(&mut state, 0, RES_AUTHORITY, RIGHT_MINT).unwrap();
+        assert!(state.mint(request(minter, RIGHT_READ)).is_ok());
+        assert_eq!(
+            state.mint(request(minter, RIGHT_REVOKE)).unwrap_err(),
+            ERR_UNAUTHORIZED
+        );
+        // Delegation must be authorized by the parent itself.
+        let parent = root_mint(&mut state, 1, 0x83, RIGHT_READ | RIGHT_DELEGATE).unwrap();
+        let mismatched = state.mint(Mint {
+            issuer: 1,
+            subject: 2,
+            resource: 0x83,
+            rights: RIGHT_READ,
+            lease_ticks: 0,
+            parent,
+            authority: office(&state),
+        });
+        assert_eq!(mismatched.unwrap_err(), ERR_UNAUTHORIZED);
+        // A non-office reference cannot reclaim, revoke, move the clock or epoch.
+        assert_eq!(
+            state.reclaim(cap, cap.cap_id).unwrap_err(),
+            ERR_UNAUTHORIZED
+        );
+        assert_eq!(state.revoke(cap, parent).unwrap_err(), ERR_UNAUTHORIZED);
+        assert_eq!(state.advance_clock(cap, 1).unwrap_err(), ERR_UNAUTHORIZED);
+        assert_eq!(state.bump_epoch(cap).unwrap_err(), ERR_UNAUTHORIZED);
+        let view = AuthorityView::new(&state);
+        assert_eq!(
+            view.cognition_attempt_reclaim(office(&state), cap.cap_id),
+            ERR_UNAUTHORIZED
+        );
+        assert_eq!(
+            view.cognition_attempt_clock(office(&state), 1),
+            ERR_UNAUTHORIZED
+        );
+    }
 }
