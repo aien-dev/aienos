@@ -1,4 +1,19 @@
-//! C binding used by the reaction world and by the Linux differential oracle.
+//! C binding for the 32-bit-generation Rust capability authority
+//! (`aienos-capability`).
+//!
+//! This is NOT the native AIENOS capability ABI. The production ABI is the C
+//! library in `native/capability` (`aienos_capability.h`): 64-bit
+//! generations, `AienosCapRef` of 16 bytes, symbols `aienos_cap_*`. That is
+//! the library omega links into the reaction world.
+//!
+//! This crate is a separate implementation with a different layout
+//! (`AienosCapRef` of 8 bytes, 32-bit generation). So that a program built
+//! against the C header can never resolve against this archive by accident,
+//! every exported symbol carries its own versioned prefix, `aienos_cap32_*`,
+//! and [`aienos_cap32_abi_layout`] reports the layout it was built with.
+//! `scripts/test-cap-abi-isolation.sh` checks that the two archives share no
+//! symbol and that a C caller of `aienos_cap_*` fails to link against this
+//! one.
 //!
 //! The view pointer can validate. The admin pointer can change the table.
 //! They share the table, and only the admin holds the office token.
@@ -11,6 +26,10 @@ use aienos_capability::{
     AuthorityAdmin, AuthorityState, CapRef, Entry, Mint, ERR_IO, ERR_STATE, OK,
 };
 
+/// Capability reference in the 32-bit-generation Rust authority ABI
+/// (8 bytes, align 4, generation at offset 4). NOT the native AIENOS
+/// capability ABI, whose `AienosCapRef` is 16 bytes with a 64-bit
+/// generation at offset 8.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct AienosCapRef {
@@ -18,6 +37,8 @@ pub struct AienosCapRef {
     pub generation: u32,
 }
 
+/// Table entry in the 32-bit-generation Rust authority ABI (64 bytes).
+/// NOT the native AIENOS capability ABI (88 bytes there).
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct AienosCapEntry {
@@ -36,6 +57,8 @@ pub struct AienosCapEntry {
     pub minted_by_generation: u32,
 }
 
+/// Mint request in the 32-bit-generation Rust authority ABI (48 bytes).
+/// NOT the native AIENOS capability ABI (64 bytes there).
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct AienosCapMint {
@@ -46,6 +69,63 @@ pub struct AienosCapMint {
     pub lease_ticks: u64,
     pub parent: AienosCapRef,
     pub authority: AienosCapRef,
+}
+
+/// Version of the `aienos_cap32_*` binary contract. Bump it, and the symbol
+/// prefix, if any exported layout or signature changes.
+pub const AIENOS_CAP32_ABI_VERSION: u32 = 1;
+
+/// Width in bits of every generation field in this ABI.
+pub const AIENOS_CAP32_GENERATION_BITS: u32 = 32;
+
+/// Number of `u32` words [`aienos_cap32_abi_layout`] writes.
+pub const AIENOS_CAP32_LAYOUT_WORDS: usize = 4;
+
+const REF_SIZE: usize = 8;
+const REF_ALIGN: usize = 4;
+const REF_GENERATION_OFFSET: usize = 4;
+const ENTRY_SIZE: usize = 64;
+const MINT_SIZE: usize = 48;
+
+const _: () = assert!(core::mem::size_of::<AienosCapRef>() == REF_SIZE);
+const _: () = assert!(core::mem::align_of::<AienosCapRef>() == REF_ALIGN);
+const _: () = assert!(core::mem::offset_of!(AienosCapRef, cap_id) == 0);
+const _: () = assert!(core::mem::offset_of!(AienosCapRef, generation) == REF_GENERATION_OFFSET);
+const _: () = assert!(core::mem::size_of::<u32>() * 8 == AIENOS_CAP32_GENERATION_BITS as usize);
+const _: () = assert!(core::mem::size_of::<AienosCapEntry>() == ENTRY_SIZE);
+const _: () = assert!(core::mem::align_of::<AienosCapEntry>() == 8);
+const _: () = assert!(core::mem::offset_of!(AienosCapEntry, generation) == 4);
+const _: () = assert!(core::mem::offset_of!(AienosCapEntry, resource) == 24);
+const _: () = assert!(core::mem::offset_of!(AienosCapEntry, parent_generation) == 52);
+const _: () = assert!(core::mem::offset_of!(AienosCapEntry, minted_by_generation) == 60);
+const _: () = assert!(core::mem::size_of::<AienosCapMint>() == MINT_SIZE);
+const _: () = assert!(core::mem::offset_of!(AienosCapMint, lease_ticks) == 24);
+const _: () = assert!(core::mem::offset_of!(AienosCapMint, parent) == 32);
+const _: () = assert!(core::mem::offset_of!(AienosCapMint, authority) == 40);
+
+/// Report the layout this archive was built with, so a caller can refuse to
+/// run against a different one. Writes, in order: size of `AienosCapRef`,
+/// offset of its `generation`, size of that `generation` field, size of
+/// `AienosCapEntry`. Returns [`AIENOS_CAP32_ABI_VERSION`], or 0 when `out`
+/// is null.
+///
+/// # Safety
+/// `out` is null or points to [`AIENOS_CAP32_LAYOUT_WORDS`] writable `u32`s.
+#[no_mangle]
+pub unsafe extern "C" fn aienos_cap32_abi_layout(out: *mut u32) -> u32 {
+    if out.is_null() {
+        return 0;
+    }
+    let words: [u32; AIENOS_CAP32_LAYOUT_WORDS] = [
+        REF_SIZE as u32,
+        REF_GENERATION_OFFSET as u32,
+        core::mem::size_of::<u32>() as u32,
+        ENTRY_SIZE as u32,
+    ];
+    for (i, word) in words.iter().enumerate() {
+        unsafe { *out.add(i) = *word };
+    }
+    AIENOS_CAP32_ABI_VERSION
 }
 
 pub struct AienosCapShared {
@@ -128,7 +208,7 @@ fn write_ref(out: *mut AienosCapRef, cap: CapRef) {
 /// # Safety
 /// `admin_out` and `view_out` must be writable pointers.
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_start(
+pub unsafe extern "C" fn aienos_cap32_start(
     admin_out: *mut *mut AienosCapAdmin,
     view_out: *mut *mut AienosCapView,
 ) -> i32 {
@@ -163,9 +243,9 @@ pub unsafe extern "C" fn aienos_cap_start(
 }
 
 /// # Safety
-/// Both pointers came from [`aienos_cap_start`] and have not been stopped.
+/// Both pointers came from [`aienos_cap32_start`] and have not been stopped.
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_stop(admin: *mut AienosCapAdmin, view: *mut AienosCapView) {
+pub unsafe extern "C" fn aienos_cap32_stop(admin: *mut AienosCapAdmin, view: *mut AienosCapView) {
     if !admin.is_null() {
         drop(unsafe { Box::from_raw(admin) });
     }
@@ -191,9 +271,9 @@ fn with_state_mut<T>(shared: &AienosCapShared, f: impl FnOnce(&mut AuthorityStat
 }
 
 /// # Safety
-/// `admin` came from [`aienos_cap_start`].
+/// `admin` came from [`aienos_cap32_start`].
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_office(
+pub unsafe extern "C" fn aienos_cap32_office(
     admin: *const AienosCapAdmin,
     out: *mut AienosCapRef,
 ) -> i32 {
@@ -206,9 +286,9 @@ pub unsafe extern "C" fn aienos_cap_office(
 }
 
 /// # Safety
-/// `admin` came from [`aienos_cap_start`]. `out` may be null.
+/// `admin` came from [`aienos_cap32_start`]. `out` may be null.
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_mint(
+pub unsafe extern "C" fn aienos_cap32_mint(
     admin: *mut AienosCapAdmin,
     request: *const AienosCapMint,
     out: *mut AienosCapRef,
@@ -230,9 +310,9 @@ pub unsafe extern "C" fn aienos_cap_mint(
 }
 
 /// # Safety
-/// `admin` came from [`aienos_cap_start`].
+/// `admin` came from [`aienos_cap32_start`].
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_revoke(
+pub unsafe extern "C" fn aienos_cap32_revoke(
     admin: *mut AienosCapAdmin,
     authority: AienosCapRef,
     target: AienosCapRef,
@@ -248,9 +328,9 @@ pub unsafe extern "C" fn aienos_cap_revoke(
 }
 
 /// # Safety
-/// `admin` came from [`aienos_cap_start`].
+/// `admin` came from [`aienos_cap32_start`].
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_reclaim(
+pub unsafe extern "C" fn aienos_cap32_reclaim(
     admin: *mut AienosCapAdmin,
     authority: AienosCapRef,
     cap_id: u32,
@@ -266,9 +346,9 @@ pub unsafe extern "C" fn aienos_cap_reclaim(
 }
 
 /// # Safety
-/// `admin` came from [`aienos_cap_start`].
+/// `admin` came from [`aienos_cap32_start`].
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_advance_clock(
+pub unsafe extern "C" fn aienos_cap32_advance_clock(
     admin: *mut AienosCapAdmin,
     authority: AienosCapRef,
     ticks: u64,
@@ -284,9 +364,9 @@ pub unsafe extern "C" fn aienos_cap_advance_clock(
 }
 
 /// # Safety
-/// `admin` came from [`aienos_cap_start`].
+/// `admin` came from [`aienos_cap32_start`].
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_bump_epoch(
+pub unsafe extern "C" fn aienos_cap32_bump_epoch(
     admin: *mut AienosCapAdmin,
     authority: AienosCapRef,
 ) -> i32 {
@@ -301,9 +381,9 @@ pub unsafe extern "C" fn aienos_cap_bump_epoch(
 }
 
 /// # Safety
-/// `admin` came from [`aienos_cap_start`].
+/// `admin` came from [`aienos_cap32_start`].
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_kill(admin: *mut AienosCapAdmin) -> i32 {
+pub unsafe extern "C" fn aienos_cap32_kill(admin: *mut AienosCapAdmin) -> i32 {
     if admin.is_null() {
         return ERR_STATE;
     }
@@ -315,9 +395,9 @@ pub unsafe extern "C" fn aienos_cap_kill(admin: *mut AienosCapAdmin) -> i32 {
 /// fail against the new table. The office token is replaced.
 ///
 /// # Safety
-/// `admin` came from [`aienos_cap_start`].
+/// `admin` came from [`aienos_cap32_start`].
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_restart(admin: *mut AienosCapAdmin) -> i32 {
+pub unsafe extern "C" fn aienos_cap32_restart(admin: *mut AienosCapAdmin) -> i32 {
     if admin.is_null() {
         return ERR_STATE;
     }
@@ -344,9 +424,9 @@ pub unsafe extern "C" fn aienos_cap_restart(admin: *mut AienosCapAdmin) -> i32 {
 }
 
 /// # Safety
-/// `view` came from [`aienos_cap_start`]. `out` may be null.
+/// `view` came from [`aienos_cap32_start`]. `out` may be null.
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_validate(
+pub unsafe extern "C" fn aienos_cap32_validate(
     view: *const AienosCapView,
     cap: AienosCapRef,
     subject: u32,
@@ -370,9 +450,9 @@ pub unsafe extern "C" fn aienos_cap_validate(
 }
 
 /// # Safety
-/// `view` came from [`aienos_cap_start`]. `out` may be null.
+/// `view` came from [`aienos_cap32_start`]. `out` may be null.
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_inspect(
+pub unsafe extern "C" fn aienos_cap32_inspect(
     view: *const AienosCapView,
     cap: AienosCapRef,
     out: *mut AienosCapEntry,
@@ -393,9 +473,9 @@ pub unsafe extern "C" fn aienos_cap_inspect(
 }
 
 /// # Safety
-/// `view` came from [`aienos_cap_start`].
+/// `view` came from [`aienos_cap32_start`].
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_clock(view: *const AienosCapView) -> u64 {
+pub unsafe extern "C" fn aienos_cap32_clock(view: *const AienosCapView) -> u64 {
     if view.is_null() {
         return 0;
     }
@@ -406,9 +486,9 @@ pub unsafe extern "C" fn aienos_cap_clock(view: *const AienosCapView) -> u64 {
 /// change the table no matter what reference or token bytes are supplied.
 ///
 /// # Safety
-/// `view` came from [`aienos_cap_start`]. `token` may be null.
+/// `view` came from [`aienos_cap32_start`]. `token` may be null.
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_cognition_mint(
+pub unsafe extern "C" fn aienos_cap32_cognition_mint(
     view: *const AienosCapView,
     _request: *const AienosCapMint,
     _token: *const u8,
@@ -421,9 +501,9 @@ pub unsafe extern "C" fn aienos_cap_cognition_mint(
 }
 
 /// # Safety
-/// `view` came from [`aienos_cap_start`].
+/// `view` came from [`aienos_cap32_start`].
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_cognition_admin(
+pub unsafe extern "C" fn aienos_cap32_cognition_admin(
     view: *const AienosCapView,
     _op: u32,
     _authority: AienosCapRef,
@@ -438,7 +518,7 @@ pub unsafe extern "C" fn aienos_cap_cognition_admin(
 /// # Safety
 /// `out` may be null. When it is not, it must be writable.
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_generation_advance(generation: u32, out: *mut u32) -> i32 {
+pub unsafe extern "C" fn aienos_cap32_generation_advance(generation: u32, out: *mut u32) -> i32 {
     match aienos_capability::generation_advance(generation) {
         Ok(next) => {
             if !out.is_null() {
@@ -451,9 +531,9 @@ pub unsafe extern "C" fn aienos_cap_generation_advance(generation: u32, out: *mu
 }
 
 /// # Safety
-/// `admin` came from [`aienos_cap_start`] and is the test harness, not cognition.
+/// `admin` came from [`aienos_cap32_start`] and is the test harness, not cognition.
 #[no_mangle]
-pub unsafe extern "C" fn aienos_cap_force_generation(
+pub unsafe extern "C" fn aienos_cap32_force_generation(
     admin: *mut AienosCapAdmin,
     cap_id: u32,
     generation: u32,
@@ -466,4 +546,29 @@ pub unsafe extern "C" fn aienos_cap_force_generation(
     })
     .err()
     .unwrap_or(OK)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::ptr;
+
+    #[test]
+    fn layout_matches_the_cap32_contract() {
+        assert_eq!(core::mem::size_of::<AienosCapRef>(), 8);
+        assert_eq!(core::mem::align_of::<AienosCapRef>(), 4);
+        assert_eq!(core::mem::offset_of!(AienosCapRef, generation), 4);
+        assert_eq!(core::mem::size_of::<AienosCapEntry>(), 64);
+        assert_eq!(core::mem::size_of::<AienosCapMint>(), 48);
+        let mut words = [0u32; AIENOS_CAP32_LAYOUT_WORDS];
+        let version = unsafe { aienos_cap32_abi_layout(words.as_mut_ptr()) };
+        assert_eq!(version, AIENOS_CAP32_ABI_VERSION);
+        assert_eq!(version, 1);
+        assert_eq!(words, [8, 4, 4, 64]);
+        assert_eq!(unsafe { aienos_cap32_abi_layout(ptr::null_mut()) }, 0);
+        // The native C ABI is 16 bytes with the generation at offset 8. A
+        // caller that checks this report cannot mistake one for the other.
+        assert_ne!(words[0], 16);
+        assert_ne!(words[1], 8);
+    }
 }

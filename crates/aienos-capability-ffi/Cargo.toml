@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Host C binding for the native AIENOS capability authority."
+description = "C binding (aienos_cap32_* symbols) for the 32-bit-generation Rust capability authority. Not the native AIENOS capability ABI."
 
 [lib]
 crate-type = ["staticlib", "rlib"]
