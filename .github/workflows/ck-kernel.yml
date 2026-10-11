@@ -137,6 +137,15 @@ jobs:
           done
           exit ${fail}
 
+      - name: B7b preparation probe (self-test, Spark-target image refuses on QEMU, TEST-ONLY segment-0 positive path; aienos#286)
+        env:
+          AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
+          AIENOS_GATE_LOCK: ${{ runner.temp }}/qemu-gate-lock
+        run: |
+          bash scripts/qemu_ck_b7b_probe_test.sh --self-test
+          bash scripts/qemu_ck_b7b_probe_test.sh
+          bash scripts/qemu_ck_b7b_probe_test.sh --positive
+
       - name: Upload the receipt and logs
         if: always()
         uses: actions/upload-artifact@v4

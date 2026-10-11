@@ -203,3 +203,80 @@ and the RMR node.
 
 Still unknown after this cut: everything in section 7, plus whether SMMUv3 B
 comes up with this driver's geometry (IDR0/IDR1 read only at B7b).
+
+## 10. Cut B7b preparation (done, QEMU/host only): the probe image
+
+Approval: Drake's ruling of 2026-10-10 (aien-architecture#190, item 5): B7b
+*preparation* is authorized, not an unattended boot. The boot itself needs a
+first operator-confirmed, two-hour attended window after the recovery media,
+rollback, trust and preflight checks pass. Nothing in this cut ran on the
+Spark's SMMUs.
+
+What changed:
+
+- `make [full] CK_B7B_PROBE=1` builds a probe image (own OUT,
+  `target/native-kernel-b7b-probe`; allowed with `CK_HARDWARE_STAGING`).
+  After `kernel: alive` and before the secondary cores start, `ck_b7b_probe`
+  (core/smmu_svc.c) runs once: it prints the IORT route for PCI segment 15
+  requester 0x100, confines that requester on a one-page DMA window through
+  the normal `ck_dma_confine` path (which brings up the SMMUv3 node behind
+  it and identity-maps its RMR ranges, section 9), reads `SMMU_IDR0` and
+  `SMMU_IDR1` of that node (read-only registers: "Access to this field is
+  RO", IHI0070H.a 6.3.1 and 6.3.2), unconfines, and prints one summary line
+  `AIENOS_B7B_PROBE: CONFINED_AND_RELEASED | REFUSED | FAIL`. No DMA is
+  started and the window page is never handed to a device.
+- `CK_B7B_PROBE_TEST_SEGMENT0=1` (TEST-ONLY, needs `CK_B7B_PROBE=1`, refused
+  with `CK_HARDWARE_STAGING` in the Makefile and by an `#error` in the
+  source) probes segment 0 instead, so QEMU exercises the granted path.
+- The image checks (`b7b_check`) refuse a default image that carries the
+  probe, a probe image that lacks it, and any image that carries the
+  segment-0 announcement without its flag.
+- Gate `scripts/qemu_ck_b7b_probe_test.sh` (also a CI step in
+  `.github/workflows/ck-kernel.yml`):
+  - default: the Spark-target probe image on QEMU virt (one SMMUv3, no
+    segment 15) must refuse, fail closed: `route none`, `confine refused
+    rc=-3 (nostream)`, nothing confined, summary `REFUSED`, the boot goes on
+    to the SMP summary, no panic. Local run 2026-10-11: PASS.
+  - `--positive`: the TEST-ONLY segment-0 image must route to instance 0
+    stream 0x100, confine one page, read IDR0/IDR1 with a SIDSIZE that
+    covers 0x100, unconfine with rc 0 and print `CONFINED_AND_RELEASED`.
+    Local run: PASS (QEMU 0x9050000: idr0=0x0d44101a idr1=0x02730010,
+    ST_LEVEL 1, SIDSIZE 16).
+  - `--self-test`: canned logs for 19 cases (2 that must pass, 17 that must fail: (something
+    granted on the refusal image, wrong segment, other refusal reason,
+    missing or doubled summary, boot stopped, panic, probe before `kernel:
+    alive`, a route found where none should be, the TEST image on the gate,
+    and on the positive path: no announcement, unconfine failure, SIDSIZE
+    too small, no IDR line, wrong window, forged summary)) plus four Makefile
+    refusals. Local run: PASS.
+
+What the B7b window would show on the Spark (expected from sections 3 and 9
+and `ck_acpi_scan --iort` on this machine's table, not observed):
+
+    b7b_probe: start segment=15 rid=0x100 window_bytes=4096 no_dma=yes
+    b7b_probe: route instance=1 base=0x13000000 stream=0x100 rmr_nodes=1 (smmus=3)
+    smmu: instance 1 up base=0x13000000
+    smmu: stream 0x100 on 0x13000000: 3 firmware-reserved range(s) identity-mapped beside the window
+    b7b_probe: confined stream=0x100 smmu_base=0x13000000 iova=0x... len=0x1000
+    b7b_probe: instance=1 idr0=0x........ idr1=0x........ st_level=. sidsize=..
+    b7b_probe: unconfine rc=0 (ok); stream 0x100 aborts again
+    AIENOS_B7B_PROBE: CONFINED_AND_RELEASED
+
+Any other summary is a finding, not a retry: `REFUSED` names the reason
+(`nostream`: the route differs from section 3; `failed`: bring-up or an RMR
+attribute was refused), `FAIL` means the unconfine failed or no live
+instance matched the confined base.
+
+Still open before the window (not done in this cut):
+
+- The one-time staging script (`scripts/stage_one_time_boot_ck.sh`) builds
+  the infer image; it has no probe variant yet. Adding one touches the
+  NVRAM staging path and is left for the window's own preparation with
+  Drake.
+- After the probe, SMMUv3 B stays enabled with every stream aborting until
+  the next reset (the same state any unconfine leaves). UNKNOWN whether the
+  GB10 or HDA0 attempt DMA while no OS drives them; an abort there would be
+  recorded as an event, not acted on.
+- The preconditions of the ruling (recovery media, rollback, trust,
+  preflight) are checked by their own procedures
+  (`docs/NATIVE_BOOT_ONE_TIME.md` section 3); this cut does not change them.

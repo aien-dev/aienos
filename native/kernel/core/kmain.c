@@ -216,6 +216,11 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
                   : ent == CK_RNG_STUCK ? "RNDR repeated a 64-bit word"
                                         : "probe error");
 
+#ifdef CK_B7B_PROBE
+    /* B7b preparation probe (core/smmu_svc.c), probe build only. */
+    ck_b7b_probe();
+#endif
+
     /* Secondary cores (core/smp.c): PSCI CPU_ON, check in, park in WFE with
      * interrupts masked; the boot core goes on alone. Lines judged by
      * scripts/qemu_ck_smp_test.sh (CK gate SMP). */

@@ -119,6 +119,10 @@ uint64_t ck_entropy_retries(void);
  * the MMU on the boot core's tables, checked in and parked in WFE. Prints
  * the smp: lines scripts/qemu_ck_smp_test.sh judges; never panics. */
 void ck_smp_run(void);
+#ifdef CK_B7B_PROBE
+/* Cut B7b preparation probe (core/smmu_svc.c), probe build only. */
+void ck_b7b_probe(void);
+#endif
 void ck_fpu_run(void); /* core/fpu.c: probe build only (CK_RUST_LIBS), else a no-op */
 void ck_infer_run(void); /* core/infer.c: probe build only (CK_INFER_LIB), else a no-op */
 

@@ -48,6 +48,12 @@
 #                        scripts/qemu_ck_rollback_test.sh; refused with CK_HARDWARE_STAGING
 #   make uefi-vars       host tool $(OUT)/host/ck_uefi_vars: reads BootOrder, BootNext
 #                        and Boot#### from an edk2 vars.fd (read-only, M0_ROLLBACK)
+#   make [full] CK_B7B_PROBE=1 [CK_B7B_PROBE_TEST_SEGMENT0=1]
+#                        B7b preparation probe image (aienos#286): confine the
+#                        GB10 requester once, read SMMU_IDR0/IDR1, unconfine;
+#                        own OUT (target/native-kernel-b7b-probe); the segment-0
+#                        variant is TEST-ONLY (QEMU positive path). Gate:
+#                        scripts/qemu_ck_b7b_probe_test.sh
 #   make CK_TEST_SMP_SKIP_CPU=1
 #                        TEST-ONLY SMP mutation: CPU_ON skipped for one secondary
 #                        core (core/smp.c); own OUT (target/native-kernel-test-smp-skip);
@@ -149,6 +155,39 @@ OUT ?= $(REPO)/target/native-kernel-test-smp-skip
 SMP_TEST_FLAGS := -DCK_TEST_SMP_SKIP_CPU=1
 else
 SMP_TEST_FLAGS :=
+endif
+# B7b preparation probe (aienos#286, core/smmu_svc.c): CK_B7B_PROBE=1 builds an
+# image that confines PCI segment 15 requester 0x100 (the Spark's GB10) once on
+# a one-page window, prints the route and SMMU_IDR0/IDR1, and unconfines. Own
+# OUT; allowed with CK_HARDWARE_STAGING (it is meant for the attended B7b
+# window); refused with CK_QEMU_UNSAFE_DMA. CK_B7B_PROBE_TEST_SEGMENT0=1
+# (TEST-ONLY, needs CK_B7B_PROBE=1) probes segment 0 for the QEMU positive path
+# and is refused with CK_HARDWARE_STAGING. Default images are checked to carry
+# no probe (b7b_check). Gate: scripts/qemu_ck_b7b_probe_test.sh.
+CK_B7B_PROBE ?=
+CK_B7B_PROBE_TEST_SEGMENT0 ?=
+ifneq ($(strip $(CK_B7B_PROBE_TEST_SEGMENT0)),)
+ifneq ($(strip $(CK_B7B_PROBE_TEST_SEGMENT0)),1)
+$(error CK_B7B_PROBE_TEST_SEGMENT0 must be empty or 1)
+endif
+ifneq ($(strip $(CK_B7B_PROBE)),1)
+$(error CK_B7B_PROBE_TEST_SEGMENT0 needs CK_B7B_PROBE=1)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_B7B_PROBE_TEST_SEGMENT0 (TEST-only QEMU positive path) cannot be combined with CK_HARDWARE_STAGING)
+endif
+OUT ?= $(REPO)/target/native-kernel-test-b7b-seg0
+SMP_TEST_FLAGS += -DCK_B7B_PROBE_TEST_SEGMENT0=1
+endif
+ifneq ($(strip $(CK_B7B_PROBE)),)
+ifneq ($(strip $(CK_B7B_PROBE)),1)
+$(error CK_B7B_PROBE must be empty or 1)
+endif
+ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),)
+$(error CK_B7B_PROBE cannot be combined with CK_QEMU_UNSAFE_DMA)
+endif
+OUT ?= $(REPO)/target/native-kernel-b7b-probe
+SMP_TEST_FLAGS += -DCK_B7B_PROBE=1
 endif
 # TEST-ONLY stale handoff (AIENOS_CK_SCREEN negative control,
 # scripts/qemu_ck_screen_test.sh): the stub hands the kernel a CHANDOF2 magic;
@@ -721,6 +760,22 @@ define smp_check
 	fi
 endef
 
+# b7b_check(elf): only a CK_B7B_PROBE image may carry the B7b probe, and such an
+# image must; only a CK_B7B_PROBE_TEST_SEGMENT0 image may carry the TEST-ONLY
+# segment-0 announcement, and such an image must.
+define b7b_check
+	@if [ "$(strip $(CK_B7B_PROBE))" = 1 ]; then \
+	  grep -aqF "b7b_probe: start segment=" $(1) || { echo "B7b probe image lacks the probe"; rm -f $(1); exit 1; }; \
+	else \
+	  if grep -aqF "b7b_probe:" $(1); then echo "default image carries the B7b probe"; rm -f $(1); exit 1; fi; \
+	fi
+	@if [ "$(strip $(CK_B7B_PROBE_TEST_SEGMENT0))" = 1 ]; then \
+	  grep -aqF "TEST-ONLY B7b probe on PCI segment 0" $(1) || { echo "segment-0 probe image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
+	else \
+	  if grep -aqF "TEST-ONLY B7b probe" $(1); then echo "image carries the TEST-ONLY segment-0 probe"; rm -f $(1); exit 1; fi; \
+	fi
+endef
+
 # crash_check(elf): a full image built without CK_TEST_STORE_CRASH must carry
 # no Store crash hook code or strings; a TEST crash image must announce itself.
 # The bare "TEST-ONLY MUTANT" phrase is refused here except in the TEST
@@ -784,6 +839,7 @@ $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
 	if [ -n "$$s" ]; then echo "core image defines stage symbols: $$s"; rm -f $@; exit 1; fi
 	$(call fwcfg_check,$@)
 	$(call smp_check,$@)
+	$(call b7b_check,$@)
 
 $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	$(call link_image,$@,$(CORE_OBJS) $(STAGE_LINK) $(CK_RUST_LIBS) $(CK_INFER_LIB))
@@ -796,6 +852,7 @@ $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	$(call console_check,$@)
 	$(call smp_check,$@)
 	$(call crash_check,$@)
+	$(call b7b_check,$@)
 	$(call cont_check,$@)
 
 $(EFI): $(ELF)
