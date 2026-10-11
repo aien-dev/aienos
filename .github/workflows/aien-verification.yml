@@ -111,6 +111,13 @@ jobs:
           ref: ${{ env.AIEN_TEST_PIN }}
           path: .aien-test-src
 
+      - name: Move the pinned source out of the tree under test
+        if: steps.anchors.outputs.enrolled == 'true'
+        # cargo reads .cargo/config.toml from the working directory upward. This repository's
+        # config replaces crates-io with vendor/, which does not carry aien-test's dependencies,
+        # and a head under test must never configure the build of its own verifier.
+        run: mv .aien-test-src "$RUNNER_TEMP/aien-test-src"
+
       - name: Cache the pinned aien-test build
         if: steps.anchors.outputs.enrolled == 'true'
         uses: actions/cache@v4
@@ -118,16 +125,16 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            .aien-test-src/target
+            ${{ runner.temp }}/aien-test-src/target
           key: aien-test-${{ runner.os }}-${{ env.AIEN_TEST_PIN }}
 
-      - name: Build aien-test from the pin (never from the tree under test), then remove the source
+      - name: Build aien-test from the pin outside the tree under test (the target dir stays for the cache)
         if: steps.anchors.outputs.enrolled == 'true'
         run: |
-          cargo build --release -p aien-test --manifest-path .aien-test-src/Cargo.toml
-          cp .aien-test-src/target/release/aien-test "$RUNNER_TEMP/bin/aien-test" 2>/dev/null || { mkdir -p "$RUNNER_TEMP/bin"; cp .aien-test-src/target/release/aien-test "$RUNNER_TEMP/bin/aien-test"; }
+          cd "$RUNNER_TEMP/aien-test-src" && cargo build --release -p aien-test
+          mkdir -p "$RUNNER_TEMP/bin" && cp "$RUNNER_TEMP/aien-test-src/target/release/aien-test" "$RUNNER_TEMP/bin/aien-test"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-          rm -rf .aien-test-src
+          cd "$GITHUB_WORKSPACE"
           git status --porcelain --untracked-files=normal
 
       - name: Fetch the signed verification bundle for this commit
