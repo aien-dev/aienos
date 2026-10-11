@@ -10,7 +10,21 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::math;
-use crate::model::{InferError, Model};
+use crate::model::{InferError, Model, Weight};
+use crate::quant::Q8Act;
+
+/// Matvec class: Q, K and V projections (input: attention RMSNorm output).
+pub const Q8_QKV: u8 = 1;
+/// Matvec class: attention output projection.
+pub const Q8_WO: u8 = 2;
+/// Matvec class: FFN gate and up projections (input: FFN RMSNorm output).
+pub const Q8_GATE_UP: u8 = 4;
+/// Matvec class: FFN down projection (input: SwiGLU output).
+pub const Q8_DOWN: u8 = 8;
+/// Matvec class: output head (logits).
+pub const Q8_OUTPUT: u8 = 16;
+/// All matvec classes.
+pub const Q8_ALL: u8 = 31;
 
 /// KV cache plus scratch buffers for one sequence.
 pub struct DecodeState {
@@ -37,6 +51,19 @@ pub struct DecodeState {
     pub logits: Vec<f32>,
     /// Round matvec inputs to the Q8_K grid like ggml does (default off).
     pub emulate_q8k: bool,
+    /// Run the quantized matvecs on int8 activations (ggml's Q8_K grid,
+    /// i32 dots; aienos#34 L6). Implies the Q8_K rounding. Default off.
+    pub int8_dot: bool,
+    /// Diagnostic selector for the int8 parity diagnosis (aienos#34): bit `l`
+    /// lets layer `l` take the int8 / Q8_K-rounding path. Default: all layers.
+    /// Only consulted when `int8_dot` or `emulate_q8k` is on, so the plain f32
+    /// path is unaffected.
+    pub q8_layers: u64,
+    /// Diagnostic selector: which matvec classes take that path (bits
+    /// [`Q8_QKV`], [`Q8_WO`], [`Q8_GATE_UP`], [`Q8_DOWN`], [`Q8_OUTPUT`]).
+    /// Default: [`Q8_ALL`].
+    pub q8_classes: u8,
+    q8: Q8Act,
 }
 
 impl DecodeState {
@@ -67,6 +94,10 @@ impl DecodeState {
             rope_sin: vec![0.0; model.head_dim / 2],
             logits: vec![0.0; p.vocab_size as usize],
             emulate_q8k: false,
+            int8_dot: false,
+            q8_layers: u64::MAX,
+            q8_classes: Q8_ALL,
+            q8: Q8Act::with_capacity(e.max(ff)),
         }
     }
 
@@ -168,14 +199,42 @@ impl DecodeState {
             &mut self.rope_sin,
         );
 
+        let (int8_on, round_on) = (self.int8_dot, self.emulate_q8k);
+        let (lmask, cmask) = (self.q8_layers, self.q8_classes);
+        // Per (layer, class) path choice; all-ones masks give the old behaviour.
+        let pick = move |layer_on: bool, c: u8| {
+            let on = layer_on && cmask & c != 0;
+            (int8_on && on, round_on && on)
+        };
         for (l, layer) in m.layers.iter().enumerate() {
+            let layer_on = l >= 64 || (lmask >> l) & 1 == 1;
+            let (int8, round) = pick(layer_on, Q8_QKV);
             rms_norm(&self.x, &layer.attn_norm, eps, &mut self.h);
-            if self.emulate_q8k {
-                q8k_round(&mut self.h);
-            }
-            layer.wq.matvec(&self.h, &mut self.q, &mut self.scr)?;
-            layer.wk.matvec(&self.h, &mut self.kk, &mut self.scr)?;
-            layer.wv.matvec(&self.h, &mut self.vv, &mut self.scr)?;
+            prep(&mut self.h, &mut self.q8, int8, round)?;
+            mv(
+                &layer.wq,
+                &self.h,
+                &self.q8,
+                int8,
+                &mut self.q,
+                &mut self.scr,
+            )?;
+            mv(
+                &layer.wk,
+                &self.h,
+                &self.q8,
+                int8,
+                &mut self.kk,
+                &mut self.scr,
+            )?;
+            mv(
+                &layer.wv,
+                &self.h,
+                &self.q8,
+                int8,
+                &mut self.vv,
+                &mut self.scr,
+            )?;
             rope_apply(&mut self.q, hd, &self.rope_cos, &self.rope_sin);
             rope_apply(&mut self.kk, hd, &self.rope_cos, &self.rope_sin);
 
@@ -203,33 +262,52 @@ impl DecodeState {
                 }
             }
             let e = self.x.len();
-            if self.emulate_q8k {
-                q8k_round(&mut self.att);
-            }
-            layer
-                .wo
-                .matvec(&self.att, &mut self.tmp[..e], &mut self.scr)?;
+            let (int8, round) = pick(layer_on, Q8_WO);
+            prep(&mut self.att, &mut self.q8, int8, round)?;
+            mv(
+                &layer.wo,
+                &self.att,
+                &self.q8,
+                int8,
+                &mut self.tmp[..e],
+                &mut self.scr,
+            )?;
             for (x, d) in self.x.iter_mut().zip(&self.tmp[..e]) {
                 *x += d;
             }
 
             rms_norm(&self.x, &layer.ffn_norm, eps, &mut self.h);
-            if self.emulate_q8k {
-                q8k_round(&mut self.h);
-            }
-            layer
-                .w_gate
-                .matvec(&self.h, &mut self.gate, &mut self.scr)?;
-            layer.w_up.matvec(&self.h, &mut self.up, &mut self.scr)?;
+            let (int8, round) = pick(layer_on, Q8_GATE_UP);
+            prep(&mut self.h, &mut self.q8, int8, round)?;
+            mv(
+                &layer.w_gate,
+                &self.h,
+                &self.q8,
+                int8,
+                &mut self.gate,
+                &mut self.scr,
+            )?;
+            mv(
+                &layer.w_up,
+                &self.h,
+                &self.q8,
+                int8,
+                &mut self.up,
+                &mut self.scr,
+            )?;
             for (g, u) in self.gate.iter_mut().zip(&self.up) {
                 *g = *g / (1.0 + math::exp(-*g)) * u;
             }
-            if self.emulate_q8k {
-                q8k_round(&mut self.gate);
-            }
-            layer
-                .w_down
-                .matvec(&self.gate, &mut self.tmp[..e], &mut self.scr)?;
+            let (int8, round) = pick(layer_on, Q8_DOWN);
+            prep(&mut self.gate, &mut self.q8, int8, round)?;
+            mv(
+                &layer.w_down,
+                &self.gate,
+                &self.q8,
+                int8,
+                &mut self.tmp[..e],
+                &mut self.scr,
+            )?;
             for (x, d) in self.x.iter_mut().zip(&self.tmp[..e]) {
                 *x += d;
             }
@@ -237,10 +315,16 @@ impl DecodeState {
         self.pos += 1;
         if want_logits {
             rms_norm(&self.x, &m.output_norm, eps, &mut self.h);
-            if self.emulate_q8k {
-                q8k_round(&mut self.h);
-            }
-            m.output.matvec(&self.h, &mut self.logits, &mut self.scr)?;
+            let (int8, round) = pick(true, Q8_OUTPUT);
+            prep(&mut self.h, &mut self.q8, int8, round)?;
+            mv(
+                &m.output,
+                &self.h,
+                &self.q8,
+                int8,
+                &mut self.logits,
+                &mut self.scr,
+            )?;
         }
         Ok(())
     }
@@ -285,6 +369,33 @@ pub fn generate_greedy(
         st.forward(m, t, true)?;
     }
     Ok(out)
+}
+
+/// Prepare an activation vector for the quantized matvecs that follow: the
+/// int8 path quantizes it into `q8`; the emulation path rounds it in place.
+fn prep(x: &mut [f32], q8: &mut Q8Act, int8: bool, round: bool) -> Result<(), InferError> {
+    if int8 {
+        q8.quantize(x)?;
+    } else if round {
+        q8k_round(x);
+    }
+    Ok(())
+}
+
+/// One matvec on whichever path applies (int8 only for K-quant weights).
+fn mv(
+    w: &Weight<'_>,
+    x: &[f32],
+    q8: &Q8Act,
+    int8: bool,
+    out: &mut [f32],
+    scr: &mut [f32],
+) -> Result<(), InferError> {
+    if int8 && w.is_kquant() {
+        w.matvec_q8(q8, out)
+    } else {
+        w.matvec(x, out, scr)
+    }
 }
 
 /// Round activations to ggml's Q8_K grid in place (per 256-block: scale

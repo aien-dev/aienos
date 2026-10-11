@@ -107,15 +107,42 @@ impl<'a> Weight<'a> {
         if x.len() != self.cols || out.len() != self.rows || scratch.len() < self.cols {
             return Err(InferError::BadParams("matvec shape"));
         }
+        // Sub-block sums of x are shared by every Q4_K row (aienos#34 L6).
+        let nsums = self.cols / quant::Q4K_SUB;
+        if matches!(self.ty, GgmlType::Q4K | GgmlType::Q6K) {
+            quant::sub_block_sums(x, &mut scratch[..nsums]);
+        }
         for (r, o) in out.iter_mut().enumerate() {
             *o = match self.ty {
-                GgmlType::Q4K | GgmlType::Q6K => quant::dot_row(self.ty, self.row(r), x)?,
+                GgmlType::Q4K | GgmlType::Q6K => {
+                    quant::dot_row_sums(self.ty, self.row(r), x, &scratch[..nsums])?
+                }
                 _ => {
                     let s = &mut scratch[..self.cols];
                     plain_to_f32(self.ty, self.row(r), s);
                     s.iter().zip(x).map(|(a, b)| a * b).sum()
                 }
             };
+        }
+        Ok(())
+    }
+
+    /// True for the K-quant types the int8 activation path handles.
+    pub fn is_kquant(&self) -> bool {
+        matches!(self.ty, GgmlType::Q4K | GgmlType::Q6K)
+    }
+
+    /// `out[r] = row_r . act` with activations on the Q8_K grid (aienos#34
+    /// L6 int8 path); K-quant weights only, see [`Weight::is_kquant`].
+    pub fn matvec_q8(&self, act: &quant::Q8Act, out: &mut [f32]) -> Result<(), InferError> {
+        if act.len() != self.cols || out.len() != self.rows {
+            return Err(InferError::BadParams("matvec shape"));
+        }
+        if !self.is_kquant() {
+            return Err(InferError::BadParams("matvec_q8 needs a K-quant weight"));
+        }
+        for (r, o) in out.iter_mut().enumerate() {
+            *o = quant::dot_row_q8k(self.ty, self.row(r), act)?;
         }
         Ok(())
     }
