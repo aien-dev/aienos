@@ -1,0 +1,19 @@
+# tests/gates/aienos-store-native.gate
+# Mirrors hosted: ci.yml (disabled_manually on GitHub) 'make -C native/store test mutants'; not covered by any active workflow
+gate: AIENOS-STORE-NATIVE
+manifest_version: 2
+owner: aienos
+requires:
+  - host
+inputs:
+  - native/store/
+  - tests/gates/
+run:
+  exec: tests/gates/run.sh
+  args: ["store-native"]
+expects:
+  exit: 0
+  verdict: PASS
+timeout: 15m
+exactness: EXACT
+cache_scope: machine

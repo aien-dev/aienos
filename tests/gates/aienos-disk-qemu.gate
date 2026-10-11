@@ -1,0 +1,21 @@
+# tests/gates/aienos-disk-qemu.gate
+# Mirrors hosted: native-suites.yml 'native/disk qemu NVMe payload': bash scripts/qemu_native_nvme_test.sh, AIENOS_STORE_NVME_QEMU: PASS required (hosted 27 s)
+gate: AIENOS-DISK-QEMU
+manifest_version: 2
+owner: aienos
+requires:
+  - qemu
+inputs:
+  - native/disk/
+  - scripts/qemu_native_nvme_test.sh
+  - scripts/lib_gate_hold.sh
+  - tests/gates/
+run:
+  exec: tests/gates/run.sh
+  args: ["disk-qemu"]
+expects:
+  exit: 0
+  verdict: PASS
+timeout: 15m
+exactness: EXACT
+cache_scope: machine

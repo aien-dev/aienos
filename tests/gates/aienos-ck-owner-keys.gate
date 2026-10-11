@@ -1,0 +1,27 @@
+# tests/gates/aienos-ck-owner-keys.gate
+# Mirrors hosted: ck-kernel.yml 'Hardware staging image refuses TEST keys (build only)': bash scripts/ck_owner_keys_check.sh with quiet flag and gate lock in a temp dir
+gate: AIENOS-CK-OWNER-KEYS
+manifest_version: 2
+owner: aienos
+requires:
+  - host
+inputs:
+  - native/kernel/
+  - scripts/ck_gates.sh
+  - scripts/lib_ck_m1_checks.sh
+  - scripts/lib_gate_hold.sh
+  - scripts/gate_hold_selftest.sh
+  - scripts/ck_owner_keys_check.sh
+  - crates/aienos-fpu-probe/
+  - crates/aienos-infer-kernel/
+  - tests/gates/
+  - scripts/
+run:
+  exec: tests/gates/run.sh
+  args: ["ck-owner-keys"]
+expects:
+  exit: 0
+  verdict: PASS
+timeout: 30m
+exactness: EXACT
+cache_scope: machine

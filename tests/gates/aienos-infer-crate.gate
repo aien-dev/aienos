@@ -1,0 +1,21 @@
+# tests/gates/aienos-infer-crate.gate
+# Mirrors hosted: infer-crate.yml: fmt, clippy, test and aarch64-unknown-none build of aienos-infer (hosted 24 s)
+gate: AIENOS-INFER-CRATE
+manifest_version: 2
+owner: aienos
+requires:
+  - host
+inputs:
+  - crates/aienos-infer/
+  - Cargo.toml
+  - Cargo.lock
+  - tests/gates/
+run:
+  exec: tests/gates/run.sh
+  args: ["infer-crate"]
+expects:
+  exit: 0
+  verdict: PASS
+timeout: 15m
+exactness: EXACT
+cache_scope: machine

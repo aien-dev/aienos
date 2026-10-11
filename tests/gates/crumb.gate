@@ -1,0 +1,24 @@
+# tests/gates/crumb.gate
+# Mirrors hosted: crumb.yml 'crumb verify .' with the tool built from crumb.lock (hosted job 9 s)
+# cache: never because crumbs live in many directories and inputs are literal paths; the check is sub-second.
+# requires: host because run.sh builds the tool from the sibling ../aien-architecture checkout, which a
+# GitHub runner does not have (portable means the tree alone). The thin gate runs crumb verify itself.
+gate: CRUMB-VERIFY
+manifest_version: 2
+owner: aienos
+requires:
+  - host
+inputs:
+  - .crumb
+  - crumb.lock
+  - tests/gates/
+run:
+  exec: tests/gates/run.sh
+  args: ["crumb-verify"]
+expects:
+  exit: 0
+  verdict: PASS
+timeout: 5m
+exactness: EXACT
+cache_scope: machine
+cache: never

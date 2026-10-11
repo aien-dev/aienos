@@ -1,0 +1,26 @@
+# tests/gates/aienos-ck-hold-selftest.gate
+# Mirrors hosted: ck-kernel.yml 'Gate hold self-test' (aienos#278): bash scripts/gate_hold_selftest.sh
+gate: AIENOS-CK-HOLD-SELFTEST
+manifest_version: 2
+owner: aienos
+requires:
+  - host
+inputs:
+  - native/kernel/
+  - scripts/ck_gates.sh
+  - scripts/lib_ck_m1_checks.sh
+  - scripts/lib_gate_hold.sh
+  - scripts/gate_hold_selftest.sh
+  - scripts/ck_owner_keys_check.sh
+  - crates/aienos-fpu-probe/
+  - crates/aienos-infer-kernel/
+  - tests/gates/
+run:
+  exec: tests/gates/run.sh
+  args: ["ck-hold-selftest"]
+expects:
+  exit: 0
+  verdict: PASS
+timeout: 10m
+exactness: EXACT
+cache_scope: machine
