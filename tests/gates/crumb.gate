@@ -1,4 +1,4 @@
-# tests/gates/crumb-verify.gate
+# tests/gates/crumb.gate
 # Mirrors hosted: crumb.yml 'crumb verify .' with the tool built from crumb.lock (hosted job 9 s)
 # cache: never because crumbs live in many directories and inputs are literal paths; the check is sub-second.
 gate: CRUMB-VERIFY
