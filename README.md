@@ -39,7 +39,8 @@ The C kernel needs only gcc, binutils, make and a shell. Host tests need nothing
 ```bash
 make -C native/kernel test        # C kernel host tests
 make -C native/kernel sanitize    # same under ASan and UBSan
-make -C native/capability test    # capability authority
+make -C native/capability test    # capability authority (production ABI; docs/CAPABILITY_ABI.md)
+bash scripts/cap_abi_isolation_test.sh  # C and Rust capability ABIs stay separate
 make -C native/store test mutants # torn-write-safe Store record
 ```
 

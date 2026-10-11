@@ -2,8 +2,11 @@
 # only compiled these into the kernel image; nothing ran their own tests.
 #
 # Coverage map (what runs where):
-#   native/capability  test                   ci.yml (ci.yml is disabled_manually on GitHub, so this does NOT run in CI today)
+#   native/capability  test                   ci.yml (disabled_manually on GitHub) and, since abi-qual, the capability-abi job below
 #   native/capability  mutants                this file
+#   native/capability  test + ABI isolation   this file (capability-abi job: C rule tests,
+#                      Rust aienos-capability{,-ffi} fmt/clippy/test, and
+#                      scripts/cap_abi_isolation_test.sh)
 #   native/store       test mutants           ci.yml (ci.yml is disabled_manually on GitHub, so this does NOT run in CI today)
 #   native/kernel      test sanitize + gates  ck-kernel.yml (owned by another lane)
 #   native/net         test sanitize mutants  this file
@@ -34,6 +37,9 @@ on:
       - ".github/workflows/native-suites.yml"
       - "scripts/qemu_native_nvme_test.sh"
       - "scripts/lib_gate_hold.sh"
+      - "scripts/cap_abi_isolation_test.sh"
+      - "crates/aienos-capability/**"
+      - "crates/aienos-capability-ffi/**"
   workflow_dispatch:
 
 permissions:
@@ -88,6 +94,55 @@ jobs:
             echo "found: $m"
           done
           if grep -q 'NOT_RUN' suite.log; then echo 'NOT_RUN in log'; exit 1; fi
+
+  capability-abi:
+    # The native C authority (aienos_cap_*, 64-bit generation) is the
+    # production ABI; the Rust crates are a separate 32-bit implementation
+    # exported as aienos_cap32_*. This job keeps them from becoming
+    # interchangeable by accident and runs both sides' rule tests.
+    name: native/capability ABI isolation (C test, Rust tests, symbol/link checks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install C toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+          cc --version | head -1
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: C rule tests (make -C native/capability test)
+        run: |
+          set -o pipefail
+          make -C native/capability test 2>&1 | tee cap-test.log
+          grep -qE 'capability: [0-9]+ checks, 0 failures' cap-test.log
+          grep -q 'contain-checks PASS' cap-test.log
+
+      - name: Rust fmt
+        run: cargo fmt -p aienos-capability -p aienos-capability-ffi -- --check
+
+      - name: Rust clippy
+        run: cargo clippy --locked -p aienos-capability -p aienos-capability-ffi --all-targets -- -D warnings
+
+      - name: Rust tests
+        run: |
+          set -o pipefail
+          cargo test --locked -p aienos-capability -p aienos-capability-ffi 2>&1 | tee rust-test.log
+          if grep -q 'test result: FAILED' rust-test.log; then exit 1; fi
+          grep -q 'reclaimed_reference_stays_dead_after_restart ... ok' rust-test.log
+          grep -q 'layout_matches_the_cap32_contract ... ok' rust-test.log
+
+      - name: ABI isolation (symbols, link probe, layout drift)
+        run: |
+          set -o pipefail
+          bash scripts/cap_abi_isolation_test.sh 2>&1 | tee abi.log
+          grep -qx 'AIENOS_CAP_ABI_ISOLATION: PASS' abi.log
 
   disk-qemu:
     name: native/disk qemu NVMe payload

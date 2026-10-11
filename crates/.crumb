@@ -96,7 +96,7 @@
         },
         {
           "digest": "41559b6187a30de12fdf5ee7e749662f3576d60e4bf0e0753284c05aa64baec0",
-          "last_commit": "7acfbcf",
+          "last_commit": "3761935",
           "name": "aienos-boot",
           "purpose": "Directory crates/aienos-boot. Purpose not yet described by a human."
         },
@@ -107,14 +107,14 @@
           "purpose": "Directory crates/aienos-c1-tree. Purpose not yet described by a human."
         },
         {
-          "digest": "8a0463de3e20f4781afc41b8f7b354a29a3b819b2a88a8588b62c2ae3a29ebef",
-          "last_commit": "187ecdf",
+          "digest": "ca15c2b9ae570b0aa2c7859672de2c976d6ce046188c09b7c74b5ccbee350136",
+          "last_commit": "362cba9",
           "name": "aienos-capability",
           "purpose": "Directory crates/aienos-capability. Purpose not yet described by a human."
         },
         {
-          "digest": "ddcab59814a675942fbea09cd734c6d9726359da319efd962a9abd1a4949e9af",
-          "last_commit": "e3ec8a5",
+          "digest": "c63ab3d5643ac3c0974eee276273a0ab80584c54926cbb62c637294b5b857718",
+          "last_commit": "6d17b22",
           "name": "aienos-capability-ffi",
           "purpose": "Directory crates/aienos-capability-ffi. Purpose not yet described by a human."
         },
@@ -149,15 +149,15 @@
           "purpose": "Directory crates/aienos-store-tool. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:1334b8befdc1f899fa2171246a25c0dcb502d6ea6bb724f007e22b884f6040c3",
-      "compiled_at": "2026-10-07T01:17:46Z",
+      "children_root": "sha256:006b47340025796d925d29b5143f8c38760bb782916323e4d9070a8e408f7033",
+      "compiled_at": "2026-10-11T21:20:24Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:ebc8d5c8bacd11bfcc717785e74cb4de592e0aab8f41a6f81f75f4cda158dc21",
+      "digest": "sha256:e4f7c9f4b54d792a3d410c4143742cd0f95b64858494d6bfa9ffc6cc9ff7687a",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 231,
-      "generated_at_commit": "7acfbcf2acfbc8c505a60d0e20cebf4d5f963c00",
-      "source_tree": "sha256:dd6b4a3aade84dd3a50986ad97114e1338b5e3b820119356f4ffbb599e099e0b"
+      "generated_at_commit": "362cba9653c8021996a21b17ead00d5d1140b371",
+      "source_tree": "sha256:7d853b8e4348ea1aaebc7c18c71e06d2bd272911acc2e4861fd01a2589a66ad0"
     },
     "owner_lane": "",
     "provenance": {

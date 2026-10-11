@@ -1,4 +1,10 @@
-//! Native capability authority.
+//! Rust capability authority, 32-bit generations.
+//!
+//! A separate implementation of the AIENOS capability rules. The production
+//! ABI is the C authority in `native/capability` (64-bit generations,
+//! symbols `aienos_cap_*`); this crate and its C binding
+//! `aienos-capability-ffi` (symbols `aienos_cap32_*`) are not interchangeable
+//! with it. See `docs/CAPABILITY_ABI.md`.
 //!
 //! This is the AIENOS side of the host reference root. The slot rules match
 //! that root: a reference is an index plus a generation, a reused slot does
@@ -102,14 +108,28 @@ pub const fn add_u64(a: u64, b: u64) -> Result<u64, i32> {
 /// Take the next boot generation. A later authority starts higher, so a
 /// reference from a stopped authority cannot validate against the new one.
 pub fn take_boot_gen() -> Result<u32, i32> {
+    take_boot_gen_above(0)
+}
+
+/// Take the next boot generation, no lower than `floor`. A restart passes
+/// [`AuthorityState::generation_floor`] of the table it replaces, so the new
+/// table starts above every generation the old one handed out, including
+/// generations a reclaim moved past the old boot generation. Fails closed
+/// with [`ERR_EXHAUSTED`] rather than reuse a generation.
+pub fn take_boot_gen_above(floor: u32) -> Result<u32, i32> {
     let mut cur = NEXT_BOOT_GEN.load(Ordering::Relaxed);
     loop {
-        if cur == 0 || cur == u32::MAX {
+        let start = if floor > cur { floor } else { cur };
+        if start == 0 || start == u32::MAX {
             return Err(ERR_EXHAUSTED);
         }
-        match NEXT_BOOT_GEN.compare_exchange_weak(cur, cur + 1, Ordering::AcqRel, Ordering::Relaxed)
-        {
-            Ok(_) => return Ok(cur),
+        match NEXT_BOOT_GEN.compare_exchange_weak(
+            cur,
+            start + 1,
+            Ordering::AcqRel,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return Ok(start),
             Err(observed) => cur = observed,
         }
     }
@@ -214,6 +234,30 @@ impl AuthorityState {
 
     pub fn boot_gen(&self) -> u32 {
         self.boot_gen
+    }
+
+    /// One past the largest generation anywhere in the table, including the
+    /// generations recorded for parents and minters. A table restarted at or
+    /// above this value honours no reference this table handed out. Returns
+    /// `u32::MAX` when no such start exists, which
+    /// [`take_boot_gen_above`] refuses.
+    pub fn generation_floor(&self) -> u32 {
+        let mut top = self.boot_gen;
+        let mut i = 0;
+        while i < CAP_MAX {
+            let e = &self.entries[i];
+            if e.generation > top {
+                top = e.generation;
+            }
+            if e.parent_generation > top {
+                top = e.parent_generation;
+            }
+            if e.minted_by_generation > top {
+                top = e.minted_by_generation;
+            }
+            i += 1;
+        }
+        top.saturating_add(1)
     }
 
     pub fn epoch(&self) -> u64 {
@@ -716,6 +760,56 @@ mod tests {
         })
     }
 
+    /// The b1fa747 defect, Rust side: a reclaim moves a slot to boot + 1, and
+    /// a restart at boot + 1 made the reference minted after the reclaim
+    /// valid again. A restart must start at or above the old table's floor.
+    #[test]
+    fn reclaimed_reference_stays_dead_after_restart() {
+        let mut state = boot();
+        let first = root_mint(&mut state, 1, 0x40, RIGHT_READ).unwrap();
+        state.revoke(office(&state), first).unwrap();
+        state.reclaim(office(&state), first.cap_id).unwrap();
+        let second = root_mint(&mut state, 1, 0x40, RIGHT_READ).unwrap();
+        assert_eq!(second.cap_id, first.cap_id);
+        assert_eq!(second.generation, first.generation + 1);
+        // The old restart start (boot + 1) is exactly the reused generation.
+        assert_eq!(state.boot_gen() + 1, second.generation);
+        let floor = state.generation_floor();
+        assert!(floor > second.generation);
+        let start = take_boot_gen_above(floor).unwrap();
+        assert!(start >= floor);
+        let mut restarted = AuthorityState::bootstrap(start).unwrap();
+        let fresh = root_mint(&mut restarted, 1, 0x40, RIGHT_READ).unwrap();
+        assert_eq!(fresh.cap_id, second.cap_id);
+        assert!(fresh.generation > second.generation);
+        assert_eq!(
+            restarted.validate(second, 1, 0x40, RIGHT_READ).unwrap_err(),
+            ERR_STALE_GEN
+        );
+        assert_eq!(
+            restarted.validate(first, 1, 0x40, RIGHT_READ).unwrap_err(),
+            ERR_STALE_GEN
+        );
+        assert!(restarted.validate(fresh, 1, 0x40, RIGHT_READ).is_ok());
+    }
+
+    #[test]
+    fn restart_refuses_above_an_exhausted_generation() {
+        let mut state = boot();
+        let cap = root_mint(&mut state, 1, 0x10, RIGHT_READ).unwrap();
+        state.revoke(office(&state), cap).unwrap();
+        state.set_generation_for_test(cap.cap_id, u32::MAX).unwrap();
+        assert_eq!(state.generation_floor(), u32::MAX);
+        assert_eq!(take_boot_gen_above(u32::MAX).unwrap_err(), ERR_EXHAUSTED);
+        assert_eq!(
+            AuthorityState::bootstrap(u32::MAX).unwrap_err(),
+            ERR_EXHAUSTED
+        );
+        let a = take_boot_gen_above(0).unwrap();
+        let b = take_boot_gen_above(0).unwrap();
+        assert!(b > a);
+    }
+
     #[test]
     fn high_half_resource_is_kept() {
         let wide = (1u64 << 32) | 0x51;
@@ -997,5 +1091,191 @@ mod tests {
             authority: cur,
         });
         assert_eq!(too_deep.unwrap_err(), ERR_CHAIN);
+    }
+
+    // ---- ABI-qualification regression set (mirrors native/capability/tests) ----
+
+    #[test]
+    fn stale_reference_after_revoke_is_refused() {
+        let mut state = boot();
+        let cap = root_mint(&mut state, 1, 0x60, RIGHT_READ).unwrap();
+        assert!(state.validate(cap, 1, 0x60, RIGHT_READ).is_ok());
+        state.revoke(office(&state), cap).unwrap();
+        assert_eq!(
+            state.validate(cap, 1, 0x60, RIGHT_READ).unwrap_err(),
+            ERR_REVOKED
+        );
+        assert_eq!(state.revoke(office(&state), cap).unwrap_err(), ERR_STATE);
+        state.reclaim(office(&state), cap.cap_id).unwrap();
+        assert_eq!(
+            state.validate(cap, 1, 0x60, RIGHT_READ).unwrap_err(),
+            ERR_STALE_GEN
+        );
+        assert_eq!(state.inspect(cap).unwrap_err(), ERR_STALE_GEN);
+        // A revoked minting authority cannot mint.
+        let minter = root_mint(&mut state, 0, RES_AUTHORITY, RIGHT_MINT).unwrap();
+        state.revoke(office(&state), minter).unwrap();
+        let refused = state.mint(Mint {
+            issuer: 3,
+            subject: 1,
+            resource: 0x61,
+            rights: RIGHT_READ,
+            lease_ticks: 0,
+            parent: CapRef::NONE,
+            authority: minter,
+        });
+        assert_eq!(refused.unwrap_err(), ERR_REVOKED);
+    }
+
+    #[test]
+    fn recycled_slot_does_not_honour_old_reference() {
+        let mut state = boot();
+        let old = root_mint(&mut state, 1, 0x70, RIGHT_READ | RIGHT_DELEGATE).unwrap();
+        state.revoke(office(&state), old).unwrap();
+        state.reclaim(office(&state), old.cap_id).unwrap();
+        let new = root_mint(&mut state, 1, 0x70, RIGHT_READ | RIGHT_DELEGATE).unwrap();
+        assert_eq!(new.cap_id, old.cap_id);
+        assert!(new.generation > old.generation);
+        assert_eq!(
+            state.validate(old, 1, 0x70, RIGHT_READ).unwrap_err(),
+            ERR_STALE_GEN
+        );
+        assert_eq!(state.inspect(old).unwrap_err(), ERR_STALE_GEN);
+        // The old reference cannot revoke or delegate from the new holder.
+        assert_eq!(
+            state.revoke(office(&state), old).unwrap_err(),
+            ERR_STALE_GEN
+        );
+        let via_old = state.mint(Mint {
+            issuer: 1,
+            subject: 2,
+            resource: 0x70,
+            rights: RIGHT_READ,
+            lease_ticks: 0,
+            parent: old,
+            authority: old,
+        });
+        assert_eq!(via_old.unwrap_err(), ERR_STALE_GEN);
+        assert!(state.validate(new, 1, 0x70, RIGHT_READ).is_ok());
+    }
+
+    #[test]
+    fn generation_exhaustion_fails_closed() {
+        assert_eq!(generation_advance(u32::MAX).unwrap_err(), ERR_EXHAUSTED);
+        assert_eq!(generation_advance(u32::MAX - 1), Ok(u32::MAX));
+        let mut state = boot();
+        let cap = root_mint(&mut state, 1, 0x10, RIGHT_READ).unwrap();
+        state.revoke(office(&state), cap).unwrap();
+        state.set_generation_for_test(cap.cap_id, u32::MAX).unwrap();
+        assert_eq!(
+            state.reclaim(office(&state), cap.cap_id).unwrap_err(),
+            ERR_EXHAUSTED
+        );
+        assert_eq!(
+            state.validate(cap, 1, 0x10, RIGHT_READ).unwrap_err(),
+            ERR_STALE_GEN
+        );
+        let replacement = root_mint(&mut state, 1, 0x11, RIGHT_READ).unwrap();
+        assert_ne!(replacement.cap_id, cap.cap_id);
+        // A live slot cannot be moved onto a chosen generation.
+        assert_eq!(
+            state
+                .set_generation_for_test(replacement.cap_id, 99)
+                .unwrap_err(),
+            ERR_STATE
+        );
+        // Every free slot exhausted: mint refuses rather than reuse one.
+        for id in 0..CAP_MAX as u32 {
+            let _ = state.set_generation_for_test(id, u32::MAX);
+        }
+        assert_eq!(
+            root_mint(&mut state, 1, 0x12, RIGHT_READ).unwrap_err(),
+            ERR_EXHAUSTED
+        );
+    }
+
+    #[test]
+    fn unauthorized_capability_use_is_refused() {
+        let mut state = boot();
+        let cap = root_mint(&mut state, 1, 0x80, RIGHT_READ).unwrap();
+        assert_eq!(
+            state.validate(cap, 2, 0x80, RIGHT_READ).unwrap_err(),
+            ERR_SUBJECT
+        );
+        assert_eq!(
+            state.validate(cap, 1, 0x81, RIGHT_READ).unwrap_err(),
+            ERR_RESOURCE
+        );
+        assert_eq!(
+            state.validate(cap, 1, 0x80, RIGHT_WRITE).unwrap_err(),
+            ERR_RIGHTS
+        );
+        let request = |authority: CapRef, rights: u32| Mint {
+            issuer: 3,
+            subject: 1,
+            resource: 0x82,
+            rights,
+            lease_ticks: 0,
+            parent: CapRef::NONE,
+            authority,
+        };
+        // An ordinary capability is not an office authority.
+        assert_eq!(
+            state.mint(request(cap, RIGHT_READ)).unwrap_err(),
+            ERR_UNAUTHORIZED
+        );
+        // A slot never handed out, and one out of range, authorize nothing.
+        let undelivered = CapRef {
+            cap_id: 200,
+            generation: state.boot_gen(),
+        };
+        assert_eq!(
+            state.mint(request(undelivered, RIGHT_READ)).unwrap_err(),
+            ERR_UNAUTHORIZED
+        );
+        let out_of_range = CapRef {
+            cap_id: CAP_MAX as u32,
+            generation: state.boot_gen(),
+        };
+        assert_eq!(
+            state.mint(request(out_of_range, RIGHT_READ)).unwrap_err(),
+            ERR_UNAUTHORIZED
+        );
+        // A minting authority cannot hand out a privilege it does not hold.
+        let minter = root_mint(&mut state, 0, RES_AUTHORITY, RIGHT_MINT).unwrap();
+        assert!(state.mint(request(minter, RIGHT_READ)).is_ok());
+        assert_eq!(
+            state.mint(request(minter, RIGHT_REVOKE)).unwrap_err(),
+            ERR_UNAUTHORIZED
+        );
+        // Delegation must be authorized by the parent itself.
+        let parent = root_mint(&mut state, 1, 0x83, RIGHT_READ | RIGHT_DELEGATE).unwrap();
+        let mismatched = state.mint(Mint {
+            issuer: 1,
+            subject: 2,
+            resource: 0x83,
+            rights: RIGHT_READ,
+            lease_ticks: 0,
+            parent,
+            authority: office(&state),
+        });
+        assert_eq!(mismatched.unwrap_err(), ERR_UNAUTHORIZED);
+        // A non-office reference cannot reclaim, revoke, move the clock or epoch.
+        assert_eq!(
+            state.reclaim(cap, cap.cap_id).unwrap_err(),
+            ERR_UNAUTHORIZED
+        );
+        assert_eq!(state.revoke(cap, parent).unwrap_err(), ERR_UNAUTHORIZED);
+        assert_eq!(state.advance_clock(cap, 1).unwrap_err(), ERR_UNAUTHORIZED);
+        assert_eq!(state.bump_epoch(cap).unwrap_err(), ERR_UNAUTHORIZED);
+        let view = AuthorityView::new(&state);
+        assert_eq!(
+            view.cognition_attempt_reclaim(office(&state), cap.cap_id),
+            ERR_UNAUTHORIZED
+        );
+        assert_eq!(
+            view.cognition_attempt_clock(office(&state), 1),
+            ERR_UNAUTHORIZED
+        );
     }
 }

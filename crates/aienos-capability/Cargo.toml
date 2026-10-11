@@ -5,6 +5,6 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Native AIENOS capability authority. The Linux mint process remains the differential oracle."
+description = "Rust AIENOS capability authority with 32-bit generations; separate from the native C production ABI (see docs/CAPABILITY_ABI.md). The Linux mint process remains the differential oracle."
 
 [dependencies]
