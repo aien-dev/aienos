@@ -25,7 +25,7 @@ C gates (one line each from `ck_gates.sh`): `M1` and `M3` (from
 `scripts/qemu_ck_net_test.sh`; rows 102-106 and 110-112; the script now also checks the virtio-net SMMU fence (ACCESS_PLATFORM required, out-of-window device DMA refused), rows 102 and 110-112 are QEMU PASS on this branch from the committed forge log `evidence/ck_net_qemu_8bdbc2e46b85d04c422f9d2830c1c4b263e254b3cfecfe21ff0063c9e33c86e8.log`, hardware NOT_RUN), the kernel entropy rows 107-109 (M1 via `scripts/lib_ck_m1_checks.sh`, ARGUS1_REVOKE and M4_STORE via the Store gate boot 7),
 `DISK_LAYOUT` (C-only, from `scripts/qemu_ck_disk_layout_test.sh`, rows 118-123: QEMU PASS at 741b2b8 before the merge with main 8555049, rerun pending at the merged head; row 123 host test), and the NOT_RUN gates
 `SMP` (C-only, from `scripts/qemu_ck_smp_test.sh`, rows 113-117, NOT_RUN pending forge receipt), `M0_ROLLBACK` (from `scripts/qemu_ck_rollback_test.sh`, rows 42-46; QEMU PASS in its committed run log, C-image, no `ck_gates.sh` receipt yet; hardware NOT_RUN), `M4_STORE_CRASH` (now read from `scripts/qemu_ck_store_crash_test.sh`, rows 73-80; NOT_RUN until a forge receipt exists),
-`M4_CONTINUITY`, `M4_RECOVERY`, `M4_ALLEN` (C-only, from `scripts/qemu_ck_allen_test.sh`, rows A1-A30; QEMU PASS, hardware NOT_RUN), `KEYBOARD` (from `scripts/qemu_ck_keyboard_test.sh`, rows 25-32 and C-only 30a-30c and 32a; QEMU PASS; C-only row 32b and all hardware NOT_RUN), `FPU` (C-only, from `scripts/qemu_ck_fpu_test.sh`, rows 124-128; QEMU PASS, hardware NOT_RUN), `INFER` (C-only, from `scripts/qemu_ck_infer_test.sh`, rows 129-139; QEMU PASS, hardware NOT_RUN), `SCREEN` (C-only, from `scripts/qemu_ck_screen_test.sh`, rows 140-145; QEMU PASS, hardware NOT_RUN), and `CONSOLE` (C-only, TEST-ONLY console session image, from `scripts/qemu_ck_console_test.sh`, rows 146-155; QEMU only, hardware NOT_RUN).
+`M4_CONTINUITY`, `M4_RECOVERY`, `M4_ALLEN` (C-only, from `scripts/qemu_ck_allen_test.sh`, rows A1-A30; QEMU PASS, hardware NOT_RUN), `KEYBOARD` (from `scripts/qemu_ck_keyboard_test.sh`, rows 25-32 and C-only 30a-30c and 32a; QEMU PASS; C-only row 32b and all hardware NOT_RUN), `FPU` (C-only, from `scripts/qemu_ck_fpu_test.sh`, rows 124-128; QEMU PASS, hardware NOT_RUN), `INFER` (C-only, from `scripts/qemu_ck_infer_test.sh`, rows 129-139 and the native v1 P06 session rows 139a-139f; QEMU PASS, hardware NOT_RUN), `SCREEN` (C-only, from `scripts/qemu_ck_screen_test.sh`, rows 140-145; QEMU PASS, hardware NOT_RUN), and `CONSOLE` (C-only, TEST-ONLY console session image, from `scripts/qemu_ck_console_test.sh`, rows 146-155; QEMU only, hardware NOT_RUN).
 
 `M4_NVME` and `SMMU` PASS in the SMMU-confined mode (default `make full`
 image, QEMU `iommu=smmuv3`). The unconfined bypass build
@@ -635,6 +635,24 @@ of the whole file takes ~40 ms, the kernel's SHA-256 of it ~8.6 s under TCG. FP/
 a silent pass) when the model file, cargo, the `aarch64-unknown-none` target, QEMU or AAVMF is missing; not
 required in CI (the runner has neither the model nor the target).
 
+Bounded session (native v1 plan P06, rows 139a-139f): after the one-shot probe the same image opens a resident
+session over the same ingested bytes through `crates/aienos-infer-kernel/src/session.rs`
+(`aienos_infer_session_open/prompt/step/cancel/tokens/text/close`, one static session slot, `#[repr(C)]` limits
+`{kv_capacity, max_new, max_prompt_bytes, heap_reserve}`). `open` binds the model once and allocates the KV cache
+for `kv_capacity` positions; `prompt` applies the chat template, refuses a prompt over `max_prompt_bytes`
+(-16) or one that would not fit the cache (-8) or the heap reserve (-15), and resets the decode state; `step`
+does exactly one unit of work per call (one prompt token into the cache during prefill, then one greedy token
+plus its forward) and returns PREFILL/TOKEN/LAST/DONE, so the kernel can cancel between any two steps; `cancel`
+forgets the cache and returns the count produced; `close` drops everything, after which the kernel forgets the
+heap region. The probe runs the session on a fresh 256 MiB region with limits kv 64, max_new 16, prompt 256
+bytes, reserve 64 KiB: three refusals that touch no weights, "Say hello." cancelled after 3 prefill steps, the
+golden prompt stepped to its end (its ids must equal the one-shot reply and the llama.cpp sequence, which proves
+the cache reset after a cancel), "Say hello." cancelled again after one step, close, every frame returned,
+`AIENOS_CK_INFER_SESSION: PASS|FAIL`. Limits: the session API is linked only into the QEMU probe image
+(`CK_INFER_LIB` cannot combine with `CK_HARDWARE_STAGING` or `CK_RUST_LIBS`), so the hardware service image has
+no inference yet; the lifecycle `prompt` verb (operator prompt -> bounded output -> approve -> Store) is the next
+P06 cut; the bump allocator never frees, so each prompt costs a few KiB until close (`heap_used_kib` per line).
+
 | # | check | gate | status |
 |---|---|---|---|
 | 129 | kernel ingests exactly the host file's size (fw_cfg size and ingest bytes = `stat`) | INFER | QEMU PASS (hardware NOT_RUN) |
@@ -642,12 +660,18 @@ required in CI (the runner has neither the model nor the target).
 | 131 | probe rc = 0; 147 tensors (`golden.rs:112`), vocab 128256, 16 layers | INFER | QEMU PASS (hardware NOT_RUN) |
 | 132 | first four prompt ids = 128000 128006 882 128007 and prompt length 17, both read from `crates/aienos-infer/tests/fixtures/ref_fr.txt` by the script | INFER | QEMU PASS (hardware NOT_RUN) |
 | 133 | kernel alive, no panic/fault, final report, QEMU exit 0 (PSCI reset); M1/M3 boot gate unchanged PASS | INFER | QEMU PASS (hardware NOT_RUN) |
-| 134 | negative control: `--negative-control` overwrites the GGUF magic in a host copy -> probe rc=-2, every probe check FAILs, control prints PASS; `--self-test` canned logs reject 33 mutations, each by its own FAIL line | INFER | QEMU PASS (control caught; hardware NOT_RUN) |
+| 134 | negative control: `--negative-control` overwrites the GGUF magic in a host copy -> probe rc=-2, every probe check FAILs, control prints PASS; `--self-test` canned logs reject 47 mutations (33 probe, 14 session), each by its own FAIL line | INFER | QEMU PASS (control caught; hardware NOT_RUN) |
 | 135 | generated ids = the llama.cpp greedy sequence of `ref_fr.txt` "step" lines, exact: 791 6864 315 9822 374 12366 13 128009 (EOT included), read from the fixture by the script and also hard-coded in `core/infer.c` for the kernel verdict | INFER | QEMU PASS (hardware NOT_RUN) |
 | 136 | decoded text contains "Paris" (`infer: text=The capital of France is Paris.`) | INFER | QEMU PASS (hardware NOT_RUN) |
 | 137 | per-token timing line present: 7 decode forwards, mean > 0 us. First native CPU number: 40.40 s per decode token, prefill 553.9 s for 17 tokens, whole Rust call 837.8 s, under QEMU TCG single core (not hardware; host test on one Grace core is 0.59 s per forward) | INFER | QEMU PASS (hardware NOT_RUN) |
 | 138 | clean unload: `infer: unloaded` line present before the final report, frame-return rc 0,0, free frames after = before the ingest (1021097 = 1021097; 262728 frames returned), kernel then reaches M3, stages, final report, PSCI reset (QEMU exit 0) | INFER | QEMU PASS (hardware NOT_RUN) |
 | 139 | live control: the same serial log re-checked against a mutated expected-id list (second-to-last id + 1) must FAIL on the token check, else the gate FAILs; `--self-test` also covers wrong/short/swapped tokens, missing tokens/text/timing/unload lines, missing "Paris", leaked frames, refused frame return, unload after the final report | INFER | QEMU PASS (control caught; hardware NOT_RUN) |
+| 139a | session open on the same ingested bytes with explicit limits (kv 64, max_new 16, prompt 256 bytes, heap reserve 64 KiB): rc 0, same shape as the probe (147 tensors, vocab 128256, 16 layers), `infer: session open` line exactly once | INFER | NOT_RUN |
+| 139b | refusals before any weight is touched: a second open -12 (E_STATE), a 257-byte prompt -16 (E_PROMPT_BYTES), a step with no request pending 0 (STEP_DONE) | INFER | NOT_RUN |
+| 139c | cancel during prefill: "Say hello." stepped 3 times then cancelled: steps = cancel_after, produced = steps - prefill, cancel returns the produced count, the next step is idle (`idle_step=done`), rc >= 0 | INFER | NOT_RUN |
+| 139d | golden prompt through the step API after a cancel: 17 prefill steps then 8 token steps ending `last=yes`; ids = 791 6864 315 9822 374 12366 13 128009 (the one-shot reply and the llama.cpp sequence; the cache reset after cancel is proven by equality), text contains "Paris" | INFER | NOT_RUN |
+| 139e | a second cancel after a completed request (prompt 3, one step), close rc 0 and a second close -12, session heap peak within 256 MiB, free frames after = before the session, `AIENOS_CK_INFER_SESSION: PASS` printed between the one-shot verdict and the unload line | INFER | NOT_RUN |
+| 139f | `--self-test` rejects 14 session mutations (verdict or open line missing, limit drift, second open or long prompt accepted, cancel overrun, not idle after cancel, unfinished reply, wrong token, missing Paris, frames leaked, close refused, one-shot verdict missing, close after unload), each by its own FAIL line | INFER | host PASS (`bash scripts/qemu_ck_infer_test.sh --self-test`: 49 PASS lines) |
 
 ## SCREEN: scripts/qemu_ck_screen_test.sh -> CK `SCREEN` (L6-C prerequisite, C-only, no Rust-kernel counterpart)
 

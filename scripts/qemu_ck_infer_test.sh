@@ -79,7 +79,8 @@ infer_check_log() {
     local re_tus='^infer: decode_tokens=([0-9]+) mean_tok_us=([0-9]+)$'
     local re_txt='^infer: text=(.*)$'
     local re_un='^infer: unloaded heap_live_kib=([0-9]+) frames_free_before=([0-9]+) frames_free_after=([0-9]+) frames_returned=([0-9]+) rc=(-?[0-9]+),(-?[0-9]+)$'
-    local n sz
+    local n sz line plen=""
+    local -a m; g() { echo "${m[$1]}"; }
     if [[ "${source_mode:-fwcfg}" == disk ]]; then
         local re_dk='^infer: disk base=0x[0-9a-f]+ size=([0-9]+) extents=([0-9]+) read_us=([0-9]+) block_size=(512|4096)$'
         n="$(grep -cE "${re_dk}" "${f}" || true)"
@@ -114,8 +115,7 @@ infer_check_log() {
         bad "exactly one well-formed infer: probe line"
     else
         line="$(grep -E "${re_p}" "${f}")"
-        local -a m; [[ "${line}" =~ ${re_p} ]]; m=("${BASH_REMATCH[@]}")
-        g() { echo "${m[$1]}"; }
+        [[ "${line}" =~ ${re_p} ]]; m=("${BASH_REMATCH[@]}")
         rc="$(g 1)"
         [[ "${rc}" == 0 ]] && ok "probe returned 0" || bad "probe returned ${rc}"
         [[ "$(g 2)" == "${want_tensors}" ]] && ok "tensor count ${want_tensors}" || bad "tensor count $(g 2), expected ${want_tensors}"
@@ -161,6 +161,75 @@ infer_check_log() {
             || bad "unload: free frames after ${fa} vs before ${fb}, frame-return rc ${r1},${r2}"
     fi
     grep -qx 'AIENOS_CK_INFER: PASS' "${f}" && ok "kernel reported AIENOS_CK_INFER: PASS" || bad "kernel did not report AIENOS_CK_INFER: PASS"
+    # native v1 P06: the bounded session over the same model bytes. Open with
+    # explicit limits, three cheap refusals, a request cancelled during its
+    # prefill, the golden prompt through the step API (reply must equal the
+    # one-shot probe's), a second cancel after a completed request, close,
+    # and every session heap frame returned.
+    local re_so='^infer: session open rc=(-?[0-9]+) tensors=([0-9]+) vocab=([0-9]+) layers=([0-9]+) kv_capacity=([0-9]+) max_new=([0-9]+) max_prompt_bytes=([0-9]+) heap_reserve_kib=([0-9]+) heap_used_kib=([0-9]+) open_us=[0-9]+$'
+    local re_sr='^infer: session refusals open_twice=(-?[0-9]+) prompt_bytes=(-?[0-9]+) step_idle=(-?[0-9]+)$'
+    local re_sc='^infer: session prompt=([0-9]+) ids=([0-9]+) cancel_after_steps=([0-9]+) steps=([0-9]+) prefill=([0-9]+) produced=([0-9]+) idle_step=done heap_used_kib=[0-9]+ rc=(-?[0-9]+)$'
+    local re_sg='^infer: session prompt=2 ids=([0-9]+) steps=([0-9]+) prefill=([0-9]+) produced=([0-9]+) last=(yes|no) prefill_us=([0-9]+) mean_tok_us=([0-9]+) tokens=([0-9 ]*) text=(.*) heap_used_kib=[0-9]+ request_us=[0-9]+ rc=(-?[0-9]+)$'
+    local re_sx='^infer: session close rc=(-?[0-9]+) heap_used_kib=([0-9]+) heap_peak_kib=([0-9]+) frames_free_before=([0-9]+) frames_free_after=([0-9]+) rc=(-?[0-9]+)$'
+    if [[ "$(grep -cE "${re_so}" "${f}" || true)" != 1 ]]; then
+        bad "exactly one well-formed infer: session open line"
+    else
+        line="$(grep -E "${re_so}" "${f}")"; [[ "${line}" =~ ${re_so} ]]; m=("${BASH_REMATCH[@]}")
+        [[ "$(g 1)" == 0 && "$(g 2)" == "${want_tensors}" && "$(g 3)" == "${want_vocab}" && "$(g 4)" == "${want_layers}" ]] \
+            && ok "session open: rc 0, same model shape ($(g 2) tensors, vocab $(g 3), $(g 4) layers)" \
+            || bad "session open: rc $(g 1), tensors $(g 2), vocab $(g 3), layers $(g 4)"
+        [[ "$(g 5)" == 64 && "$(g 6)" == 16 && "$(g 7)" == 256 && "$(g 8)" == 64 ]] \
+            && ok "session limits: kv 64, max_new 16, prompt 256 bytes, heap reserve 64 KiB" \
+            || bad "session limits: kv $(g 5), max_new $(g 6), prompt bytes $(g 7), reserve $(g 8) KiB"
+    fi
+    if [[ "$(grep -cE "${re_sr}" "${f}" || true)" != 1 ]]; then
+        bad "exactly one well-formed infer: session refusals line"
+    else
+        line="$(grep -E "${re_sr}" "${f}")"; [[ "${line}" =~ ${re_sr} ]]
+        [[ "${BASH_REMATCH[1]}" == -12 && "${BASH_REMATCH[2]}" == -16 && "${BASH_REMATCH[3]}" == 0 ]] \
+            && ok "session refusals: second open -12, over-long prompt -16, idle step 0" \
+            || bad "session refusals: second open ${BASH_REMATCH[1]}, over-long prompt ${BASH_REMATCH[2]}, idle step ${BASH_REMATCH[3]}"
+    fi
+    if [[ "$(grep -cE "${re_sc}" "${f}" || true)" != 2 ]]; then
+        bad "exactly two well-formed infer: session cancel lines (prompt 1 and 3)"
+    else
+        local which
+        for which in 1 3; do
+            line="$(grep -E "${re_sc}" "${f}" | grep "prompt=${which} " || true)"
+            if [[ "${line}" =~ ${re_sc} ]]; then
+                m=("${BASH_REMATCH[@]}")
+                [[ "$(g 2)" -gt 0 && "$(g 4)" == "$(g 3)" && "$(g 6)" == $(( $(g 4) - $(g 5) )) && "$(g 7)" -ge 0 ]] \
+                    && ok "session cancel ${which}: $(g 2) prompt ids, stopped after $(g 4) of its steps ($(g 5) prefill, $(g 6) produced), idle afterwards" \
+                    || bad "session cancel ${which}: ids $(g 2), cancel_after $(g 3), steps $(g 4), prefill $(g 5), produced $(g 6), rc $(g 7)"
+            else bad "session cancel line for prompt ${which} missing"; fi
+        done
+    fi
+    if [[ "$(grep -cE "${re_sg}" "${f}" || true)" != 1 ]]; then
+        bad "exactly one well-formed infer: session prompt=2 reply line"
+    else
+        line="$(grep -E "${re_sg}" "${f}")"; [[ "${line}" =~ ${re_sg} ]]; m=("${BASH_REMATCH[@]}")
+        local got; got="$(tr -s ' ' <<<"$(g 8)" | sed 's/ *$//')"
+        local want_n; want_n="$(wc -w <<<"${want_gen}")"
+        [[ "${got}" == "${want_gen}" ]] && ok "session reply ids '${got}' = llama.cpp greedy sequence" || bad "session reply ids '${got}', expected '${want_gen}'"
+        [[ "$(g 1)" == "${plen}" && "$(g 3)" == "${plen}" && "$(g 5)" == yes && "$(g 4)" == "${want_n}" && "$(g 2)" == $(( plen + want_n )) && "$(g 7)" -gt 0 ]] \
+            && ok "session reply: ${plen} prompt steps then ${want_n} token steps to the reply's end (mean $(g 7) us per token, QEMU TCG)" \
+            || bad "session reply: ids $(g 1), steps $(g 2), prefill $(g 3), produced $(g 4), last $(g 5), mean_tok_us $(g 7)"
+        grep -qF -- "${want_text}" <<<"$(g 9)" && ok "session reply text contains '${want_text}': $(g 9)" || bad "session reply text lacks '${want_text}': $(g 9)"
+    fi
+    if [[ "$(grep -cE "${re_sx}" "${f}" || true)" != 1 ]]; then
+        bad "exactly one well-formed infer: session close line"
+    else
+        line="$(grep -E "${re_sx}" "${f}")"; [[ "${line}" =~ ${re_sx} ]]; m=("${BASH_REMATCH[@]}")
+        [[ "$(g 1)" == 0 && "$(g 6)" == 0 && "$(g 4)" == "$(g 5)" && "$(g 4)" -gt 0 && "$(g 3)" -gt 0 && "$(g 3)" -lt 262144 ]] \
+            && ok "session close: rc 0, session heap peak $(g 3) KiB within 256 MiB, every frame returned (free frames $(g 5) = $(g 4) before)" \
+            || bad "session close: rc $(g 1), peak $(g 3) KiB, free frames after $(g 5) vs before $(g 4), frame-return rc $(g 6)"
+    fi
+    grep -qx 'AIENOS_CK_INFER_SESSION: PASS' "${f}" && ok "kernel reported AIENOS_CK_INFER_SESSION: PASS" || bad "kernel did not report AIENOS_CK_INFER_SESSION: PASS"
+    # The session runs between the one-shot verdict and the unload line.
+    if [[ "$(grep -nx 'AIENOS_CK_INFER: PASS' "${f}" | cut -d: -f1 | head -1)" -lt "$(grep -nE "${re_sx}" "${f}" | cut -d: -f1 | head -1)" \
+          && "$(grep -nE "${re_sx}" "${f}" | cut -d: -f1 | head -1)" -lt "$(grep -nE "${re_un}" "${f}" | cut -d: -f1 | head -1)" ]] 2>/dev/null; then
+        ok "session ran after the one-shot verdict and before the unload"
+    else bad "session close line not between the one-shot verdict and the unload"; fi
     grep -q "kernel: alive" "${f}" && ok "kernel alive" || bad "kernel never reached kernel: alive"
     if grep -qE 'report_kind: (panic|fault)' "${f}"; then bad "panic or fault report"; else ok "no panic or fault"; fi
     grep -q '^report_kind: final' "${f}" && ok "kernel reached its final report" || bad "no final report"
@@ -185,7 +254,7 @@ if [[ "${1:-}" == --self-test ]]; then
     [[ "${gen}" == "791 6864 315 9822 374 12366 13 128009" ]] \
         && echo "PASS  reference step tokens parsed (${gen})" || { echo "FAIL  reference step tokens '${gen}'"; echo "AIENOS_CK_INFER_SELF_TEST: FAIL"; exit 1; }
     sz=807694368
-    good() { printf 'kernel: alive\ninfer: fw_cfg base=0x9020000 dma=yes file=opt/aienos/model size=%s\ninfer: ingest bytes=%s dma_us=42340\ninfer: sha256=%s sha_us=8568801\ninfer: probe rc=0 tensors=147 vocab=128256 ids=128000,128006,882,128007 prompt_len=17 layers=16 heap_peak_kib=24695 probe_us=1116277\ninfer: prefill_us=400000000 prompt_len=17\ninfer: tokens=791 6864 315 9822 374 12366 13 128009\ninfer: tok_us=23000000,23000000,23000000,23000000,23000000,23000000,23000000\ninfer: decode_tokens=7 mean_tok_us=23000000\ninfer: text=The capital of France is Paris.\ninfer: unloaded heap_live_kib=1234 frames_free_before=900000 frames_free_after=900000 frames_returned=262705 rc=0,0\nAIENOS_CK_INFER: PASS\nreport_kind: final\n' "${sz}" "${sz}" "${pinned_sha}"; }
+    good() { printf 'kernel: alive\ninfer: fw_cfg base=0x9020000 dma=yes file=opt/aienos/model size=%s\ninfer: ingest bytes=%s dma_us=42340\ninfer: sha256=%s sha_us=8568801\ninfer: probe rc=0 tensors=147 vocab=128256 ids=128000,128006,882,128007 prompt_len=17 layers=16 heap_peak_kib=24695 probe_us=1116277\ninfer: prefill_us=400000000 prompt_len=17\ninfer: tokens=791 6864 315 9822 374 12366 13 128009\ninfer: tok_us=23000000,23000000,23000000,23000000,23000000,23000000,23000000\ninfer: decode_tokens=7 mean_tok_us=23000000\ninfer: text=The capital of France is Paris.\nAIENOS_CK_INFER: PASS\ninfer: session open rc=0 tensors=147 vocab=128256 layers=16 kv_capacity=64 max_new=16 max_prompt_bytes=256 heap_reserve_kib=64 heap_used_kib=20000 open_us=1000000\ninfer: session refusals open_twice=-12 prompt_bytes=-16 step_idle=0\ninfer: session prompt=1 ids=14 cancel_after_steps=3 steps=3 prefill=3 produced=0 idle_step=done heap_used_kib=20010 rc=1\ninfer: session prompt=2 ids=17 steps=25 prefill=17 produced=8 last=yes prefill_us=400000000 mean_tok_us=23000000 tokens=791 6864 315 9822 374 12366 13 128009 text=The capital of France is Paris. heap_used_kib=20020 request_us=600000000 rc=3\ninfer: session prompt=3 ids=14 cancel_after_steps=1 steps=1 prefill=1 produced=0 idle_step=done heap_used_kib=20030 rc=1\ninfer: session close rc=0 heap_used_kib=20030 heap_peak_kib=24695 frames_free_before=900000 frames_free_after=900000 rc=0\nAIENOS_CK_INFER_SESSION: PASS\ninfer: unloaded heap_live_kib=1234 frames_free_before=900000 frames_free_after=900000 frames_returned=262705 rc=0,0\nreport_kind: final\n' "${sz}" "${sz}" "${pinned_sha}"; }
     st=0
     chk() { infer_failed=0; out="$(infer_check_log "$3" "${sz}" "${pinned_sha}" "${ids}" 1 "${gen}")"; grep -q '^FAIL' <<<"${out}" && infer_failed=1
         if [[ "$2" == pass && ${infer_failed} == 0 ]] || [[ "$2" == fail && ${infer_failed} == 1 && -n "$4" ]] && { [[ "$2" == pass ]] || grep -q "^FAIL.*$4" <<<"${out}"; }; then echo "PASS  self-test $1"; else echo "FAIL  self-test $1"; st=1; fi; }
@@ -227,6 +296,22 @@ if [[ "${1:-}" == --self-test ]]; then
     grep -v '^infer: decode_tokens=' "${tmp}/g" >"${tmp}/z3"; chk no-timing-line fail "${tmp}/z3" "decode timing line"
     # unload line after the final report: the OS did not continue after the unload
     { grep -v '^infer: unloaded' "${tmp}/g"; grep '^infer: unloaded' "${tmp}/g"; } >"${tmp}/z4"; chk unload-after-final fail "${tmp}/z4" "not before the final report"
+    # native v1 P06: the bounded session
+    grep -v '^AIENOS_CK_INFER_SESSION' "${tmp}/g" >"${tmp}/s1"; chk no-session-verdict fail "${tmp}/s1" "AIENOS_CK_INFER_SESSION"
+    grep -v '^infer: session open' "${tmp}/g" >"${tmp}/s2"; chk no-session-open fail "${tmp}/s2" "session open line"
+    sed 's/kv_capacity=64/kv_capacity=65/' "${tmp}/g" >"${tmp}/s3"; chk session-limits-drift fail "${tmp}/s3" "session limits"
+    sed 's/open_twice=-12/open_twice=0/' "${tmp}/g" >"${tmp}/s4"; chk session-second-open-allowed fail "${tmp}/s4" "session refusals"
+    sed 's/prompt_bytes=-16/prompt_bytes=14/' "${tmp}/g" >"${tmp}/s5"; chk session-long-prompt-accepted fail "${tmp}/s5" "session refusals"
+    sed 's/cancel_after_steps=3 steps=3/cancel_after_steps=3 steps=4/' "${tmp}/g" >"${tmp}/s6"; chk session-cancel-overran fail "${tmp}/s6" "session cancel 1"
+    sed 's/idle_step=done heap_used_kib=20030/idle_step=busy heap_used_kib=20030/' "${tmp}/g" >"${tmp}/s7"; chk session-not-idle-after-cancel fail "${tmp}/s7" "session cancel lines"
+    sed 's/session prompt=2 ids=17 steps=25 prefill=17 produced=8 last=yes/session prompt=2 ids=17 steps=24 prefill=17 produced=7 last=no/' "${tmp}/g" >"${tmp}/s8"; chk session-reply-unfinished fail "${tmp}/s8" "session reply"
+    sed 's/128009 text=The capital/128010 text=The capital/' "${tmp}/g" >"${tmp}/s9"; chk session-wrong-token fail "${tmp}/s9" "session reply ids"
+    sed 's/Paris\. heap_used_kib/Lyon. heap_used_kib/' "${tmp}/g" >"${tmp}/s10"; chk session-missing-paris fail "${tmp}/s10" "session reply text lacks"
+    sed 's/session close rc=0 heap_used_kib=20030 heap_peak_kib=24695 frames_free_before=900000 frames_free_after=900000/session close rc=0 heap_used_kib=20030 heap_peak_kib=24695 frames_free_before=900000 frames_free_after=899999/' "${tmp}/g" >"${tmp}/s11"; chk session-frames-leaked fail "${tmp}/s11" "session close"
+    sed 's/session close rc=0/session close rc=-12/' "${tmp}/g" >"${tmp}/s12"; chk session-close-refused fail "${tmp}/s12" "session close"
+    { grep -v '^AIENOS_CK_INFER: PASS' "${tmp}/g"; } >"${tmp}/s13"; chk no-oneshot-verdict-still fail "${tmp}/s13" "kernel did not report AIENOS_CK_INFER: PASS"
+    # session close after the unload: the resident model was unloaded under a live session
+    { grep -v '^infer: session close' "${tmp}/g" | sed '/^report_kind: final/i infer: session close rc=0 heap_used_kib=20030 heap_peak_kib=24695 frames_free_before=900000 frames_free_after=900000 rc=0'; } >"${tmp}/s14"; chk session-close-after-unload fail "${tmp}/s14" "not between"
     # the mutated expected list must make the good log FAIL (used as the live control)
     infer_failed=0; out="$(infer_check_log "${tmp}/g" "${sz}" "${pinned_sha}" "${ids}" 1 "$(mutate_gen "${gen}")")"
     grep -q '^FAIL  generated ids' <<<"${out}" && echo "PASS  self-test mutated-expected-list" || { echo "FAIL  self-test mutated-expected-list"; st=1; }
