@@ -380,7 +380,21 @@ int ck_slot_boot_check(const struct ck_slot_boot_record *b, const char **why)
         sha256_hash((const uint8_t *)b, CK_SLOT_BOOT_SIGNED, d);
         if (!eq_bytes(d, b->digest, sizeof d))
             w = "boot record digest mismatch";
-        else if (b->boot_slot >= CK_SLOT_COUNT)
+        else if (b->boot_slot == CK_SLOT_BOOT_RECOVERY) {
+            /* P11 cut 4: the recovery image, started because no slot may boot. */
+            if (b->reason != CK_SLOT_R_RECOVERY_REQUIRED)
+                w = "recovery boot record with a slot reason";
+            else if (b->control_present > 1)
+                w = "boot record control flag out of range";
+            else if (b->tries != 0)
+                w = "recovery boot record with tries";
+            else if (b->generation == 0 || b->policy_generation > b->generation)
+                w = "boot record generation fields";
+            else if (!all_zero(b->reserved, sizeof b->reserved))
+                w = "boot record reserved bytes nonzero";
+            else if (!b->control_present && b->control_seq != 0)
+                w = "boot record claims a sequence without a control record";
+        } else if (b->boot_slot >= CK_SLOT_COUNT)
             w = "boot record slot out of range";
         else if (b->reason <= CK_SLOT_R_NONE || b->reason >= CK_SLOT_R_RECOVERY_REQUIRED)
             w = "boot record reason out of range";
@@ -412,6 +426,11 @@ enum ck_slot_action ck_slot_kernel_action(const struct ck_slot_boot_record *b, c
         if (why)
             *why = w;
         return CK_SLOT_A_REFUSE;
+    }
+    if (b->boot_slot == CK_SLOT_BOOT_RECOVERY) {
+        if (why)
+            *why = "recovery boot: no slot to promote or abandon";
+        return CK_SLOT_A_NONE;
     }
     s = b->boot_slot;
     if (!ctl || ck_slot_control_check(ctl, &w) != 0) {

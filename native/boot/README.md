@@ -24,7 +24,10 @@ baked in at build time, applies `slot_select.c` (bounded candidate tries,
 generation floor, never a boot loop), commits a candidate try before the jump,
 and chain-loads the chosen image (this stub + kernel, unchanged and
 byte-identical) with `LoadImage` + `StartImage`. Both slots invalid: it prints
-`slot_loader: recovery_required (...)` and returns to the firmware. It never
+`slot_loader: recovery_required (...)`, then starts the known-good recovery
+image from its own volume (`\EFI\AIENOS\RECOVERY.EFI` + `RECOVERY.MAN`,
+verified with the same keys; P11 cut 4, `docs/NATIVE_IMAGE_SLOTS.md` section
+10) or, when there is none or it is refused, returns to the firmware. It never
 touches UEFI variables, runtime services or `ExitBootServices`. Build:
 `make -C native/kernel slot-loader CK_SLOT_KEYS=<file>` (or the TEST-ONLY
 `CK_TEST_SLOT_KEY=1`, refused with `CK_HARDWARE_STAGING`); gate

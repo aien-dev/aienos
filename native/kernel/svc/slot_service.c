@@ -62,6 +62,12 @@ void ck_slot_boot_capture(const struct ck_handoff *h)
     g_rec_state = ck_slot_boot_check(&g_rec, &g_rec_why) == 0 ? 1 : -1;
 }
 
+/* A, B, or R for the recovery image (P11 cut 4). */
+static char slot_name(unsigned s)
+{
+    return s < CK_SLOT_COUNT ? (char)('A' + s) : 'R';
+}
+
 static void say_refuse(const char *why)
 {
     ck_printf("slot: REFUSED %s: control record not written\n", why);
@@ -158,7 +164,14 @@ void ck_slot_service_start(int healthy)
         say_refuse(g_rec_why ? g_rec_why : "boot record invalid");
         return;
     }
-    ck_printf("slot: booted slot %c reason=%s generation=%llu tries=%u control_seq=%llu\n", 'A' + g_rec.boot_slot,
+    if (g_rec.boot_slot == CK_SLOT_BOOT_RECOVERY) {
+        g_done = 1;
+        ck_printf("slot: booted the recovery image (both slots unusable) generation=%llu control_seq=%llu: nothing "
+                  "promoted or abandoned; the operator verb update rewrites the inactive slot\n",
+                  (unsigned long long)g_rec.generation, (unsigned long long)g_rec.control_seq);
+        return;
+    }
+    ck_printf("slot: booted slot %c reason=%s generation=%llu tries=%u control_seq=%llu\n", slot_name(g_rec.boot_slot),
               ck_slot_reason_text((enum ck_slot_reason)g_rec.reason), (unsigned long long)g_rec.generation,
               (unsigned)g_rec.tries, (unsigned long long)g_rec.control_seq);
     evaluate(healthy);
@@ -303,7 +316,7 @@ void ck_slot_service_update(const char *arg, size_t len)
     };
     struct ck_slot_update_result res;
     const char *why = 0;
-    ck_printf("slot: update from the inbox into the inactive slot (booted %c, keys=%u)\n", 'A' + g_rec.boot_slot,
+    ck_printf("slot: update from the inbox into the inactive slot (booted %c, keys=%u)\n", slot_name(g_rec.boot_slot),
               UPD_NKEYS);
     int rc = ck_slot_update(&io, &res, &why);
     (void)ck_mm_frames_free(pa, pages);

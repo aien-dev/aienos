@@ -56,9 +56,13 @@ int ck_slot_update(const struct ck_slot_update_io *io, struct ck_slot_update_res
     const struct ck_slot_control *ctl = io->ctl;
     if (!ctl || ck_slot_control_check(ctl, &w) != 0)
         return refuse(why, ctl ? w : "no control record on disk");
-    if (ctl->candidate_slot != CK_SLOT_NONE)
+    /* The recovery image (P11 cut 4) runs because no slot may boot, so it is
+     * not the active slot, and a stale candidate (always the non-active slot)
+     * is simply restaged with fresh tries by ck_slot_stage_candidate. */
+    int recovery = io->booted_slot == CK_SLOT_BOOT_RECOVERY;
+    if (!recovery && ctl->candidate_slot != CK_SLOT_NONE)
         return refuse(why, "a candidate is already staged: boot it (promote or abandon) first");
-    if (io->booted_slot >= CK_SLOT_COUNT || io->booted_slot != ctl->active_slot)
+    if (!recovery && (io->booted_slot >= CK_SLOT_COUNT || io->booted_slot != ctl->active_slot))
         return refuse(why, "the booted slot is not the active slot");
     for (const disk_dev *d = io->slots;; d = io->inbox) {
         if (disk_check(d) != DISK_OK || (d->block_size != 512 && d->block_size != 4096))

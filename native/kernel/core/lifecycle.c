@@ -557,6 +557,10 @@ int ck_lifecycle_run(void)
 #ifdef CK_SERVICE_TEST_KEYS
     ck_puts("lifecycle: TEST-ONLY service image (CK_SERVICE_TEST_KEYS=1: TEST Store keys; QEMU only, never a production boot)\n");
 #endif
+#ifdef CK_RECOVERY_IMAGE
+    ck_puts("recovery: AIENOS native recovery image (P11 cut 4): no model, no inference; Store unlock, status, "
+            "evidence and the slot verb update only (docs/NATIVE_IMAGE_SLOTS.md section 10)\n");
+#endif
     ck_lc_start(&g_lc, ck_store_service_ready());
     ck_slot_service_start(slot_healthy());
     /* Operator input is the console UART the boot stub chose from the ACPI

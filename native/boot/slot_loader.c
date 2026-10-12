@@ -39,8 +39,13 @@
  *      DevicePath = this loader's own LoadedImageDevicePath, so the chained
  *      stub's LoadedImage->DeviceHandle is still the boot volume and its
  *      MODEL.MAP still loads) and StartImage.
- *   Recovery required: print why for both slots and return EFI_LOAD_ERROR to
- *   the firmware, which goes on to its next boot option.
+ *   Recovery required: print why for both slots. (cut 4) When the slots were
+ *   read but neither may boot, load the known-good recovery image from this
+ *   loader's own volume (CK_SLOT_RECOVERY_MANIFEST + CK_SLOT_RECOVERY_IMAGE),
+ *   verify it with the same keys, hand over a boot record with slot
+ *   CK_SLOT_BOOT_RECOVERY and start it. No recovery image, a refused one, or an
+ *   earlier refusal (no keys, no or two slots partitions, too small): return
+ *   EFI_LOAD_ERROR to the firmware, which goes on to its next boot option.
  *
  * Never: UEFI variables, runtime services, ExitBootServices (the chained
  * stub leaves boot services itself), any disk write other than the control
@@ -343,13 +348,18 @@ static const char *unusable_why(const struct ck_slot_eval *e, const struct ck_sl
     return "not selectable";
 }
 
+static char slot_label(unsigned b)
+{
+    return b < CK_SLOT_COUNT ? (char)('A' + b) : 'R';
+}
+
 /* ---- boot record for the kernel (P11 cut 2b, slot_format.h) ------------------ */
 /* One page of the OS-loader memory type CK_SLOT_BOOT_MEMTYPE: it survives
  * ExitBootServices and shows up in the final memory map the unchanged stub
  * copies into the handoff. If the allocation fails the image still boots;
  * its kernel then finds no record and writes nothing (no promotion, no
  * abandon): fail closed, the tries counter still bounds a candidate. */
-static void hand_over(unsigned b, const struct ck_slot_decision *d, const struct ck_slot_control *ctl,
+static void hand_over(unsigned b, enum ck_slot_reason reason, unsigned tries, const struct ck_slot_control *ctl,
                       uint64_t seq, const struct ck_slot_manifest *m)
 {
     uint64_t pa = 0;
@@ -366,8 +376,8 @@ static void hand_over(unsigned b, const struct ck_slot_decision *d, const struct
     memcpy(br->magic, CK_SLOT_BOOT_MAGIC, 8);
     br->version = CK_SLOT_BOOT_VERSION;
     br->boot_slot = (uint8_t)b;
-    br->reason = (uint8_t)d->reason;
-    br->tries = d->loader_write ? d->ctl_out.tries_remaining : (ctl ? ctl->tries_remaining : 0);
+    br->reason = (uint8_t)reason;
+    br->tries = (uint8_t)tries;
     br->control_present = ctl ? 1 : 0;
     br->control_seq = ctl ? seq : 0;
     br->generation = m->generation;
@@ -376,13 +386,125 @@ static void hand_over(unsigned b, const struct ck_slot_decision *d, const struct
     for (unsigned i = 0; i < sizeof br->loader_commit && c[i]; i++)
         br->loader_commit[i] = (uint8_t)c[i];
     ck_slot_boot_seal(br);
-    say("slot_loader: boot record handed over type=0x%x slot=%c reason=%s seq=%llu\n", CK_SLOT_BOOT_MEMTYPE, 'A' + b,
-        ck_slot_reason_text(d->reason), (unsigned long long)br->control_seq);
+    say("slot_loader: boot record handed over type=0x%x slot=%c reason=%s seq=%llu\n", CK_SLOT_BOOT_MEMTYPE, slot_label(b),
+        ck_slot_reason_text(reason), (unsigned long long)br->control_seq);
+}
+
+/* ---- the known-good recovery image (P11 cut 4, slot_format.h) ---------------- */
+/* Only when ck_slot_select finds no bootable slot. From this loader's own boot
+ * volume: CK_SLOT_RECOVERY_MANIFEST (one manifest unit, the slot format) and
+ * CK_SLOT_RECOVERY_IMAGE, verified with the same keys as a slot (signature
+ * over the manifest, SHA-512 of the image). No generation floor applies to it:
+ * it never becomes a slot's image and promotes nothing (docs/NATIVE_IMAGE_SLOTS.md
+ * section 10). 0 = verified bytes in *img_out (pages in *pages_out). */
+static struct ck_slot_manifest rec_man __attribute__((aligned(4096)));
+
+static EFI_STATUS read_file(EFI_FILE_PROTOCOL *root, CHAR16 *path, void *buf, uint64_t want, uint64_t *got)
+{
+    EFI_FILE_PROTOCOL *f = 0;
+    EFI_STATUS s = root->Open(root, &f, path, EFI_FILE_MODE_READ, 0);
+    *got = 0;
+    if (s != EFI_SUCCESS || !f)
+        return s != EFI_SUCCESS ? s : EFI_LOAD_ERROR;
+    while (*got < want) {
+        uint64_t n = want - *got;
+        s = f->Read(f, &n, (uint8_t *)buf + *got);
+        if (s != EFI_SUCCESS || n == 0)
+            break;
+        *got += n;
+    }
+    f->Close(f);
+    return s;
+}
+
+static int load_recovery(EFI_HANDLE image, uint8_t **img_out, uint64_t *pages_out, const char **why)
+{
+    static const EFI_GUID li_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID_INIT;
+    static const EFI_GUID fs_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID_INIT;
+    static CHAR16 man_path[sizeof CK_SLOT_RECOVERY_MANIFEST], img_path[sizeof CK_SLOT_RECOVERY_IMAGE];
+    EFI_LOADED_IMAGE_PROTOCOL *li = 0;
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = 0;
+    EFI_FILE_PROTOCOL *root = 0;
+    struct ck_slot_eval ev;
+    uint64_t got = 0, pages, base = 0;
+    for (unsigned i = 0; i < sizeof man_path / sizeof man_path[0]; i++)
+        man_path[i] = (CHAR16)CK_SLOT_RECOVERY_MANIFEST[i];
+    for (unsigned i = 0; i < sizeof img_path / sizeof img_path[0]; i++)
+        img_path[i] = (CHAR16)CK_SLOT_RECOVERY_IMAGE[i];
+    *img_out = 0;
+    *pages_out = 0;
+    if (bs->HandleProtocol(image, &li_guid, (void **)&li) != EFI_SUCCESS || !li || !li->DeviceHandle ||
+        bs->HandleProtocol(li->DeviceHandle, &fs_guid, (void **)&fs) != EFI_SUCCESS || !fs ||
+        fs->OpenVolume(fs, &root) != EFI_SUCCESS || !root) {
+        *why = "no recovery image: the loader's boot volume has no file system";
+        return -1;
+    }
+    memset(&rec_man, 0, sizeof rec_man);
+    if (read_file(root, man_path, &rec_man, sizeof rec_man, &got) != EFI_SUCCESS || got == 0) {
+        root->Close(root);
+        *why = "no recovery image: " CK_SLOT_RECOVERY_MANIFEST " absent";
+        return -1;
+    }
+    int bad = 1;
+    if (got != sizeof rec_man)
+        *why = "recovery manifest is not one unit";
+    else if (ck_slot_manifest_check(&rec_man, why) != 0) {
+    } else if (rec_man.image_len > CK_SLOT_RECOVERY_MAX_BYTES)
+        *why = "recovery image above the size bound";
+    else
+        bad = 0;
+    if (bad) {
+        root->Close(root);
+        return -1;
+    }
+    pages = (rec_man.image_len + PAGE - 1) / PAGE;
+    if (bs->AllocatePages(AllocateAnyPages, EfiLoaderData, pages, &base) != EFI_SUCCESS || !base) {
+        root->Close(root);
+        *why = "AllocatePages failed";
+        return -1;
+    }
+    if (read_file(root, img_path, (void *)(uintptr_t)base, rec_man.image_len, &got) != EFI_SUCCESS ||
+        got != rec_man.image_len) {
+        root->Close(root);
+        bs->FreePages(base, pages);
+        *why = got ? "recovery image shorter than its manifest" : "recovery image " CK_SLOT_RECOVERY_IMAGE " absent";
+        return -1;
+    }
+    root->Close(root);
+    ck_slot_verify(&rec_man, (const uint8_t *)(uintptr_t)base, CK_SLOT_RECOVERY_MAX_BYTES, ck_slot_loader_keys,
+                   ck_slot_loader_nkeys, &ev);
+    if (!ev.valid) {
+        bs->FreePages(base, pages);
+        *why = ev.why ? ev.why : "invalid";
+        return -1;
+    }
+    *img_out = (uint8_t *)(uintptr_t)base;
+    *pages_out = pages;
+    return 0;
+}
+
+/* LoadImage from the verified bytes and StartImage (step 5). */
+static EFI_STATUS start_verified(EFI_HANDLE image, unsigned b, uint8_t *img, uint64_t len, uint64_t pages)
+{
+    static const EFI_GUID lidp_guid = LOADED_IMAGE_DEVICE_PATH_GUID_INIT;
+    void *dp = 0;
+    if (bs->HandleProtocol(image, &lidp_guid, &dp) != EFI_SUCCESS)
+        dp = 0;
+    EFI_HANDLE child = 0;
+    EFI_STATUS s = ((load_image_fn)bs->LoadImage)(0, image, dp, img, len, &child);
+    bs->FreePages((uint64_t)(uintptr_t)img, pages);
+    if (s != EFI_SUCCESS || !child) {
+        say("slot_loader: LoadImage of slot %c status=0x%llx: not booted\n", slot_label(b), (unsigned long long)s);
+        return EFI_LOAD_ERROR;
+    }
+    say("slot_loader: starting slot %c\n", slot_label(b));
+    s = ((start_image_fn)bs->StartImage)(child, 0, 0);
+    say("slot_loader: slot %c returned status=0x%llx\n", slot_label(b), (unsigned long long)s);
+    return s;
 }
 
 EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 {
-    static const EFI_GUID lidp_guid = LOADED_IMAGE_DEVICE_PATH_GUID_INIT;
     struct slots_part sp;
     struct ck_slot_eval ev[CK_SLOT_COUNT];
     struct ck_slot_decision d;
@@ -489,12 +611,23 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         }
     }
     if (d.boot_slot < 0) {
+        uint8_t *rimg = 0;
+        uint64_t rpages = 0;
         say("slot_loader: recovery_required (A: %s; B: %s)\n", unusable_why(&ev[0], ctl, 0),
             unusable_why(&ev[1], ctl, 1));
         for (unsigned s = 0; s < CK_SLOT_COUNT; s++)
             if (img[s])
                 bs->FreePages((uint64_t)(uintptr_t)img[s], pages[s]);
-        return EFI_LOAD_ERROR;
+        /* P11 cut 4: the known-good recovery image on this loader's volume. */
+        if (load_recovery(image, &rimg, &rpages, &why) != 0) {
+            say("slot_loader: recovery image refused (%s): not booted\n", why);
+            return EFI_LOAD_ERROR;
+        }
+        say("slot_loader: boot=R reason=%s gen=%llu len=%llu (recovery image, both slots unusable)\n",
+            ck_slot_reason_text(d.reason), (unsigned long long)rec_man.generation,
+            (unsigned long long)rec_man.image_len);
+        hand_over(CK_SLOT_BOOT_RECOVERY, CK_SLOT_R_RECOVERY_REQUIRED, 0, ctl, seq, &rec_man);
+        return start_verified(image, CK_SLOT_BOOT_RECOVERY, rimg, rec_man.image_len, rpages);
     }
 
     unsigned b = (unsigned)d.boot_slot;
@@ -504,19 +637,6 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     if (img[b ^ 1u])
         bs->FreePages((uint64_t)(uintptr_t)img[b ^ 1u], pages[b ^ 1u]);
 
-    hand_over(b, &d, ctl, seq, &man[b]);
-    void *dp = 0;
-    if (bs->HandleProtocol(image, &lidp_guid, &dp) != EFI_SUCCESS)
-        dp = 0;
-    EFI_HANDLE child = 0;
-    EFI_STATUS s = ((load_image_fn)bs->LoadImage)(0, image, dp, img[b], man[b].image_len, &child);
-    bs->FreePages((uint64_t)(uintptr_t)img[b], pages[b]);
-    if (s != EFI_SUCCESS || !child) {
-        say("slot_loader: LoadImage of slot %c status=0x%llx: not booted\n", 'A' + b, (unsigned long long)s);
-        return EFI_LOAD_ERROR;
-    }
-    say("slot_loader: starting slot %c\n", 'A' + b);
-    s = ((start_image_fn)bs->StartImage)(child, 0, 0);
-    say("slot_loader: slot %c returned status=0x%llx\n", 'A' + b, (unsigned long long)s);
-    return s;
+    hand_over(b, d.reason, tries, ctl, seq, &man[b]);
+    return start_verified(image, b, img[b], man[b].image_len, pages[b]);
 }
