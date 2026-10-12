@@ -329,7 +329,7 @@ rcheck 161 "task refused while locked" '^lifecycle: REFUSED verb=task state=lock
 rcheck 161 "unlock refused, still locked" '^lifecycle: REFUSED verb=unlock state=locked reason="production key source refused: still locked"'
 rcheck 161 "unlock asked the production key source again" '^store: unlock REFUSED proof=keyed step="production Store key source" rc=-2002'
 rcheck 161 "status answered" '^lifecycle: state=locked store=locked pending=- requests='
-rcheck 161 "help answered" '^lifecycle: verbs: status unlock \[<64-hex recovery secret>\] rotate <current 64-hex> <new 64-hex> task <text> prompt <text> approve deny cancel recall remember <text> facts evidence help shutdown$'
+rcheck 161 "help answered" '^lifecycle: verbs: status unlock \[<64-hex recovery secret>\] rotate <current 64-hex> <new 64-hex> task <text> prompt <text> approve deny cancel recall remember <text> facts update evidence help shutdown$'
 rcheck 161 "evidence answered" '^lifecycle: evidence requests=5 refused=2 invalid=0 tasks=0 approved=0'
 rcheck 162 "stop order with no Store" '^lifecycle: stop order store=was-locked nvme=released state=stop requests=6$'
 before 162 "locked lifecycle ready < NVMe revoke (revoke only at the stop order)" '^lifecycle: ready state=locked' '^dma_gate: nvme bus master revoked'

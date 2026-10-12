@@ -33,6 +33,8 @@
  *   ck_slot_tool slots-image --disk IMG --bs 512|4096 --first LBA --last LBA
  *       [--a M,IMG] [--b M,IMG] [--control C]   write a slots partition (control
  *       region, manifests, images) into a disk image where SLOTLDR.EFI reads it
+ *   ck_slot_tool inbox-image --disk IMG --bs 512|4096 --first LBA --last LBA --m M,IMG
+ *       write a signed candidate into the update inbox partition (P11 cut 3)
  * Every refusal prints "refused: <reason>" and exits 1. */
 #include <errno.h>
 #include <stdarg.h>
@@ -45,6 +47,7 @@
 #include "../../argus/sha256.h"
 #include "../../store/torn_slot.h"
 #include "../../boot/slot_control.h"
+#include "../../boot/slot_update.h"
 
 /* RFC 8032 section 7.1 TEST 1: seed and public key (the key ck_owner_gen refuses). */
 static const uint8_t TEST1_SEED[32] = {
@@ -454,6 +457,303 @@ static void expect_refused(const struct ck_slot_manifest *m, const uint8_t *img,
     }
 }
 
+/* ---- P11 cut 3: the inactive-slot updater (native/boot/slot_update.c) ------- */
+/* In-memory disk (512-byte blocks) with a write counter and an injected I/O
+ * error at one backend write index. */
+struct memdisk {
+    uint8_t *bytes;
+    uint64_t len;
+    long fail_at; /* backend write index that fails, -1 = none */
+    long writes;
+};
+static int md_read(void *ctx, uint64_t lba, uint32_t count, uint8_t *buf)
+{
+    struct memdisk *d = ctx;
+    if ((lba + count) * 512 > d->len)
+        return DISK_ERANGE;
+    memcpy(buf, d->bytes + lba * 512, (size_t)count * 512);
+    return DISK_OK;
+}
+static int md_write(void *ctx, uint64_t lba, uint32_t count, const uint8_t *buf)
+{
+    struct memdisk *d = ctx;
+    if (d->fail_at >= 0 && d->writes++ == d->fail_at)
+        return DISK_EIO;
+    if (d->fail_at < 0)
+        d->writes++;
+    if ((lba + count) * 512 > d->len)
+        return DISK_ERANGE;
+    memcpy(d->bytes + lba * 512, buf, (size_t)count * 512);
+    return DISK_OK;
+}
+static int md_flush(void *ctx)
+{
+    (void)ctx;
+    return DISK_OK;
+}
+static void md_bind(disk_dev *dd, ts_device *td, struct memdisk *m)
+{
+    dd->ctx = m;
+    dd->block_size = 512;
+    dd->block_count = m->len / 512;
+    dd->read = md_read;
+    dd->write = md_write;
+    dd->flush = md_flush;
+    dd->max_blocks_per_io = 64; /* 32 KiB: disk_write splits the updater's chunks */
+    if (td) {
+        td->ctx = m;
+        td->block_size = 512;
+        td->block_count = m->len / 512;
+        td->read = md_read;
+        td->write = md_write;
+        td->flush = md_flush;
+    }
+}
+
+#define UPD_SLOT_UNITS (4u + 2u * 80u) /* cap 80 units per slot */
+#define UPD_IMG_BYTES 300000u          /* 74 units: two updater chunks */
+static uint8_t upd_slots[UPD_SLOT_UNITS * CK_SLOT_UNIT], upd_ref[sizeof upd_slots];
+static uint8_t upd_inbox[(1u + 90u) * CK_SLOT_UNIT];
+static uint8_t upd_buf[80u * CK_SLOT_UNIT];
+static uint8_t upd_img[UPD_IMG_BYTES];
+
+struct upd_rig {
+    struct memdisk ms, mi;
+    disk_dev slots, inbox;
+    ts_device tdev;
+    ts_region r;
+    struct ck_slot_control ctl;
+    struct ck_slot_update_io io;
+};
+
+/* Fresh media: slot A holds a valid generation-1 image and is active; slot B
+ * holds old bytes; the inbox holds manifest m and image img (inbox_units units). */
+static void upd_media(const struct ck_slot_manifest *m, const uint8_t *img, uint64_t len, uint64_t inbox_units)
+{
+    static struct ck_slot_manifest a;
+    struct memdisk md = {upd_slots, sizeof upd_slots, -1, 0};
+    disk_dev dd;
+    ts_device td;
+    ts_region r;
+    struct ck_slot_control c;
+    uint64_t seq;
+    uint64_t cap = ck_slot_cap_units(UPD_SLOT_UNITS);
+    memset(upd_slots, 0xEE, sizeof upd_slots); /* old bytes everywhere */
+    memset(upd_slots, 0, CK_SLOT_CONTROL_UNITS * CK_SLOT_UNIT);
+    fill_manifest(&a, upd_img, 5000, 1, 1, 1, "0123456789abcdef0123456789abcdef01234567", "slot A", 1700000000);
+    sign_manifest(&a, TEST1_SEED);
+    memcpy(upd_slots + ck_slot_manifest_unit(0, cap) * CK_SLOT_UNIT, &a, sizeof a);
+    memcpy(upd_slots + (ck_slot_manifest_unit(0, cap) + 1) * CK_SLOT_UNIT, upd_img, 5000);
+    md_bind(&dd, &td, &md);
+    ck_slot_control_init(&c, 0);
+    c.generation_floor = 1;
+    c.last_good_generation = 1;
+    if (ts_open(&r, &td, 0) != TS_OK || ts_recover(&r, (uint8_t *)&a, &seq, 0) != TS_EMPTY ||
+        ck_slot_control_commit(&r, &c, &seq) != TS_OK)
+        check(0, "update: rig control commit");
+    memcpy(upd_ref, upd_slots, sizeof upd_slots);
+    memset(upd_inbox, 0, sizeof upd_inbox);
+    memcpy(upd_inbox, m, sizeof *m);
+    memcpy(upd_inbox + CK_SLOT_UNIT, img, (size_t)len);
+    (void)inbox_units;
+}
+
+static int upd_stop_at(void *ctx, const char *step, uint64_t done, uint64_t total)
+{
+    (void)done;
+    (void)total;
+    return ctx && strcmp(step, (const char *)ctx) == 0;
+}
+
+static int upd_run_hook(struct upd_rig *g, uint64_t inbox_units, long fail_at, unsigned booted, const uint8_t (*keys)[32],
+                        unsigned nkeys, const char *stop, struct ck_slot_update_result *res, const char **why)
+{
+    uint64_t seq;
+    memset(g, 0, sizeof *g);
+    g->ms = (struct memdisk){upd_slots, sizeof upd_slots, -1, 0};
+    g->mi = (struct memdisk){upd_inbox, inbox_units * CK_SLOT_UNIT, -1, 0};
+    md_bind(&g->slots, &g->tdev, &g->ms);
+    md_bind(&g->inbox, 0, &g->mi);
+    int have = ts_open(&g->r, &g->tdev, 0) == TS_OK && ts_recover(&g->r, (uint8_t *)&g->ctl, &seq, 0) == TS_OK;
+    g->ms.fail_at = fail_at;
+    g->ms.writes = 0;
+    g->io = (struct ck_slot_update_io){&g->slots, &g->inbox, &g->r, have ? &g->ctl : 0, booted, keys, nkeys,
+                                       upd_buf, sizeof upd_buf, upd_stop_at, (void *)stop};
+    return ck_slot_update(&g->io, res, why);
+}
+static int upd_run(struct upd_rig *g, uint64_t inbox_units, long fail_at, unsigned booted, const uint8_t (*keys)[32],
+                   unsigned nkeys, struct ck_slot_update_result *res, const char **why)
+{
+    return upd_run_hook(g, inbox_units, fail_at, booted, keys, nkeys, 0, res, why);
+}
+
+/* The control record now on the slots media (NULL when none). */
+static const struct ck_slot_control *upd_control(void)
+{
+    static struct ck_slot_control c;
+    struct memdisk md = {upd_slots, sizeof upd_slots, -1, 0};
+    disk_dev dd;
+    ts_device td;
+    ts_region r;
+    uint64_t seq;
+    md_bind(&dd, &td, &md);
+    return ts_open(&r, &td, 0) == TS_OK && ts_recover(&r, (uint8_t *)&c, &seq, 0) == TS_OK ? &c : 0;
+}
+
+static int upd_same(uint64_t from_unit, uint64_t units)
+{
+    return memcmp(upd_slots + from_unit * CK_SLOT_UNIT, upd_ref + from_unit * CK_SLOT_UNIT, units * CK_SLOT_UNIT) == 0;
+}
+
+/* Slot s evaluated from the media, as the loader would. */
+static int upd_slot_valid(unsigned s, uint64_t *gen)
+{
+    uint64_t cap = ck_slot_cap_units(UPD_SLOT_UNITS), mu = ck_slot_manifest_unit(s, cap);
+    struct ck_slot_eval ev;
+    int ok = ck_slot_verify((const struct ck_slot_manifest *)(upd_slots + mu * CK_SLOT_UNIT),
+                            upd_slots + (mu + 1) * CK_SLOT_UNIT, (cap - 1) * CK_SLOT_UNIT, &TEST1_PK, 1, &ev);
+    if (gen)
+        *gen = ev.generation;
+    return ok;
+}
+
+static void selftest_update(void)
+{
+    static struct upd_rig g;
+    static struct ck_slot_manifest m, bad;
+    struct ck_slot_update_result res;
+    const char *why;
+    const uint64_t cap = ck_slot_cap_units(UPD_SLOT_UNITS), au = ck_slot_manifest_unit(0, cap),
+                   bu = ck_slot_manifest_unit(1, cap), inu = 1 + (UPD_IMG_BYTES + CK_SLOT_UNIT - 1) / CK_SLOT_UNIT;
+    const struct ck_slot_control *c;
+    uint64_t gen = 0;
+    uint32_t x = 0xC0FFEEu;
+    for (size_t i = 0; i < sizeof upd_img; i++) {
+        x = x * 1664525u + 1013904223u;
+        upd_img[i] = (uint8_t)(x >> 24);
+    }
+    fill_manifest(&m, upd_img, UPD_IMG_BYTES, 2, 2, 1, "89abcdef0123456789abcdef0123456789abcdef", "slot B update",
+                  1700000100);
+    sign_manifest(&m, TEST1_SEED);
+
+    /* Positive: B written, verified, staged; A and the control region otherwise untouched. */
+    upd_media(&m, upd_img, UPD_IMG_BYTES, inu);
+    int rc = upd_run(&g, inu, -1, 0, &TEST1_PK, 1, &res, &why);
+    long total = g.ms.writes;
+    c = upd_control();
+    check(rc == 0 && res.target == 1 && res.generation == 2 && res.image_len == UPD_IMG_BYTES &&
+              res.units_written == inu,
+          "update: inbox image written into inactive slot B and staged");
+    check(c && c->active_slot == 0 && c->candidate_slot == 1 && c->tries_remaining == CK_SLOT_MAX_TRIES &&
+              c->generation_floor == 1,
+          "update: control record names B candidate, A stays active, floor unchanged");
+    check(upd_slot_valid(1, &gen) && gen == 2 && upd_slot_valid(0, 0) && upd_same(au, cap),
+          "update: slot B verifies from the disk bytes; slot A bytes unchanged");
+    {
+        struct ck_slot_eval ev[2];
+        struct ck_slot_decision d;
+        upd_slot_valid(0, 0);
+        ev[0] = (struct ck_slot_eval){1, 1, 1, 0};
+        ev[1] = (struct ck_slot_eval){1, 2, 2, 0};
+        ck_slot_select(c, ev, &d);
+        check(d.boot_slot == 1 && d.reason == CK_SLOT_R_CANDIDATE_TRY && d.loader_write,
+              "update: the loader's next decision is a candidate try of B");
+        struct ck_slot_control ex = *c;
+        ex.tries_remaining = 0;
+        ck_slot_select(&ex, ev, &d);
+        check(d.boot_slot == 0 && d.reason == CK_SLOT_R_CANDIDATE_EXHAUSTED,
+              "update: exhausted tries -> the loader boots A (rollback to the previous active)");
+        ev[1] = (struct ck_slot_eval){0, 0, 0, "x"};
+        ck_slot_select(c, ev, &d);
+        check(d.boot_slot == 0 && d.reason == CK_SLOT_R_CANDIDATE_INVALID,
+              "update: a failed (invalid) candidate -> the loader boots A");
+    }
+    check(upd_run(&g, inu, -1, 0, &TEST1_PK, 1, &res, &why) != 0 && !res.wrote && strstr(why, "already staged"),
+          "update: refused while a candidate is staged, nothing written");
+
+    /* An I/O error at every backend write: control record untouched (or the
+     * staging commit failed), slot A untouched, B invalid unless only the commit failed. */
+    {
+        int all = 1;
+        long n = 0;
+        for (long k = 0; k < total; k++, n++) {
+            upd_media(&m, upd_img, UPD_IMG_BYTES, inu);
+            rc = upd_run(&g, inu, k, 0, &TEST1_PK, 1, &res, &why);
+            c = upd_control();
+            int ctl_same = c && c->candidate_slot == CK_SLOT_NONE && c->active_slot == 0;
+            int b_ok = !upd_slot_valid(1, 0) || strstr(why, "staging commit") != 0;
+            if (rc == 0 || !ctl_same || !upd_same(au, cap) || !b_ok || !res.wrote)
+                all = 0;
+        }
+        char what[160];
+        snprintf(what, sizeof what,
+                 "update: I/O error at each of %ld writes -> refused, A + control untouched, B invalid or unstaged", n);
+        check(all && total > 4, what);
+    }
+    /* Interrupted at each step (power cut model: the hook stops the run there). */
+    {
+        static const char *const steps[] = {"verified", "invalidated", "image", "manifest"};
+        for (unsigned s = 0; s < 4; s++) {
+            upd_media(&m, upd_img, UPD_IMG_BYTES, inu);
+            rc = upd_run_hook(&g, inu, -1, 0, &TEST1_PK, 1, steps[s], &res, &why);
+            c = upd_control();
+            char what[128];
+            snprintf(what, sizeof what, "update: stopped at \"%s\" -> refused, A + control untouched, B %s", steps[s],
+                     s == 0 ? "untouched" : s == 3 ? "valid but not staged" : "invalid");
+            check(rc != 0 && c && c->candidate_slot == CK_SLOT_NONE && upd_same(au, cap) &&
+                      (s == 0 ? upd_same(bu, cap) : s == 3 ? upd_slot_valid(1, 0) : !upd_slot_valid(1, 0)),
+                  what);
+        }
+    }
+
+    /* Negative controls: refused before any write, the media byte-identical. */
+    {
+        struct {
+            const char *what;
+            int kind;
+        } neg[] = {
+            {"update: bad signature refused, nothing written", 1},
+            {"update: wrong key (TEST 2 signer) refused, nothing written", 2},
+            {"update: wrong digest (image byte flipped) refused, nothing written", 3},
+            {"update: truncated inbox refused, nothing written", 4},
+            {"update: generation at the floor refused (no rollback), nothing written", 5},
+            {"update: booted slot != active slot refused, nothing written", 6},
+            {"update: image with no trusted key refused, nothing written", 7},
+            {"update: no control record refused, nothing written", 8},
+            {"update: image larger than the slot refused, nothing written", 9},
+            {"update: corrupt inbox manifest refused, nothing written", 10},
+        };
+        for (unsigned i = 0; i < sizeof neg / sizeof neg[0]; i++) {
+            bad = m;
+            uint64_t in_units = inu;
+            unsigned booted = 0, nk = 1;
+            switch (neg[i].kind) {
+            case 1: bad.signature[7] ^= 1; break;
+            case 2: sign_manifest(&bad, TEST2_SEED); break;
+            case 4: in_units = inu - 3; break;
+            case 5:
+                fill_manifest(&bad, upd_img, UPD_IMG_BYTES, 1, 1, 1, "89abcdef0123456789abcdef0123456789abcdef",
+                              "slot B old", 1700000100);
+                sign_manifest(&bad, TEST1_SEED);
+                break;
+            case 6: booted = 1; break;
+            case 7: nk = 0; break;
+            case 9: bad.image_len = (cap + 2) * CK_SLOT_UNIT; break;
+            case 10: bad.magic[0] ^= 1; break;
+            default: break;
+            }
+            upd_media(&bad, upd_img, UPD_IMG_BYTES, in_units);
+            if (neg[i].kind == 3)
+                upd_inbox[CK_SLOT_UNIT + 4242] ^= 0x40;
+            if (neg[i].kind == 8)
+                memset(upd_slots, 0, CK_SLOT_CONTROL_UNITS * CK_SLOT_UNIT), memcpy(upd_ref, upd_slots, sizeof upd_slots);
+            rc = upd_run(&g, in_units, -1, booted, &TEST1_PK, nk, &res, &why);
+            check(rc != 0 && !res.wrote && g.ms.writes == 0 && memcmp(upd_slots, upd_ref, sizeof upd_slots) == 0,
+                  neg[i].what);
+        }
+    }
+}
+
 static int selftest(void)
 {
     uint8_t keys[MAX_KEYS][32];
@@ -850,6 +1150,8 @@ static int selftest(void)
         check(keys_c_render(small, 512, (const uint8_t (*)[32])keys, MAX_KEYS, 0) == 512,
               "keys-c: eight keys into 512 bytes refused, no write past the buffer");
     }
+
+    selftest_update();
 
     printf("CK_SLOT_TOOL_SELFTEST: %s (%u checks, %u failures)\n", g_fails ? "FAIL" : "PASS", g_checks, g_fails);
     return g_fails ? 1 : 0;
@@ -1417,6 +1719,42 @@ static int cmd_slots_image(int argc, char **argv)
     return 0;
 }
 
+/* inbox-image: write a signed candidate (manifest + image) into the update
+ * inbox partition of a disk image (CK_SLOT_INBOX_TYPE, one slot's shape:
+ * manifest at unit 0, image from unit 1), where the kernel verb `update`
+ * reads it (native/boot/slot_update.h). The rest of the partition is zeroed.
+ *   inbox-image --disk IMG --bs 512|4096 --first LBA --last LBA --m M,IMG */
+static int cmd_inbox_image(int argc, char **argv)
+{
+    const char *disk = opt(argc, argv, "--disk"), *spec = opt(argc, argv, "--m");
+    uint64_t bsz, first, last;
+    static uint8_t zero[CK_SLOT_UNIT];
+    if (!disk || !spec || parse_u64(opt(argc, argv, "--bs"), &bsz) != 0 || (bsz != 512 && bsz != 4096) ||
+        parse_u64(opt(argc, argv, "--first"), &first) != 0 || parse_u64(opt(argc, argv, "--last"), &last) != 0 ||
+        last < first)
+        return refuse("inbox-image --disk IMG --bs 512|4096 --first LBA --last LBA --m M,IMG");
+    uint64_t units = (last - first + 1) * bsz / CK_SLOT_UNIT;
+    if (units < 2)
+        return refuse("inbox partition too small");
+    FILE *f = fopen(disk, "r+b");
+    if (!f)
+        return refuse("cannot open the disk image");
+    for (uint64_t u = 0; u < units; u++)
+        if (fseeko(f, (off_t)(first * bsz + u * CK_SLOT_UNIT), SEEK_SET) != 0 || fwrite(zero, 1, sizeof zero, f) != sizeof zero) {
+            fclose(f);
+            return refuse("inbox clear failed");
+        }
+    if (put_slot(f, spec, first * bsz, (units - 1) * CK_SLOT_UNIT, "inbox") != 0) {
+        fclose(f);
+        return 1;
+    }
+    if (fclose(f) != 0)
+        return refuse("disk image close failed");
+    printf("inbox: units=%llu image_cap=%llu off=%llu\n", (unsigned long long)units,
+           (unsigned long long)((units - 1) * CK_SLOT_UNIT), (unsigned long long)(first * bsz));
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2)
@@ -1449,6 +1787,8 @@ int main(int argc, char **argv)
         return cmd_keys_c(argc, argv);
     if (strcmp(argv[1], "slots-image") == 0)
         return cmd_slots_image(argc, argv);
+    if (strcmp(argv[1], "inbox-image") == 0)
+        return cmd_inbox_image(argc, argv);
     if (strcmp(argv[1], "control-recover") == 0)
         return cmd_control_recover(argc, argv);
     return refuse("unknown mode");

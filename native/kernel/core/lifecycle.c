@@ -102,7 +102,7 @@ static uint32_t g_cx_refused;    /* remember/facts refused by the Store or Corte
 
 static void help(void)
 {
-    ck_puts("lifecycle: verbs: status unlock [<64-hex recovery secret>] rotate <current 64-hex> <new 64-hex> task <text> prompt <text> approve deny cancel recall remember <text> facts evidence help shutdown\n");
+    ck_puts("lifecycle: verbs: status unlock [<64-hex recovery secret>] rotate <current 64-hex> <new 64-hex> task <text> prompt <text> approve deny cancel recall remember <text> facts update evidence help shutdown\n");
 }
 
 static void status(void)
@@ -478,6 +478,7 @@ static void handle_line(const char *line, size_t len)
     case CK_LC_R_RECALL: recall(); return;
     case CK_LC_R_REMEMBER: remember(); return;
     case CK_LC_R_FACTS: facts(); return;
+    case CK_LC_R_UPDATE: ck_slot_service_update(arg, arg_len); return; /* P11 cut 3, svc/slot_service.c */
     case CK_LC_R_OK: break;
     }
     switch (v) {

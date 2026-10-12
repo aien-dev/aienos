@@ -28,11 +28,11 @@ with the release candidate."
 | `slot/MANIFEST.tbs` | the 448 bytes the owner signs, written by `tbs --package DIR --pubkey HEX64` (or `build --pubkey`). The manifest's `signer_id` (SHA-256 of the owner public key) lies inside the signed bytes, so the bytes to sign depend on which key will sign |
 | `slot/MANIFEST.signed.bin` | after `sign`: the manifest with signer id and signature, verified before it is written |
 
-`PACKAGE.txt` lines (format 2), grouped as the owner's correction names them:
+`PACKAGE.txt` lines (format 3; the loader lines are in "Slot loader in the package"), grouped as the owner's correction names them:
 
 | Group | Lines |
 |---|---|
-| Source revision | `format 2`, `repo aien-dev/aienos`, `commit <40 hex>`, `commit_time <unix seconds>`, `tree_clean yes` (`no` only for test builds with `--allow-dirty`) |
+| Source revision | `format 3`, `repo aien-dev/aienos`, `commit <40 hex>`, `commit_time <unix seconds>`, `tree_clean yes` (`no` only for test builds with `--allow-dirty`) |
 | What was asked for | `variant`, `generation`, `policy_generation`, `min_rollback_generation` |
 | Toolchain | `toolchain_cross <prefix or none>` (the `CROSS` value the kernel Makefile resolves, asked from make itself), `toolchain_cc`, `toolchain_ld`, `toolchain_objcopy` (first line of `<CROSS>gcc/ld/objcopy --version`), `toolchain_make` (first line of `make --version`), `build_host_arch` (`uname -m`) |
 | Inputs | `input_make_goal` (`all` for core, `full` otherwise), `input_make_vars` (`none`, or `CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS=sha256:<hex> CK_MACHINE_ID=sha256:<hex>`), `input_env_ck none` (any `CK_*` in the environment or in an outer make's `MAKEFLAGS` is refused, so nothing unrecorded selects the image), `input_makefile_sha256` (`native/kernel/Makefile`), `input_image_ld_sha256` (`native/boot/image.ld`), `pin <repo> <sha>` per `--pins` line, `model_bytes`/`model_sha256` from `--model`, `firmware <name> <bytes> <sha256>` per `--firmware`, and for the staging variant `owner_pubkeys_sha256` and `machine_id_sha256` |
@@ -45,10 +45,8 @@ provenance; the provenance is `package_sha256`; `SHA256SUMS` covers
 `PACKAGE.txt` and the image. Change any record line and the provenance no
 longer matches; the self-test proves each of these refusals.
 
-TODO (slot loader, `docs/NATIVE_IMAGE_SLOTS.md` section 6 cut 2, in progress
-on another branch): when `SLOTLDR.EFI` exists, the package must carry it (or
-name the loader package it was tested with) and record its digest. This cut
-does not touch the loader or the Makefile.
+The slot loader `SLOTLDR.EFI` is part of the package since P11 cut 3 (format
+3): see "Slot loader in the package" at the end of this document.
 
 ## What the record proves and what it does not
 
@@ -136,11 +134,37 @@ About 40 s, nothing booted.
 
 ## What is still missing for N7
 
-The package is the input to the updater (slots cut 3) and to the known-good
-recovery image (slots cut 4). Neither exists yet. The owner approved the
-slot loader on 2026-10-12 (`docs/NATIVE_IMAGE_SLOTS.md` section 2); its first
-cut, `SLOTLDR.EFI` (slots cut 2a, QEMU only), exists but is not in the package
-yet: a follow-up adds `SLOTLDR.EFI` and its SHA-256 to `PACKAGE.txt` and
-`SHA256SUMS`, built with the owner's `CK_SLOT_KEYS`. Install today is still
+The package is the input to the updater (slots cut 3, QEMU only:
+`docs/NATIVE_IMAGE_SLOTS.md` section 9) and to the known-good recovery image
+(slots cut 4). The owner approved the slot loader on 2026-10-12
+(`docs/NATIVE_IMAGE_SLOTS.md` section 2); the package carries it since cut 3
+(section below). Install today is still
 the one-time BootNext procedure of `docs/NATIVE_BOOT_ONE_TIME.md`, which N7
 rejects as the supported path.
+
+## Slot loader in the package (P11 cut 3)
+
+Format 3 adds the A/B slot loader (`native/boot/slot_loader.c`,
+`docs/NATIVE_IMAGE_SLOTS.md`) to every package:
+
+| File / line | Meaning |
+| --- | --- |
+| `loader/SLOTLDR.EFI` | `make slot-loader`, built twice from the same tree like the image; the two builds must be byte-identical or `build` refuses |
+| `loader loader/SLOTLDR.EFI` | path inside the package |
+| `loader_keys owner` or `test` | `owner` for `--variant hardware-staging`: the `--owner-pubkeys` file is the loader's `CK_SLOT_KEYS` (Owner Root keys; `ck_slot_tool keys-c` refuses an RFC 8032 TEST key in it). `test` for `core` and `full`: the labelled TEST 1 key loader (`CK_TEST_SLOT_KEY=1`), never for hardware |
+| `loader_bytes`, `loader_sha256` | size and SHA-256 of the loader |
+| `loader_reproducible two_clean_builds_identical` | the two builds matched |
+
+`SHA256SUMS` covers `loader/SLOTLDR.EFI`, so the owner's one signature over
+the slot manifest (whose provenance is `package_sha256`) binds the loader too.
+The loader itself is not a slot payload: it is installed on the ESP once
+(owner-attended, not part of this cut) and verifies slot manifests with the
+keys it was built with. `verify` refuses a package whose loader bytes or
+digest differ from the record, whose `loader_keys` does not match the
+variant, a `test` loader without its "TEST-ONLY key" note, or an `owner`
+loader carrying any TEST-ONLY note. Self-test rows (`make package-test`):
+record lines, coverage by `SHA256SUMS`, a tampered loader byte, a missing
+loader, tampered `loader_sha256` / `loader_keys` / missing `loader_bytes`
+lines, and the hardware-staging package's owner-key loader without a
+TEST-ONLY note. Format 2 packages (no loader) are refused by format 3
+`verify`; rebuild them.

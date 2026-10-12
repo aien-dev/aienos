@@ -30,6 +30,9 @@ int main(void)
     CHECK(CK_LC_LINE_MAX >= 7 + 64 + 1 + 64); /* "rotate " + current + " " + new */
     CHECK(dec("rotate aa bb", &a, &al) == CK_LC_V_ROTATE && al == 5 && memcmp(a, "aa bb", 5) == 0);
     CHECK(dec("rotate", &a, &al) == CK_LC_V_ROTATE && al == 0);
+    CHECK(dec("update", &a, &al) == CK_LC_V_UPDATE && al == 0); /* P11 cut 3 */
+    CHECK(dec("update halt-after=2", &a, &al) == CK_LC_V_UPDATE && al == 12 && memcmp(a, "halt-after=2", 12) == 0);
+    CHECK(strcmp(ck_lc_verb_name(CK_LC_V_UPDATE), "update") == 0);
     CHECK(dec("frobnicate", &a, &al) == CK_LC_V_UNKNOWN);
     CHECK(dec("prompt hi", &a, &al) == CK_LC_V_PROMPT && al == 2 && memcmp(a, "hi", 2) == 0);
     CHECK(dec("prompt", &a, &al) == CK_LC_V_INVALID);       /* prompt needs text */
@@ -60,6 +63,7 @@ int main(void)
     CHECK(req(&lc, "status") == CK_LC_R_OK && req(&lc, "help") == CK_LC_R_OK && req(&lc, "evidence") == CK_LC_R_OK);
     CHECK(req(&lc, "task hello") == CK_LC_R_REFUSED && lc.state == CK_LC_LOCKED && lc.tasks == 0);
     CHECK(req(&lc, "rotate aa bb") == CK_LC_R_REFUSED && lc.state == CK_LC_LOCKED); /* unlock first */
+    CHECK(req(&lc, "update") == CK_LC_R_REFUSED && lc.state == CK_LC_LOCKED && lc.updates == 0 && strstr(lc.reason, "unlock before updating"));
     CHECK(req(&lc, "approve") == CK_LC_R_REFUSED && req(&lc, "deny") == CK_LC_R_REFUSED && req(&lc, "cancel") == CK_LC_R_REFUSED);
     CHECK(req(&lc, "unlock") == CK_LC_R_UNLOCK);
     ck_lc_unlock_done(&lc, 0);
@@ -75,6 +79,7 @@ int main(void)
     CHECK(req(&lc, "rotate aa bb") == CK_LC_R_ROTATE);
     ck_lc_rotate_done(&lc, 1);
     CHECK(lc.state == CK_LC_READY);
+    CHECK(req(&lc, "update") == CK_LC_R_UPDATE && lc.state == CK_LC_READY && lc.updates == 1);
     CHECK(req(&lc, "shutdown") == CK_LC_R_STOP && lc.state == CK_LC_QUIESCE);
     CHECK(req(&lc, "status") == CK_LC_R_REFUSED && strcmp(lc.reason, "stopping") == 0);
     ck_lc_stopped(&lc);
@@ -86,6 +91,7 @@ int main(void)
     CHECK(lc.state == CK_LC_READY);
     CHECK(req(&lc, "approve") == CK_LC_R_REFUSED && req(&lc, "cancel") == CK_LC_R_REFUSED);
     CHECK(req(&lc, "task draft the plan") == CK_LC_R_OK && lc.state == CK_LC_SERVE && lc.tasks == 1);
+    CHECK(req(&lc, "update") == CK_LC_R_REFUSED && lc.state == CK_LC_SERVE && strstr(lc.reason, "pending")); /* P11 cut 3 */
     CHECK(strcmp(lc.task, "draft the plan") == 0 && lc.task_len == 14);
     CHECK(req(&lc, "task another") == CK_LC_R_REFUSED && strcmp(lc.task, "draft the plan") == 0); /* one at a time */
     CHECK(req(&lc, "approve") == CK_LC_R_COMMIT && lc.state == CK_LC_SERVE);
@@ -102,7 +108,7 @@ int main(void)
     CHECK(lc.state == CK_LC_QUIESCE && lc.task_len == 0 && lc.approved == 1);
     ck_lc_commit_done(&lc, 0); /* ignored outside SERVE */
     CHECK(lc.approved == 1);
-    CHECK(lc.requests == 14);
+    CHECK(lc.requests == 15); /* 14 + the P11 cut 3 update refused in SERVE */
 
     /* P06: prompt and recall. Locked: both refused, nothing counted. */
     ck_lc_init(&lc);

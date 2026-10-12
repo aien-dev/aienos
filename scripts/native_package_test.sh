@@ -28,7 +28,7 @@ expect_refused() { # what, needle, cmd...
 has_line() { # what, file, regex
     if /usr/bin/grep -qE -- "$3" "$2"; then pass "$1"; else fail "$1"; fi
 }
-remake_sums() { (cd "$1" && sha256sum image/BOOTAA64.EFI PACKAGE.txt >SHA256SUMS); }
+remake_sums() { (cd "$1" && sha256sum image/BOOTAA64.EFI loader/SLOTLDR.EFI PACKAGE.txt >SHA256SUMS); }
 remake_all() { remake_sums "$1"; echo "package_sha256 $(sha256sum "$1/SHA256SUMS" | cut -c1-64)" >"$1/PROVENANCE.txt"; }
 dirty=()
 tree_clean=yes
@@ -49,7 +49,7 @@ for k in "commit " "image_sha256 " "reproducible two_clean_builds_identical" "pi
 done
 [ "$(stat -c %s "$T/p1/slot/MANIFEST.bin")" = 4096 ] && pass "manifest is 4096 bytes" || fail "manifest size"
 # 1b. the provenance record: source revision, toolchain, inputs, resulting digest
-has_line "record: format 2" "$P" "^format 2$"
+has_line "record: format 3" "$P" "^format 3$"
 has_line "record: commit is HEAD" "$P" "^commit $(git -C "$repo" rev-parse HEAD)$"
 has_line "record: commit_time is HEAD's" "$P" "^commit_time $(git -C "$repo" log -1 --format=%ct)$"
 has_line "record: tree_clean $tree_clean" "$P" "^tree_clean $tree_clean$"
@@ -69,6 +69,13 @@ has_line "record: image_sha512" "$P" "^image_sha512 $(sha512sum "$T/p1/image/BOO
 has_line "PROVENANCE.txt package_sha256 = sha256(SHA256SUMS)" "$T/p1/PROVENANCE.txt" "^package_sha256 $(sha256sum "$T/p1/SHA256SUMS" | cut -c1-64)$"
 "$NATIVE_PACKAGE_TOOL_OUT/host/ck_slot_tool" show "$T/p1/slot/MANIFEST.bin" | /usr/bin/grep -q "provenance=$(sha256sum "$T/p1/SHA256SUMS" | cut -c1-64)" \
     && pass "manifest provenance = package_sha256" || fail "manifest provenance"
+# 1c. the slot loader in the package (P11 cut 3): TEST-key loader for a full package
+has_line "record: loader path" "$P" "^loader loader/SLOTLDR.EFI$"
+has_line "record: loader_keys test (full package)" "$P" "^loader_keys test$"
+has_line "record: loader_sha256" "$P" "^loader_sha256 $(sha256sum "$T/p1/loader/SLOTLDR.EFI" | cut -c1-64)$"
+has_line "record: loader_reproducible" "$P" "^loader_reproducible two_clean_builds_identical$"
+has_line "SHA256SUMS covers the loader" "$T/p1/SHA256SUMS" " loader/SLOTLDR.EFI$"
+LC_ALL=C /usr/bin/grep -aqF "TEST-ONLY key" "$T/p1/loader/SLOTLDR.EFI" && pass "full package loader carries its TEST-ONLY key note" || fail "full package loader lacks the TEST-ONLY note"
 cp -r "$T/p1" "$T/p1o"   # unsigned copy for the offline-signing round trip (section 8)
 expect_refused "build refuses an existing --out" "already exists" "$np" build --out "$T/p1" --generation 7 "${dirty[@]}"
 echo "aien-dev/omega notahash" >"$T/badpins.txt"
@@ -106,6 +113,10 @@ echo "$out" | /usr/bin/grep -q "^  checked  toolchain_cc " && pass "verify --sam
 # 4. tampering (each on a fresh copy)
 cp -r "$T/p1" "$T/t1"; chmod u+w "$T/t1/image/BOOTAA64.EFI"; printf '\xff' | dd of="$T/t1/image/BOOTAA64.EFI" bs=1 seek=100 conv=notrunc status=none
 expect_refused "tampered image byte" "SHA256SUMS does not match" "$np" verify --package "$T/t1" --test-key "${dirty[@]}"
+cp -r "$T/p1" "$T/t1l"; chmod u+w "$T/t1l/loader/SLOTLDR.EFI"; printf '\xff' | dd of="$T/t1l/loader/SLOTLDR.EFI" bs=1 seek=100 conv=notrunc status=none
+expect_refused "tampered loader byte" "SHA256SUMS does not match" "$np" verify --package "$T/t1l" --test-key "${dirty[@]}"
+cp -r "$T/p1" "$T/t1m"; rm -f "$T/t1m/loader/SLOTLDR.EFI"
+expect_refused "missing loader" "missing loader/SLOTLDR.EFI" "$np" verify --package "$T/t1m" --test-key "${dirty[@]}"
 cp -r "$T/p1" "$T/t2"; sed -i 's/^generation 7$/generation 9/' "$T/t2/PACKAGE.txt"
 expect_refused "tampered PACKAGE.txt" "SHA256SUMS does not match" "$np" verify --package "$T/t2" --test-key "${dirty[@]}"
 cp -r "$T/p1" "$T/t3"; sed -i 's/^generation 7$/generation 9/' "$T/t3/PACKAGE.txt"; remake_sums "$T/t3"
@@ -139,6 +150,9 @@ tamper env-ck 's/^input_env_ck .*/input_env_ck CK_EXTRA_CFLAGS/' "input_env_ck i
 tamper missing-toolchain '/^toolchain_objcopy /d' "exactly one toolchain_objcopy" "${dirty[@]}"
 tamper duplicate-commit '/^commit /p' "exactly one commit" "${dirty[@]}"
 tamper toolchain-same-host 's/^toolchain_cc .*/toolchain_cc gcc 0.0/' "toolchain_cc differs from this host" --same-host "${dirty[@]}"
+tamper loader-sha256 's/^loader_sha256 f/loader_sha256 0/;t;s/^loader_sha256 ./loader_sha256 f/' "loader_sha256 does not match" "${dirty[@]}"
+tamper loader-keys 's/^loader_keys .*/loader_keys owner/' "loader_keys does not match the variant" "${dirty[@]}"
+tamper missing-loader-line '/^loader_bytes /d' "exactly one loader_bytes" "${dirty[@]}"
 
 # 5. a signed manifest from another package does not verify here
 expect_ok "build core package generation 8" "$np" build --out "$T/p2" --generation 8 --variant core "${dirty[@]}"
@@ -155,6 +169,8 @@ expect_refused "non-reproducible build refused (test hook)" "not reproducible, n
 expect_ok "build hardware-staging package (fixture owner files)" "$np" build --out "$T/p4" --generation 7 --variant hardware-staging --owner-pubkeys "$fix/TEST-FIXTURE-owner-pubkeys.txt" --machine-id "$fix/TEST-FIXTURE-machine-id.txt" "${dirty[@]}"
 /usr/bin/grep -q "^owner_pubkeys_sha256 " "$T/p4/PACKAGE.txt" && pass "staging PACKAGE.txt records owner_pubkeys_sha256" || fail "staging owner digest missing"
 /usr/bin/grep -q "^variant hardware-staging$" "$T/p4/PACKAGE.txt" && pass "staging variant recorded" || fail "staging variant"
+has_line "staging record: loader_keys owner" "$T/p4/PACKAGE.txt" "^loader_keys owner$"
+LC_ALL=C /usr/bin/grep -aqF "TEST-ONLY" "$T/p4/loader/SLOTLDR.EFI" && fail "staging loader carries a TEST-ONLY note" || pass "staging loader carries no TEST-ONLY note (owner keys only)"
 has_line "staging record: input_make_vars names the owner files by digest" "$T/p4/PACKAGE.txt" \
     "^input_make_vars CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS=sha256:$(sha256sum "$fix/TEST-FIXTURE-owner-pubkeys.txt" | cut -c1-64) CK_MACHINE_ID=sha256:$(sha256sum "$fix/TEST-FIXTURE-machine-id.txt" | cut -c1-64)$"
 expect_refused "staging variant needs both owner files" "needs --owner-pubkeys" "$np" build --out "$T/p5" --generation 7 --variant hardware-staging "${dirty[@]}"

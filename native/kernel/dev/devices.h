@@ -12,6 +12,8 @@ const disk_dev *ck_dev_boot_disk(void);
  * 0, the CK_GPT_* refusal, or CK_DEV_NO_BOOT_DISK. */
 #define CK_DEV_NO_BOOT_DISK (-1)
 const disk_dev *ck_dev_slots_disk(int *rc_out);
+/* The update inbox partition (CK_SLOT_INBOX_TYPE, P11 cut 3), same rules. */
+const disk_dev *ck_dev_inbox_disk(int *rc_out);
 /* Revoke the NVMe function's bus mastering once the last disk user (the
  * Store stage) is done, or after a failed bind; prints the dma_gate line.
  * The boot disk is unavailable afterwards. */

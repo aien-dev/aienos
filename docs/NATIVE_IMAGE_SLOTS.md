@@ -1,8 +1,9 @@
-# Native image slots: install, update and recovery without Linux (P11 cuts 1, 2a and 2b)
+# Native image slots: install, update and recovery without Linux (P11 cuts 1, 2a, 2b and 3)
 
 STATUS: cut 1 (format, rules, host tool), cut 2a (SLOTLDR.EFI, a separate
 slot loader in front of the unchanged image, QEMU gate PASS) and cut 2b
-(kernel-side promote / abandon, section 8) done; the owner
+(kernel-side promote / abandon, section 8) and cut 3 (the inactive-slot
+updater and the loader in the package, section 9) done; the owner
 approved the loader on 2026-10-12 (section 2). Nothing here has run on
 hardware (hardware NOT_RUN). The kernel image and its stub are unchanged.
 SECURITY_IMPACT: PERSISTENT_FORMAT + RECOVERY (a new on-disk format and a new
@@ -212,6 +213,7 @@ nothing and to re-release anything.
    path, verifies by reading back, stages through the torn-slot region, and
    promotes after its health milestone. Qualifies interrupted updates,
    tampered images, failed candidates and authorized rollback (the P11 list).
+   **Cut 3 (done, QEMU; section 9).**
 4. **Known-good recovery image.** The same loader plus a slot image on
    recovery media built by our tools, for the dual-invalid case. Then N7 is
    run on the physical candidate inside an attended window.
@@ -353,5 +355,82 @@ record mutations (each refused with its reason), the kernel-action scenarios
 and the shared commit routine.
 
 Not here: the updater that writes a new candidate into the inactive slot
-(cut 3) and the recovery image for the dual-invalid case (cut 4). Hardware
-NOT_RUN.
+(cut 3, section 9) and the recovery image for the dual-invalid case (cut 4).
+Hardware NOT_RUN.
+
+## 9. The inactive-slot updater (cut 3)
+
+The running service kernel writes a new signed image into the slot it is
+NOT running from, then stages it as the candidate; the loader tries it on
+the next boot and the kernel promotes it after its health milestone
+(section 8). One routine does the work, `ck_slot_update`
+(`native/boot/slot_update.c`), shared by the kernel and the host tool's
+self-test, over the same control-commit routine as the loader.
+
+**Source: the update inbox partition.** GPT type
+`58D9C90E-497A-4848-95DD-EB7E22B0CE96` (`CK_SLOT_INBOX_TYPE`), on the same
+NVMe disk, with one slot's shape: the signed manifest in unit 0, the image
+from unit 1. The desk tool fills it from a package
+(`ck_slot_tool inbox-image --m slot/MANIFEST.signed.bin,image/BOOTAA64.EFI`);
+the kernel only reads it. How the inbox is filled on the physical machine
+(an owner-attended step) is not part of this cut.
+
+**Operator verb `update`** (lifecycle READY only: a LOCKED Store, or a
+pending task, refuses it; `core/lifecycle_fsm.c`). The kernel:
+
+1. refuses unless it was started by SLOTLDR.EFI (boot record), a control
+   record exists, no candidate is staged, and the booted slot is the active
+   one; the target is the other slot;
+2. reads the inbox manifest and image and runs the loader's own
+   `ck_slot_verify` (Ed25519 signature by a trusted key, SHA-512 of the
+   image, size within the slot) and a dry run of
+   `ck_slot_stage_candidate` (generation above the floor). Any refusal:
+   **nothing is written**;
+3. zeroes the target's manifest unit and flushes: from here the target is
+   invalid and the loader keeps booting the active slot;
+4. writes the image units, flushes; then the manifest last, flushes;
+5. reads the whole target back and verifies it again from the disk bytes
+   (a mismatch zeroes the manifest unit again and refuses);
+6. stages: one control record commit (candidate = target, three tries).
+
+Every write is bounded to the target slot's unit range; the active slot and
+the control region (except the one commit of step 6) are never written. An
+interruption before step 6 leaves the control record untouched and the
+target invalid (or, only between steps 5 and 6, valid but not staged, which
+the loader ignores until a later `update` stages it).
+
+**Trusted keys.** The service image is built with the same key table as
+SLOTLDR.EFI (`ck_slot_tool keys-c`): RFC 8032 TEST 1 in the TEST-keys
+service image (`CK_SERVICE_TEST_KEYS=1`, QEMU only), the Owner Root from
+`CK_OWNER_PUBKEYS` under `CK_HARDWARE_STAGING`; the plain service image
+has no table and refuses every update. TEST keys under hardware staging
+stay refused by the Makefile (gate row 15) and by `keys-c`.
+
+**Evidence.**
+- `make -C native/kernel slot-test`: 155 checks. The 22 added for cut 3: a
+  positive update (B written, verified from disk, staged, A unchanged, the
+  loader's next decision is a candidate try; exhausted tries and an invalid
+  candidate fall back to A), refusal while a candidate is staged, an
+  injected I/O error at each of the 16 writes of an update (every one
+  refused with A and the control record untouched and B invalid or
+  unstaged), a stop at each step, and ten refusals before any write (bad
+  signature, wrong key, wrong digest, truncated inbox, generation at the
+  floor, booted slot not active, no trusted key, no control record, image
+  larger than the slot, corrupt manifest). Three mutants of
+  `slot_update.c` (writing the active slot, staging before the image,
+  skipping signature verification) each fail these checks.
+- `scripts/qemu_ck_slot_loader_test.sh` rows 12-15 (`docs/GATES.md`):
+  row 12 update from slot A writes and stages B, a second `update` is
+  refused, A's bytes are unchanged, the next boot tries B and the kernel
+  promotes it; row 13 QEMU is killed in the middle of the image write
+  (TEST-only `update halt-after=1`), the control record and A are
+  untouched, the loader refuses the half-written B and boots A, and a new
+  `update` then succeeds; row 14 an inbox signed by the wrong key and one
+  with a flipped image byte are refused with the slots partition
+  byte-identical; row 15 the update is refused while the Store is locked,
+  and a TEST-key updater image is refused under hardware staging.
+- The package carries SLOTLDR.EFI (`docs/NATIVE_PACKAGE.md`, "Slot loader
+  in the package").
+
+Not here: the known-good recovery image for the case where both slots are
+invalid (cut 4). Hardware NOT_RUN: nothing was written to a physical disk.

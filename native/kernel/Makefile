@@ -726,6 +726,17 @@ STAGE_SRCS += $(KDIR)/svc/continuity_codec.c $(KDIR)/svc/continuity_resolve.c \
 # P11 cut 2b: kernel-side slot promotion / abandon (svc/slot_service.c) over the shared
 # slot decision rules and control-commit routine of SLOTLDR.EFI (native/boot).
 STAGE_SRCS += $(KDIR)/svc/slot_service.c $(BOOT)/slot_select.c $(BOOT)/slot_control.c
+# P11 cut 3: the inactive-slot updater (svc/slot_service.c verb `update`, native/boot/slot_update.c)
+# verifies the inbox image against the key table SLOTLDR.EFI is built with (ck_slot_tool keys-c):
+# RFC 8032 TEST 1 in the TEST-keys image, the Owner Root (CK_OWNER_PUBKEYS) under CK_HARDWARE_STAGING.
+# The plain service image gets no table and refuses every update.
+STAGE_SRCS += $(BOOT)/slot_update.c
+SVC_SLOT_KEY_SRC := $(if $(strip $(CK_SERVICE_TEST_KEYS)),--test-key,$(if $(strip $(CK_HARDWARE_STAGING)),--keys $(OWNER_PUBKEYS_FILE),))
+ifneq ($(SVC_SLOT_KEY_SRC),)
+SVC_SLOT_KEYS_C := $(OUT)/gen-$(FULL_NAME)/svc_slot_keys.c
+STAGE_SRCS += $(SVC_SLOT_KEYS_C)
+STAGE_DMA_FLAGS += -DCK_SLOT_UPDATE_KEYS=1
+endif
 endif
 ifeq ($(strip $(CK_TEST_DISK_XLATE_BYPASS)),1)
 FULL_NAME := $(FULL_NAME)-test-xlate-bypass
@@ -1614,12 +1625,18 @@ gsp-rpc-test: $(GSP_RPC_TOOL)
 # freestanding flags and needs only the image's own digest/signature primitives.
 # No image code changes in this cut; the loader does not read slots yet.
 SLOT_TOOL := $(OUT)/host/ck_slot_tool
-SLOT_TOOL_SRCS := $(KDIR)/tools/ck_slot_tool.c $(BOOT)/slot_select.c $(BOOT)/slot_control.c $(NATIVE)/sig/sha512.c \
+SLOT_TOOL_SRCS := $(KDIR)/tools/ck_slot_tool.c $(BOOT)/slot_select.c $(BOOT)/slot_control.c $(BOOT)/slot_update.c $(NATIVE)/disk/disk.c $(NATIVE)/sig/sha512.c \
 	$(NATIVE)/sig/ed25519.c $(NATIVE)/sig/ct.c $(NATIVE)/argus/sha256.c $(NATIVE)/store/torn_slot.c
-$(SLOT_TOOL): $(SLOT_TOOL_SRCS) $(BOOT)/slot_format.h $(BOOT)/slot_control.h
+$(SLOT_TOOL): $(SLOT_TOOL_SRCS) $(BOOT)/slot_format.h $(BOOT)/slot_control.h $(BOOT)/slot_update.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -o $@ $(SLOT_TOOL_SRCS)
 slot-tool: $(SLOT_TOOL)
+# P11 cut 3: the service image's slot key table (see SVC_SLOT_KEY_SRC above).
+ifneq ($(SVC_SLOT_KEYS_C),)
+$(SVC_SLOT_KEYS_C): $(SLOT_TOOL) FORCE
+	@mkdir -p $(dir $@)
+	@$(SLOT_TOOL) keys-c $(SVC_SLOT_KEY_SRC) --out $@
+endif
 slot-test: $(SLOT_TOOL)
 	$(SLOT_TOOL) selftest | grep -E '^CK_SLOT_TOOL_SELFTEST: (PASS|FAIL)' | grep -q PASS || { $(SLOT_TOOL) selftest | grep -E 'FAIL|SELFTEST'; exit 1; }
 	@$(SLOT_TOOL) selftest | tail -1
