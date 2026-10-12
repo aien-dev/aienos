@@ -351,9 +351,11 @@ swait() { # raw-file regex count pid: until count answers are on the serial (or 
     while kill -0 "$4" 2>/dev/null && [[ "$(tr -d '\r' <"$1" | grep -cE "$2" || true)" -lt "$3" ]]; do sleep 1; done
 }
 
+skilled=0 # 1 when sboot itself killed QEMU (the power cut of row 13)
 qpid=""
 sboot() { # name timeout-seconds [efi]: ESP with SLOTLDR (or efi), NVMe ${disk}; "shutdown" once ready
     local name="$1" to="$2" efi="${3:-${out}/SLOTLDR.EFI}" w t0 rc dpid
+    skilled=0
     w="${work}/s-${name}"
     mkdir -p "${w}/esp/EFI/BOOT" "${w}/esp/EFI/AIENOS"
     touch "${w}/esp/EFI/AIENOS/BOOTREPORT.TXT"
@@ -392,6 +394,7 @@ sboot() { # name timeout-seconds [efi]: ESP with SLOTLDR (or efi), NVMe ${disk};
         done
         if [[ "${halted}" == 1 ]]; then
             kill "${qpid}" 2>/dev/null || true # the power cut: QEMU dies mid-update
+            skilled=1
         else
             printf 'shutdown\r' >&4 || true
         fi
@@ -534,7 +537,7 @@ sops=()
 has 13 "update started" "slot: update from the inbox into the inactive slot (booted A, keys=1)"
 has 13 "halted mid-image (power cut model)" "slot: TEST-ONLY update halted after 64 of"
 lacks 13 "never staged" "slot: update staged"
-if [[ "${last_rc}" != 0 ]]; then ok "row 13: QEMU killed mid-update (exit ${last_rc})"; else bad "row 13: QEMU exited 0, the update was not interrupted"; fi
+if [[ "${skilled}" == 1 ]]; then ok "row 13: QEMU killed mid-update by the gate (power cut model)"; else bad "row 13: QEMU was not killed mid-update"; fi
 ctl_is 13 "control record untouched" "seq=1 control: active=0 candidate=none tries=0"
 if [[ "$(slot_sum A)" == "${a_sum}" ]]; then ok "row 13: slot A bytes unchanged"; else bad "row 13: slot A bytes changed"; fi
 sops=("update")
@@ -574,7 +577,8 @@ sops=()
 has 15 "plain service image stays LOCKED" "lifecycle: ready state=locked"
 has 15 "update refused while locked" "lifecycle: REFUSED verb=update state=locked reason=\"locked: unlock before updating a slot\""
 if [[ "$(part_sum)" == "${p_sum}" ]]; then ok "row 15: slots partition byte-identical"; else bad "row 15: slots partition changed"; fi
-if make -n -C native/kernel CROSS="${cross}" OUT="${work}/hs" CK_SERVICE=1 CK_SERVICE_TEST_KEYS=1 CK_HARDWARE_STAGING=1 full 2>&1 | grep -qF "CK_SERVICE_TEST_KEYS (TEST keys) cannot be combined with CK_HARDWARE_STAGING"; then
+mk_out="$(make -n -C native/kernel CROSS="${cross}" OUT="${work}/hs" CK_SERVICE=1 CK_SERVICE_TEST_KEYS=1 CK_HARDWARE_STAGING=1 full 2>&1 || true)"
+if grep -qF -- "CK_SERVICE_TEST_KEYS (TEST keys) cannot be combined with CK_HARDWARE_STAGING" <<<"${mk_out}"; then
     ok "row 15: TEST-key updater image refused under CK_HARDWARE_STAGING (make)"
 else
     bad "row 15: make accepted a TEST-key service image under CK_HARDWARE_STAGING"
