@@ -15,12 +15,21 @@ This is the C path's UEFI entry (Lane 18). It is deliberately small:
   `ck_kernel_entry` with a `struct ck_handoff` (`handoff.h`): memory-map
   copy, RSDP, firmware EL, firmware TTBR0/SCTLR, counter, commit.
 
-**Proposed, not wired (P11 cut 1, gate N7):** `slot_format.h` and
-`slot_select.c` pin an A/B image-slot format and the loader's selection rules
-(bounded candidate tries, generation floor, never a boot loop), checked by
-`make -C native/kernel slot-test slot-free`. The stub does not read them yet;
-whether it ever does is the owner's call recorded in
-`docs/NATIVE_IMAGE_SLOTS.md` section 2. The paragraph below stays true.
+**A/B slots live in a separate loader, `slot_loader.c` -> `SLOTLDR.EFI` (P11
+cut 2a, gate N7, QEMU only; owner decision 2026-10-12: narrowly scoped to
+signed A/B image selection, boot-success tracking and rollback).** It sits in
+front of this stub as the boot volume's `EFI/BOOT/BOOTAA64.EFI`, reads the
+slots partition (`slot_format.h`), verifies both slots against owner keys
+baked in at build time, applies `slot_select.c` (bounded candidate tries,
+generation floor, never a boot loop), commits a candidate try before the jump,
+and chain-loads the chosen image (this stub + kernel, unchanged and
+byte-identical) with `LoadImage` + `StartImage`. Both slots invalid: it prints
+`slot_loader: recovery_required (...)` and returns to the firmware. It never
+touches UEFI variables, runtime services or `ExitBootServices`. Build:
+`make -C native/kernel slot-loader CK_SLOT_KEYS=<file>` (or the TEST-ONLY
+`CK_TEST_SLOT_KEY=1`, refused with `CK_HARDWARE_STAGING`); gate
+`scripts/qemu_ck_slot_loader_test.sh`; `docs/NATIVE_IMAGE_SLOTS.md`. This stub
+itself still has no slot logic, so the paragraph below stays true for it.
 
 **Parked, not here:** signature checks, BootNext staging, rollback and the
 boot-report file. The Rust `aienos-boot` crate has BootNext staging and a QEMU
