@@ -165,7 +165,7 @@ reserved (16 B)
 - Recovery KEK (raw-secret profile): `m5_recovery_kek` = HKDF-SHA256(salt = slot.salt, ikm = 32-byte secret, info = `AIENOS/M5/RECOVERY-KEK-V1`, 32). HKDF-Extract is `HMAC(salt || 0^16, ikm)`, bit-identical to RFC 5869 for a 16-byte salt (test vector in `m5_test.c`).
 - Keyslot AAD in C binds `store_uuid, slot_id, slot_type, key_epoch` (`AIENOS-M5-KEYSLOT-V2`), a superset of the Rust reference; C is authoritative.
 - The kernel (`ck_store_unlock_boot`) creates the manifest at genesis in the same first transaction as the boot record (index 0 reserved Empty for the TPM slot, index 1 = Recovery_RawSecret, slot_id 1, `active_key_epoch` 1), and derives PRODUCTION-class subkeys with owner hierarchy generation = `active_key_epoch`.
-- Not yet: TPM Slot 0 (BLOCKED_HARDWARE), key rotation (section 2.7), binding `keyslot_manifest_id` into the SecurityManifest, Argon2id profile.
+- Not yet: TPM Slot 0 (BLOCKED_HARDWARE), key rotation (section 2.7), Argon2id profile. The `keyslot_manifest_id` binding into the SecurityManifest is P04 cut 2a (section 2.5.1).
 
 ### 2.5 SecurityManifest (`kind = 22`)
 
@@ -193,6 +193,14 @@ Offset    Size  Field
 $$\text{root\_mac} = \text{HMAC-SHA256}(K_{\text{root\_auth}}, \text{"AIENOS-M5-ROOT-AUTH-V1\0"} \parallel \text{bytes}[0..224])$$
 
 To break the content-addressing dependency cycle, `SecurityManifest` intentionally omits the current generation's `commit_record_id`. The Store transaction engine links `SecurityManifest` into the Catalog, whose root is referenced by the CommitRecord.
+
+#### 2.5.1 Implementation note (C kernel, P04 cut 2a, 2026-10-12)
+
+- Codec: `native/m5` `m5_secman_seal` / `m5_secman_open` (256 bytes, Rust v1 layout, `root_mac` under `k_root_auth`; identity class and owner hierarchy generation are bound through the key, not wire fields).
+- The kernel boot stage (`native/kernel/svc/store_boot.c`, `run_policy_ex`) commits one SecurityManifest in **every boot transaction**, next to the boot record (and the KeySlotManifest at genesis). In the C sealed store it is a kind-22 **sealed envelope** (the store admits only the KeySlotManifest in plaintext), so the transaction record binds it and `root_mac` authenticates it a second time under `k_root_auth`.
+- Fields as written: `generation` = the generation the transaction creates; `security_sequence` = previous + 1 (1 at genesis); `previous_security_manifest_id` = the Store ObjectId of the manifest it supersedes (zero at genesis); `key_epoch` = the owner hierarchy generation of the open keys (`active_key_epoch`, 1); `keyslot_manifest_id` = the KeySlotManifest ObjectId (`sv1_object_id` of the kind-21 bytes at genesis, the keyed open's bound `keyslot_sid` later; zero on a TEST-key Store, which has none); `epoch` = `generation`, because the C sealed store's anti-rollback anchor (`torn_slot`, section 2.6 step 3) counts Store generations; `agent_root_id`, `continuity_manifest_id`, `migration_manifest_id` = zero (not yet linked).
+- On every open the newest manifest is read back and must: verify under the open keys; name this Store; bind exactly the keyslot the keyed open bound; carry the open keys' epoch; carry the generation of the transaction that committed it; carry a `security_sequence` equal to the number of manifests on the Store. A Store with history but no manifest, or any failed check, is refused (`CK_SB_E_SECMAN`, "SecurityManifestRefused") before the boot record is written, and the keys are wiped. Evidence: `svc/tests/stage_test.c` `test_secman`, LIFECYCLE gate rows 182-183.
+- Limits: only the boot transaction writes a manifest (approve, continuity and journal commits do not advance `security_sequence`); rotation (section 2.7) and TPM Slot 0 (section 2.8) remain open.
 
 ---
 

@@ -34,9 +34,27 @@
  * with PRODUCTION-class keys (owner hierarchy generation = active_key_epoch).
  * A wrong secret is refused by the AES-GCM-SIV tag before the Store is
  * touched. K_vol lives in a stack buffer for the unwrap only and is wiped.
- * Limits (cut 1): TPM Slot 0 stays BLOCKED_HARDWARE, no key rotation
- * (active_key_epoch 1), the manifest is not yet bound into the secman
- * keyslot_manifest_id field. */
+ *
+ * SECURITY MANIFEST (P04 cut 2a, ADR 0017 section 2.5). Every boot
+ * transaction also commits one SecurityManifest (kind 22, a sealed envelope
+ * whose root_mac is under k_root_auth): generation = the generation the
+ * transaction creates, security_sequence = previous + 1 (1 at genesis),
+ * previous_security_manifest_id = the ObjectId of the manifest it
+ * supersedes (zero at genesis), key_epoch = the owner hierarchy generation
+ * of the open keys, keyslot_manifest_id = the KeySlotManifest ObjectId (zero
+ * for a TEST-key Store, which has none), epoch = generation (the sealed
+ * Store's anti-rollback anchor counts Store generations). On every open the
+ * newest manifest is read back and must verify under the open keys, name
+ * this Store, bind exactly the keyslot the keyed open bound, carry the open
+ * keys' epoch, the generation that committed it and a security_sequence
+ * equal to the number of manifests on the Store. A Store with history but
+ * no manifest, or a manifest failing any check, is refused (CK_SB_E_SECMAN)
+ * before the boot record is written and the keys are wiped.
+ * Limits (cut 2a): TPM Slot 0 stays BLOCKED_HARDWARE, no key rotation
+ * (active_key_epoch 1); only the boot transaction writes a manifest
+ * (approve, continuity and journal commits do not advance
+ * security_sequence); agent_root_id, continuity_manifest_id and
+ * migration_manifest_id stay zero (not yet linked). */
 #ifndef AIENOS_CK_STORE_BOOT_H
 #define AIENOS_CK_STORE_BOOT_H
 #include <stdint.h>
@@ -47,6 +65,7 @@
 #define CK_BOOT_VERSION 1u
 #define CK_BOOT_COMMIT_MAX 64u
 #define CK_BOOT_RECORD_LEN 88u /* "AIENBOOT" u32 ver u32 0 u64 boot_count char commit[64] */
+#define CK_SECMAN_KIND 22u     /* ADR 0017 section 2.5 SecurityManifest, M5_SECMAN_LEN bytes */
 
 enum { CK_SB_COMMITTED = 0, CK_SB_REFUSED = 1 };
 
@@ -64,6 +83,9 @@ typedef struct {
     uint8_t identity_class;   /* identity class of the keys given (M5_ID_*) */
     int unlocked_genesis;     /* ck_store_unlock_boot: this run created the keyslot manifest */
     const char *key_source;   /* ck_store_unlock_boot: "recovery-keyslot" */
+    uint64_t secman_seq;      /* security_sequence of the SecurityManifest this boot committed */
+    int secman_keyslot;       /* 1: it binds the KeySlotManifest ObjectId (production Store) */
+    int secman_prev;          /* 1: it links the manifest it supersedes (0 at genesis) */
 } ck_store_report;
 
 #define CK_SB_E_TEST_KEYS (-2001)        /* TEST identity keys refused (hardware staging) */
@@ -73,6 +95,7 @@ typedef struct {
 #define CK_SB_E_ENTROPY (-2005)          /* genesis refused: kernel entropy service refused */
 #define CK_SB_E_KEYSLOT_BAD (-2006)      /* manifest decoded but has no usable recovery descriptor / wrong uuid */
 #define CK_SB_E_CONTINUITY (-2007)      /* service: continuity refused after the Store opened (lifecycle stays LOCKED) */
+#define CK_SB_E_SECMAN (-2008)          /* SecurityManifest missing, malformed, unbound, stale or under other keys */
 #define CK_SB_SECRET_LEN 32u
 
 /* TEST keys and store uuid. Public, not secret, never production. Not
