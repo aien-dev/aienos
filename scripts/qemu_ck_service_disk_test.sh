@@ -309,7 +309,7 @@ drive_neg() {
     ser_line evidence
     ser_line shutdown
 }
-re_open='^infer: resident open rc=0 tensors=147 vocab=128256 layers=16 kv_capacity=64 max_new=16 max_prompt_bytes=256 heap_reserve_kib=64 heap_used_kib=[0-9]+ open_us=[0-9]+$'
+re_open='^infer: resident open rc=0 tensors=147 vocab=128256 layers=16 kv_capacity=1024 max_new=256 max_prompt_bytes=752 heap_reserve_kib=64 heap_used_kib=[0-9]+ open_us=[0-9]+$'
 re_recall='^lifecycle: recall gen=4 kind=reply id=[0-9a-f]{8} bytes=[0-9]+ text="aienos\.reply\.v1.prompt: What is the capital of France\?.reply: The capital of France is Paris\.'
 frames_kept() {
     local l b a; l="$(grep -E -m1 '^infer: unloaded ' "${work}/serial.txt" || true)"
