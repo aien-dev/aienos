@@ -137,6 +137,10 @@ About 40 s, nothing booted.
 ## What is still missing for N7
 
 The package is the input to the updater (slots cut 3) and to the known-good
-recovery image (slots cut 4). Neither exists yet. Install today is still
+recovery image (slots cut 4). Neither exists yet. The owner approved the
+slot loader on 2026-10-12 (`docs/NATIVE_IMAGE_SLOTS.md` section 2); its first
+cut, `SLOTLDR.EFI` (slots cut 2a, QEMU only), exists but is not in the package
+yet: a follow-up adds `SLOTLDR.EFI` and its SHA-256 to `PACKAGE.txt` and
+`SHA256SUMS`, built with the owner's `CK_SLOT_KEYS`. Install today is still
 the one-time BootNext procedure of `docs/NATIVE_BOOT_ONE_TIME.md`, which N7
 rejects as the supported path.

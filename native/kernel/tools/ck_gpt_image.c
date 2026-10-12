@@ -14,6 +14,10 @@
  *         no-gpt          sentinel fills only: no protective MBR, no GPT
  *         esp-model ESP_MIB MODEL_FILE   ESP + model in 3 out-of-order
  *                         extents (see esp_model below; model ingest gate)
+ *         slots           one AIENOS image slots partition [1, M-1) (type
+ *                         CK_SLOT_PART_TYPE_TEXT, native/boot/slot_format.h), left
+ *                         zero; prints "gpt_image bs=B blocks=N slots_first_lba=F
+ *                         slots_last_lba=L" (slot loader gate)
  *       CORRUPTION: bad-primary-crc bad-backup-crc bad-primary-entries
  *         bad-backup-entries no-pmbr
  *       Prints one line: "gpt_image bs=B blocks=N aienos_first_lba=F
@@ -32,6 +36,7 @@
 #include "disk_file.h"
 #include "disk_part.h"
 #include "gpt_write.h"
+#include "../../boot/slot_format.h"
 
 static int usage(void)
 {
@@ -113,6 +118,15 @@ static int cmd_create(int argc, char **argv)
     const char *lay = argv[5];
     unsigned flags = 0;
     if (!strcmp(lay, "esp-model")) return esp_model(argc, argv, bs, blocks, per, flags);
+    if (!strcmp(lay, "slots")) {
+        static const uint8_t slots_type[16] = CK_SLOT_PART_TYPE_BYTES;
+        gw_part sp = {slots_type, 1 * per, (mib - 1u) * per - 1u, "AIENOS-SLOTS", 0};
+        if (argc != 6) return usage();
+        if (gw_write(argv[2], bs, blocks, &sp, 1, flags)) return 1;
+        printf("gpt_image bs=%u blocks=%llu slots_first_lba=%llu slots_last_lba=%llu\n", bs,
+               (unsigned long long)blocks, (unsigned long long)sp.first, (unsigned long long)sp.last);
+        return 0;
+    }
     for (int i = 6; i < argc; i++) {
         if (!strcmp(argv[i], "bad-primary-crc")) flags |= GW_BAD_PRIMARY_CRC;
         else if (!strcmp(argv[i], "bad-backup-crc")) flags |= GW_BAD_BACKUP_CRC;

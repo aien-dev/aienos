@@ -90,6 +90,14 @@
 #   make print-kcflags   flags stage code must be built with
 #   make udp-echo        host UDP echo helper for scripts/qemu_ck_net_test.sh:
 #                        $(OUT)/host/ck_udp_echo (hosted, test tooling only)
+#   make slot-loader CK_SLOT_KEYS=<file> | CK_TEST_SLOT_KEY=1
+#                        SLOTLDR.EFI, the signed A/B slot loader in front of the
+#                        unchanged image (native/boot/slot_loader.c, P11 cut 2a):
+#                        $(OUT)/SLOTLDR.EFI; owner keys baked in from CK_SLOT_KEYS,
+#                        or the TEST-ONLY RFC 8032 TEST 1 key; the TEST key is
+#                        refused with CK_HARDWARE_STAGING. Gate:
+#                        scripts/qemu_ck_slot_loader_test.sh
+#   make slot-loader-check  build checks + refusals -> SLOT_LOADER_BUILD: PASS
 #
 #   CK_EXTRA_CFLAGS=... extra kernel flags for one-off checks, e.g.
 #                    -DCK_SELFTEST_EL2_FAULT (brk at EL2: the EL2 fatal path)
@@ -229,6 +237,30 @@ endif
 OUT ?= $(REPO)/target/native-kernel-test-rollback-$(strip $(CK_TEST_ROLLBACK))
 SMP_TEST_FLAGS += -DCK_TEST_ROLLBACK_$(subst -,_,$(shell echo '$(strip $(CK_TEST_ROLLBACK))' | tr a-z A-Z))=1
 endif
+# SLOTLDR.EFI trusted keys (native v1 plan P11 cut 2a; native/boot/slot_loader.c,
+# make slot-loader):
+#   CK_SLOT_KEYS=<file>  owner public keys, "owner_root_ed25519 <64 hex>" lines
+#                        (tools/ck_owner_gen.c format; ck_slot_tool keys-c refuses
+#                        every known TEST key)
+#   CK_TEST_SLOT_KEY=1   TEST-ONLY: RFC 8032 TEST 1; the loader prints
+#                        "slot_loader: TEST-ONLY key ..."; refused with
+#                        CK_HARDWARE_STAGING and together with CK_SLOT_KEYS.
+# Checked here, before the hardware staging owner-file checks, so the refusal
+# names the TEST key itself.
+CK_SLOT_KEYS ?=
+CK_TEST_SLOT_KEY ?=
+ifneq ($(strip $(CK_TEST_SLOT_KEY)),)
+ifneq ($(strip $(CK_TEST_SLOT_KEY)),1)
+$(error CK_TEST_SLOT_KEY must be empty or 1)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_TEST_SLOT_KEY (TEST-ONLY slot loader key) cannot be combined with CK_HARDWARE_STAGING)
+endif
+ifneq ($(strip $(CK_SLOT_KEYS)),)
+$(error CK_TEST_SLOT_KEY and CK_SLOT_KEYS are exclusive: one trusted key source per slot loader)
+endif
+endif
+
 OUT ?= $(REPO)/target/native-kernel
 AIENOS_COMMIT ?= $(shell git -C $(REPO) rev-parse HEAD 2>/dev/null || echo unknown)
 
@@ -1067,8 +1099,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -1436,7 +1468,7 @@ cont-tool: $(CONT_TOOL)
 GPT_IMG_TOOL := $(OUT)/host/ck_gpt_image
 GPT_IMG_SRCS := $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \
 	$(KDIR)/tools/gpt_write.c $(KDIR)/tools/ck_gpt_image.c
-$(GPT_IMG_TOOL): $(GPT_IMG_SRCS) $(KDIR)/dev/disk_part.h $(KDIR)/tools/gpt_write.h $(NATIVE)/disk/disk.h
+$(GPT_IMG_TOOL): $(GPT_IMG_SRCS) $(KDIR)/dev/disk_part.h $(KDIR)/tools/gpt_write.h $(NATIVE)/disk/disk.h $(BOOT)/slot_format.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -I$(KDIR)/dev -I$(KDIR)/tools -I$(NATIVE)/disk -o $@ $(GPT_IMG_SRCS)
 gpt-image: $(GPT_IMG_TOOL)
@@ -1576,6 +1608,77 @@ package-test: $(SLOT_TOOL)
 	NATIVE_PACKAGE_TOOL_OUT=$(OUT) bash $(REPO)/scripts/native_package_test.sh | grep -E '^NATIVE_PACKAGE_TEST: (PASS|FAIL)' | grep -q PASS || { NATIVE_PACKAGE_TOOL_OUT=$(OUT) bash $(REPO)/scripts/native_package_test.sh | grep -E '^FAIL|NATIVE_PACKAGE_TEST'; exit 1; }
 	@echo "NATIVE_PACKAGE_TEST: PASS"
 
+# ---- SLOTLDR.EFI: the signed A/B slot loader (native v1 plan P11 cut 2a, gate N7) ----
+# native/boot/slot_loader.c: a separate UEFI application in FRONT of the unchanged
+# stub + kernel image (BOOTAA64.EFI is not touched). It reads the slots partition,
+# verifies both slots against the keys baked in here, applies slot_select.c, commits
+# the control record before a candidate try, then LoadImage + StartImage of the
+# verified bytes. Own object list: no kernel objects (checked), no runtime services,
+# no UEFI variables, no ExitBootServices (checked in the source). Keys: CK_SLOT_KEYS
+# or CK_TEST_SLOT_KEY=1 (see the top of this file). docs/NATIVE_IMAGE_SLOTS.md.
+#   make slot-loader CK_TEST_SLOT_KEY=1        -> $(OUT)/SLOTLDR.EFI (TEST-ONLY key)
+#   make slot-loader CK_SLOT_KEYS=<file>       -> $(OUT)/SLOTLDR.EFI (owner keys)
+#   make slot-loader-check                      build checks + refusals (in make test)
+# QEMU gate: scripts/qemu_ck_slot_loader_test.sh (AIENOS_CK_SLOT_LOADER).
+SLOTLDR_DIR := $(OUT)/slotldr
+SLOTLDR_ELF := $(SLOTLDR_DIR)/slotldr.elf
+SLOTLDR_EFI := $(OUT)/SLOTLDR.EFI
+SLOTLDR_KEYS_C := $(SLOTLDR_DIR)/slot_keys.c
+SLOTLDR_C := $(BOOT)/slot_loader.c $(BOOT)/slot_select.c $(NATIVE)/sig/sha512.c $(NATIVE)/sig/ed25519.c \
+	$(NATIVE)/sig/ct.c $(NATIVE)/argus/sha256.c $(NATIVE)/store/torn_slot.c $(KDIR)/core/libc_min.c \
+	$(KDIR)/core/fmt.c
+SLOTLDR_OBJS := $(patsubst $(NATIVE)/%.c,$(SLOTLDR_DIR)/obj/%.o,$(SLOTLDR_C)) \
+	$(SLOTLDR_DIR)/obj/boot/efi_entry.o $(SLOTLDR_DIR)/obj/slot_keys.o
+SLOTLDR_CFLAGS := $(KCFLAGS) $(ART_INC) -I$(NATIVE)/store
+SLOTLDR_HDRS := $(BOOT)/slot_format.h $(BOOT)/efi.h $(NATIVE)/store/torn_slot.h $(KDIR)/core/fmt.h $(ART_HDRS)
+SLOTLDR_KEY_SRC := $(if $(strip $(CK_TEST_SLOT_KEY)),--test-key,$(if $(strip $(CK_SLOT_KEYS)),--keys $(abspath $(CK_SLOT_KEYS)),))
+$(SLOTLDR_DIR)/obj/%.o: $(NATIVE)/%.c $(SLOTLDR_HDRS)
+	@mkdir -p $(dir $@)
+	$(KCC) $(SLOTLDR_CFLAGS) -c -o $@ $<
+$(SLOTLDR_DIR)/obj/boot/slot_loader.o: $(BOOT)/slot_loader.c $(SLOTLDR_HDRS) $(OUT)/commit.stamp
+	@mkdir -p $(dir $@)
+	$(KCC) $(SLOTLDR_CFLAGS) -DAIENOS_COMMIT='"$(AIENOS_COMMIT)"' -c -o $@ $<
+$(SLOTLDR_DIR)/obj/boot/efi_entry.o: $(BOOT)/efi_entry.S
+	@mkdir -p $(dir $@)
+	$(KCC) $(KCFLAGS) -c -o $@ $<
+# Rewritten only when the key table changes (ck_slot_tool keys-c compares).
+$(SLOTLDR_KEYS_C): $(SLOT_TOOL) FORCE
+	@[ -n "$(SLOTLDR_KEY_SRC)" ] || { echo "slot-loader: give CK_SLOT_KEYS=<owner public keys file> or CK_TEST_SLOT_KEY=1 (TEST only)"; exit 1; }
+	@mkdir -p $(dir $@)
+	@$(SLOT_TOOL) keys-c $(SLOTLDR_KEY_SRC) --out $@
+$(SLOTLDR_DIR)/obj/slot_keys.o: $(SLOTLDR_KEYS_C)
+	@mkdir -p $(dir $@)
+	$(KCC) $(SLOTLDR_CFLAGS) -c -o $@ $<
+$(SLOTLDR_ELF): $(SLOTLDR_OBJS) $(BOOT)/image.ld
+	@if grep -nE -- '->(RuntimeServices|ExitBootServices|SetVariable|GetVariable|SetWatchdogTimer)' $(BOOT)/slot_loader.c; then \
+	  echo "slot_loader.c calls a service the slot loader must never call"; exit 1; fi
+	$(call link_image,$@,$(SLOTLDR_OBJS))
+	@k=$$($(KNM) $@ | grep -E ' [TtDdBbRr] (ck_kernel_entry|kmain|ck_boot_model_load|ck_printf)$$' || true); \
+	if [ -n "$$k" ]; then echo "SLOTLDR links kernel objects: $$k"; rm -f $@; exit 1; fi
+	@if [ "$(strip $(CK_TEST_SLOT_KEY))" = 1 ]; then \
+	  grep -aqF "TEST-ONLY key" $@ || { echo "TEST-key SLOTLDR lacks its TEST-ONLY announcement"; rm -f $@; exit 1; }; \
+	elif grep -aqF "TEST-ONLY" $@; then echo "owner-key SLOTLDR carries a TEST-ONLY note"; rm -f $@; exit 1; fi
+$(SLOTLDR_EFI): $(SLOTLDR_ELF)
+	$(call pe_image,$<,$@)
+slot-loader: $(SLOTLDR_EFI)
+SLOTLDR_FIXTURE_KEYS := $(KDIR)/tests/fixtures/owner/TEST-FIXTURE-owner-pubkeys.txt
+slot-loader-check:
+	@$(MAKE) -s --no-print-directory OUT=$(OUT)/slotldr-check-test CK_TEST_SLOT_KEY=1 slot-loader >/dev/null
+	@grep -aqF "TEST-ONLY key" $(OUT)/slotldr-check-test/SLOTLDR.EFI
+	@$(MAKE) -s --no-print-directory OUT=$(OUT)/slotldr-check-owner CK_SLOT_KEYS=$(SLOTLDR_FIXTURE_KEYS) slot-loader >/dev/null
+	@if grep -aqF "TEST-ONLY" $(OUT)/slotldr-check-owner/SLOTLDR.EFI; then echo "SLOT_LOADER_BUILD: FAIL owner-key loader carries TEST-ONLY"; exit 1; fi
+	@for c in "CK_HARDWARE_STAGING=1 CK_TEST_SLOT_KEY=1|cannot be combined with CK_HARDWARE_STAGING" \
+	          "CK_TEST_SLOT_KEY=1 CK_SLOT_KEYS=$(SLOTLDR_FIXTURE_KEYS)|are exclusive" \
+	          "CK_SLOT_KEYS=$(SLOTLDR_FIXTURE_KEYS:.txt=.missing)|cannot read the keys file" \
+	          "|give CK_SLOT_KEYS"; do \
+	  args=$${c%%|*}; want=$${c#*|}; \
+	  if $(MAKE) -s --no-print-directory OUT=$(OUT)/slotldr-check-refuse $$args slot-loader >$(OUT)/slotldr-refuse.log 2>&1; then \
+	    echo "SLOT_LOADER_BUILD: FAIL not refused: $$args"; exit 1; fi; \
+	  grep -qF -- "$$want" $(OUT)/slotldr-refuse.log || { echo "SLOT_LOADER_BUILD: FAIL refused without '$$want': $$args"; cat $(OUT)/slotldr-refuse.log; exit 1; }; \
+	  echo "slot-loader refused as required: $${args:-no key source} ($$want)"; \
+	done
+	@echo "SLOT_LOADER_BUILD: PASS (TEST-key and owner-key loaders built; TEST key refused with hardware staging)"
+
 # ---- host checker for the AIENOS_CK_SCREEN gate (scripts/qemu_ck_screen_test.sh) ----
 FB_CHECK_TOOL := $(OUT)/host/ck_fb_check
 $(FB_CHECK_TOOL): $(KDIR)/tools/ck_fb_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/fbcon.h $(KDIR)/core/font8x8.h
@@ -1612,5 +1715,5 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: uefi-vars
+.PHONY: uefi-vars slot-loader slot-loader-check
 .PHONY: all full test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE

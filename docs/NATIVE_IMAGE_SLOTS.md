@@ -1,9 +1,13 @@
-# Native image slots: install, update and recovery without Linux (P11 cut 1)
+# Native image slots: install, update and recovery without Linux (P11 cuts 1 and 2a)
 
-STATUS: PROPOSED (design note plus host tooling; no loader or kernel image
-code changed in this cut; nothing here has run on hardware).
+STATUS: cut 1 (format, rules, host tool) and cut 2a (SLOTLDR.EFI, a separate
+slot loader in front of the unchanged image, QEMU gate PASS) done; the owner
+approved the loader on 2026-10-12 (section 2). Nothing here has run on
+hardware (hardware NOT_RUN). The kernel image and its stub are unchanged.
 SECURITY_IMPACT: PERSISTENT_FORMAT + RECOVERY (a new on-disk format and a new
-recovery rule are specified; neither is written to any machine by this cut).
+recovery rule are specified; from cut 2a SLOTLDR.EFI writes the control
+region of the slots partition, and nothing else, before a candidate try;
+nothing has been written to a physical machine).
 
 Program: AIEN native v1 (aien-architecture CURRENT_EXECUTION_PLAN, addendum
 2026-10-12), work package P11, gate N7: "Install, update and recovery work
@@ -52,7 +56,20 @@ built by our own tools), which is a later cut. Dual-invalid cannot happen by
 update alone under the rules below (the active slot is never written while
 it is active), only by media failure or a deliberate wipe.
 
-## 2. Decision needed from the owner (Drake)
+## 2. Owner decision (Drake): approved 2026-10-12, narrow scope
+
+**Decision recorded 2026-10-12.** Drake: "Slot loader APPROVED, narrowly
+scoped: the frozen boot stub may change only for signed A/B image selection,
+boot-success tracking, and rollback. Emulator tests required before hardware:
+successful update, invalid signature, interrupted update, unsuccessful boot."
+Cut 2a meets that without changing the stub at all: the slot logic is a
+separate UEFI application, `SLOTLDR.EFI`, in front of the unchanged stub +
+kernel image (section 7). The four required emulator tests are rows 2
+(a staged update boots, one counted try per boot; it is not yet made
+permanent, that is the kernel promote of cut 2b; after three unsuccessful
+boots the loader goes back to A), 3 and 4 (invalid signature, untrusted key)
+and 6 (interrupted update) of its QEMU gate; rows 5, 7 and 8 add a tampered
+image, both slots invalid and the generation floor. The text below is the request as it was asked.
 
 The loader is frozen: `docs/BOOT_HANDOFF_CONTRACT.md` section 7 says "There
 are no slots and, per Q3, none will be added to this loader", and
@@ -167,8 +184,10 @@ nothing and to re-release anything.
    10 control mutations, 16 selection scenarios including the bounded tries
    and the floor, the transitions, and torn-slot commit/recover with a
    simulated torn write) and the freestanding proof (`slot-free`). The
-   signing path is offline: `ck_slot_tool tbs` emits the 448 signed bytes,
-   the owner signs them on the air-gapped machine with OpenSSL
+   signing path is offline: `ck_slot_tool tbs M --pubkey HEX64 --out F`
+   emits the 448 signed bytes (the owner public key is required because
+   `signer_id`, its SHA-256, lies inside the signed bytes; aienos#324), the
+   owner signs them on the air-gapped machine with OpenSSL
    (`pkeyutl -sign -rawin`), `attach-sig` verifies and attaches. No private
    key ever touches the Spark. The TEST signer exists for tests only.
    **Cut 1b (merged with this note's follow-up): the package.**
@@ -178,7 +197,10 @@ nothing and to re-release anything.
    firmware digests) and `SHA256SUMS`, and sets the slot manifest's
    provenance to the SHA-256 of `SHA256SUMS`, so the owner's one signature
    over the manifest binds the whole package. `docs/NATIVE_PACKAGE.md`.
-2. **Stub reads a slot (after the owner's yes).** The stub locates the
+2. **Cut 2a (done, QEMU): a slot loader in front of the stub.** Built as a
+   separate loader, `SLOTLDR.EFI`, not inside the stub (section 7), so the
+   qualified image stays byte-identical and its own stub never recurses into
+   slot selection. As first planned: the stub locates the
    slots partition on the boot disk, reads C, reads both manifests and
    images, calls `ck_slot_select`, commits the try if asked, and chain-loads
    the chosen image with `LoadImage(SourceBuffer)` + `StartImage`. A QEMU
@@ -193,5 +215,68 @@ nothing and to re-release anything.
    recovery media built by our tools, for the dual-invalid case. Then N7 is
    run on the physical candidate inside an attended window.
 
-Until cut 2 is approved and merged, the boot path is unchanged and the
-statements in BOOT_HANDOFF_CONTRACT section 7 and native/boot/README.md hold.
+   **Cut 2b (next): kernel-side promote.** After its health milestone the
+   kernel writes the control record over its own NVMe path (promote the
+   candidate, or mark it failed), so a good update becomes the active slot
+   instead of only being tried three times.
+
+The stub itself is unchanged: the statements in BOOT_HANDOFF_CONTRACT
+section 7 and native/boot/README.md hold for it; slots live only in
+SLOTLDR.EFI.
+
+## 7. SLOTLDR.EFI and its gate (cut 2a)
+
+`native/boot/slot_loader.c` builds `$(OUT)/SLOTLDR.EFI`
+(`make -C native/kernel slot-loader`). Why a separate loader and not the
+stub: if the stub chose a slot and chain-loaded an image, that image's own
+stub would choose again; a front loader keeps the qualified image
+byte-identical and keeps the stub frozen. The boot volume's
+`EFI/BOOT/BOOTAA64.EFI` becomes SLOTLDR.EFI; the slot images are the
+unchanged stub + kernel image.
+
+What it does, in order:
+
+1. Finds whole disks (Block I/O), checks each primary GPT (header and entry
+   array CRC32, usable range) and takes the one partition with the slots type
+   GUID (`slot_format.h`). None, or more than one across all disks:
+   recovery required. The backup GPT is not read; a bad primary fails closed.
+2. Reads the control region (units 0-3) and recovers the newest committed
+   record with the torn-slot rules (`native/store/torn_slot.c`), read only.
+3. Reads both manifests and images (bounded by the slot capacity, read in
+   pieces of at most 8 MiB) and verifies each with `ck_slot_verify` against
+   the keys baked in at build time.
+4. Applies `ck_slot_select`. A candidate try commits the control record with
+   tries reduced by one, then reads it back and compares; if that fails the
+   candidate is treated as invalid and the selection runs again. This is the
+   only write, and it lands only in the control region.
+5. Prints `slot_loader: boot=<A|B> reason=<name> gen=<n> tries=<n> floor=<n>`
+   and chain-loads the verified bytes with `LoadImage(SourceBuffer)` and its
+   own device path (so the chained stub still sees the boot volume) and
+   `StartImage`.
+6. Both slots invalid: prints `slot_loader: recovery_required (A: <why>; B:
+   <why>)` and returns `EFI_LOAD_ERROR` to the firmware.
+
+Never: UEFI variables, runtime services, `ExitBootServices` (the chained
+stub leaves boot services itself), `SetWatchdogTimer`, kernel objects (all
+checked at build time).
+
+Keys: `CK_SLOT_KEYS=<file>` bakes the owner's public keys in (same file
+format as `ck_slot_tool --keys`, generated by `ck_slot_tool keys-c`).
+`CK_TEST_SLOT_KEY=1` bakes the RFC 8032 TEST 1 key and the loader prints
+`slot_loader: TEST-ONLY key`; it is refused with `CK_HARDWARE_STAGING=1`,
+and the two options together are refused.
+
+Boot-success tracking in cut 2a is the tries counter: a candidate that is
+never promoted is tried three times and then left; the active slot boots.
+Promotion after a kernel health milestone is cut 2b.
+
+Gate: `scripts/qemu_ck_slot_loader_test.sh` (`AIENOS_CK_SLOT_LOADER`, child
+`slots` of `scripts/ck_gates.sh`), rows 186-193 of `native/kernel/GATES.md`,
+plus the build check row 194 (`make test` runs `slot-loader-check`). Run on
+2026-10-12 at code commit bff20a1: PASS, 8 rows, 11 boots, 76 checks, 126 s
+under QEMU TCG. Hardware NOT_RUN.
+
+Host tool additions for the gate: `ck_slot_tool slots-image` (writes the
+control record and both slots into a slots partition of a disk image),
+`ck_slot_tool keys-c`, `ck_slot_tool sign-test --test2` (a second,
+untrusted TEST key), and `ck_gpt_image` layout `slots`.
