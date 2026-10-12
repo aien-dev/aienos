@@ -307,6 +307,7 @@ void ck_kernel_entry(struct ck_handoff *h)
     if (ck_handoff_check(h, &why) != 0)
         ck_panic("handoff: %s", why);
     sum_conventional(h);
+    if (ck_slot_boot_capture) ck_slot_boot_capture(h);
     ck_psci_configure(ck_acpi_find("FACP"));
     ck_set_stage("mm_build");
     uint64_t sp = ck_mm_build(h);

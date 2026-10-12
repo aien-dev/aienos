@@ -89,6 +89,13 @@ uint32_t ck_crc32(uint32_t crc, const uint8_t *p, size_t n);
  * through p->dev refused) and the CK_GPT_* code is returned. */
 int ck_gpt_find_aienos(const disk_dev *d, ck_part *p, ck_gpt_info *info);
 
+/* The same strict validation for exactly one partition of an arbitrary type
+ * (on-disk byte order): CK_GPT_ENOPART / CK_GPT_EMULTI then mean "none" /
+ * "more than one" of THAT type. Used for the AIENOS image slots partition
+ * (native/boot/slot_format.h, svc/slot_service.c): a second bounded view
+ * over the same parent, never a whole-disk handle. */
+int ck_gpt_find_type(const disk_dev *d, const uint8_t type[16], ck_part *p, ck_gpt_info *info);
+
 /* The single translation layer: partition-relative lba/count -> absolute
  * LBA. DISK_ESTATE when p is not a valid partition, DISK_EARG for count 0,
  * DISK_ERANGE when any block of the transfer would fall outside the

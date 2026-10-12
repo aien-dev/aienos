@@ -44,6 +44,7 @@
 #include "../../sig/aienos_sig.h"
 #include "../../argus/sha256.h"
 #include "../../store/torn_slot.h"
+#include "../../boot/slot_control.h"
 
 /* RFC 8032 section 7.1 TEST 1: seed and public key (the key ck_owner_gen refuses). */
 static const uint8_t TEST1_SEED[32] = {
@@ -683,6 +684,157 @@ static int selftest(void)
             check(ts_recover(&r, (uint8_t *)&back, &seq, 0) == TS_OK && seq == 2 && back.candidate_slot == 1, "torn body: previous record still recovered");
         }
         check(ck_slot_control_check(&back, &why) == 0, "recovered control is structurally valid");
+    }
+
+    /* P11 cut 2b: the boot record SLOTLDR.EFI hands the kernel, and the pure
+     * kernel decision over it (svc/slot_service.c). Every check that flips one
+     * field must be refused; every scenario names the action and the record. */
+    {
+        static struct ck_slot_boot_record b, bm;
+        static struct ck_slot_control c, out;
+        static struct ck_slot_manifest man;
+        enum ck_slot_action a;
+        fill_manifest(&man, img, sizeof img, 9, 4, 0, "0123456789abcdef0123456789abcdef01234567",
+                      "selftest candidate", 1760000000ull);
+        memset(&b, 0, sizeof b);
+        memcpy(b.magic, CK_SLOT_BOOT_MAGIC, 8);
+        b.version = CK_SLOT_BOOT_VERSION;
+        b.boot_slot = 1;
+        b.reason = CK_SLOT_R_CANDIDATE_TRY;
+        b.tries = 2;
+        b.control_present = 1;
+        b.control_seq = 5;
+        b.generation = man.generation;
+        b.policy_generation = man.policy_generation;
+        memcpy(b.image_sha512, man.image_sha512, 64);
+        memcpy(b.loader_commit, "0123456789abcdef0123456789abcdef01234567", 40);
+        ck_slot_boot_seal(&b);
+        check(ck_slot_boot_check(&b, &why) == 0, "boot record: sealed record is valid");
+#define BM(stmt, want, what)                                                                        \
+        do {                                                                                        \
+            bm = b;                                                                                 \
+            stmt;                                                                                   \
+            ck_slot_boot_seal(&bm);                                                                 \
+            check(ck_slot_boot_check(&bm, &why) != 0 && strcmp(why, want) == 0, "boot record: " what); \
+        } while (0)
+        bm = b;
+        bm.tries ^= 1;
+        check(ck_slot_boot_check(&bm, &why) != 0 && strcmp(why, "boot record digest mismatch") == 0,
+              "boot record: one changed byte without a reseal refused (digest)");
+        BM(bm.magic[0] ^= 1, "bad boot record magic", "bad magic refused");
+        BM(bm.version = 2, "unsupported boot record version", "version 2 refused");
+        BM(bm.boot_slot = 2, "boot record slot out of range", "slot 2 refused");
+        BM(bm.reason = CK_SLOT_R_NONE, "boot record reason out of range", "reason none refused");
+        BM(bm.reason = CK_SLOT_R_RECOVERY_REQUIRED, "boot record reason out of range", "reason recovery_required refused");
+        BM(bm.control_present = 2, "boot record control flag out of range", "control flag 2 refused");
+        BM(bm.tries = CK_SLOT_MAX_TRIES + 1, "boot record tries above the bound", "tries above the bound refused");
+        BM(bm.generation = 0, "boot record generation fields", "generation 0 refused");
+        BM(bm.policy_generation = bm.generation + 1, "boot record generation fields", "policy above generation refused");
+        BM(bm.reserved[79] = 1, "boot record reserved bytes nonzero", "reserved byte refused");
+        BM(bm.control_present = 0, "boot record claims a decision without a control record",
+           "decision without control refused");
+        BM(bm.reason = CK_SLOT_R_NO_CONTROL, "boot record claims no control with a control record",
+           "no_control with a control record refused");
+#undef BM
+
+        /* Candidate B on its try, control still names it. */
+        ck_slot_control_init(&c, 0);
+        c.generation_floor = 1;
+        check(ck_slot_stage_candidate(&c, 1, 9, &why) == 0, "kernel action: fixture staged");
+        c.tries_remaining = 2;
+        a = ck_slot_kernel_action(&b, &c, &man, 0, &out, &why);
+        check(a == CK_SLOT_A_WAIT && strcmp(why, "health milestone not reached") == 0,
+              "kernel action: candidate not healthy -> WAIT (nothing written)");
+        a = ck_slot_kernel_action(&b, &c, &man, 1, &out, &why);
+        check(a == CK_SLOT_A_PROMOTE && out.active_slot == 1 && out.candidate_slot == CK_SLOT_NONE &&
+                  out.tries_remaining == 0 && out.generation_floor == 4 && out.last_good_generation == 9 &&
+                  ck_slot_control_check(&out, &why) == 0,
+              "kernel action: healthy candidate -> PROMOTE (active=B, floor=policy 4, last_good=9)");
+        check(ck_slot_kernel_action(&b, 0, &man, 1, &out, &why) == CK_SLOT_A_REFUSE &&
+                  strcmp(why, "no control record on disk") == 0,
+              "kernel action: no control record -> REFUSE");
+        out = c;
+        out.version = 9;
+        check(ck_slot_kernel_action(&b, &out, &man, 1, &out, &why) == CK_SLOT_A_REFUSE,
+              "kernel action: corrupt control record -> REFUSE");
+        check(ck_slot_kernel_action(&b, &c, 0, 1, &out, &why) == CK_SLOT_A_REFUSE &&
+                  strcmp(why, "started slot's manifest unreadable") == 0,
+              "kernel action: unreadable manifest -> REFUSE");
+        m = man;
+        m.image_sha512[0] ^= 1;
+        m.kernel_sha512[0] ^= 1; /* v1: kernel_sha512 == image_sha512, so the manifest stays well formed */
+        check(ck_slot_kernel_action(&b, &c, &m, 1, &out, &why) == CK_SLOT_A_REFUSE &&
+                  strcmp(why, "started slot's manifest on disk differs from the boot record") == 0,
+              "kernel action: manifest digest differs from the boot record -> REFUSE");
+        m = man;
+        m.generation = 10;
+        check(ck_slot_kernel_action(&b, &c, &m, 1, &out, &why) == CK_SLOT_A_REFUSE,
+              "kernel action: manifest generation differs from the boot record -> REFUSE");
+        bm = b;
+        bm.digest[0] ^= 1;
+        check(ck_slot_kernel_action(&bm, &c, &man, 1, &out, &why) == CK_SLOT_A_REFUSE &&
+                  strcmp(why, "boot record digest mismatch") == 0,
+              "kernel action: damaged boot record -> REFUSE");
+        out = c;
+        out.candidate_slot = CK_SLOT_NONE;
+        out.tries_remaining = 0;
+        check(ck_slot_kernel_action(&b, &out, &man, 1, &out, &why) == CK_SLOT_A_NONE,
+              "kernel action: control no longer names the started slot -> NONE");
+
+        /* A booted because B ran out of tries / failed verification. */
+        fill_manifest(&m, img, sizeof img, 3, 1, 0, "0123456789abcdef0123456789abcdef01234567", "selftest active",
+                      1760000000ull);
+        bm = b;
+        bm.boot_slot = 0;
+        bm.reason = CK_SLOT_R_CANDIDATE_EXHAUSTED;
+        bm.tries = 0;
+        bm.generation = 3;
+        bm.policy_generation = 1;
+        memcpy(bm.image_sha512, m.image_sha512, 64);
+        ck_slot_boot_seal(&bm);
+        c.tries_remaining = 0;
+        a = ck_slot_kernel_action(&bm, &c, &m, 0, &out, &why);
+        check(a == CK_SLOT_A_ABANDON && out.active_slot == 0 && out.candidate_slot == CK_SLOT_NONE &&
+                  (out.flags & CK_SLOT_CTL_FLAG_CANDIDATE_FAILED) && out.generation_floor == 1 &&
+                  ck_slot_control_check(&out, &why) == 0,
+              "kernel action: exhausted candidate -> ABANDON (failed flag, active A stays, not gated on health)");
+        bm.reason = CK_SLOT_R_CANDIDATE_INVALID;
+        ck_slot_boot_seal(&bm);
+        check(ck_slot_kernel_action(&bm, &c, &m, 1, &out, &why) == CK_SLOT_A_ABANDON,
+              "kernel action: invalid candidate -> ABANDON");
+        bm.reason = CK_SLOT_R_ACTIVE;
+        ck_slot_boot_seal(&bm);
+        check(ck_slot_kernel_action(&bm, &c, &m, 1, &out, &why) == CK_SLOT_A_NONE,
+              "kernel action: steady active boot -> NONE");
+        bm.reason = CK_SLOT_R_CANDIDATE_EXHAUSTED;
+        bm.boot_slot = 1;
+        memcpy(bm.image_sha512, man.image_sha512, 64);
+        bm.generation = 9;
+        bm.policy_generation = 4;
+        ck_slot_boot_seal(&bm);
+        check(ck_slot_kernel_action(&bm, &c, &man, 1, &out, &why) == CK_SLOT_A_NONE,
+              "kernel action: exhausted reason on the non-active slot -> NONE (never abandons its own active)");
+        check(strcmp(ck_slot_action_text(CK_SLOT_A_PROMOTE), "promote") == 0, "action text");
+    }
+
+    /* The shared control-commit routine: commit, read back, sequence. */
+    {
+        static uint8_t media[CK_SLOT_CONTROL_UNITS * CK_SLOT_UNIT];
+        struct filedev fd = {media, sizeof media};
+        ts_device dev;
+        ts_region r;
+        uint64_t seq = 0, s2 = 0;
+        static struct ck_slot_control c, back;
+        memset(media, 0, sizeof media);
+        bind_dev(&dev, &fd);
+        check(ts_open(&r, &dev, 0) == TS_OK && ts_recover(&r, (uint8_t *)&back, &seq, 0) == TS_EMPTY,
+              "control commit: blank region");
+        ck_slot_control_init(&c, 0);
+        check(ck_slot_control_commit(&r, &c, &seq) == TS_OK && seq == 1, "control commit: first record seq 1");
+        check(ck_slot_stage_candidate(&c, 1, 2, &why) == 0 && ck_slot_control_commit(&r, &c, &s2) == TS_OK && s2 == 2,
+              "control commit: second record seq 2");
+        check(ts_recover(&r, (uint8_t *)&back, &seq, 0) == TS_OK && seq == 2 && memcmp(&back, &c, sizeof c) == 0,
+              "control commit: read back equals what was committed");
     }
 
     /* keys-c rendering: bounded, refuses instead of overflowing. */

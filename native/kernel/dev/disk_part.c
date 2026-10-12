@@ -80,8 +80,8 @@ typedef struct {
 } ent_geom;
 
 /* Stream the entry array at lba: CRC32 over num*esize bytes; when scan is
- * set, also check every used entry and find the AIENOS one. */
-static int scan_entries(const disk_dev *d, uint64_t lba, const ent_geom *g, int scan, uint32_t *crc_out,
+ * set, also check every used entry and find the one entry of `type`. */
+static int scan_entries(const disk_dev *d, const uint8_t *type, uint64_t lba, const ent_geom *g, int scan, uint32_t *crc_out,
                         uint64_t first_usable, uint64_t last_usable, int *sem_rc, ck_part *p, ck_gpt_info *info)
 {
     uint32_t crc = 0, left = g->bytes, idx = 0, used = 0, aienos = 0;
@@ -102,7 +102,7 @@ static int scan_entries(const disk_dev *d, uint64_t lba, const ent_geom *g, int 
             g_used_first[used] = f;
             g_used_last[used] = l;
             used++;
-            if (same(e, ck_aienos_part_type, 16)) {
+            if (same(e, type, 16)) {
                 aienos++;
                 p->first_lba = f;
                 p->blocks = l - f + 1u; /* f <= l checked above before it is trusted */
@@ -161,9 +161,9 @@ static void part_invalid(ck_part *p, const disk_dev *d)
     p->dev.max_blocks_per_io = d ? d->max_blocks_per_io : 0;
 }
 
-int ck_gpt_find_aienos(const disk_dev *d, ck_part *p, ck_gpt_info *info)
+int ck_gpt_find_type(const disk_dev *d, const uint8_t type[16], ck_part *p, ck_gpt_info *info)
 {
-    if (!p || !info) return CK_GPT_EGEOM;
+    if (!p || !info || !type) return CK_GPT_EGEOM;
     part_invalid(p, d);
     for (size_t i = 0; i < sizeof *info; i++) ((uint8_t *)info)[i] = 0;
     if (disk_check(d) != DISK_OK || d->block_size > GPT_BUF || d->block_count < 8u) return CK_GPT_EGEOM;
@@ -196,7 +196,7 @@ int ck_gpt_find_aienos(const disk_dev *d, ck_part *p, ck_gpt_info *info)
 
     int sem = CK_GPT_OK;
     uint32_t crc = 0;
-    rc = scan_entries(d, ent_lba, &g, 1, &crc, first_u, last_u, &sem, p, info);
+    rc = scan_entries(d, type, ent_lba, &g, 1, &crc, first_u, last_u, &sem, p, info);
     if (rc) return rc;
     if (crc != get32(g_hdr + H_ECRC)) return CK_GPT_EENT_CRC;
 
@@ -210,7 +210,7 @@ int ck_gpt_find_aienos(const disk_dev *d, ck_part *p, ck_gpt_info *info)
         get32(g_bak + H_ECRC) != get32(g_hdr + H_ECRC) || bent <= last_u || bent >= last || g.blocks > last - bent)
         return CK_GPT_EBACKUP;
     uint32_t bcrc = 0;
-    rc = scan_entries(d, bent, &g, 0, &bcrc, first_u, last_u, &sem, p, info);
+    rc = scan_entries(d, type, bent, &g, 0, &bcrc, first_u, last_u, &sem, p, info);
     if (rc) return rc;
     if (bcrc != get32(g_hdr + H_ECRC)) return CK_GPT_EBACKUP;
 
@@ -267,4 +267,9 @@ const char *ck_gpt_strerror(int rc)
     case CK_GPT_ETOOMANY: return "too many used entries";
     default: return "error";
     }
+}
+
+int ck_gpt_find_aienos(const disk_dev *d, ck_part *p, ck_gpt_info *info)
+{
+    return ck_gpt_find_type(d, ck_aienos_part_type, p, info);
 }

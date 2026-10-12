@@ -55,6 +55,7 @@
 #include "store_sealed.h"
 #include "continuity_service.h"
 #include "cortex_journal.h"
+#include "slot_service.h"
 
 #if !defined(CK_SERVICE)
 #error "lifecycle.c is only part of a CK_SERVICE=1 image"
@@ -77,6 +78,13 @@ int ck_store_service_unlock(const char *arg, size_t arg_len);
 int ck_store_service_rotate(const char *arg, size_t arg_len);
 
 static ck_lc g_lc;
+
+/* P11 cut 2b health milestone for slot promotion (svc/slot_service.h): Store open,
+ * continuity committed this boot, lifecycle READY. */
+static int slot_healthy(void)
+{
+    return ck_store_service_ready() && ck_cont_service_writable() && g_lc.state == CK_LC_READY;
+}
 static uint8_t g_last_id[32];
 static uint64_t g_last_gen;
 static unsigned g_overlong;
@@ -437,6 +445,7 @@ static void handle_line(const char *line, size_t len)
         int opened = ck_store_service_unlock(arg, arg_len);
         ck_lc_unlock_done(&g_lc, opened);
         if (opened) ck_printf("lifecycle: unlock ok state=%s\n", ck_lc_state_name(g_lc.state));
+        if (opened) ck_slot_service_health(slot_healthy());
         else ck_printf("lifecycle: REFUSED verb=unlock state=%s reason=\"%s\"\n", ck_lc_state_name(g_lc.state), g_lc.reason);
         return;
     }
@@ -548,6 +557,7 @@ int ck_lifecycle_run(void)
     ck_puts("lifecycle: TEST-ONLY service image (CK_SERVICE_TEST_KEYS=1: TEST Store keys; QEMU only, never a production boot)\n");
 #endif
     ck_lc_start(&g_lc, ck_store_service_ready());
+    ck_slot_service_start(slot_healthy());
     /* Operator input is the console UART the boot stub chose from the ACPI
      * SPCR (PL011/SBSA or 16550), POLLED: no interrupt is ever enabled. */
     const char *uname = ck_console_uart_name();
@@ -575,6 +585,7 @@ int ck_lifecycle_run(void)
     /* Stop order: Cortex journal closed (frames returned), inference session
      * closed (frames returned), Store closed, then NVMe released, then the
      * caller resets. */
+    ck_slot_service_stop();
     cortex_close();
     ck_infer_resident_close();
     int closed = ck_store_service_close();

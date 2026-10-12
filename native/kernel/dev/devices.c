@@ -9,6 +9,7 @@
 #include "net_bind.h"
 #include "xhci_fence.h"
 #include "usb_kbd.h"
+#include "../../boot/slot_format.h"
 
 static pci_system g_pci;
 static ck_nvme g_nvme;
@@ -16,6 +17,30 @@ static ck_nvme g_nvme;
 /* Later stages get only the AIENOS partition view (dev/disk_part.h), never the
  * whole namespace: every access they make goes through ck_part_xlate. */
 const disk_dev *ck_dev_boot_disk(void) { return g_nvme.bound && g_nvme.part.valid ? &g_nvme.part.dev : 0; }
+
+/* The AIENOS image slots partition (native/boot/slot_format.h, P11 cut 2b) on
+ * the same bound NVMe disk: a second bounded partition view, found with the
+ * same strict GPT validation as the AIENOS partition; never the whole
+ * namespace. Looked up once, on first use. *rc_out: 0, a CK_GPT_* code, or
+ * CK_DEV_NO_BOOT_DISK when no disk is bound (or it was released). */
+static ck_part g_slots;
+static int g_slots_rc = 1; /* 1: not looked up yet */
+const disk_dev *ck_dev_slots_disk(int *rc_out)
+{
+    static const uint8_t type[16] = CK_SLOT_PART_TYPE_BYTES;
+    int rc;
+    if (!g_nvme.bound || !g_nvme.part.valid) {
+        rc = CK_DEV_NO_BOOT_DISK;
+    } else {
+        if (g_slots_rc == 1) {
+            ck_gpt_info gi;
+            g_slots_rc = ck_gpt_find_type(&g_nvme.disk, type, &g_slots, &gi);
+        }
+        rc = g_slots_rc;
+    }
+    if (rc_out) *rc_out = rc;
+    return rc == 0 && g_slots.valid ? &g_slots.dev : 0;
+}
 
 void ck_dev_nvme_release(void)
 {
