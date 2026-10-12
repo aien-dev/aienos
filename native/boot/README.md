@@ -15,6 +15,13 @@ This is the C path's UEFI entry (Lane 18). It is deliberately small:
   `ck_kernel_entry` with a `struct ck_handoff` (`handoff.h`): memory-map
   copy, RSDP, firmware EL, firmware TTBR0/SCTLR, counter, commit.
 
+**Proposed, not wired (P11 cut 1, gate N7):** `slot_format.h` and
+`slot_select.c` pin an A/B image-slot format and the loader's selection rules
+(bounded candidate tries, generation floor, never a boot loop), checked by
+`make -C native/kernel slot-test slot-free`. The stub does not read them yet;
+whether it ever does is the owner's call recorded in
+`docs/NATIVE_IMAGE_SLOTS.md` section 2. The paragraph below stays true.
+
 **Parked, not here:** signature checks, BootNext staging, rollback and the
 boot-report file. The Rust `aienos-boot` crate has BootNext staging and a QEMU
 rollback test but no A/B slot selection (ADR 0024 Q3); it is frozen and

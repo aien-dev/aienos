@@ -1066,8 +1066,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -1539,6 +1539,32 @@ gsp-rpc-encode: $(GSP_RPC_TOOL)
 gsp-rpc-test: $(GSP_RPC_TOOL)
 	$(GSP_RPC_TOOL) selftest | grep -E '^CK_GSP_RPC_ENCODE_SELFTEST: (PASS|FAIL)' | grep -q PASS || { $(GSP_RPC_TOOL) selftest | grep -E 'FAIL|SELFTEST'; exit 1; }
 	@$(GSP_RPC_TOOL) selftest | tail -1
+
+# ---- native image slots: host tool + freestanding check (native v1 plan P11 cut 1, gate N7) ----
+# native/boot/slot_format.h + slot_select.c: the A/B slot manifest, control record and the
+# loader's selection rules (bounded candidate tries, generation floor, no boot loop, an
+# exhausted candidate never boots on its own authority). docs/NATIVE_IMAGE_SLOTS.md.
+# ck_slot_tool builds/signs/verifies manifests and simulates the decision; its self-test
+# is the format's oracle. slot-free proves slot_select.c compiles with the kernel's
+# freestanding flags and needs only the image's own digest/signature primitives.
+# No image code changes in this cut; the loader does not read slots yet.
+SLOT_TOOL := $(OUT)/host/ck_slot_tool
+SLOT_TOOL_SRCS := $(KDIR)/tools/ck_slot_tool.c $(BOOT)/slot_select.c $(NATIVE)/sig/sha512.c \
+	$(NATIVE)/sig/ed25519.c $(NATIVE)/sig/ct.c $(NATIVE)/argus/sha256.c $(NATIVE)/store/torn_slot.c
+$(SLOT_TOOL): $(SLOT_TOOL_SRCS) $(BOOT)/slot_format.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -o $@ $(SLOT_TOOL_SRCS)
+slot-tool: $(SLOT_TOOL)
+slot-test: $(SLOT_TOOL)
+	$(SLOT_TOOL) selftest | grep -E '^CK_SLOT_TOOL_SELFTEST: (PASS|FAIL)' | grep -q PASS || { $(SLOT_TOOL) selftest | grep -E 'FAIL|SELFTEST'; exit 1; }
+	@$(SLOT_TOOL) selftest | tail -1
+SLOT_FREE_ALLOWED_U := aienos_sha512 aienos_ed25519_verify sha256_hash _GLOBAL_OFFSET_TABLE_
+slot-free: $(BOOT)/slot_select.c $(BOOT)/slot_format.h
+	@mkdir -p $(OUT)/free
+	$(KCC) $(KCFLAGS) -c $(BOOT)/slot_select.c -o $(OUT)/free/slot_select.o
+	@bad=$$($(CROSS)nm -u $(OUT)/free/slot_select.o | awk '{print $$2}' | grep -vxF $(foreach a,$(SLOT_FREE_ALLOWED_U),-e $(a)) || true); \
+	if [ -n "$$bad" ]; then echo "slot-free: FAIL unexpected undefined symbols: $$bad"; exit 1; fi; \
+	echo "SLOT_FREE: PASS (undefined: $(SLOT_FREE_ALLOWED_U))"
 
 # ---- host checker for the AIENOS_CK_SCREEN gate (scripts/qemu_ck_screen_test.sh) ----
 FB_CHECK_TOOL := $(OUT)/host/ck_fb_check
