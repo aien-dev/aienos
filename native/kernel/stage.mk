@@ -89,9 +89,16 @@ stage-free: $(STAGE_OUT)/stage_all.o
 	echo "CK_STAGE_FREE: PASS objects=$(words $(STAGE_FREE_OBJS))"
 
 # ---- host tests ----------------------------------------------------------
+# P05: the production continuity layer (svc/continuity_service.c) is tested here
+# with CK_CONT_SERVICE_HOST_TEST (the image links it only under CK_SERVICE=1).
+STAGE_CONT_SRCS := $(STAGE_DIR)/svc/continuity_codec.c $(STAGE_DIR)/svc/continuity_resolve.c \
+  $(STAGE_DIR)/svc/continuity_resolve_sealed.c $(STAGE_DIR)/svc/continuity_commit.c \
+  $(STAGE_DIR)/svc/continuity_subject.c $(STAGE_DIR)/svc/continuity_subject_provision.c $(STAGE_DIR)/svc/continuity_service.c \
+  $(STAGE_DIR)/core/entropy.c $(STAGE_DIR)/core/fmt.c
 STAGE_HOST_SRCS := $(STAGE_OWN_SRCS) $(STAGE_DIR)/core/ipc.c $(STAGE_NATIVE_SRCS) $(STAGE_NATIVE)/disk/disk_file.c \
-  $(STAGE_DIR)/svc/tests/ck_host.c $(STAGE_DIR)/svc/tests/stage_test.c
-STAGE_HOST_FLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -pthread -DCK_ART_STORE_WRITER -DCK_HOST_TEST
+  $(STAGE_CONT_SRCS) $(STAGE_DIR)/svc/tests/ck_host.c $(STAGE_DIR)/svc/tests/stage_test.c
+STAGE_HOST_FLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -pthread -DCK_ART_STORE_WRITER -DCK_HOST_TEST \
+  -DCK_CONT_SERVICE_HOST_TEST -I$(STAGE_DIR)/core
 STAGE_SAN_FLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
 $(STAGE_OUT)/stage_test: $(STAGE_HOST_SRCS) $(wildcard $(STAGE_DIR)/dev/*.h $(STAGE_DIR)/svc/*.h $(STAGE_DIR)/include/*.h)

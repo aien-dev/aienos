@@ -20,17 +20,22 @@
  * (3) return to kmain: final report, ck_reset (quiesce hook, PSCI). Never
  * the other way round.
  *
- * LOCKED is the production truth today: ck_store_production_keys refuses
- * (no in-kernel K_vol unwrap until P04). A full-service image therefore
- * stays locked; only the TEST-ONLY full-service-testkeys image (refused
- * with CK_HARDWARE_STAGING) opens the Store with TEST keys so the READY and
- * SERVE paths can run in QEMU. */
+ * LOCKED at boot is the production truth: ck_store_production_keys refuses
+ * (no TPM Slot 0 unwrap); the operator opens the Store with the recovery
+ * secret (`unlock <64-hex>`, P04 cut 1). The TEST-ONLY full-service-testkeys
+ * image (refused with CK_HARDWARE_STAGING) opens it with TEST keys at boot so
+ * the READY and SERVE paths run in QEMU.
+ *
+ * Continuity (P05 cut 1): every Store open runs svc/continuity_service.c:
+ * identity + ALLEN subject provisioned once, restored and resumed on every
+ * later boot; a refusal keeps the lifecycle LOCKED. `status` reports it. */
 #include <stddef.h>
 #include <stdint.h>
 #include "ck.h"
 #include "lifecycle_fsm.h"
 #include "store_boot.h"
 #include "store_sealed.h"
+#include "continuity_service.h"
 
 #if !defined(CK_SERVICE)
 #error "lifecycle.c is only part of a CK_SERVICE=1 image"
@@ -62,8 +67,10 @@ static void help(void)
 
 static void status(void)
 {
-    ck_printf("lifecycle: state=%s store=%s pending=%s requests=%u\n", ck_lc_state_name(g_lc.state),
-              ck_store_service_ready() ? "open" : "locked", g_lc.task_len ? g_lc.task : "-", g_lc.requests);
+    char cs[96];
+    ck_cont_service_status(cs, sizeof cs);
+    ck_printf("lifecycle: state=%s store=%s pending=%s requests=%u %s\n", ck_lc_state_name(g_lc.state),
+              ck_store_service_ready() ? "open" : "locked", g_lc.task_len ? g_lc.task : "-", g_lc.requests, cs);
 }
 
 static void evidence(void)
@@ -83,6 +90,7 @@ static int commit_task(void)
     size_t n = 0, i;
     ss_store *s = store_boot_store();
     if (!s || !ck_store_service_ready()) return -1;
+    if (!ck_cont_service_writable()) return CK_SB_E_CONTINUITY; /* degraded mount: read-only */
     for (i = 0; i < sizeof hdr - 1; i++) buf[n++] = (uint8_t)hdr[i];
     for (i = 0; i < g_lc.task_len; i++) buf[n++] = (uint8_t)g_lc.task[i];
     ss_object o = { CK_LC_OBJ_KIND, 1, buf, n };
@@ -122,6 +130,9 @@ static void handle_line(const char *line, size_t len)
         if (rc == 0)
             ck_printf("lifecycle: approve committed gen=%llu id=%02x%02x%02x%02x state=%s\n",
                       (unsigned long long)g_last_gen, g_last_id[0], g_last_id[1], g_last_id[2], g_last_id[3],
+                      ck_lc_state_name(g_lc.state));
+        else if (rc == CK_SB_E_CONTINUITY)
+            ck_printf("lifecycle: REFUSED verb=approve rc=%d state=%s reason=\"continuity read-only (degraded mount)\"\n", rc,
                       ck_lc_state_name(g_lc.state));
         else
             ck_printf("lifecycle: REFUSED verb=approve rc=%d state=%s reason=\"%s\"\n", rc,

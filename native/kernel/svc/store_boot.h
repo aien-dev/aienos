@@ -72,6 +72,7 @@ typedef struct {
 #define CK_SB_E_SECRET_REJECTED (-2004)  /* recovery secret did not unwrap K_vol (tag failed) */
 #define CK_SB_E_ENTROPY (-2005)          /* genesis refused: kernel entropy service refused */
 #define CK_SB_E_KEYSLOT_BAD (-2006)      /* manifest decoded but has no usable recovery descriptor / wrong uuid */
+#define CK_SB_E_CONTINUITY (-2007)      /* service: continuity refused after the Store opened (lifecycle stays LOCKED) */
 #define CK_SB_SECRET_LEN 32u
 
 /* TEST keys and store uuid. Public, not secret, never production. Not

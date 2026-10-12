@@ -278,7 +278,10 @@ int cr_resume(const struct cr_source *src, const struct cr_sink *snk, struct cr_
 #endif
 }
 
-/* ---- markers ---- */
+/* ---- markers (TEST-ONLY serial lines of continuity_boot.c; a CK_SERVICE image
+ * prints its own lowercase "continuity:" lines and must not carry the
+ * "CONTINUITY: " prefix: Makefile cont_check) ---- */
+#if !defined(CK_SERVICE)
 struct mb {
     char *p;
     size_t cap, n;
@@ -384,3 +387,4 @@ size_t cr_marker_outcome(char *out, size_t cap, int outcome, const char *why, in
     }
     return mb_done(&b);
 }
+#endif /* !CK_SERVICE */
