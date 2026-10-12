@@ -653,6 +653,8 @@ FULL_NAME := full-service$(if $(strip $(CK_HARDWARE_STAGING)),-hardware-staging,
 STAGE_DMA_FLAGS += -DCK_SERVICE=1
 endif
 STAGE_SRCS += $(KDIR)/core/lifecycle.c $(KDIR)/core/lifecycle_fsm.c
+# P06 cut 3: the canonical Omega Cortex store over the sealed Store (svc/cortex_journal.c).
+STAGE_SRCS += $(STAGE_CORTEX_SRCS)
 # P05 cut 1: production continuity on the service lifecycle (svc/continuity_service.c):
 # the continuity layer without its TEST-ONLY mode selection (continuity_boot.c)
 # and without the Recovery Core (continuity_recovery.c, TEST operator key).

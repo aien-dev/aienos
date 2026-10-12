@@ -22,6 +22,7 @@
 #include "store_boot.h"
 #include "continuity_service.h"
 #include "artifact_store.h"
+#include "cortex_journal.h"
 #include "sha256.h"
 #include "net_bind.h"
 #include "net_udp.h"
@@ -2318,6 +2319,137 @@ static void test_mmio_stage_report(void)
     munmap(regs, WIN_BYTES);
 }
 
+/* ---- P06 cut 3: the Omega Cortex journal over the sealed Store ---------- */
+#define CJ_UNITS 1024u
+static int cj_dopen(int create)
+{
+    if (create) unlink(img);
+    return disk_file_open(&g_f, &g_d, img, T_BS, (uint64_t)CJ_UNITS * T_BPU, create);
+}
+static uint8_t cj_heap[4u << 20];
+static ck_cj cj_ctx;
+static uint64_t cj_mid[5000]; /* 40000-byte payload: three sealed chunks */
+
+static void test_cortex_journal(void)
+{
+    printf("  [cortex journal: canonical Omega CxStore records over the sealed Store]\n");
+    snprintf(img, sizeof img, "/tmp/ck_stage_cj_%d.img", (int)getpid());
+    ss_keys k;
+    ck_store_test_keys(&k);
+    ck_store_report r;
+    CxStore cx, cx2;
+    CxHeader h;
+    uint64_t id = 0, ids[3] = { 0, 0, 0 }, pay[2];
+    size_t i;
+    for (i = 0; i < 5000; i++) cj_mid[i] = 0x9e3779b97f4a7c15ull * (i + 1);
+
+    CHECK(cj_dopen(1) == 0);
+    CHECK(store_boot_run(&g_d, &k, ck_store_test_uuid, "cj-1", &r) == 0 && r.formatted == 1);
+    ss_store *s = store_boot_store();
+    uint64_t g0 = ss_generation(s);
+    ck_cx_heap_init(cj_heap, sizeof cj_heap);
+    ck_cj_init(&cj_ctx, s);
+
+    /* a blank Store holds no journal: the first writable open writes the
+     * 32-byte header as one sealed transaction */
+    CHECK(cx_open_with(&cx, &ck_cx_journal_store, &cj_ctx, "cortex", 4, 0) == CX_OK);
+    CHECK(ss_generation(s) == g0 + 1 && cj_ctx.len == 32 && cj_ctx.nchunks == 1 && cx.n == 0);
+    /* one semantic writer: a second writable open is refused, read-only is not */
+    CHECK(cx_open_with(&cx2, &ck_cx_journal_store, &cj_ctx, "cortex", 4, 0) == CX_ERR_WRITER && cj_ctx.refused == 1);
+    CHECK(cx_open_with(&cx2, &ck_cx_journal_store, &cj_ctx, "cortex", 0, CX_OPEN_READONLY) == CX_OK && cx2.n == 0);
+    cx_close(&cx2);
+    CHECK(cj_ctx.writer == 1 && cj_ctx.ro_handles == 0);
+
+    /* three records: each is exactly one Store generation */
+    memset(&h, 0, sizeof h);
+    h.cls = CX_CLAIM;
+    h.kind = CX_K_CLAIM;
+    h.subject = 1;
+    h.generation = 1;
+    for (i = 0; i < 3; i++) {
+        h.t = i + 1;
+        pay[0] = 0x100 + i;
+        pay[1] = ~(uint64_t)i;
+        CHECK(cx_append(&cx, &h, pay, 2, &ids[i]) == CX_OK && ids[i] == i + 1);
+        CHECK(ss_generation(s) == g0 + 2 + i);
+    }
+    CHECK(cx.n == 3 && cx_verify_chain(&cx) == CX_OK && cj_ctx.nchunks == 4 && cj_ctx.appends == 4);
+    size_t len3 = cj_ctx.len;
+    /* no torn tail can exist: truncate accepts only the current length */
+    CHECK(ck_cx_journal_store.truncate(&cj_ctx, cx.jh, len3) == CX_OK);
+    CHECK(ck_cx_journal_store.truncate(&cj_ctx, cx.jh, len3 - 1) == CX_ERR_IO);
+    /* a record above CK_CJ_MAX_RECORD is refused before any write; memory and
+     * the Store are unchanged */
+    {
+        uint64_t gb = ss_generation(s);
+        h.t = 10;
+        CHECK(cx_append(&cx, &h, cj_mid, 0, &id) == CX_OK && id == 4); /* empty payload is fine */
+        gb = ss_generation(s);
+        static uint64_t big[CK_CJ_MAX_RECORD / 8 + 16];
+        h.t = 11;
+        id = 0;
+        CHECK(cx_append(&cx, &h, big, (uint32_t)(CK_CJ_MAX_RECORD / 8), &id) == CX_ERR_IO && id == 0);
+        CHECK(cx.n == 4 && ss_generation(s) == gb && cj_ctx.refused == 2 && cx_verify_chain(&cx) == CX_OK);
+    }
+    /* a 40000-byte payload spans three sealed chunks of one transaction */
+    {
+        uint64_t gb = ss_generation(s);
+        uint32_t nb = cj_ctx.nchunks;
+        h.t = 12;
+        CHECK(cx_append(&cx, &h, cj_mid, 5000, &id) == CX_OK && id == 5);
+        CHECK(ss_generation(s) == gb + 1 && cj_ctx.nchunks == nb + 3);
+    }
+    cx_close(&cx);
+    CHECK(cj_ctx.writer == 0);
+
+    /* reopen on the same mount: replay, digests and chain are Omega's checks */
+    CHECK(cx_open_with(&cx, &ck_cx_journal_store, &cj_ctx, "cortex", 4, 0) == CX_OK && cx.n == 5);
+    CHECK(cx_verify_chain(&cx) == CX_OK);
+    {
+        const CxObject *o = cx_get(&cx, 5);
+        CHECK(o && o->n == 5000 && o->t == 12 && memcmp(cx_payload(&cx, o), cj_mid, 40000) == 0);
+        o = cx_get(&cx, 2);
+        CHECK(o && o->t == 2 && cx_payload(&cx, o)[0] == 0x101);
+    }
+    cx_close(&cx);
+    /* another subject count is another journal */
+    CHECK(cx_open_with(&cx, &ck_cx_journal_store, &cj_ctx, "cortex", 5, 0) == CX_ERR_FORMAT && cj_ctx.writer == 0);
+    dclose();
+
+    /* cold start: a fresh mount, a fresh heap, the same five records */
+    CHECK(cj_dopen(0) == 0);
+    CHECK(store_boot_run(&g_d, &k, ck_store_test_uuid, "cj-2", &r) == 0 && r.formatted == 0);
+    s = store_boot_store();
+    ck_cx_heap_init(cj_heap, sizeof cj_heap);
+    ck_cj_init(&cj_ctx, s);
+    CHECK(cx_open_with(&cx, &ck_cx_journal_store, &cj_ctx, "cortex", 4, 0) == CX_OK && cx.n == 5);
+    CHECK(cx_verify_chain(&cx) == CX_OK && cj_ctx.appends == 0 && cj_ctx.reads >= 1 && cj_ctx.nchunks == 8);
+    {
+        const CxObject *o = cx_get(&cx, 5);
+        CHECK(o && memcmp(cx_payload(&cx, o), cj_mid, 40000) == 0);
+        /* an in-memory edit is caught by Omega's digest check */
+        cx_tamper(&cx, 3, 0, 77);
+        CHECK(cx_verify(&cx, 3) == CX_ERR_DIGEST && cx_verify(&cx, 2) == CX_OK);
+    }
+    {
+        size_t used = 0, peak = 0, size = 0;
+        ck_cx_heap_stats(&used, &peak, &size);
+        CHECK(used > 0 && peak <= size && size == sizeof cj_heap);
+        printf("  cortex journal: bytes=%zu chunks=%u heap_peak_kib=%zu\n", cj_ctx.len, cj_ctx.nchunks, peak / 1024);
+    }
+    cx_close(&cx);
+    /* a heap too small for the replay: refused, nothing written */
+    {
+        uint64_t gb = ss_generation(s);
+        ck_cx_heap_init(cj_heap, 256);
+        ck_cj_init(&cj_ctx, s);
+        CHECK(cx_open_with(&cx, &ck_cx_journal_store, &cj_ctx, "cortex", 4, 0) == CX_ERR_NOMEM);
+        CHECK(ss_generation(s) == gb && cj_ctx.writer == 0);
+    }
+    dclose();
+    unlink(img);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -2341,6 +2473,7 @@ int main(void)
     test_store();
     test_unlock_recovery();
     test_continuity_service();
+    test_cortex_journal();
     test_artifact_store();
     test_security();
     test_nvme_shutdown();

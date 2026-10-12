@@ -41,6 +41,11 @@ STAGE_NATIVE_SRCS := \
 STAGE_KERNEL_SRCS := $(STAGE_DIR)/svc/ck_compat.c
 
 STAGE_SRCS := $(STAGE_OWN_SRCS) $(STAGE_NATIVE_SRCS) $(STAGE_KERNEL_SRCS)
+# P06 cut 3: the canonical Omega Cortex store (third_party/omega, pinned by
+# omega.lock) over the sealed Store. Linked into the CK_SERVICE image by the
+# kernel Makefile; compiled freestanding here so stage-free proves the link.
+STAGE_CORTEX_SRCS := $(STAGE_DIR)/svc/cortex_store.c $(STAGE_DIR)/svc/cortex_journal.c
+STAGE_FREE_SRCS := $(STAGE_SRCS) $(STAGE_CORTEX_SRCS)
 
 STAGE_INC := -I$(STAGE_DIR)/include -I$(STAGE_DIR)/dev -I$(STAGE_DIR)/svc \
              -I$(STAGE_NATIVE)/disk -I$(STAGE_NATIVE)/store -I$(STAGE_NATIVE)/m5 -I$(STAGE_NATIVE)/crypto \
@@ -67,14 +72,14 @@ STAGE_ALLOWED_U := ck_puts ck_printf ck_vprintf ck_panic ck_alloc ck_free ck_dma
   ck_entropy_fill ck_entropy_status ck_entropy_reason \
   ck_console_rx_ready ck_console_rx_poll ck_console_uart_name ck_console_uart_base
 
-STAGE_FREE_OBJS := $(foreach s,$(STAGE_SRCS),$(STAGE_OUT)/free/$(subst /,_,$(subst $(STAGE_NATIVE)/,,$(s:.c=.o))))
+STAGE_FREE_OBJS := $(foreach s,$(STAGE_FREE_SRCS),$(STAGE_OUT)/free/$(subst /,_,$(subst $(STAGE_NATIVE)/,,$(s:.c=.o))))
 
 define stage_free_rule
 $(STAGE_OUT)/free/$(subst /,_,$(subst $(STAGE_NATIVE)/,,$(1:.c=.o))): $(1)
 	@mkdir -p $$(@D)
 	$$(STAGE_CC) $$(STAGE_FREE_FLAGS) $$(STAGE_CFLAGS) -c -o $$@ $$<
 endef
-$(foreach s,$(STAGE_SRCS),$(eval $(call stage_free_rule,$(s))))
+$(foreach s,$(STAGE_FREE_SRCS),$(eval $(call stage_free_rule,$(s))))
 
 $(STAGE_OUT)/stage_all.o: $(STAGE_FREE_OBJS)
 	$(STAGE_LD) -r -o $@ $^
@@ -96,7 +101,7 @@ STAGE_CONT_SRCS := $(STAGE_DIR)/svc/continuity_codec.c $(STAGE_DIR)/svc/continui
   $(STAGE_DIR)/svc/continuity_subject.c $(STAGE_DIR)/svc/continuity_subject_provision.c $(STAGE_DIR)/svc/continuity_service.c \
   $(STAGE_DIR)/core/entropy.c $(STAGE_DIR)/core/fmt.c
 STAGE_HOST_SRCS := $(STAGE_OWN_SRCS) $(STAGE_DIR)/core/ipc.c $(STAGE_NATIVE_SRCS) $(STAGE_NATIVE)/disk/disk_file.c \
-  $(STAGE_CONT_SRCS) $(STAGE_DIR)/svc/tests/ck_host.c $(STAGE_DIR)/svc/tests/stage_test.c
+  $(STAGE_CONT_SRCS) $(STAGE_CORTEX_SRCS) $(STAGE_DIR)/svc/tests/ck_host.c $(STAGE_DIR)/svc/tests/stage_test.c
 STAGE_HOST_FLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -pthread -DCK_ART_STORE_WRITER -DCK_HOST_TEST \
   -DCK_CONT_SERVICE_HOST_TEST -I$(STAGE_DIR)/core
 STAGE_SAN_FLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer

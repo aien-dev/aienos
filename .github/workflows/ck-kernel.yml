@@ -86,6 +86,12 @@ jobs:
       - name: Stage host tests (plain and ASan + UBSan)
         run: make -C native/kernel stage-test stage-sanitize
 
+      - name: Vendored Omega Cortex store matches omega.lock (P06 cut 3; shallow fetch of the pinned omega commit)
+        run: bash scripts/omega_lock_check.sh
+
+      - name: Stage sources compile freestanding (nm -u: ck.h services only)
+        run: make -C native/kernel stage-free
+
       - name: Gate runner self-test
         run: bash scripts/ck_gates.sh --self-test
 
