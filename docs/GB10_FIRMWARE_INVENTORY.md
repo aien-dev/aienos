@@ -40,10 +40,15 @@ the driver on the box; fetched read-only into a scratch directory, not vendored)
   SEC2 (section 10), and `ck_gsp_bindata_extract` reads the eight GB10B
   firmware arrays out of the public driver source with our own inflater and
   hash code, cross-checks every size, record and digest, and writes them as
-  files (section 11). `make -C native/kernel test` runs all three self-tests.
+  files (section 11). A fourth, `ck_gsp_boot_args_encode`, builds and checks
+  the five memory blocks the driver hands to the GSP-RM boot (the 256-byte
+  WPR description, the libos argument page, the log-buffer tables, the
+  message-queue arguments and the three-level page table for the 75 MB
+  firmware), with the GB10B values traced line by line from the driver
+  (section 12). `make -C native/kernel test` runs all four self-tests.
 - The largest remaining unknowns for a native bring-up (section 8) are the
   SEC2 command protocol details beyond what the driver source shows, the
-  exact GspFwWprMeta/boot-argument layout expected by this GSP-FMC build, and
+  message-queue (RPC) protocol after the FMC starts GSP-RM, and
   the state the SoC firmware (UEFI) leaves SEC2 and the GPU in at AIENOS entry.
   Do not attach a calendar to cut C/D until those are measured on the machine.
 
@@ -296,8 +301,12 @@ code into AIENOS would require carrying the MIT notice (none was copied here).
   SHA-384, `make -C native/kernel gsp-bindata-test`; (b) DONE 2026-10-12: the encoder, decoder
   and refusal tests for `NVDM_PAYLOAD_COT`, the MCTP/NVDM headers, the EMEM
   packet and `GSP_FMC_BOOT_PARAMS` are `ck_gsp_cot_encode` (section 10);
-  (c) remaining: an encoder for `GspFwWprMeta` (256 bytes, layout known, the
-  GH100 populate values not yet traced) and the libos init-argument block.
+  (c) DONE 2026-10-12: `ck_gsp_boot_args_encode` (section 12) encodes,
+  decodes and refuses `GspFwWprMeta`, the libos init-argument page, the
+  log-buffer PTE prefix, `GSP_ARGUMENTS_CACHED`, the RPC shared-buffer page
+  table and the radix-3 ELF table with the GB10B populate values traced;
+  (d) remaining: the message-queue element format and the RPC init handshake
+  (section 8 item 4), host-side parser and refusal tests only.
 - The machine-side part of cut C (first SEC2 command, FMC boot, GSP-RM init
   done) is an attended-window item under the P08 rules: documented cold power
   state, no prior Linux GPU initialization, camera, abort rule, and the
@@ -308,14 +317,16 @@ code into AIENOS would require carrying the MIT notice (none was copied here).
 1. RESOLVED 2026-10-12 [SOURCE]: the `NVDM_PAYLOAD_COT` layout is 860 packed
    bytes, GB10B uses version 1, signature and key sizes 384, hash 48; the
    whole wire format is in section 10 and checked by `ck_gsp_cot_encode`.
-2. [PARTLY RESOLVED 2026-10-12] `GSP_FMC_BOOT_PARAMS` (88 bytes, section 10)
-   and the `GspFwWprMeta` struct (256 bytes, `gsp/gsp_fw_wpr_meta.h`, magic
-   `0xdc3aae21371a60b3`, revision 1; GB10B zeroes `vgaWorkspaceSize`,
-   `pmuReservedSize` and `nonWprHeapSize`, kernel_gsp_gb10b.c:32-55) are
-   known. [UNKNOWN] the values `kgspPopulateWprMeta_GH100` computes (radix3
-   ELF placement, heap sizes, WPR carveout) and the libos init-argument block
-   (`gsp_init_args.h` gives `GSP_ARGUMENTS_CACHED`; the libos block itself not
-   traced).
+2. RESOLVED on the host side 2026-10-12 [SOURCE]: `GSP_FMC_BOOT_PARAMS`
+   (section 10), `GspFwWprMeta` with every value `kgspPopulateWprMeta_GH100`
+   and `_GB10B` fill (heap 133 MiB, bootloader 196,608 bytes at descriptor
+   offsets 0xb000/0xa00/0x0, frts 0, nonWprHeap 0, FB layout left to the
+   FMC), the libos init-argument page (seven logs then RMARGS), the
+   log-buffer PTE prefix, `GSP_ARGUMENTS_CACHED` (message-queue offsets,
+   512 MiB sysmem heap on ZERO_FB) and the radix-3 ELF table are in section
+   12 and checked by `ck_gsp_boot_args_encode`. [INFERRED (medium)] that the
+   GSP-FMC accepts these exact values without Linux present: only the chip
+   can confirm that.
 3. [UNKNOWN] What SEC2 requires to be already true when the first command
    arrives (its own firmware loaded by the SoC boot chain? clocks? power
    state?), and whether UEFI leaves the GPU in that state at AIENOS entry.
@@ -363,8 +374,19 @@ nouveau/extract-firmware-nouveau.py (lines 82-114 only), kernel_gsp_gh100.c
 (`kgspBootstrap_GH100`, `_kgspLockdownReleasedOrFmcError`,
 `kgspPopulateWprMeta_GH100`, `_kgspBootstrapGspFmc_GH100`), g_kern_fsp_nvoc.c
 (the `PDB_PROP_KFSP_IS_MISSING` chip list), and the full bindata record
-tables of both GB10B files. Not read: the GSP RPC layer, the libos
-init-argument block, ACR or GSP internals (not available). No Context7 or web manual covers this layer; the
+tables of both GB10B files; for section 12 also gsp_fw_wpr_meta.h,
+libos_init_args.h, gsp_fw_heap.h, gsp_init_args.h, nvrm_registry.h (heap
+and stack keys), nv-firmware-registry.h, nvtypes.h (`NvLength`), g_gpu_nvoc.c
+(the ZERO_FB chip list), g_kernel_gsp_nvoc.c/.h (frts, heap, log-count,
+libos-version and kernel-logging HAL tables), kernel_gsp.c (`kgspSetupLibos
+InitArgs_IMPL`, `_kgspGenerateInitArgId`, `kgspPopulateGspRmInitArgs_IMPL`,
+`kgspCreateRadix3`, `_kgspCalculateFwHeapSize`, `kgspGetFwHeapSize_IMPL`,
+`kgspInitLogging`, log registration), kernel_gsp_tu102.c (the boot-argument
+allocations), kernel_gsp_gh100.c (`kgspPopulateWprMeta_GH100`), kernel_gsp_
+gb10b.c (`kgspPopulateWprMeta_GB10B`), message_queue_cpu.c, message_queue.h,
+message_queue_priv.h (sizes and page table only). Not read: the RPC element
+format and init handshake beyond the queue geometry, ACR or GSP internals
+(not available). No Context7 or web manual covers this layer; the
 DGX Spark user guide is silent on GSP firmware loading (DOCS SILENT on native
 GSP bring-up).
 
@@ -514,3 +536,73 @@ ready" (the RPC init handshake, section 8 item 4). Each of these is a
 measurable checkpoint for the attended window, with its own timeout and its
 own refusal line. Nothing in this section has been run on the chip.
 
+
+## 12. The boot-argument blocks, byte for byte [SOURCE]
+
+Tool: `native/kernel/tools/ck_gsp_boot_args_encode.c` (hosted C, no
+dependencies). `make -C native/kernel gsp-bootargs-test` runs the self-test
+(142 checks: compiler layouts, golden constants, round trips, every single-
+field mutation refused); it is part of `make test`. Modes `wprmeta`, `libos`,
+`logbuf`, `rmargs`, `mqtable`, `radix3` write a block; `check-wprmeta`,
+`check-libos`, `check-rmargs` refuse any block that is not the fresh-boot
+GB10B shape; `layout` prints the offsets. Nothing is sent anywhere.
+
+What the driver puts in system memory before it sends the SEC2 message of
+section 10, every line from tag 580.173.02 (file:line in the tool header):
+
+1. **GspFwWprMeta**, 256 bytes in one 4 KiB cached page. Host-filled fields
+   on GB10B: magic `0xdc3aae21371a60b3`, revision 1; bootloader = the
+   GspRmBoot PROD image (196,608 bytes, 4 KiB-aligned copy) with the
+   descriptor offsets code 0xb000, data 0xa00, manifest 0x0; the GSP-RM ELF
+   size and the physical address of the radix-3 root page; the signature
+   buffer (256-aligned, size rounded up to 256); `gspFwHeapSize` 133 MiB;
+   `nonWprHeapSize`, `frtsSize`, `vgaWorkspaceSize`, `pmuReservedSize`, VF
+   partition count all 0 on GB10B; optional crash-report queue; flags 0
+   (`SCAN_RECOVERY_MARGIN` only on a retry with ECC disabled). Every FB
+   layout field (`gspFwRsvdStart` … `vgaWorkspaceOffset`), `bootCount` and
+   `verified` stay 0: the FMC/ACR fill them and set `verified` to
+   `0xa0a0a0a0a0a0a0a0`, which the host later checks.
+   Heap arithmetic: GB10B is ZERO_FB (memory size counted as 1 GB), so the
+   heap is OS carveout 22 MiB + base 14 MiB + 1 MiB + 96 MiB = 133 MiB,
+   clamped to at least 88 MiB; a registry override would be clamped to
+   [88, 280] MiB. The tool refuses anything outside that range.
+2. **Libos init arguments**, one 4 KiB **uncached** page of 32-byte entries
+   (id8, pa, size, kind, loc). GB10B (libos 3, release build, kernel logging
+   on) has exactly eight: LOGINIT, LOGINTR, LOGRM, LOGMNOC, LOGDBG (64 KiB
+   each), LOGROOT (4 KiB), LOGKRNL (64 KiB), then RMARGS (4 KiB, the
+   `GSP_ARGUMENTS_CACHED` page); all CONTIGUOUS/SYSMEM; id8 is the name
+   packed big-endian (RMARGS = `0x524d41524753`). Order and sizes are
+   refused if they differ.
+3. **Each log buffer** (cached, contiguous, 4 KiB aligned, zeroed) starts
+   with an 8-byte put pointer followed by its own page table: one physical
+   address per 4 KiB page. The init-argument `pa` is that first PTE.
+4. **GSP_ARGUMENTS_CACHED**, 88 bytes in one 4 KiB cached page: shared
+   message-queue buffer address, 129 page-table entries, command queue at
+   offset 4096, status queue at 266,240 (page table 4 KiB + command queue
+   256 KiB); suspend/resume fields 0; `bDmemStack` 1; profiler 0; sysmem
+   heap address and size (512 MiB default on ZERO_FB, contiguous uncached).
+   The RPC shared buffer is 129 pages: page 0 holds the addresses of all 129
+   pages (itself first), then 64 pages of command queue and 64 of status
+   queue. The element format inside those queues is item 4 of section 8.
+5. **Radix-3 page table** for the ELF: 4 KiB pages, 512 entries each, three
+   table levels then the data; level 0 must be one page (so up to 512 GiB).
+   For the pinned 75,012,080-byte container: 18,314 data pages, 36 level-2
+   pages, 1 level-1, 1 level-0, tables 155,648 bytes, data at offset
+   0x26000, allocation 75,169,792 bytes. The WPR meta carries the ELF size
+   and the level-0 page address.
+
+Where these sit in the SEC2 flow: the `GSP_FMC_BOOT_PARAMS` page (section
+10) carries both addresses: the WprMeta at offset 16 (`bootGspRmParams.
+gspRmDescOffset`, size 256 at offset 12) and the libos init-argument page at
+offset 48 (`gspRmParams.bootArgsOffset`, DMA target at 40;
+kernel_gsp_gh100.c:457-461). The FMC hands the first to ACR/the bootloader
+and the second to GSP-RM as its libos boot arguments; GSP-RM then finds the
+RMARGS entry, reads `GSP_ARGUMENTS_CACHED` and maps the message queues.
+Everything above
+is what Linux prepares; whether the GSP-FMC on this board accepts exactly
+this shape without Linux ever having run is INFERRED (medium) until the
+attended window measures it. Caching note (section 4 of the hardware manual
+skill): the libos page and the sysmem heap are the only **uncached** blocks;
+the WprMeta, RMARGS, log buffers, radix-3 tables and queue buffer are cached
+sysmem in the driver, so a native port must keep the same attributes or
+flush explicitly.

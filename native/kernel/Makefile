@@ -1066,8 +1066,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -1510,6 +1510,21 @@ gsp-bindata-test: $(GSP_BINDATA_TOOL)
 	  echo "$$out" | grep -q '^desc UCODE_DESC_PROD version=5 manifest=0x0+0xa00 monitor_data=0xa00+0xa600 monitor_code=0xb000+0x24d00 monitor_enabled=1 ' || { echo "CK_GSP_BINDATA_PIN: FAIL (descriptor differs from the pin)"; exit 1; }; \
 	  echo "CK_GSP_BINDATA_PIN: PASS"; \
 	else echo "CK_GSP_BINDATA_PIN: NOT_RUN ($(GSP_BINDATA_DIR) lacks the two GB10B bindata files)"; fi
+
+# ---- host encoder/decoder for the GSP-RM boot-argument blocks (aienos#286 cut C host work) ----
+# Byte-exact GspFwWprMeta (256), libos init-argument page, log-buffer PTE prefix,
+# GSP_ARGUMENTS_CACHED page, RPC shared-buffer page table and radix-3 ELF table, with
+# the GB10B values traced from the pinned driver (heap 133 MiB, 7 logs + RMARGS, 129 PTEs).
+# Self-test = compiler layouts, golden constants, round trips, every mutation refused.
+# Never loads anything. docs/GB10_FIRMWARE_INVENTORY.md section 12.
+GSP_BOOTARGS_TOOL := $(OUT)/host/ck_gsp_boot_args_encode
+$(GSP_BOOTARGS_TOOL): $(KDIR)/tools/ck_gsp_boot_args_encode.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -o $@ $(KDIR)/tools/ck_gsp_boot_args_encode.c
+gsp-bootargs-encode: $(GSP_BOOTARGS_TOOL)
+gsp-bootargs-test: $(GSP_BOOTARGS_TOOL)
+	$(GSP_BOOTARGS_TOOL) selftest | grep -E '^CK_GSP_BOOT_ARGS_ENCODE_SELFTEST: (PASS|FAIL)' | grep -q PASS || { $(GSP_BOOTARGS_TOOL) selftest | grep -E 'FAIL|SELFTEST'; exit 1; }
+	@$(GSP_BOOTARGS_TOOL) selftest | tail -1
 
 # ---- host checker for the AIENOS_CK_SCREEN gate (scripts/qemu_ck_screen_test.sh) ----
 FB_CHECK_TOOL := $(OUT)/host/ck_fb_check
