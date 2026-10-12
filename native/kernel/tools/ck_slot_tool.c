@@ -8,6 +8,7 @@
  *   ck_slot_tool make-manifest --image F --generation N --out M
  *       [--policy-generation N] [--min-rollback N] [--commit HEX40]
  *       [--provenance TEXT] [--timestamp N]       unsigned manifest (signature zero)
+ *   ck_slot_tool show M                        print the manifest fields (structural check only)
  *   ck_slot_tool tbs M --out F                   the 448 to-be-signed bytes, for an
  *       offline signer: openssl pkeyutl -sign -inkey owner_root.pem -rawin -in F -out SIG
  *   ck_slot_tool attach-sig M --sig SIG --out M2 --pubkey HEX64
@@ -680,6 +681,21 @@ static int load_manifest(const char *path, struct ck_slot_manifest *m)
     return 0;
 }
 
+static int cmd_show(int argc, char **argv)
+{
+    struct ck_slot_manifest m;
+    const char *why;
+    if (argc < 3)
+        return refuse("show M");
+    if (load_manifest(argv[2], &m) != 0)
+        return 1;
+    print_manifest(&m);
+    if (ck_slot_manifest_check(&m, &why) != 0)
+        return refuse(why);
+    printf("structure: OK (signature not checked; use verify)\n");
+    return 0;
+}
+
 static int cmd_tbs(int argc, char **argv)
 {
     struct ck_slot_manifest m;
@@ -1032,6 +1048,8 @@ int main(int argc, char **argv)
         return selftest();
     if (strcmp(argv[1], "make-manifest") == 0)
         return cmd_make_manifest(argc, argv);
+    if (strcmp(argv[1], "show") == 0)
+        return cmd_show(argc, argv);
     if (strcmp(argv[1], "tbs") == 0)
         return cmd_tbs(argc, argv);
     if (strcmp(argv[1], "sign-test") == 0)
