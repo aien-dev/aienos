@@ -249,11 +249,11 @@ code into AIENOS would require carrying the MIT notice (none was copied here).
   firmware metadata" by `ck_gsp_fw_inspect`. The next host-only steps that do
   not need the machine: (a) a small extractor over the two public
   `g_bindata_*_GB10B.c` files that writes the eight arrays as files with
-  digests (our own tool, no Python); (b) a C struct definition and encoder for
-  `NVDM_PAYLOAD_COT` and the MCTP/NVDM headers with fixture tests, from
-  `src/nvidia/inc/kernel/gpu/fsp/kern_fsp_cot_payload.h`,
-  `fsp/fsp_nvdm_format.h`, `fsp/fsp_mctp_format.h` (not yet read); (c) the
-  `GspFwWprMeta` and GSP-FMC argument layouts from the same source tree.
+  digests (our own tool, no Python); (b) DONE 2026-10-12: the encoder, decoder
+  and refusal tests for `NVDM_PAYLOAD_COT`, the MCTP/NVDM headers, the EMEM
+  packet and `GSP_FMC_BOOT_PARAMS` are `ck_gsp_cot_encode` (section 10);
+  (c) remaining: an encoder for `GspFwWprMeta` (256 bytes, layout known, the
+  GH100 populate values not yet traced) and the libos init-argument block.
 - The machine-side part of cut C (first SEC2 command, FMC boot, GSP-RM init
   done) is an attended-window item under the P08 rules: documented cold power
   state, no prior Linux GPU initialization, camera, abort rule, and the
@@ -261,11 +261,17 @@ code into AIENOS would require carrying the MIT notice (none was copied here).
 
 ## 8. Known unknowns
 
-1. [UNKNOWN] The exact `NVDM_PAYLOAD_COT` field layout, `cotPayloadVersion`,
-   `cotPayloadSignatureSize` and `cotPayloadPublicKeySize` values for GB10B
-   (set in the SEC2 object constructor; not read).
-2. [UNKNOWN] The `GspFwWprMeta`, GSP-FMC argument block (`pGspFmcArgumentsCached`)
-   and libos init-argument layouts this FMC build expects.
+1. RESOLVED 2026-10-12 [SOURCE]: the `NVDM_PAYLOAD_COT` layout is 860 packed
+   bytes, GB10B uses version 1, signature and key sizes 384, hash 48; the
+   whole wire format is in section 10 and checked by `ck_gsp_cot_encode`.
+2. [PARTLY RESOLVED 2026-10-12] `GSP_FMC_BOOT_PARAMS` (88 bytes, section 10)
+   and the `GspFwWprMeta` struct (256 bytes, `gsp/gsp_fw_wpr_meta.h`, magic
+   `0xdc3aae21371a60b3`, revision 1; GB10B zeroes `vgaWorkspaceSize`,
+   `pmuReservedSize` and `nonWprHeapSize`, kernel_gsp_gb10b.c:32-55) are
+   known. [UNKNOWN] the values `kgspPopulateWprMeta_GH100` computes (radix3
+   ELF placement, heap sizes, WPR carveout) and the libos init-argument block
+   (`gsp_init_args.h` gives `GSP_ARGUMENTS_CACHED`; the libos block itself not
+   traced).
 3. [UNKNOWN] What SEC2 requires to be already true when the first command
    arrives (its own firmware loaded by the SoC boot chain? clocks? power
    state?), and whether UEFI leaves the GPU in that state at AIENOS entry.
@@ -293,9 +299,95 @@ binary), kernel_gsp_gh100.c (prepare, bootstrap), kernel_gsp_gb100.c,
 kernel_gsp_gb10b.c, kernel_gsp_booter.c and kernel_gsp_fwsec.c (grep only),
 kernel_sec2_gb10b.c, g_kernel_gsp_nvoc.c/.h, g_kernel_sec2_nvoc.c,
 g_kern_fsp_nvoc.c (property tables only), the two GB10B bindata files
-(metadata comments only), README.md, COPYING, the firmware copyright file. Not
-read: kern_fsp_cot_payload.h, the NVDM/MCTP format headers, kernel_sec2.c
-(`ksec2SendMessage`), the GSP RPC layer, dev_sec_pri.h register values, ACR or
-GSP internals (not available). No Context7 or web manual covers this layer; the
+(metadata comments only), README.md, COPYING, the firmware copyright file;
+for section 10 also kern_fsp_cot_payload.h, fsp_nvdm_format.h,
+fsp_mctp_format.h, fsp_emem_channels.h, kernel_sec2.c (`ksec2SendMessage`,
+`ksec2PollForCanSend`), g_kernel_sec2_nvoc.c/.h (version, sizes, SEID),
+gspifpub.h, gsp_init_args.h, gsp_fw_wpr_meta.h, kernel_gsp_gh100.c
+(`kgspSetupGspFmcArgs`), and published/blackwell/gb10b dev_sec_pri.h,
+dev_gsp.h, dev_falcon_v4.h. Not read: the GSP RPC layer, the libos
+init-argument block, ACR or GSP internals (not available). No Context7 or web manual covers this layer; the
 DGX Spark user guide is silent on GSP firmware loading (DOCS SILENT on native
 GSP bring-up).
+
+## 10. The SEC2 chain-of-trust message, byte for byte [SOURCE]
+
+Everything in this section is read from open-gpu-kernel-modules tag
+580.173.02 and mirrored by `native/kernel/tools/ck_gsp_cot_encode.c`
+(`make -C native/kernel gsp-cot-test`, part of `make test`). Nothing here was
+sent to the device.
+
+Transport. NVDM (NVIDIA Data Model) over MCTP over SEC2 EMEM channel 0,
+1024 bytes (`fsp/fsp_emem_channels.h:9-11`; `kernel_sec2_gb10b.c:36-41`,
+`:322-333`). A packet is two header dwords then the payload
+(`kernel_sec2.c:50-52`, `:305-325`):
+
+| dword | field | value for the boot message | source |
+|---|---|---|---|
+| 0 | MCTP transport header: SOM bit 31, EOM bit 30, SEQ 29:28, TO 27, TAG 26:24, SEID 23:16, DEID 15:8, RSVD 7:4, VERSION 3:0 | `0xC0000000` (SOM=1, EOM=1, SEQ=0, SEID=0; the driver sets only those four) | `fsp_mctp_format.h:8-16`; `kernel_sec2.c:319-321`; SEID 0 for GB10B `g_kernel_sec2_nvoc.c:879-888`, `g_kernel_sec2_nvoc.h:907-909` |
+| 1 | NVDM header: TYPE 6:0 = 0x7e (vendor PCI), IC 7 = 0, VENDOR_ID 23:8 = 0x10de, NVDM_TYPE 31:24 | `0x1410DE7E` (NVDM_TYPE_COT = 0x14) | `fsp_mctp_format.h:17-22`; `fsp_nvdm_format.h:14`; `kernel_sec2_gb10b.c:391-402` |
+
+A message longer than 1016 bytes would continue in packets that carry only
+the MCTP dword with SOM=0 and SEQ = (n mod 4) (`kernel_sec2.c:330-357`); the
+boot message is 860 bytes, so it is always one packet, and the driver sends
+only this one command on the channel (`kernel_sec2_gb10b.c:719-722`).
+
+Payload `NVDM_PAYLOAD_COT`, `#pragma pack(1)`, 860 bytes
+(`src/nvidia/inc/kernel/gpu/fsp/kern_fsp_cot_payload.h:12-29`):
+
+| offset | size | field | GB10B value | source |
+|---|---|---|---|---|
+| 0 | 2 | version | 1 | `g_kernel_sec2_nvoc.c:478-482` |
+| 2 | 2 | size | 860 (`sizeof`) | `kernel_sec2_gb10b.c:580-581` |
+| 4 | 8 | gspFmcSysmemOffset | physical address of the GSP-FMC image in system memory | `:507` |
+| 12 | 8 | frtsSysmemOffset | 0 (never set) | `:578` zero-fill |
+| 20 | 4 | frtsSysmemSize | the GSP-FMC image size (195,912), sic | `:508` |
+| 24 | 8 | frtsVidmemOffset | 0 | `:578` |
+| 32 | 4 | frtsVidmemSize | 0 | `:578` |
+| 36 | 48 | hash384 | `UCODE_HASH` array | `:514` |
+| 84 | 384 | publicKey | `UCODE_PKEY` array | `:526-527`; size `g_kernel_sec2_nvoc.c:475-476` |
+| 468 | 384 | signature | `UCODE_SIG` array | `:519-520`; size `g_kernel_sec2_nvoc.c:472-473` |
+| 852 | 8 | gspBootArgsSysmemOffset | physical address of `GSP_FMC_BOOT_PARAMS` | `:532`, `:241-258` |
+
+The packet is therefore 868 bytes. It is written at EMEM offset 0 with the
+write auto-increment bit, one dword at a time, then QUEUE_HEAD(0) = 0 and
+QUEUE_TAIL(0) = 864 (padded size minus one dword) (`kernel_sec2_gb10b.c:
+700-732`, `:108-152`, `:160-210`). The channel may be written only while
+HEAD == TAIL (`:344-356`, polled `kernel_sec2.c:605-640`); the command counts
+as handled once FALCON_MAILBOX0 no longer reads `0xc001cafe` (`:285-297`);
+before the boot the driver also waits until the GSP falcon's HWCFG2 register
+reads non-zero and not the `0xBADF41xx` "target locked" pattern (`:262-281`).
+Register addresses for GB10B: `published/blackwell/gb10b/dev_sec_pri.h`
+(MAILBOX0/1, QUEUE_HEAD/TAIL(i), EMEMC(i), EMEMD(i)), `dev_gsp.h` (NV_PGSP
+base), `dev_falcon_v4.h` (HWCFG2); the tool does not use them.
+
+Boot arguments the payload points at: `GSP_FMC_BOOT_PARAMS`
+(`src/nvidia/arch/nvalloc/common/inc/gsp/gspifpub.h`), natural C layout, 88
+bytes on the LP64 ABI the driver and this host share (the self-test checks the
+offsets against the compiler); filled by `kgspSetupGspFmcArgs_GH100`
+(`kernel_gsp_gh100.c:415-470`), allocated 4 KiB aligned (`:164`):
+
+| offset | size | field | fresh-boot value |
+|---|---|---|---|
+| 0 | 4 | initParams.regkeys | 0 unless CC or NVLink proxy keys |
+| 8 | 4 | bootGspRmParams.target | DMA target of the descriptor (0 FB, 1 coherent sysmem, 2 non-coherent sysmem) |
+| 12 | 4 | bootGspRmParams.gspRmDescSize | 256 (`sizeof GspFwWprMeta`) |
+| 16 | 8 | bootGspRmParams.gspRmDescOffset | physical address of the `GspFwWprMeta` |
+| 24 | 8 | bootGspRmParams.wprCarveoutOffset | not set by the driver (0) |
+| 32 | 4 | bootGspRmParams.wprCarveoutSize | not set (0) |
+| 36 | 1 | bootGspRmParams.bIsGspRmBoot | 1 |
+| 40 | 4 | gspRmParams.target | DMA target of the libos init arguments |
+| 48 | 8 | gspRmParams.bootArgsOffset | physical address of the libos init arguments |
+| 56 | 24 | gspSpdmParams | only with SPDM (assumed off) |
+| 80 | 8 | gspRmMemParams.flushSysmemAddrVal{Lo,Hi} | only with CC (0) |
+
+INFERRED, enforced by the tool but not a driver check: the image address is
+4 KiB aligned (the driver maps `NV_ALIGN_UP(size, 0x1000)` bytes of
+page-granular system memory, `kernel_sec2_gb10b.c:489-495`) and every
+system address fits the 41-bit DMA window `/proc/driver/nvidia/gpus` reports
+for this GPU (section 2; `--dma-bits` overrides).
+
+Evidence 2026-10-12 on the box: `CK_GSP_COT_ENCODE_SELFTEST: PASS` (80 checks:
+both layouts against the compiler, golden header words, encode/decode round
+trips, 46 field mutations and every header truncation refused by name), same
+under ASan/UBSan.

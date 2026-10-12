@@ -1066,8 +1066,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -1467,6 +1467,19 @@ gsp-fw-inspect-test: $(GSP_FW_TOOL)
 	  echo "$$out" | grep -E '^(fwversion|build_id|signature_section|sha256_file|RESULT)'; \
 	  echo "$$out" | grep -q '^sha256_file $(GSP_FW_SHA256)$$' && echo "CK_GSP_FW_INSPECT_PIN: PASS" || { echo "CK_GSP_FW_INSPECT_PIN: FAIL (digest differs from the pin)"; exit 1; }; \
 	else echo "CK_GSP_FW_INSPECT_PIN: NOT_RUN ($(GSP_FW_FILE) absent)"; fi
+
+# ---- host encoder/decoder for the SEC2 chain-of-trust boot message (aienos#286 cut C/D host work) ----
+# Byte-exact NVDM-over-MCTP packet and GSP_FMC_BOOT_PARAMS layouts from the pinned
+# driver source; self-test = layouts, golden headers, round trips, every mutation refused.
+# Never loads anything. docs/GB10_FIRMWARE_INVENTORY.md section 10.
+GSP_COT_TOOL := $(OUT)/host/ck_gsp_cot_encode
+$(GSP_COT_TOOL): $(KDIR)/tools/ck_gsp_cot_encode.c $(NATIVE)/argus/sha256.c $(NATIVE)/argus/sha256.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -I$(NATIVE)/argus -o $@ $(KDIR)/tools/ck_gsp_cot_encode.c $(NATIVE)/argus/sha256.c
+gsp-cot-encode: $(GSP_COT_TOOL)
+gsp-cot-test: $(GSP_COT_TOOL)
+	$(GSP_COT_TOOL) selftest | grep -E '^CK_GSP_COT_ENCODE_SELFTEST: (PASS|FAIL)' | grep -q PASS || { $(GSP_COT_TOOL) selftest | grep -E 'FAIL|SELFTEST'; exit 1; }
+	@$(GSP_COT_TOOL) selftest | tail -1
 
 # ---- host checker for the AIENOS_CK_SCREEN gate (scripts/qemu_ck_screen_test.sh) ----
 FB_CHECK_TOOL := $(OUT)/host/ck_fb_check
