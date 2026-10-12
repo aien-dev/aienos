@@ -80,6 +80,17 @@
 #            QEMU exit 0; M1 checks. Separate verdict AIENOS_CK_LIFECYCLE_INFER:
 #            NOT_RUN (never a silent pass) when the model file, cargo or the Rust
 #            target aarch64-unknown-none is missing; TCG needs ~25 min for it
+#   row 179  P06 cut 4 (test-keys boot 2): `remember prefer short notes` creates
+#            the Cortex journal (one sealed header transaction) and appends one
+#            CX_CLAIM record (one sealed transaction); `facts` in the same boot
+#            lists it with the chain verified; evidence counts remembers/facts;
+#            the journal closes (heap frames returned) before the stop order
+#   row 180  production genesis boot (boot 3): the same two verbs on the
+#            production Store after the approved note; stop order requests=9
+#   row 181  cold production boot (boot 4): `facts` alone answers the fact from
+#            the disk (records=1, digest and chain re-verified at open); the fact
+#            is never typed in that boot; the Store opens at generation 6 (journal open at 8:
+#            note 4, journal header 5, fact 6, boot record 7, continuity resume 8)
 #   build    the default (diagnostic) image carries no lifecycle; CK_SERVICE is
 #            refused with CK_CONSOLE_SESSION, CK_QEMU_UNSAFE_DMA and a CK_TEST_*
 #            flag; CK_SERVICE_TEST_KEYS is refused with CK_HARDWARE_STAGING
@@ -200,6 +211,8 @@ drive_ready() {
     ser_line "task to be denied"; ser_line deny
     ser_line "task to be cancelled"; ser_line cancel
     ser_line "$(printf 'x%.0s' $(seq 97))"
+    ser_line "remember prefer short notes"; ser_wait '^lifecycle: (remembered|REFUSED verb=remember)'
+    ser_line facts; ser_wait '^lifecycle: (facts records=|facts none|REFUSED verb=facts)'
     ser_line evidence
     ser_line shutdown
 }
@@ -209,6 +222,8 @@ drive_unlock() {
     ser_line "unlock ${secret_ok}"; ser_wait '^(lifecycle: unlock ok|lifecycle: REFUSED verb=unlock)'
     ser_line status
     ser_line "task write a note"; ser_line approve; ser_wait '^lifecycle: (approve committed|REFUSED verb=approve)'
+    ser_line "remember prefer short notes"; ser_wait '^lifecycle: (remembered|REFUSED verb=remember)'
+    ser_line facts; ser_wait '^lifecycle: (facts records=|facts none|REFUSED verb=facts)'
     ser_line evidence
     ser_line shutdown
 }
@@ -236,6 +251,7 @@ drive_relock() {
     ser_line status
     ser_line "unlock ${secret_ok}"; ser_wait '^(lifecycle: unlock ok|lifecycle: REFUSED verb=unlock)'
     ser_line status
+    ser_line facts; ser_wait '^lifecycle: (facts records=|facts none|REFUSED verb=facts)'
     ser_line evidence
     ser_line shutdown
 }
@@ -268,7 +284,7 @@ rcheck 161 "task refused while locked" '^lifecycle: REFUSED verb=task state=lock
 rcheck 161 "unlock refused, still locked" '^lifecycle: REFUSED verb=unlock state=locked reason="production key source refused: still locked"'
 rcheck 161 "unlock asked the production key source again" '^store: unlock REFUSED proof=keyed step="production Store key source" rc=-2002'
 rcheck 161 "status answered" '^lifecycle: state=locked store=locked pending=- requests='
-rcheck 161 "help answered" '^lifecycle: verbs: status unlock \[<64-hex recovery secret>\] task <text> prompt <text> approve deny cancel recall evidence help shutdown$'
+rcheck 161 "help answered" '^lifecycle: verbs: status unlock \[<64-hex recovery secret>\] task <text> prompt <text> approve deny cancel recall remember <text> facts evidence help shutdown$'
 rcheck 161 "evidence answered" '^lifecycle: evidence requests=5 refused=2 invalid=0 tasks=0 approved=0'
 rcheck 162 "stop order with no Store" '^lifecycle: stop order store=was-locked nvme=released state=stop requests=6$'
 before 162 "locked lifecycle ready < NVMe revoke (revoke only at the stop order)" '^lifecycle: ready state=locked' '^dma_gate: nvme bus master revoked'
@@ -295,8 +311,15 @@ rcheck 165 "approve with nothing pending refused" '^lifecycle: REFUSED verb=appr
 rcheck 165 "deny drops" '^lifecycle: denied state=ready$'
 rcheck 165 "cancel drops" '^lifecycle: cancelled state=ready$'
 rcheck 166 "overlong line refused whole" '^lifecycle: REFUSED verb=invalid reason="line longer than 96 bytes"$'
-rcheck 166 "evidence counts" '^lifecycle: evidence requests=10 refused=2 invalid=0 tasks=3 approved=1 denied=1 cancelled=1 overlong=1 last_commit_gen=[0-9]+ last_id=[0-9a-f]{8} prompts=0 replies=0 gen_cancelled=0 gen_failed=0 recalls=0 inference=none$'
-rcheck 167 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=11$'
+rcheck 166 "evidence counts" '^lifecycle: evidence requests=12 refused=2 invalid=0 tasks=3 approved=1 denied=1 cancelled=1 overlong=1 last_commit_gen=[0-9]+ last_id=[0-9a-f]{8} prompts=0 replies=0 gen_cancelled=0 gen_failed=0 recalls=0 inference=none remembers=1 facts=1 cortex=open records=1$'
+rcheck 167 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=13$'
+rcheck 179 "remember created the journal (header transaction, no records yet)" '^lifecycle: cortex open records=0 chunks=1 journal_bytes=32 store_gen=[0-9]+ heap_used_kib=[0-9]+ chain=ok$'
+rcheck 179 "remembered as record 1 (one sealed transaction)" '^lifecycle: remembered id=1 t=1 store_gen=[0-9]+ bytes=18 text="prefer short notes"$'
+rcheck 179 "facts lists the fact in the same boot" '^lifecycle: fact id=1 t=1 store_gen=[0-9]+ text="prefer short notes"$'
+rcheck 179 "facts summary, chain verified" '^lifecycle: facts records=1 shown=1 journal_bytes=192 chain=ok$'
+rcheck 179 "journal closed first in the stop order" '^lifecycle: cortex closed records=1 appends=2 reads=[0-9]+ refused=0 heap_peak_kib=[0-9]+$'
+before 179 "cortex closed < stop order line" '^lifecycle: cortex closed' '^lifecycle: stop order store=closed'
+rabsent 179 "no refusal of remember or facts" '^lifecycle: REFUSED verb=(remember|facts)'
 before 167 "lifecycle ready < NVMe revoke (revoke only at the stop order)" '^lifecycle: ready state=ready' '^dma_gate: nvme bus master revoked'
 before 167 "NVMe revoke < stop order line" '^dma_gate: nvme bus master revoked' '^lifecycle: stop order store=closed'
 before 167 "stop order < stage result" '^lifecycle: stop order store=closed' '^stage lifecycle: ok rc=0$'
@@ -325,7 +348,12 @@ before 171 "PROVISIONED < lifecycle unlock ok" '^continuity: PROVISIONED' '^life
 rcheck 171 "status reports continuity" '^lifecycle: state=ready store=open pending=- requests=[0-9]+ continuity=provisioned agent=[0-9a-f]{16} incarnation=1 subject_seq=1$'
 unlock_agent="$(grep -oE '^continuity: PROVISIONED agent=[0-9a-f]{64}' "${top}/unlock/serial.txt" | head -1 | sed 's/.*agent=//')"
 [[ -n "${unlock_agent}" ]] || unlock_agent="NO_AGENT"
-rcheck 168 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=7$'
+rcheck 168 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=9$'
+rcheck 180 "production Store: journal created after the note (header at generation 5)" '^lifecycle: cortex open records=0 chunks=1 journal_bytes=32 store_gen=5 heap_used_kib=[0-9]+ chain=ok$'
+rcheck 180 "production Store: fact committed at generation 6" '^lifecycle: remembered id=1 t=1 store_gen=6 bytes=18 text="prefer short notes"$'
+rcheck 180 "production Store: facts lists it" '^lifecycle: facts records=1 shown=1 journal_bytes=192 chain=ok$'
+rcheck 180 "evidence counts the two verbs" '^lifecycle: evidence requests=8 refused=1 invalid=0 tasks=1 approved=1 denied=0 cancelled=0 overlong=0 last_commit_gen=4 last_id=[0-9a-f]{8} prompts=0 replies=0 gen_cancelled=0 gen_failed=0 recalls=0 inference=none remembers=1 facts=1 cortex=open records=1$'
+rabsent 180 "no refusal of remember or facts" '^lifecycle: REFUSED verb=(remember|facts)'
 before 168 "stop order < stage result" '^lifecycle: stop order store=closed' '^stage lifecycle: ok rc=0$'
 rabsent 168 "no panic or fault" '^report_kind: (panic|fault)'
 if [[ "${qemu_status}" == 0 ]]; then ok 168 "QEMU exit 0"; else bad 168 "QEMU exit ${qemu_status}"; fi
@@ -343,9 +371,9 @@ rcheck 169 "lifecycle still locked after the wrong secret" '^lifecycle: REFUSED 
 rcheck 169 "status still locked" '^lifecycle: state=locked store=locked pending=- requests=2 continuity=none$'
 rabsent 169 "not reformatted" '^store: blank disk'
 rcheck 169 "key source line: recovery keyslot resume" '^store: key source=recovery-keyslot genesis=0 '
-rcheck 169 "store opened at generation 4 (keyslot + boot record + continuity genesis + note), boot_count 1" '^store: opened generation=4 boot_count=1 prev_commit=[0-9a-f]+ anchor=valid-resume$'
-rcheck 169 "store committed generation 5 boot 2" '^store: committed generation=5 boot_count=2$'
-rcheck 169 "unlock ok, no genesis" '^store: unlock ok source=recovery-keyslot slot=1 genesis=0 generation=5 boot_count=2$'
+rcheck 169 "store opened at generation 6 (keyslot + boot record + continuity genesis + note + journal header + fact), boot_count 1" '^store: opened generation=6 boot_count=1 prev_commit=[0-9a-f]+ anchor=valid-resume$'
+rcheck 169 "store committed generation 7 boot 2" '^store: committed generation=7 boot_count=2$'
+rcheck 169 "unlock ok, no genesis" '^store: unlock ok source=recovery-keyslot slot=1 genesis=0 generation=7 boot_count=2$'
 rcheck 172 "ALLEN subject RESTORED sequence 1" '^allen: RESTORED subject=[0-9a-f]{64} sequence=1 lineage=[0-9a-f]{64} intents=0 active=0 knowledge=0$'
 rcheck 172 "identity RESUMED incarnation 2, same agent as the genesis boot" "^continuity: RESUMED agent=${unlock_agent} incarnation=2 sequence=2 cortex=0 branches=1\$"
 rabsent 172 "no second genesis" '^continuity: (PROVISIONED|genesis)'
@@ -354,8 +382,16 @@ before 172 "unlock ok < RESUMED" '^store: unlock ok' '^continuity: RESUMED'
 before 172 "RESUMED < lifecycle unlock ok" '^continuity: RESUMED' '^lifecycle: unlock ok'
 rcheck 172 "status reports resumed" "^lifecycle: state=ready store=open pending=- requests=[0-9]+ continuity=resumed agent=${unlock_agent:0:16} incarnation=2 subject_seq=1\$"
 rcheck 169 "lifecycle unlocked to ready" '^lifecycle: unlock ok state=ready$'
-rcheck 169 "evidence: one refused unlock" '^lifecycle: evidence requests=5 refused=1 invalid=0 tasks=0 approved=0'
-rcheck 169 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=6$'
+rcheck 169 "evidence: one refused unlock" '^lifecycle: evidence requests=6 refused=1 invalid=0 tasks=0 approved=0'
+rcheck 169 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=7$'
+rcheck 181 "cold boot: journal opened from the disk, chain verified (1 record, 2 chunks)" '^lifecycle: cortex open records=1 chunks=2 journal_bytes=192 store_gen=8 heap_used_kib=[0-9]+ chain=ok$'
+rcheck 181 "cold boot: the fact answers from the disk, not restated" '^lifecycle: fact id=1 t=1 store_gen=6 text="prefer short notes"$'
+rcheck 181 "cold boot: facts summary" '^lifecycle: facts records=1 shown=1 journal_bytes=192 chain=ok$'
+rabsent 181 "cold boot: the fact was never typed in this boot" '^> remember '
+rabsent 181 "cold boot: nothing remembered in this boot" '^lifecycle: remembered '
+rcheck 181 "cold boot: evidence shows facts only" '^lifecycle: evidence requests=6 refused=1 invalid=0 tasks=0 approved=0 denied=0 cancelled=0 overlong=0 last_commit_gen=0 last_id=00000000 prompts=0 replies=0 gen_cancelled=0 gen_failed=0 recalls=0 inference=none remembers=0 facts=1 cortex=open records=1$'
+rcheck 181 "cold boot: journal closed before the stop order" '^lifecycle: cortex closed records=1 appends=0 reads=[0-9]+ refused=0 heap_peak_kib=[0-9]+$'
+before 181 "cold boot: cortex closed < stop order" '^lifecycle: cortex closed' '^lifecycle: stop order store=closed'
 rabsent 169 "no panic or fault" '^report_kind: (panic|fault)'
 if [[ "${qemu_status}" == 0 ]]; then ok 169 "QEMU exit 0"; else bad 169 "QEMU exit ${qemu_status}"; fi
 m1 169
@@ -406,7 +442,7 @@ else
     rabsent 175 "the cancel was not refused" '^lifecycle: REFUSED verb=cancel'
     rabsent 175 "no prompt refused" '^lifecycle: REFUSED verb=prompt'
     rcheck 175 "recall (same boot) reads the reply back through the sealed Store" "${re_recall}"
-    rcheck 176 "evidence counters" '^lifecycle: evidence requests=5 refused=0 invalid=0 tasks=0 approved=1 denied=0 cancelled=0 overlong=0 last_commit_gen=[0-9]+ last_id=[0-9a-f]{8} prompts=2 replies=1 gen_cancelled=1 gen_failed=0 recalls=0 inference=resident$'
+    rcheck 176 "evidence counters" '^lifecycle: evidence requests=5 refused=0 invalid=0 tasks=0 approved=1 denied=0 cancelled=0 overlong=0 last_commit_gen=[0-9]+ last_id=[0-9a-f]{8} prompts=2 replies=1 gen_cancelled=1 gen_failed=0 recalls=0 inference=resident remembers=0 facts=0 cortex=none records=0$'
     rcheck 176 "resident close" '^infer: resident close rc=0 heap_used_kib=[0-9]+ heap_peak_kib=[0-9]+$'
     frames_kept 176 "unload returned every frame"
     before 176 "resident close < unload line" '^infer: resident close rc=0' '^infer: unloaded '
@@ -426,7 +462,7 @@ else
     rcheck 175 "cold boot: continuity RESUMED on the same disk" '^continuity: RESUMED agent=[0-9a-f]{64} incarnation=2 '
     rabsent 175 "cold boot: no second genesis" '^continuity: PROVISIONED'
     rcheck 175 "cold boot: recall returns the approved reply from the disk" "${re_recall}"
-    rcheck 175 "cold boot: evidence shows one recall, no prompt" '^lifecycle: evidence requests=3 refused=0 invalid=0 tasks=0 approved=0 denied=0 cancelled=0 overlong=0 last_commit_gen=0 last_id=00000000 prompts=0 replies=0 gen_cancelled=0 gen_failed=0 recalls=1 inference=resident$'
+    rcheck 175 "cold boot: evidence shows one recall, no prompt" '^lifecycle: evidence requests=3 refused=0 invalid=0 tasks=0 approved=0 denied=0 cancelled=0 overlong=0 last_commit_gen=0 last_id=00000000 prompts=0 replies=0 gen_cancelled=0 gen_failed=0 recalls=1 inference=resident remembers=0 facts=0 cortex=none records=0$'
     frames_kept 175 "cold boot: unload returned every frame"
     rcheck 175 "cold boot: stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=4$'
     rabsent 175 "cold boot: no panic or fault" '^report_kind: (panic|fault)'

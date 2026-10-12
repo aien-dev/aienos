@@ -32,6 +32,10 @@ int main(void)
     CHECK(dec("prompt", &a, &al) == CK_LC_V_INVALID);       /* prompt needs text */
     CHECK(dec("recall", &a, &al) == CK_LC_V_RECALL && al == 0);
     CHECK(dec("recall x", &a, &al) == CK_LC_V_INVALID);     /* no argument allowed */
+    CHECK(dec("remember prefer short notes", &a, &al) == CK_LC_V_REMEMBER && al == 18 && memcmp(a, "prefer short notes", 18) == 0);
+    CHECK(dec("remember", &a, &al) == CK_LC_V_INVALID);     /* remember needs text */
+    CHECK(dec("facts", &a, &al) == CK_LC_V_FACTS && al == 0);
+    CHECK(dec("facts all", &a, &al) == CK_LC_V_INVALID);    /* no argument allowed */
     CHECK(dec("sta\x01tus", &a, &al) == CK_LC_V_INVALID);  /* unprintable */
     {
         char big[CK_LC_LINE_MAX + 2];
@@ -145,5 +149,30 @@ int main(void)
     CHECK(lc.state == CK_LC_QUIESCE && lc.reply_len == 0 && lc.task_len == 0 && lc.pending == CK_LC_PENDING_NONE);
     CHECK(req(&lc, "prompt q") == CK_LC_R_REFUSED && req(&lc, "recall") == CK_LC_R_REFUSED);
     CHECK(lc.requests == 18 && lc.prompts == 7 && lc.refused == 4 && lc.approved == 1);
+
+    /* P06 cut 4: remember and facts. Locked: both refused, nothing counted. */
+    ck_lc_init(&lc);
+    ck_lc_start(&lc, 0);
+    CHECK(req(&lc, "remember prefer short notes") == CK_LC_R_REFUSED && lc.remembers == 0 && strstr(lc.reason, "locked"));
+    CHECK(req(&lc, "facts") == CK_LC_R_REFUSED && lc.facts == 0 && lc.refused == 2);
+    /* ready: remember hands the text to the binding and never changes the
+     * state or the pending task; facts likewise */
+    ck_lc_init(&lc);
+    ck_lc_start(&lc, 1);
+    CHECK(req(&lc, "remember prefer short notes") == CK_LC_R_REMEMBER && lc.state == CK_LC_READY && lc.remembers == 1);
+    CHECK(lc.fact_len == 18 && strcmp(lc.fact, "prefer short notes") == 0 && lc.task_len == 0 && lc.pending == CK_LC_PENDING_NONE);
+    CHECK(req(&lc, "facts") == CK_LC_R_FACTS && lc.facts == 1 && lc.state == CK_LC_READY);
+    CHECK(req(&lc, "task n") == CK_LC_R_OK && lc.state == CK_LC_SERVE);
+    CHECK(req(&lc, "remember second") == CK_LC_R_REMEMBER && lc.remembers == 2 && lc.state == CK_LC_SERVE);
+    CHECK(strcmp(lc.fact, "second") == 0 && lc.fact_len == 6 && strcmp(lc.task, "n") == 0 && lc.pending == CK_LC_PENDING_NOTE);
+    CHECK(req(&lc, "facts") == CK_LC_R_FACTS && lc.facts == 2 && lc.state == CK_LC_SERVE);
+    {
+        char big[CK_LC_LINE_MAX + 1];
+        memset(big, 'f', CK_LC_LINE_MAX); big[CK_LC_LINE_MAX] = 0;
+        memcpy(big, "remember ", 9);
+        CHECK(req(&lc, big) == CK_LC_R_INVALID && lc.invalid == 1 && lc.remembers == 2); /* text 87 > 48 refused whole */
+    }
+    CHECK(req(&lc, "shutdown") == CK_LC_R_STOP && req(&lc, "remember z") == CK_LC_R_REFUSED && req(&lc, "facts") == CK_LC_R_REFUSED);
+    CHECK(lc.requests == 9 && lc.remembers == 2 && lc.facts == 2 && lc.refused == 2 && lc.invalid == 1);
     return ck_t_verdict("CK_LIFECYCLE");
 }

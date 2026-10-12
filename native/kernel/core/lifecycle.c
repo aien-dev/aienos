@@ -28,14 +28,28 @@
  *
  * Continuity (P05 cut 1): every Store open runs svc/continuity_service.c:
  * identity + ALLEN subject provisioned once, restored and resumed on every
- * later boot; a refusal keeps the lifecycle LOCKED. `status` reports it. */
+ * boot; a refusal keeps the lifecycle LOCKED. `status` reports it.
+ *
+ * Remembered facts (P06 cut 4, the N3 "memory-only fact"): `remember <text>`
+ * appends one CX_CLAIM record to the canonical Omega Cortex store whose
+ * journal is the sealed Store (svc/cortex_journal.c, chunks of kind 'CJ');
+ * `facts` reads the journal back (every record digest and the chain
+ * re-verified by Omega's cx_open replay) and lists the newest facts. The
+ * journal opens lazily on the first of either verb (a fresh journal is
+ * created only by `remember`), stays open for the service lifetime and is
+ * closed first in the stop order. Its heap is CK_CX_HEAP_PAGES kernel frames
+ * handed to the Cortex bump allocator and returned at the stop order.
+ * Nothing in memory is authoritative: a cold boot answers `facts` from the
+ * disk, the fact never has to be restated. */
 #include <stddef.h>
 #include <stdint.h>
 #include "ck.h"
+#include "ck_internal.h"
 #include "lifecycle_fsm.h"
 #include "store_boot.h"
 #include "store_sealed.h"
 #include "continuity_service.h"
+#include "cortex_journal.h"
 
 #if !defined(CK_SERVICE)
 #error "lifecycle.c is only part of a CK_SERVICE=1 image"
@@ -61,9 +75,20 @@ static uint8_t g_last_id[32];
 static uint64_t g_last_gen;
 static unsigned g_overlong, g_dropped;
 
+/* The Cortex store over the sealed Store (P06 cuts 3 and 4). */
+#define CK_CX_SUBJECTS 2u        /* subject 0: the owner (facts); 1: reserved for ALLEN */
+#define CK_CX_FACT_SUBJECT 0u
+#define CK_CX_FACTS_SHOWN 16u    /* `facts` lists at most the newest 16 */
+#define CK_CX_HEAP_BYTES (CK_CX_HEAP_PAGES * 4096u)
+static ck_cj g_cj;
+static CxStore g_cx;
+static int g_cx_open;            /* 1 while the journal is open */
+static uint64_t g_cx_heap_pa;    /* 0: no frames held */
+static uint32_t g_cx_refused;    /* remember/facts refused by the Store or Cortex */
+
 static void help(void)
 {
-    ck_puts("lifecycle: verbs: status unlock [<64-hex recovery secret>] task <text> prompt <text> approve deny cancel recall evidence help shutdown\n");
+    ck_puts("lifecycle: verbs: status unlock [<64-hex recovery secret>] task <text> prompt <text> approve deny cancel recall remember <text> facts evidence help shutdown\n");
 }
 
 static void status(void)
@@ -78,11 +103,12 @@ static void evidence(void)
 {
     ck_printf("lifecycle: evidence requests=%u refused=%u invalid=%u tasks=%u approved=%u denied=%u cancelled=%u "
               "overlong=%u last_commit_gen=%llu last_id=%02x%02x%02x%02x prompts=%u replies=%u gen_cancelled=%u "
-              "gen_failed=%u recalls=%u inference=%s\n",
+              "gen_failed=%u recalls=%u inference=%s remembers=%u facts=%u cortex=%s records=%llu\n",
               g_lc.requests, g_lc.refused, g_lc.invalid, g_lc.tasks, g_lc.approved, g_lc.denied, g_lc.cancelled,
               g_overlong, (unsigned long long)g_last_gen, g_last_id[0], g_last_id[1], g_last_id[2], g_last_id[3],
               g_lc.prompts, g_lc.replies, g_lc.gen_cancelled, g_lc.gen_failed, g_lc.recalls,
-              ck_infer_resident() ? "resident" : "none");
+              ck_infer_resident() ? "resident" : "none", g_lc.remembers, g_lc.facts, g_cx_open ? "open" : "none",
+              (unsigned long long)(g_cx_open ? g_cx.n : 0));
 }
 
 /* Commit the pending task as one sealed Store object. Bytes: a fixed header
@@ -248,6 +274,157 @@ static void recall(void)
               kind == CK_LC_REPLY_KIND ? "reply" : "note", sid[0], sid[1], sid[2], sid[3], (unsigned)len, shown);
 }
 
+/* Number of journal chunks ('CJ' objects) the open Store holds: 0 means no
+ * Cortex journal exists on this disk yet. */
+static uint32_t cortex_chunks(const ss_store *s)
+{
+    uint32_t k, n = 0;
+    for (k = 0; k < s->nclaims; k++)
+        if (s->ws->claims[k].c.obj.object_kind == CK_CJ_KIND) n++;
+    return n;
+}
+
+/* Open the Cortex journal once per service lifetime. create: a missing
+ * journal is created (one sealed header transaction); else a missing journal
+ * answers 1 and opens nothing. 0: open. <0: refused (printed). */
+static int cortex_open(int create)
+{
+    ss_store *s = store_boot_store();
+    if (g_cx_open) return 0;
+    if (!s || !ck_store_service_ready()) return -1;
+    if (!create && cortex_chunks(s) == 0) return 1;
+    if (create && !ck_cont_service_writable()) return CK_SB_E_CONTINUITY;
+    if (!g_cx_heap_pa) {
+        uint64_t pa = 0;
+        int rc = ck_mm_frames_alloc(CK_CX_HEAP_PAGES, &pa);
+        if (rc) {
+            ck_printf("lifecycle: cortex REFUSED heap frames=%u rc=%d\n", (unsigned)CK_CX_HEAP_PAGES, rc);
+            return -2;
+        }
+        g_cx_heap_pa = pa;
+    }
+    ck_cx_heap_init((void *)(uintptr_t)g_cx_heap_pa, CK_CX_HEAP_BYTES);
+    ck_cj_init(&g_cj, s);
+    int rc = cx_open_with(&g_cx, &ck_cx_journal_store, &g_cj, "cortex", CK_CX_SUBJECTS, 0);
+    if (rc != CX_OK) {
+        ck_printf("lifecycle: cortex REFUSED open rc=%d chunks=%u\n", rc, cortex_chunks(s));
+        return rc;
+    }
+    g_cx_open = 1;
+    {
+        size_t used = 0, peak = 0, size = 0;
+        ck_cx_heap_stats(&used, &peak, &size);
+        ck_printf("lifecycle: cortex open records=%llu chunks=%u journal_bytes=%u store_gen=%llu heap_used_kib=%u chain=%s\n",
+                  (unsigned long long)g_cx.n, g_cj.nchunks, (unsigned)g_cj.len, (unsigned long long)ss_generation(s),
+                  (unsigned)(used / 1024), cx_verify_chain(&g_cx) == CX_OK ? "ok" : "FAIL");
+    }
+    return 0;
+}
+
+/* remember: one CX_CLAIM record about the owner subject, payload = the text
+ * packed into little-endian 64-bit words, tag = its byte length, t = the
+ * record count + 1 (monotonic across boots: the count is replayed at open),
+ * generation = the Store generation its transaction commits. One record is one
+ * sealed Store transaction: durable before `remembered` is printed. */
+static void remember(void)
+{
+    uint64_t pay[(CK_LC_TASK_MAX + 7) / 8];
+    uint32_t nw = (uint32_t)((g_lc.fact_len + 7) / 8), i;
+    int rc = cortex_open(1);
+    if (rc == CK_SB_E_CONTINUITY || (rc == 0 && !ck_cont_service_writable())) {
+        g_lc.refused++; g_cx_refused++;
+        ck_printf("lifecycle: REFUSED verb=remember rc=%d state=%s reason=\"continuity read-only (degraded mount)\"\n",
+                  CK_SB_E_CONTINUITY, ck_lc_state_name(g_lc.state));
+        return;
+    }
+    if (rc) {
+        g_lc.refused++; g_cx_refused++;
+        ck_printf("lifecycle: REFUSED verb=remember rc=%d state=%s reason=\"cortex journal not open\"\n", rc,
+                  ck_lc_state_name(g_lc.state));
+        return;
+    }
+    for (i = 0; i < nw; i++) pay[i] = 0;
+    for (i = 0; i < g_lc.fact_len; i++) pay[i / 8] |= (uint64_t)(uint8_t)g_lc.fact[i] << (8 * (i % 8));
+    CxHeader h;
+    uint64_t id = 0;
+    for (i = 0; i < sizeof h; i++) ((uint8_t *)&h)[i] = 0;
+    h.cls = CX_CLAIM;
+    h.kind = CX_K_CLAIM;
+    h.subject = CK_CX_FACT_SUBJECT;
+    h.t = g_cx.n + 1;
+    h.generation = ss_generation(store_boot_store()) + 1; /* the generation this append commits */
+    h.tag = g_lc.fact_len;
+    rc = cx_append(&g_cx, &h, pay, nw, &id);
+    if (rc != CX_OK) {
+        g_lc.refused++; g_cx_refused++;
+        ck_printf("lifecycle: REFUSED verb=remember rc=%d state=%s reason=\"cortex append failed, nothing written\"\n", rc,
+                  ck_lc_state_name(g_lc.state));
+        return;
+    }
+    ck_printf("lifecycle: remembered id=%llu t=%llu store_gen=%llu bytes=%u text=\"%s\"\n", (unsigned long long)id,
+              (unsigned long long)h.t, (unsigned long long)ss_generation(store_boot_store()), (unsigned)g_lc.fact_len,
+              g_lc.fact);
+}
+
+/* facts: the newest CK_CX_FACTS_SHOWN owner records, oldest first, each read
+ * back through cx_recall_id (digest re-checked) from the journal replayed at
+ * open; then the whole chain is verified again. */
+static void facts(void)
+{
+    static CxRecord r;
+    static char shown[CK_LC_TASK_MAX + 1];
+    uint64_t id, first;
+    unsigned n = 0;
+    int rc = cortex_open(0);
+    if (rc == 1) {
+        ck_puts("lifecycle: facts none cortex=none records=0\n");
+        return;
+    }
+    if (rc) {
+        g_lc.refused++; g_cx_refused++;
+        ck_printf("lifecycle: REFUSED verb=facts rc=%d state=%s reason=\"cortex journal not open\"\n", rc,
+                  ck_lc_state_name(g_lc.state));
+        return;
+    }
+    first = g_cx.n > CK_CX_FACTS_SHOWN ? g_cx.n - CK_CX_FACTS_SHOWN + 1 : 1;
+    for (id = first; id <= g_cx.n; id++) {
+        uint8_t text[CK_LC_TASK_MAX];
+        size_t len, i;
+        if (cx_recall_id(&g_cx, id, &r) != CX_OK || !r.verified) {
+            ck_printf("lifecycle: fact id=%llu DIGEST_FAIL\n", (unsigned long long)id);
+            continue;
+        }
+        if (r.hdr.cls != CX_CLAIM || r.hdr.kind != CX_K_CLAIM || r.hdr.subject != CK_CX_FACT_SUBJECT) continue;
+        len = (size_t)r.hdr.tag;
+        if (len > sizeof text || len > (size_t)r.hdr.n * 8) len = 0; /* malformed tag: shown empty, still counted */
+        for (i = 0; i < len; i++) text[i] = (uint8_t)(r.payload[i / 8] >> (8 * (i % 8)));
+        printable(shown, sizeof shown, text, len);
+        ck_printf("lifecycle: fact id=%llu t=%llu store_gen=%llu text=\"%s\"\n", (unsigned long long)id,
+                  (unsigned long long)r.hdr.t, (unsigned long long)r.hdr.generation, shown);
+        n++;
+    }
+    ck_printf("lifecycle: facts records=%llu shown=%u journal_bytes=%u chain=%s\n", (unsigned long long)g_cx.n, n,
+              (unsigned)g_cj.len, cx_verify_chain(&g_cx) == CX_OK ? "ok" : "FAIL");
+}
+
+/* Stop order step 0: close the journal (nothing to flush: every append was
+ * already durable) and return its heap frames. */
+static void cortex_close(void)
+{
+    if (g_cx_open) {
+        size_t used = 0, peak = 0, size = 0;
+        ck_cx_heap_stats(&used, &peak, &size);
+        ck_printf("lifecycle: cortex closed records=%llu appends=%u reads=%u refused=%u heap_peak_kib=%u\n",
+                  (unsigned long long)g_cx.n, g_cj.appends, g_cj.reads, g_cx_refused, (unsigned)(peak / 1024));
+        cx_close(&g_cx);
+        g_cx_open = 0;
+    }
+    if (g_cx_heap_pa) {
+        ck_mm_frames_free(g_cx_heap_pa, CK_CX_HEAP_PAGES);
+        g_cx_heap_pa = 0;
+    }
+}
+
 static void handle_line(const char *line, size_t len)
 {
     const char *arg;
@@ -289,6 +466,8 @@ static void handle_line(const char *line, size_t len)
         return;
     case CK_LC_R_GENERATE: generate(); return;
     case CK_LC_R_RECALL: recall(); return;
+    case CK_LC_R_REMEMBER: remember(); return;
+    case CK_LC_R_FACTS: facts(); return;
     case CK_LC_R_OK: break;
     }
     switch (v) {
@@ -381,8 +560,10 @@ int ck_lifecycle_run(void)
             }
         }
     }
-    /* Stop order: inference session closed (frames returned), Store closed,
-     * then NVMe released, then the caller resets. */
+    /* Stop order: Cortex journal closed (frames returned), inference session
+     * closed (frames returned), Store closed, then NVMe released, then the
+     * caller resets. */
+    cortex_close();
     ck_infer_resident_close();
     int closed = ck_store_service_close();
     ck_dev_nvme_release();

@@ -13,7 +13,8 @@
  *   QUIESCE  stop order running: flush, revoke, halt
  *   STOP     nothing more is accepted
  * Verbs are the v1 operator surface and nothing else: status, unlock, task
- * <text>, approve, deny, cancel, evidence, help, shutdown. */
+ * <text>, approve, deny, cancel, evidence, help, shutdown, and (P06) prompt
+ * <text>, recall, remember <text>, facts. */
 #ifndef AIENOS_CK_LIFECYCLE_FSM_H
 #define AIENOS_CK_LIFECYCLE_FSM_H
 
@@ -37,6 +38,8 @@ enum ck_lc_verb {
     CK_LC_V_SHUTDOWN,
     CK_LC_V_PROMPT, /* native v1 P06: bounded generation from the resident model */
     CK_LC_V_RECALL, /* read back the newest approved object from the Store */
+    CK_LC_V_REMEMBER, /* P06 cut 4: record one owner fact in the Cortex journal (sealed Store) */
+    CK_LC_V_FACTS,    /* list the remembered facts read back from the journal */
 };
 
 /* Bounds: one request line, and the task text that a line may carry. */
@@ -56,6 +59,8 @@ enum ck_lc_result {
     CK_LC_R_STOP,          /* shutdown accepted: the binding must run the stop order */
     CK_LC_R_GENERATE,      /* prompt accepted: the binding must generate (task holds the prompt) */
     CK_LC_R_RECALL,        /* recall accepted: the binding must read the newest approved object */
+    CK_LC_R_REMEMBER,      /* remember accepted: the binding must append the fact (task holds the text) */
+    CK_LC_R_FACTS,         /* facts accepted: the binding must list the journal */
 };
 
 typedef struct {
@@ -68,11 +73,15 @@ typedef struct {
     /* counters for the evidence verb (bounded, wrap is harmless) */
     uint32_t requests, refused, invalid, tasks, approved, denied, cancelled;
     uint32_t prompts, replies, gen_cancelled, gen_failed, recalls;
+    uint32_t remembers, facts; /* P06 cut 4: accepted remember / facts requests */
+    char fact[CK_LC_TASK_MAX + 1]; /* text of the remember request being served, else "" */
+    size_t fact_len;
     const char *reason; /* last refusal reason, static string */
 } ck_lc;
 
 /* Decode one request line (len bytes, no terminator required). arg and arg_len
- * receive the text after "task" or "prompt" (trimmed), else an empty span. */
+ * receive the text after "task", "prompt" or "remember" (trimmed), else an
+ * empty span. */
 enum ck_lc_verb ck_lc_decode(const char *line, size_t len, const char **arg, size_t *arg_len);
 const char *ck_lc_verb_name(enum ck_lc_verb v);
 const char *ck_lc_state_name(enum ck_lc_state s);
