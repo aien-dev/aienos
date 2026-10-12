@@ -6,6 +6,7 @@
 #include "disk_layout.h"
 #include "m5.h"
 #include "sha256.h"
+#include "store_v1.h"
 #include "store_crash.h"
 #include "continuity_boot.h"
 #ifdef CK_SERVICE
@@ -121,6 +122,13 @@ static int fail(ck_store_report *r, const char *proof, const char *step, int rc)
 }
 
 /* Blank = anchor units and the first two Store units read back all zero. */
+static int bytes_differ(const uint8_t *a, const uint8_t *b, size_t n)
+{
+    int diff = 0;
+    for (size_t i = 0; i < n; i++) diff |= a[i] ^ b[i];
+    return diff != 0;
+}
+
 static int is_blank(const disk_dev *d, uint32_t bpu, uint8_t *buf, int *blank)
 {
     *blank = 1;
@@ -154,6 +162,13 @@ static const char *classify(int rc)
 /* Workspace lives across boots of the host test; the kernel uses it once. */
 static ss_workspace *g_ws;
 static ss_store *g_ss;
+
+/* SecurityManifest refusal: the Store is not served and the keys are wiped. */
+static int secman_refuse(ck_store_report *r, const char *step)
+{
+    bz(&g_ss->keys, sizeof g_ss->keys);
+    return fail(r, "keyed", step, CK_SB_E_SECMAN);
+}
 #ifdef CK_SERVICE
 static int g_service_open;      /* Store open for the service lifetime (core/lifecycle.c) */
 static int g_service_locked_rc; /* last production key source refusal */
@@ -261,14 +276,76 @@ static int run_policy_ex(const disk_dev *d, const ss_keys *keys, const uint8_t u
         return fail(r, "record", "store has history but no boot record", -1);
     }
 
+    /* SecurityManifest (ADR 0017 section 2.5, P04 cut 2a): the newest
+     * kind-22 claim must verify under these keys and bind this Store, its
+     * keyslot and its key epoch; its security_sequence equals the number of
+     * manifests on the Store (every boot transaction writes exactly one). */
+    m5_secman sm;
+    uint8_t sm_prev[32], zero32[32];
+    uint32_t nsecman = 0;
+    int sm_best = -1;
+    bz(&sm, sizeof sm);
+    bz(sm_prev, sizeof sm_prev);
+    bz(zero32, sizeof zero32);
+    for (uint32_t k = 0; k < g_ss->nclaims; k++) {
+        const ss_claim *c = &g_ws->claims[k];
+        if (c->c.obj.object_kind != CK_SECMAN_KIND) continue;
+        nsecman++;
+        if (sm_best < 0 || c->c.store_generation > g_ws->claims[sm_best].c.store_generation) sm_best = (int)k;
+    }
+    if (sm_best >= 0) {
+        uint8_t smb[M5_SECMAN_LEN];
+        size_t len = 0;
+        uint16_t kind = 0;
+        bcp(sm_prev, g_ws->claims[sm_best].sid, 32);
+        rc = ss_read(g_ss, sm_prev, smb, sizeof smb, &len, &kind);
+        if (rc) return fail(r, classify(rc), "read SecurityManifest", rc);
+        if (len != M5_SECMAN_LEN || kind != CK_SECMAN_KIND || m5_secman_open(smb, len, keys->k_root_auth, &sm) != 0)
+            return secman_refuse(r, "SecurityManifest malformed or not under these keys");
+        if (bytes_differ(sm.store_uuid, g_ss->uuid, 16)) return secman_refuse(r, "SecurityManifest names another Store");
+        if (bytes_differ(sm.keyslot_manifest_id, g_ss->has_keyslot ? g_ss->keyslot_sid : zero32, 32))
+            return secman_refuse(r, "SecurityManifest does not bind this Store's KeySlotManifest");
+        if (sm.key_epoch != keys->key_generation) return secman_refuse(r, "SecurityManifest key_epoch differs from the open keys");
+        if (sm.generation != g_ws->claims[sm_best].c.store_generation)
+            return secman_refuse(r, "SecurityManifest generation differs from the transaction that committed it");
+        if (sm.security_sequence != nsecman) return secman_refuse(r, "SecurityManifest security_sequence is not the manifest count");
+        r->secman_prev = 1;
+    } else if (!r->formatted && r->gen_open > 1) {
+        return secman_refuse(r, "store has history but no SecurityManifest");
+    }
+
     r->boot_count_new = r->boot_count_prev + 1;
     bz(rec, sizeof rec);
     bcp(rec, "AIENBOOT", 8);
     put32(rec + 8, CK_BOOT_VERSION);
     put64(rec + 16, r->boot_count_new);
     for (size_t i = 0; i < CK_BOOT_COMMIT_MAX && commit[i]; i++) rec[24 + i] = (uint8_t)commit[i];
-    ss_object objs[2] = {{CK_BOOT_KIND, CK_BOOT_VERSION, rec, sizeof rec}, {0, 0, 0, 0}};
-    size_t nobjs = 1;
+    /* The SecurityManifest of this transaction (sequence previous + 1). */
+    uint8_t smb_new[M5_SECMAN_LEN];
+    {
+        m5_secman n;
+        bz(&n, sizeof n);
+        bcp(n.store_uuid, g_ss->uuid, 16);
+        n.generation = r->gen_open + 1;
+        n.security_sequence = sm.security_sequence + 1;
+        n.epoch = n.generation;
+        n.key_epoch = keys->key_generation;
+        bcp(n.previous_security_manifest_id, sm_prev, 32);
+        if (genesis_obj && r->formatted) {
+            if (sv1_object_id(genesis_obj->kind, genesis_obj->version, genesis_obj->bytes, genesis_obj->len,
+                              n.keyslot_manifest_id) != 0)
+                return fail(r, "commit", "KeySlotManifest ObjectId", -1);
+        } else if (g_ss->has_keyslot) {
+            bcp(n.keyslot_manifest_id, g_ss->keyslot_sid, 32);
+        }
+        if (m5_secman_seal(&n, keys->k_root_auth, smb_new) != 0) return fail(r, "commit", "seal SecurityManifest", -1);
+        r->secman_seq = n.security_sequence;
+        r->secman_keyslot = bytes_differ(n.keyslot_manifest_id, zero32, 32);
+    }
+    ss_object objs[3] = {{CK_BOOT_KIND, CK_BOOT_VERSION, rec, sizeof rec},
+                         {CK_SECMAN_KIND, 1, smb_new, M5_SECMAN_LEN},
+                         {0, 0, 0, 0}};
+    size_t nobjs = 2;
     if (genesis_obj && r->formatted) objs[nobjs++] = *genesis_obj;
 #ifdef CK_TEST_STORE_CRASH
     ck_store_crash_opened(r->gen_open);
@@ -451,6 +528,7 @@ static const char *err_name(int rc)
     if (rc == CK_SB_E_ENTROPY) return "EntropyRefused";
     if (rc == CK_SB_E_KEYSLOT_BAD) return "KeyslotManifestUnusable";
     if (rc == CK_SB_E_CONTINUITY) return "ContinuityRefused";
+    if (rc == CK_SB_E_SECMAN) return "SecurityManifestRefused";
     return "error";
 }
 
@@ -487,6 +565,9 @@ void store_boot_print(const ck_store_report *r)
               rb_name(r->rb));
     ck_printf("store: committed generation=%llu boot_count=%llu\n", (unsigned long long)r->gen_commit,
               (unsigned long long)r->boot_count_new);
+    ck_printf("store: security manifest sequence=%llu generation=%llu keyslot=%s previous=%s\n",
+              (unsigned long long)r->secman_seq, (unsigned long long)r->gen_commit,
+              r->secman_keyslot ? "bound" : "none", r->secman_prev ? "linked" : "genesis");
     ck_printf("store: limit: anchor shares this disk, so a whole-disk rollback is not detectable "
               "(needs TPM NV or another external counter)\n");
 }

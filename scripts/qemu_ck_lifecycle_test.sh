@@ -91,6 +91,14 @@
 #            the disk (records=1, digest and chain re-verified at open); the fact
 #            is never typed in that boot; the Store opens at generation 6 (journal open at 8:
 #            note 4, journal header 5, fact 6, boot record 7, continuity resume 8)
+#   row 182  P04 cut 2a SecurityManifest, TEST-key Store (boot 2): the boot
+#            transaction commits `store: security manifest sequence=1 generation=2
+#            keyslot=none previous=genesis` (no KeySlotManifest on a TEST Store)
+#   row 183  P04 cut 2a SecurityManifest, production Store: genesis (boot 3)
+#            `sequence=1 generation=2 keyslot=bound previous=genesis`; cold resume
+#            (boot 4) `sequence=2 generation=7 keyslot=bound previous=linked` (the
+#            manifest read back verified under K_root_auth, bound the keyslot the
+#            keyed open bound, carried key_epoch 1 and the manifest count)
 #   build    the default (diagnostic) image carries no lifecycle; CK_SERVICE is
 #            refused with CK_CONSOLE_SESSION, CK_QEMU_UNSAFE_DMA and a CK_TEST_*
 #            flag; CK_SERVICE_TEST_KEYS is refused with CK_HARDWARE_STAGING
@@ -301,6 +309,7 @@ boot testkeys "${testkeys_efi}" drive_ready
 rcheck 163 "TEST-ONLY banner" '^lifecycle: TEST-ONLY service image \(CK_SERVICE_TEST_KEYS=1: TEST Store keys; QEMU only, never a production boot\)$'
 rcheck 163 "Store open, NVMe kept bound for the service lifetime" '^store: service lifetime: Store open, NVMe stays bound until the lifecycle stop order$'
 rcheck 163 "lifecycle ready" '^lifecycle: ready state=ready store=open \(operator input: serial\)$'
+rcheck 182 "TEST-key Store: security manifest sequence 1 at genesis, no keyslot" '^store: security manifest sequence=1 generation=2 keyslot=none previous=genesis$'
 rcheck 173 "test-keys image provisions continuity at boot" '^continuity: PROVISIONED agent=[0-9a-f]{64} incarnation=1 sequence=1 cortex=0 branches=1$'
 before 173 "PROVISIONED < Store open line" '^continuity: PROVISIONED' '^store: service lifetime: Store open'
 if [[ -n "$(line_of '^dma_gate: nvme bus master revoked')" && "$(line_of '^dma_gate: nvme bus master revoked')" -lt "$(line_of '^lifecycle: ready state=ready')" ]]; then bad 163 "NVMe revoked before the lifecycle (service lifetime broken)"; else ok 163 "no NVMe revoke before the lifecycle"; fi
@@ -335,6 +344,7 @@ rcheck 168 "short secret refused (64 hex digits expected)" '^store: unlock REFUS
 rcheck 168 "blank disk formatted as a production store" '^store: blank disk \(all-zero anchor \+ Store head\): formatted production store$'
 rcheck 168 "key source line: recovery keyslot genesis" '^store: key source=recovery-keyslot genesis=1 \(K_vol source: the Slot 1 recovery descriptor; TPM Slot 0 BLOCKED_HARDWARE; no rotation\)$'
 rcheck 168 "store committed generation 2 boot 1" '^store: committed generation=2 boot_count=1$'
+rcheck 183 "production genesis: security manifest sequence 1 binds the keyslot" '^store: security manifest sequence=1 generation=2 keyslot=bound previous=genesis$'
 rcheck 168 "unlock ok" '^store: unlock ok source=recovery-keyslot slot=1 genesis=1 generation=2 boot_count=1$'
 rcheck 168 "lifecycle unlocked to ready" '^lifecycle: unlock ok state=ready$'
 rcheck 168 "status open" '^lifecycle: state=ready store=open pending=- requests='
@@ -373,6 +383,8 @@ rabsent 169 "not reformatted" '^store: blank disk'
 rcheck 169 "key source line: recovery keyslot resume" '^store: key source=recovery-keyslot genesis=0 '
 rcheck 169 "store opened at generation 6 (keyslot + boot record + continuity genesis + note + journal header + fact), boot_count 1" '^store: opened generation=6 boot_count=1 prev_commit=[0-9a-f]+ anchor=valid-resume$'
 rcheck 169 "store committed generation 7 boot 2" '^store: committed generation=7 boot_count=2$'
+rcheck 183 "production resume: security manifest sequence 2 links the genesis one, keyslot bound" '^store: security manifest sequence=2 generation=7 keyslot=bound previous=linked$'
+rabsent 183 "no SecurityManifest refusal in any boot" '^store: (unlock )?REFUSED proof=keyed step="SecurityManifest'
 rcheck 169 "unlock ok, no genesis" '^store: unlock ok source=recovery-keyslot slot=1 genesis=0 generation=7 boot_count=2$'
 rcheck 172 "ALLEN subject RESTORED sequence 1" '^allen: RESTORED subject=[0-9a-f]{64} sequence=1 lineage=[0-9a-f]{64} intents=0 active=0 knowledge=0$'
 rcheck 172 "identity RESUMED incarnation 2, same agent as the genesis boot" "^continuity: RESUMED agent=${unlock_agent} incarnation=2 sequence=2 cortex=0 branches=1\$"

@@ -1192,6 +1192,95 @@ static void test_unlock_recovery(void)
     free(after);
 }
 
+/* P04 cut 2a: the SecurityManifest (ADR 0017 section 2.5) every boot
+ * transaction commits: sequence 1 at genesis and previous + 1 on every later
+ * boot, the keyslot bound on a production Store and zero on a TEST-key one;
+ * a forged newer manifest under the right keys (wrong sequence, another key
+ * epoch, a keyslot the Store does not have) refuses the next boot and wipes
+ * the keys; the disk is left as found. */
+static void test_secman(void)
+{
+    ck_store_report r;
+    ss_keys k;
+    uint8_t S[32];
+    for (int i = 0; i < 32; i++) S[i] = (uint8_t)(i * 3 + 5);
+    ck_store_test_keys(&k);
+    uint8_t *now = malloc(T_BYTES), *after = malloc(T_BYTES);
+    CHECK(now && after);
+    if (!now || !after) return;
+
+    printf("  [secman: TEST-key Store: sequence 1 at genesis, then 2 and 3; no keyslot]\n");
+    CHECK(dopen(1) == 0);
+    dclose();
+    CHECK(boot(&k, "sm-1", &r) == 0 && r.secman_seq == 1 && r.secman_keyslot == 0 && r.secman_prev == 0 && r.gen_commit == 2);
+    CHECK(boot(&k, "sm-2", &r) == 0 && r.secman_seq == 2 && r.secman_keyslot == 0 && r.secman_prev == 1 && r.gen_commit == 3);
+    CHECK(boot(&k, "sm-3", &r) == 0 && r.secman_seq == 3 && r.secman_prev == 1 && r.gen_commit == 4);
+
+    static const char *const forge_name[3] = {"sequence is not the manifest count", "another key epoch",
+                                              "a keyslot this Store does not have"};
+    for (int v = 0; v < 3; v++) {
+        printf("  [secman: forged newer manifest under the right keys: %s -> refused, keys wiped, disk as found]\n",
+               forge_name[v]);
+        CHECK(dopen(1) == 0);
+        dclose();
+        CHECK(boot(&k, "sm-f0", &r) == 0 && r.secman_seq == 1 && r.gen_commit == 2);
+        m5_secman f;
+        uint8_t buf[M5_SECMAN_LEN];
+        memset(&f, 0, sizeof f);
+        memcpy(f.store_uuid, store_boot_store()->uuid, 16);
+        f.generation = 3;
+        f.epoch = 3;
+        f.security_sequence = 2;
+        f.key_epoch = 1;
+        if (v == 0) f.security_sequence = 7;
+        if (v == 1) f.key_epoch = 2;
+        if (v == 2) f.keyslot_manifest_id[0] = 1;
+        CHECK(m5_secman_seal(&f, store_boot_store()->keys.k_root_auth, buf) == 0);
+        ss_object o = {CK_SECMAN_KIND, 1, buf, sizeof buf};
+        CHECK(dopen(0) == 0);
+        CHECK(ss_transact(store_boot_store(), &o, 1, 0, 0, 0) == 0);
+        dclose();
+        CHECK(load(now) == 0);
+        int rc = boot(&k, "sm-f1", &r);
+        CHECK(rc == CK_SB_E_SECMAN && r.verdict == CK_SB_REFUSED && r.rc == CK_SB_E_SECMAN);
+        CHECK(r.proof && strcmp(r.proof, "keyed") == 0);
+        CHECK(nonzero((const uint8_t *)&store_boot_store()->keys, sizeof(ss_keys)) == 0);
+        CHECK(load(after) == 0 && memcmp(now, after, T_BYTES) == 0);
+    }
+
+    printf("  [secman: a well-formed newer manifest (sequence 2, same keys, no keyslot) is accepted: sequence 3 next]\n");
+    {
+        CHECK(dopen(1) == 0);
+        dclose();
+        CHECK(boot(&k, "sm-g0", &r) == 0 && r.secman_seq == 1);
+        m5_secman f;
+        uint8_t buf[M5_SECMAN_LEN];
+        memset(&f, 0, sizeof f);
+        memcpy(f.store_uuid, store_boot_store()->uuid, 16);
+        f.generation = 3;
+        f.epoch = 3;
+        f.security_sequence = 2;
+        f.key_epoch = 1;
+        CHECK(m5_secman_seal(&f, store_boot_store()->keys.k_root_auth, buf) == 0);
+        ss_object o = {CK_SECMAN_KIND, 1, buf, sizeof buf};
+        CHECK(dopen(0) == 0);
+        CHECK(ss_transact(store_boot_store(), &o, 1, 0, 0, 0) == 0);
+        dclose();
+        CHECK(boot(&k, "sm-g1", &r) == 0 && r.secman_seq == 3 && r.secman_prev == 1 && r.gen_commit == 4);
+    }
+
+    printf("  [secman: production Store binds the KeySlotManifest ObjectId at genesis and on resume]\n");
+    CHECK(dopen(1) == 0);
+    dclose();
+    CHECK(unlock(S, 0, "sm-p1", 0, &r) == 0 && r.secman_seq == 1 && r.secman_keyslot == 1 && r.secman_prev == 0);
+    CHECK(unlock(S, 0, "sm-p2", 1, &r) == 0 && r.secman_seq == 2 && r.secman_keyslot == 1 && r.secman_prev == 1);
+    CHECK(unlock(S, 0, "sm-p3", 1, &r) == 0 && r.secman_seq == 3 && r.secman_keyslot == 1 && r.secman_prev == 1);
+
+    unlink(img);
+    free(now);
+    free(after);
+}
+
 /* P05 cut 1: production continuity on the service lifecycle
  * (svc/continuity_service.c) over the real sealed Store in a file, opened the
  * production way (recovery keyslot unlock). Identity + ALLEN subject are
@@ -2472,6 +2561,7 @@ int main(void)
     test_mmio_stage_report();
     test_store();
     test_unlock_recovery();
+    test_secman();
     test_continuity_service();
     test_cortex_journal();
     test_artifact_store();
