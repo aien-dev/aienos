@@ -58,7 +58,7 @@
         },
         {
           "digest": "438c62d03d5cc14b9d2b663dbdd54dbd4153124e759bd3a97467e8dc0f5a6f74",
-          "last_commit": "101c710",
+          "last_commit": "a8bf02b",
           "name": "core",
           "purpose": "Directory native/kernel/core. Purpose not yet described by a human."
         },
@@ -81,8 +81,8 @@
           "purpose": "Directory native/kernel/mm. Purpose not yet described by a human."
         },
         {
-          "digest": "5901ee6ca8dd0417ed55c72cc01cb3c2e9d55d71cd91d89f9cad9e6901e7a64e",
-          "last_commit": "101c710",
+          "digest": "7d18df01ff7941ffed2ed82d18fed6ab5b635156333da8ae33d698756bf15e14",
+          "last_commit": "453f41e",
           "name": "svc",
           "purpose": "Directory native/kernel/svc. Purpose not yet described by a human."
         },
@@ -99,15 +99,15 @@
           "purpose": "Directory native/kernel/tools. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:dcf283b3305e4989150c05c97b1dd3fac672a0112769ddc7adab58e773bbc806",
-      "compiled_at": "2026-10-12T06:35:59Z",
+      "children_root": "sha256:49fd3831250168da5ac9a5e1d4066b65af70cc1780e3547b9c5f974f2dbb0a2d",
+      "compiled_at": "2026-10-12T07:42:03Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:169522946ffcd95a36106c1d8a0f6bdba1130e97a5b8dad204696a7245de1948",
+      "digest": "sha256:4cbfcc2d3ce9c2956be80604f8c41d1eb0e87d06d20a999fc8ebe579d95dfb8b",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "files": 298,
-      "generated_at_commit": "101c710b24fad41fc9a8797222e366ed71e6b6f2",
-      "source_tree": "sha256:1b874766907d3cf7dab922682886f87da433f84c1b2622334df9f30b405636a0"
+      "files": 305,
+      "generated_at_commit": "453f41e7fca07a97ee52db3a125d106dfaf17ff5",
+      "source_tree": "sha256:3f01b77765ab6778ee9fc8e79002e2258ea8a9ec11be41d09753b4824b0946be"
     },
     "owner_lane": "",
     "provenance": {

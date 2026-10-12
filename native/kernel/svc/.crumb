@@ -23,21 +23,21 @@
           "purpose": "Directory native/kernel/svc/compat. Purpose not yet described by a human."
         },
         {
-          "digest": "4e044d7fe1d514bd13baa4e84872a66e46f96b86c7a7589d14489aec0978e366",
-          "last_commit": "101c710",
+          "digest": "88c4fc1ed3ed47dc767deb9c59923934ca9b73b66aabec84a2c3e19cebdf8283",
+          "last_commit": "453f41e",
           "name": "tests",
           "purpose": "Directory native/kernel/svc/tests. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:e44defe690939de314fec75a24c9369748bd9153c9511478d13fb58173a1ea74",
-      "compiled_at": "2026-10-12T06:35:59Z",
+      "children_root": "sha256:c08ae620be123d4ae06a01d1830984c81570c3c44fc528987cee2ad37c3c2ca9",
+      "compiled_at": "2026-10-12T07:42:03Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:5901ee6ca8dd0417ed55c72cc01cb3c2e9d55d71cd91d89f9cad9e6901e7a64e",
+      "digest": "sha256:7d18df01ff7941ffed2ed82d18fed6ab5b635156333da8ae33d698756bf15e14",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "files": 37,
-      "generated_at_commit": "101c710b24fad41fc9a8797222e366ed71e6b6f2",
-      "source_tree": "sha256:b38670ec128a2b278c0e948e306d7aa50e4b350e3d0aa35f1efaf94658813624"
+      "files": 41,
+      "generated_at_commit": "453f41e7fca07a97ee52db3a125d106dfaf17ff5",
+      "source_tree": "sha256:f5ce71ef8038e16c2de685108d74a32c41ee82205eae65a77aa3b8301f3ada77"
     },
     "owner_lane": "",
     "provenance": {
