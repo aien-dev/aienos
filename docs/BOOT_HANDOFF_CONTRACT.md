@@ -210,6 +210,21 @@ is handed out) and after the vectors are installed, so a refusal can print.
 
 ## 7. Rollback without A/B slots
 
+**Update 2026-10-12 (P11 cut 2a, owner decision):** Drake approved a slot
+loader, narrowly scoped to signed A/B image selection, boot-success tracking
+and rollback. The slots live in a separate UEFI application,
+`SLOTLDR.EFI` (`native/boot/slot_loader.c`), placed in front of the
+unchanged stub + kernel image; this loader (the stub) still has no slots and
+the rules below still hold for the image itself. SLOTLDR.EFI picks a
+verified slot from the slots partition, consumes one candidate try before
+the jump, and chain-loads the slot image with `LoadImage` + `StartImage`; it
+never touches UEFI variables, so a BootNext stager in front of it works as
+before. If the chained image returns to the firmware (the three paths in
+item 3), it returns to SLOTLDR.EFI, which prints
+`slot_loader: slot X returned status=...` and returns that status to the
+firmware. Format, rules and gate: `docs/NATIVE_IMAGE_SLOTS.md` sections 5
+and 7, `native/kernel/GATES.md` `SLOT_LOADER`.
+
 There are no slots and, per Q3, none will be added to this loader. Rollback
 is the firmware's **one-time BootNext** rule, already the subject of
 `docs/NATIVE_BOOT_ROLLBACK_CONTRACT.md` (section 2 invariant: "A candidate may
