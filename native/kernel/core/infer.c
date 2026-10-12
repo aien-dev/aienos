@@ -420,7 +420,7 @@ static void resident_open(uint64_t mpa, uint64_t msize, uint64_t mpages, uint64_
     ck_wr(cpacr_el1, v);
     ck_isb();
     infer_heap_open((uintptr_t)hpa, HEAP_BYTES);
-    struct infer_limits lim = { SESS_KV, SESS_MAX_NEW, SESS_PROMPT_BYTES, SESS_RESERVE };
+    struct infer_limits lim = { CK_INFER_RES_KV, CK_INFER_RES_MAX_NEW, CK_INFER_RES_PROMPT_BYTES, CK_INFER_RES_RESERVE };
     struct infer_info info = { 0, 0, 0, 0 };
     uint64_t t0 = ck_time_us(), daif = ck_rd(daif);
     __asm__ volatile("msr daifset, #0xf" ::: "memory");

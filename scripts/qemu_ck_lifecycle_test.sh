@@ -329,7 +329,7 @@ rcheck 161 "task refused while locked" '^lifecycle: REFUSED verb=task state=lock
 rcheck 161 "unlock refused, still locked" '^lifecycle: REFUSED verb=unlock state=locked reason="production key source refused: still locked"'
 rcheck 161 "unlock asked the production key source again" '^store: unlock REFUSED proof=keyed step="production Store key source" rc=-2002'
 rcheck 161 "status answered" '^lifecycle: state=locked store=locked pending=- requests='
-rcheck 161 "help answered" '^lifecycle: verbs: status unlock \[<64-hex recovery secret>\] rotate <current 64-hex> <new 64-hex> task <text> prompt <text> approve deny cancel recall remember <text> facts update evidence help shutdown$'
+rcheck 161 "help answered" '^lifecycle: verbs: status unlock \[<64-hex recovery secret>\] rotate <current 64-hex> <new 64-hex> task <text> prompt <text> approve deny cancel recall remember <text> prefer <text> facts update evidence help shutdown$'
 rcheck 161 "evidence answered" '^lifecycle: evidence requests=5 refused=2 invalid=0 tasks=0 approved=0'
 rcheck 162 "stop order with no Store" '^lifecycle: stop order store=was-locked nvme=released state=stop requests=6$'
 before 162 "locked lifecycle ready < NVMe revoke (revoke only at the stop order)" '^lifecycle: ready state=locked' '^dma_gate: nvme bus master revoked'
@@ -516,7 +516,7 @@ else
     make -s -C native/kernel CROSS="${cross}" OUT="${out_infer}" AIENOS_COMMIT="${commit}" full CK_SERVICE=1 CK_SERVICE_TEST_KEYS=1 CK_INFER_LIB="${lib}" >/dev/null
     infer_efi="${out_infer}/full-service-testkeys/BOOTAA64.EFI"
     if grep -aqF "infer: resident open" "${infer_efi}" && ! grep -aqF "infer: resident open" "${testkeys_efi}"; then ok 174 "only the CK_INFER_LIB service image carries the resident session"; else bad 174 "resident session shape wrong (missing from the inference image, or present in the plain test-keys image)"; fi
-    re_open='^infer: resident open rc=0 tensors=147 vocab=128256 layers=16 kv_capacity=64 max_new=16 max_prompt_bytes=256 heap_reserve_kib=64 heap_used_kib=[0-9]+ open_us=[0-9]+$'
+    re_open='^infer: resident open rc=0 tensors=147 vocab=128256 layers=16 kv_capacity=1024 max_new=256 max_prompt_bytes=752 heap_reserve_kib=64 heap_used_kib=[0-9]+ open_us=[0-9]+$'
     re_recall='^lifecycle: recall gen=[0-9]+ kind=reply id=[0-9a-f]{8} bytes=[0-9]+ text="aienos\.reply\.v1.prompt: What is the capital of France\?.reply: The capital of France is Paris\.'
     frames_kept() { # row label: the unload line returned every frame (free after = free before)
         local l b a; l="$(grep -E -m1 '^infer: unloaded ' "${work}/serial.txt" || true)"
