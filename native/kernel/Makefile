@@ -659,6 +659,24 @@ ifneq ($(strip $(CK_HARDWARE_STAGING)),)
 $(error CK_SERVICE_TEST_KEYS (TEST keys) cannot be combined with CK_HARDWARE_STAGING)
 endif
 endif
+# CK_RECOVERY=1 (native v1 plan P11 cut 4, gate N7): the known-good recovery
+# image, a service image (CK_SERVICE=1) with no model and no inference unit
+# that keeps Store unlock, status, evidence and the slot verb update. SLOTLDR.EFI
+# starts it from \EFI\AIENOS\RECOVERY.EFI + RECOVERY.MAN on its own volume when
+# neither slot may boot (docs/NATIVE_IMAGE_SLOTS.md section 10). Own OUT
+# subdirectory (FULL_NAME suffix -recovery). Refused with CK_INFER_LIB.
+CK_RECOVERY ?=
+ifneq ($(strip $(CK_RECOVERY)),)
+ifneq ($(strip $(CK_RECOVERY)),1)
+$(error CK_RECOVERY must be empty or 1)
+endif
+ifneq ($(strip $(CK_SERVICE)),1)
+$(error CK_RECOVERY needs CK_SERVICE=1 (the recovery image is a service image))
+endif
+ifneq ($(strip $(CK_INFER_LIB)),)
+$(error CK_RECOVERY (the recovery image carries no model) cannot be combined with CK_INFER_LIB)
+endif
+endif
 
 # TEST-ONLY Store crash hook (svc/store_crash.h; only
 # scripts/qemu_ck_store_crash_test.sh sets it): the Store stage reads a crash
@@ -977,15 +995,18 @@ ifneq ($(strip $(CK_SERVICE)$(CK_PI5_LIFECYCLE)),)
 SVC_STAGE_BASE := $(STAGE_SRCS)
 # Own OUT subdirectory: service objects never mix with a diagnostic image.
 ifeq ($(strip $(CK_SERVICE_TEST_KEYS)),1)
-FULL_NAME := full-service-testkeys
+FULL_NAME := full-service-testkeys$(if $(strip $(CK_RECOVERY)),-recovery,)
 STAGE_DMA_FLAGS += -DCK_SERVICE=1 -DCK_SERVICE_TEST_KEYS=1
 else
-FULL_NAME := full-service$(if $(strip $(CK_HARDWARE_STAGING)),-hardware-staging,)
+FULL_NAME := full-service$(if $(strip $(CK_HARDWARE_STAGING)),-hardware-staging,)$(if $(strip $(CK_RECOVERY)),-recovery,)
 STAGE_DMA_FLAGS += -DCK_SERVICE=1
 endif
 STAGE_SRCS += $(KDIR)/core/lifecycle.c $(KDIR)/core/lifecycle_fsm.c $(KDIR)/core/line_rx.c
 # N3 (aienos#329): context assembly and the exact approval binding (pure C, host-tested by test_context).
 STAGE_SRCS += $(KDIR)/core/context.c $(KDIR)/core/context_proposal.c
+ifeq ($(strip $(CK_RECOVERY)),1)
+STAGE_DMA_FLAGS += -DCK_RECOVERY_IMAGE=1
+endif
 # P06 cut 3: the canonical Omega Cortex store over the sealed Store (svc/cortex_journal.c).
 STAGE_SRCS += $(STAGE_CORTEX_SRCS)
 # P05 cut 1: production continuity on the service lifecycle (svc/continuity_service.c):

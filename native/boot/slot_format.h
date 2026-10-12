@@ -222,11 +222,20 @@ int ck_slot_abandon_candidate(struct ck_slot_control *c, const char **why);
 #define CK_SLOT_BOOT_VERSION 1u
 #define CK_SLOT_BOOT_BYTES 256u
 #define CK_SLOT_BOOT_SIGNED 224u          /* digest = SHA-256 over bytes [0, 224) */
+/* P11 cut 4: boot_slot of the known-good recovery image (no slot may boot;
+ * reason CK_SLOT_R_RECOVERY_REQUIRED, tries 0). SLOTLDR.EFI loads it from its
+ * own boot volume, CK_SLOT_RECOVERY_IMAGE + CK_SLOT_RECOVERY_MANIFEST (one
+ * signed manifest unit, the same format and keys as a slot), and starts it only
+ * when both slots are unusable. docs/NATIVE_IMAGE_SLOTS.md section 10. */
+#define CK_SLOT_BOOT_RECOVERY 2u
+#define CK_SLOT_RECOVERY_IMAGE "\\EFI\\AIENOS\\RECOVERY.EFI"
+#define CK_SLOT_RECOVERY_MANIFEST "\\EFI\\AIENOS\\RECOVERY.MAN"
+#define CK_SLOT_RECOVERY_MAX_BYTES (64ull << 20)
 
 struct ck_slot_boot_record {
     uint8_t magic[8];                 /*   0 "AIENSLB1" */
     uint32_t version;                 /*   8 1 */
-    uint8_t boot_slot;                /*  12 0 or 1: the slot whose image the loader started */
+    uint8_t boot_slot;                /*  12 0 or 1: the slot whose image the loader started; 2: recovery image */
     uint8_t reason;                   /*  13 enum ck_slot_reason of the loader's decision */
     uint8_t tries;                    /*  14 tries_remaining on disk when the image started */
     uint8_t control_present;          /*  15 1 = a valid control record was read (and committed when asked) */

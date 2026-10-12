@@ -25,8 +25,9 @@
 #  5 B image flipped, manifest intact: "image SHA-512 mismatch", boots A.
 #  6 torn control write (the staging record's body half written, no commit
 #    header): the previous record is recovered, boots A (active), B not tried.
-#  7 both slots invalid: "recovery_required (A: ...; B: ...)", the loader returns
-#    to the firmware, no kernel runs (QEMU is stopped by the row timeout).
+#  7 both slots invalid: "recovery_required (A: ...; B: ...)", no recovery image on
+#    this ESP (cut 4), the loader returns to the firmware, no kernel runs (QEMU is
+#    stopped by the row timeout).
 #  8 B validly signed but below the generation floor: refused, boots A.
 #  P11 cut 2b (the service kernel promotes / abandons; svc/slot_service.c), one NVMe
 #  disk with the Store and slots partitions, "shutdown" sent once the lifecycle is ready:
@@ -47,6 +48,12 @@
 #    partition byte-identical.
 # 15 update refused while the Store is LOCKED; a TEST-key updater image is refused
 #    by make under CK_HARDWARE_STAGING.
+#  P11 cut 4 (the known-good recovery image, CK_RECOVERY=1, \EFI\AIENOS\RECOVERY.EFI + .MAN):
+# 16 both slots invalid, recovery image on the ESP: the loader verifies and starts it
+#    (boot record slot R), it promotes nothing, its `update` rewrites B from the inbox
+#    and stages it; next boot tries B (recovery image not used) and the kernel promotes B.
+# 17 recovery image signed by the wrong key / with a flipped image byte: refused, no
+#    kernel runs, slots partition byte-identical; make refuses CK_RECOVERY with a model.
 #
 # Output: one PASS/FAIL line per check, then
 #     AIENOS_CK_SLOT_LOADER: PASS|FAIL|NOT_RUN [(...)]
@@ -74,6 +81,8 @@ mk OUT="${out}/payload-b" AIENOS_COMMIT="slotB-${commit}"
 mk OUT="${out}/svc-a" AIENOS_COMMIT="slotA-${commit}" CK_SERVICE=1 CK_SERVICE_TEST_KEYS=1 full
 mk OUT="${out}/svc-b" AIENOS_COMMIT="slotB-${commit}" CK_SERVICE=1 CK_SERVICE_TEST_KEYS=1 full
 mk OUT="${out}/svc-l" AIENOS_COMMIT="slotL-${commit}" CK_SERVICE=1 full
+# P11 cut 4 (rows 16-17): the known-good recovery image (no model; TEST Store keys in QEMU).
+mk OUT="${out}/svc-r" AIENOS_COMMIT="slotR-${commit}" CK_SERVICE=1 CK_SERVICE_TEST_KEYS=1 CK_RECOVERY=1 full
 tool="${out}/host/ck_slot_tool"
 gpt="${out}/host/ck_gpt_image"
 img_a="${out}/payload-a/BOOTAA64.EFI"
@@ -81,6 +90,7 @@ img_b="${out}/payload-b/BOOTAA64.EFI"
 svc_a="${out}/svc-a/full-service-testkeys/BOOTAA64.EFI"
 svc_b="${out}/svc-b/full-service-testkeys/BOOTAA64.EFI"
 svc_l="${out}/svc-l/full-service/BOOTAA64.EFI"
+svc_r="${out}/svc-r/full-service-testkeys-recovery/BOOTAA64.EFI"
 
 . "${repo_root}/scripts/lib_gate_hold.sh"
 if ! gh_quiet_check || ! gh_lock_take qemu_ck_slot_loader_test "${AIENOS_GATE_MINUTES:-60}"; then
@@ -303,6 +313,7 @@ has 7 "recovery required, both reasons" "slot_loader: recovery_required (A: imag
 lacks 7 "no slot started" "slot_loader: starting slot"
 lacks 7 "no kernel ran" "kernel: alive"
 lacks 7 "no payload ran" "aienos_commit: slot"
+has 7 "no recovery image on this ESP: not booted" "slot_loader: recovery image refused (no recovery image: \\EFI\\AIENOS\\RECOVERY.MAN absent): not booted"
 ctl_is 7 "control untouched" "seq=1 control: active=0 candidate=none tries=0"
 row_end 7
 
@@ -352,6 +363,7 @@ swait() { # raw-file regex count pid: until count answers are on the serial (or 
 }
 
 skilled=0 # 1 when sboot itself killed QEMU (the power cut of row 13)
+srec="" # manifest,image of a recovery image sboot puts on the ESP (P11 cut 4)
 qpid=""
 sboot() { # name timeout-seconds [efi]: ESP with SLOTLDR (or efi), NVMe ${disk}; "shutdown" once ready
     local name="$1" to="$2" efi="${3:-${out}/SLOTLDR.EFI}" w t0 rc dpid
@@ -360,6 +372,10 @@ sboot() { # name timeout-seconds [efi]: ESP with SLOTLDR (or efi), NVMe ${disk};
     mkdir -p "${w}/esp/EFI/BOOT" "${w}/esp/EFI/AIENOS"
     touch "${w}/esp/EFI/AIENOS/BOOTREPORT.TXT"
     cp "${efi}" "${w}/esp/EFI/BOOT/BOOTAA64.EFI"
+    if [[ -n "${srec}" ]]; then # P11 cut 4: recovery image on the ESP (manifest,image)
+        cp "${srec%%,*}" "${w}/esp/EFI/AIENOS/RECOVERY.MAN"
+        cp "${srec#*,}" "${w}/esp/EFI/AIENOS/RECOVERY.EFI"
+    fi
     cp "${vars_fd}" "${w}/vars.fd"
     mkfifo "${w}/ser.in" "${w}/ser.out"
     : >"${w}/serial.raw"
@@ -379,7 +395,7 @@ sboot() { # name timeout-seconds [efi]: ESP with SLOTLDR (or efi), NVMe ${disk};
     dpid=$!
     exec 4>"${w}/ser.in"
     while kill -0 "${qpid}" 2>/dev/null; do
-        if tr -d '\r' <"${w}/serial.raw" | grep -qE '^lifecycle: ready state=|^report_kind: (panic|fault|final)'; then break; fi
+        if tr -d '\r' <"${w}/serial.raw" | grep -qE '^lifecycle: ready state=|^report_kind: (panic|fault|final)|^slot_loader: recovery image refused'; then break; fi
         sleep 1
     done
     if tr -d '\r' <"${w}/serial.raw" | grep -q '^lifecycle: ready state='; then
@@ -398,6 +414,9 @@ sboot() { # name timeout-seconds [efi]: ESP with SLOTLDR (or efi), NVMe ${disk};
         else
             printf 'shutdown\r' >&4 || true
         fi
+    elif tr -d '\r' <"${w}/serial.raw" | grep -q '^slot_loader: recovery image refused'; then
+        sleep 3 # the loader returned to the firmware: no image of ours runs after it
+        kill "${qpid}" 2>/dev/null || true
     fi
     set +e
     wait "${qpid}"
@@ -585,10 +604,69 @@ else
 fi
 row_end 15
 
+# ==== P11 cut 4: the known-good native recovery image ===============================
+# SLOTLDR.EFI starts \EFI\AIENOS\RECOVERY.EFI (manifest RECOVERY.MAN, same format and
+# keys as a slot) from its own ESP only when neither slot may boot. The recovery
+# image (CK_RECOVERY=1 service image: no model) rewrites the inactive slot from the
+# inbox with the same updater; the next boot tries the rewritten slot and promotes it.
+mm SR1 "${svc_r}" 1
+mm SR1k2 "${svc_r}" 1 0 --test2
+cp "${svc_r}" "${work}/svc_r_bad"
+flip "${work}/svc_r_bad" 4242
+
+# ---- row 16: both slots invalid -> recovery image -> update B -> reboot -> B promoted ----
+slots --a "${SA1}" --control "${work}/c_init_a"
+flip "${disk}" $(( $(geo_val a_off) + 4096 + 1000 ))
+inbox "${SB2}"
+a_sum="$(slot_sum A)"
+srec="${work}/SR1,${svc_r}"
+sops=("update")
+sboot r16-recovery "${svc_to}"
+sops=()
+has 16 "both slots unusable" "slot_loader: recovery_required (A: image SHA-512 mismatch; B: "
+has 16 "loader starts the verified recovery image" "slot_loader: boot=R reason=recovery_required gen=1"
+has 16 "boot record names the recovery image" "slot_loader: boot record handed over type=0x80000a1e slot=R reason=recovery_required"
+has 16 "recovery image banner (no model)" "recovery: AIENOS native recovery image (P11 cut 4): no model"
+has 16 "kernel knows it is the recovery boot" "slot: booted the recovery image (both slots unusable)"
+lacks 16 "recovery promotes nothing" "slot: promoted"
+has 16 "update from the recovery image" "slot: update from the inbox into the inactive slot (booted R, keys=1)"
+has 16 "B rewritten and staged" "slot: update staged slot B as candidate generation=2"
+ran 16 R
+ctl_is 16 "control: B candidate with 3 tries, A still named active" "seq=2 control: active=0 candidate=1 tries=3"
+if [[ "$(slot_sum A)" == "${a_sum}" ]]; then ok "row 16: damaged slot A bytes untouched by the recovery update"; else bad "row 16: slot A bytes changed"; fi
+sboot r16-try "${svc_to}"
+has 16 "loader tries the rewritten B" "slot_loader: boot=B reason=candidate_try gen=2"
+lacks 16 "recovery image not used while a slot may boot" "slot_loader: boot=R"
+has 16 "kernel promoted the rewritten B" "slot: promoted slot B to active generation=2 floor=2"
+ran 16 B
+ctl_is 16 "control: B active" "control: active=1 candidate=none tries=0 flags=0x00 floor=2 last_good=2"
+row_end 16
+
+# ---- row 17: negative controls: recovery image wrong key / wrong digest -> not booted ----
+for k in key digest; do
+    slots --a "${SA1}" --control "${work}/c_init_a"
+    flip "${disk}" $(( $(geo_val a_off) + 4096 + 1000 ))
+    p_sum="$(part_sum)"
+    if [[ "${k}" == key ]]; then srec="${work}/SR1k2,${svc_r}"; want="signer_id names no trusted key"; else srec="${work}/SR1,${work}/svc_r_bad"; want="image SHA-512 mismatch"; fi
+    sboot "r17-${k}" "${AIENOS_SLOT_RECOVERY_TIMEOUT:-60}"
+    has 17 "wrong ${k}: recovery image refused" "slot_loader: recovery image refused (${want}): not booted"
+    lacks 17 "wrong ${k}: nothing started" "slot_loader: starting slot"
+    lacks 17 "wrong ${k}: no kernel ran" "kernel: alive"
+    if [[ "$(part_sum)" == "${p_sum}" ]]; then ok "row 17: wrong ${k}: slots partition byte-identical"; else bad "row 17: wrong ${k}: slots partition changed"; fi
+done
+srec=""
+mk_out="$(make -n -C native/kernel CROSS="${cross}" OUT="${work}/rc" CK_SERVICE=1 CK_RECOVERY=1 CK_INFER_LIB=/nonexistent full 2>&1 || true)"
+if grep -qF -- "CK_RECOVERY (the recovery image carries no model) cannot be combined with CK_INFER_LIB" <<<"${mk_out}"; then
+    ok "row 17: a recovery image with a model is refused (make)"
+else
+    bad "row 17: make accepted CK_RECOVERY with CK_INFER_LIB"
+fi
+row_end 17
+
 gh_lock_release
 echo "slot loader gate: ${boots} boots, ${checks} checks, ${fails} failures, QEMU ${qemu_secs} s (commit ${commit:0:12}; QEMU only, hardware NOT_RUN)"
 if [[ "${fails}" == 0 ]]; then
-    echo "${tag}: PASS (15 rows, ${boots} boots, ${checks} checks; QEMU, not hardware)"
+    echo "${tag}: PASS (17 rows, ${boots} boots, ${checks} checks; QEMU, not hardware)"
 else
     echo "${tag}: FAIL (${fails} of ${checks} checks)"
     exit 1
