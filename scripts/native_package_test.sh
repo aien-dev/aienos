@@ -126,11 +126,12 @@ tamper() { # name, sed expression, needle, extra verify args...
     cp -r "$T/p1" "$d"; sed -i "$e" "$d/PACKAGE.txt"; remake_all "$d"
     expect_refused "record check: $name" "$needle" "$np" verify --package "$d" --test-key "$@"
 }
+# digest tampers flip the first hex digit to a different one (f becomes 0), so they never leave the record unchanged
 tamper tree-clean-no 's/^tree_clean .*/tree_clean no/' "dirty tree (tree_clean no)"
-tamper makefile-digest 's/^input_makefile_sha256 ./input_makefile_sha256 f/' "input_makefile_sha256 does not match" "${dirty[@]}"
-tamper image-ld-digest 's/^input_image_ld_sha256 ./input_image_ld_sha256 f/' "input_image_ld_sha256 does not match" "${dirty[@]}"
+tamper makefile-digest 's/^input_makefile_sha256 f/input_makefile_sha256 0/;t;s/^input_makefile_sha256 ./input_makefile_sha256 f/' "input_makefile_sha256 does not match" "${dirty[@]}"
+tamper image-ld-digest 's/^input_image_ld_sha256 f/input_image_ld_sha256 0/;t;s/^input_image_ld_sha256 ./input_image_ld_sha256 f/' "input_image_ld_sha256 does not match" "${dirty[@]}"
 tamper commit-time 's/^commit_time .*/commit_time 1/' "commit_time does not match" "${dirty[@]}"
-tamper image-sha512 's/^image_sha512 ./image_sha512 f/' "image_sha512 does not match" "${dirty[@]}"
+tamper image-sha512 's/^image_sha512 f/image_sha512 0/;t;s/^image_sha512 ./image_sha512 f/' "image_sha512 does not match" "${dirty[@]}"
 tamper image-bytes 's/^image_bytes .*/image_bytes 1/' "image_bytes does not match" "${dirty[@]}"
 tamper make-vars 's/^input_make_vars .*/input_make_vars CK_SERVICE=1/' "input_make_vars does not match" "${dirty[@]}"
 tamper make-goal 's/^input_make_goal .*/input_make_goal all/' "input_make_goal does not match" "${dirty[@]}"
