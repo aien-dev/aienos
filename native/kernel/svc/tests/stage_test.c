@@ -20,6 +20,7 @@
 #include "mmio_window.h"
 #include "security.h"
 #include "store_boot.h"
+#include "continuity_service.h"
 #include "artifact_store.h"
 #include "sha256.h"
 #include "net_bind.h"
@@ -1190,6 +1191,87 @@ static void test_unlock_recovery(void)
     free(after);
 }
 
+/* P05 cut 1: production continuity on the service lifecycle
+ * (svc/continuity_service.c) over the real sealed Store in a file, opened the
+ * production way (recovery keyslot unlock). Identity + ALLEN subject are
+ * provisioned once, restored and resumed on every later open; an entropy
+ * refusal on a blank Store writes nothing. */
+static void test_continuity_service(void)
+{
+    ck_store_report r;
+    uint8_t S[32], U[16];
+    for (int i = 0; i < 32; i++) S[i] = (uint8_t)(i * 11 + 3);
+    for (int i = 0; i < 16; i++) U[i] = (uint8_t)(0xC0 + i);
+    uint8_t *now = malloc(T_BYTES), *after = malloc(T_BYTES);
+    CHECK(now && after);
+    if (!now || !after) return;
+    char st[96];
+    uint8_t agent[32];
+
+    printf("  [continuity: not started -> none, not writable]\n");
+    CHECK(ck_cont_service_state() == CK_CONT_NONE && ck_cont_service_writable() == 0 && ck_cont_service_agent() == 0);
+    ck_cont_service_status(st, sizeof st);
+    CHECK(strstr(st, "continuity=none") != 0);
+
+    printf("  [continuity: blank Store, unlock genesis, then PROVISIONED in one transaction]\n");
+    CHECK(dopen(1) == 0);
+    dclose();
+    CHECK(unlock(S, U, "cont-1", 1, &r) == 0 && r.formatted == 1 && r.gen_commit == 2);
+    CHECK(dopen(0) == 0);
+    int o = ck_cont_service_start(store_boot_store(), U, 0, 0, CC_SOURCE_QUALIFICATION);
+    CHECK(o == CK_CONT_PROVISIONED && ck_cont_service_state() == CK_CONT_PROVISIONED && ck_cont_service_writable() == 1);
+    CHECK(ss_generation(store_boot_store()) == 3);
+    CHECK(ck_cont_service_agent() != 0);
+    if (ck_cont_service_agent()) memcpy(agent, ck_cont_service_agent(), 32);
+    ck_cont_service_status(st, sizeof st);
+    CHECK(strstr(st, "continuity=provisioned") != 0 && strstr(st, "incarnation=1") != 0 && strstr(st, "subject_seq=1") != 0);
+    dclose();
+    ck_cont_service_stop();
+    CHECK(ck_cont_service_state() == CK_CONT_NONE && ck_cont_service_writable() == 0);
+
+    printf("  [continuity: reboot -> RESTORED + RESUMED incarnation 2, same agent]\n");
+    CHECK(unlock(S, U, "cont-2", 1, &r) == 0 && r.formatted == 0 && r.gen_open == 3 && r.gen_commit == 4);
+    CHECK(dopen(0) == 0);
+    o = ck_cont_service_start(store_boot_store(), U, 0, 0, CC_SOURCE_QUALIFICATION);
+    CHECK(o == CK_CONT_RESUMED && ck_cont_service_writable() == 1);
+    CHECK(ss_generation(store_boot_store()) == 5);
+    CHECK(ck_cont_service_agent() && memcmp(ck_cont_service_agent(), agent, 32) == 0);
+    ck_cont_service_status(st, sizeof st);
+    CHECK(strstr(st, "continuity=resumed") != 0 && strstr(st, "incarnation=2") != 0);
+    dclose();
+    ck_cont_service_stop();
+
+    printf("  [continuity: third boot -> incarnation 3]\n");
+    CHECK(unlock(S, U, "cont-3", 1, &r) == 0 && r.gen_open == 5);
+    CHECK(dopen(0) == 0);
+    o = ck_cont_service_start(store_boot_store(), U, 0, 0, CC_SOURCE_QUALIFICATION);
+    CHECK(o == CK_CONT_RESUMED);
+    ck_cont_service_status(st, sizeof st);
+    CHECK(strstr(st, "incarnation=3") != 0);
+    dclose();
+    ck_cont_service_stop();
+
+    printf("  [continuity: blank Store, entropy refused at genesis -> REFUSED, disk unchanged]\n");
+    CHECK(dopen(1) == 0);
+    dclose();
+    CHECK(unlock(S, U, "cont-r", 1, &r) == 0 && r.formatted == 1);
+    CHECK(load(now) == 0);
+    CHECK(dopen(0) == 0);
+    ck_host_entropy_refuse = 1;
+    o = ck_cont_service_start(store_boot_store(), U, 0, 0, CC_SOURCE_QUALIFICATION);
+    ck_host_entropy_refuse = 0;
+    CHECK(o == CK_CONT_REFUSED && ck_cont_service_state() == CK_CONT_REFUSED && ck_cont_service_writable() == 0);
+    CHECK(ck_cont_service_agent() == 0);
+    dclose();
+    CHECK(load(after) == 0 && memcmp(now, after, T_BYTES) == 0);
+    ck_cont_service_stop();
+    CHECK(ck_cont_service_state() == CK_CONT_NONE);
+
+    unlink(img);
+    free(now);
+    free(after);
+}
+
 static void test_security(void)
 {
     ck_sec_report r;
@@ -2258,6 +2340,7 @@ int main(void)
     test_mmio_stage_report();
     test_store();
     test_unlock_recovery();
+    test_continuity_service();
     test_artifact_store();
     test_security();
     test_nvme_shutdown();

@@ -86,7 +86,8 @@ int cr_resume(const struct cr_source *src, const struct cr_sink *snk, struct cr_
               struct cr_txwork *tw, struct cr_view *out, int *committed, const char **why,
               int *store_rc);
 
-/* ---- serial markers (contract section 3, nvme_read.rs:1118-1155) ----
+/* ---- serial markers (contract section 3, nvme_read.rs:1118-1155; TEST-ONLY,
+ * absent from a CK_SERVICE image) ----
  * Write the NUL-terminated line, without newline, into out[0..cap). Return the
  * length, or 0 when cap is too small. word: "PROVISIONED", "RESUMED",
  * "RESUMED_READONLY", "REMEMBERED", "COMMITTED". */

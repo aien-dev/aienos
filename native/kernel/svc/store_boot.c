@@ -8,6 +8,9 @@
 #include "sha256.h"
 #include "store_crash.h"
 #include "continuity_boot.h"
+#ifdef CK_SERVICE
+#include "continuity_service.h"
+#endif
 
 #ifdef CK_HARDWARE_STAGING
 /* Hardware staging image: owner provisioning generated at build time by
@@ -447,6 +450,7 @@ static const char *err_name(int rc)
     if (rc == CK_SB_E_SECRET_REJECTED) return "RecoverySecretRejected";
     if (rc == CK_SB_E_ENTROPY) return "EntropyRefused";
     if (rc == CK_SB_E_KEYSLOT_BAD) return "KeyslotManifestUnusable";
+    if (rc == CK_SB_E_CONTINUITY) return "ContinuityRefused";
     return "error";
 }
 
@@ -486,6 +490,29 @@ void store_boot_print(const ck_store_report *r)
     ck_printf("store: limit: anchor shares this disk, so a whole-disk rollback is not detectable "
               "(needs TPM NV or another external counter)\n");
 }
+
+#ifdef CK_SERVICE
+/* P05 cut 1: continuity (identity + ALLEN subject) runs on every Store open
+ * (svc/continuity_service.c). 0 = REFUSED: the Store keys are erased, the
+ * disk bytes stay as found, the lifecycle stays LOCKED and the NVMe stays
+ * bound for the stop order. */
+static int service_continuity(void)
+{
+#ifdef CK_HARDWARE_STAGING
+    int o = ck_cont_service_start(g_ss, g_ss->uuid, ck_owner_root_pk, sizeof ck_owner_root_pk, CC_SOURCE_OPERATOR);
+#else
+    int o = ck_cont_service_start(g_ss, g_ss->uuid, 0, 0, CC_SOURCE_QUALIFICATION);
+#endif
+    if (o == CK_CONT_REFUSED) {
+        bz(&g_ss->keys, sizeof g_ss->keys);
+        g_service_locked_rc = CK_SB_E_CONTINUITY;
+        ck_puts("store: service lifetime: continuity REFUSED, Store keys erased, lifecycle stays LOCKED "
+                "(disk as found; NVMe stays bound for the stop order)\n");
+        return 0;
+    }
+    return 1;
+}
+#endif
 
 /* Kernel stage. ck_dev_boot_disk comes from dev/devices.c. */
 const disk_dev *ck_dev_boot_disk(void);
@@ -579,6 +606,7 @@ int ck_stage_store(void)
      * until the lifecycle stop order releases it, in that order. A refused
      * Store releases the disk now, exactly as the diagnostic image does. */
     if (r.verdict == CK_SB_COMMITTED) {
+        if (!service_continuity()) return CK_SB_E_CONTINUITY;
         g_service_open = 1;
         ck_puts("store: service lifetime: Store open, NVMe stays bound until the lifecycle stop order\n");
         return rc;
@@ -600,6 +628,7 @@ int ck_store_service_close(void)
 {
     if (!g_service_open) return 0;
     g_service_open = 0;
+    ck_cont_service_stop();
     if (g_ss) bz(&g_ss->keys, sizeof g_ss->keys);
     return 1;
 }
@@ -671,6 +700,10 @@ int ck_store_service_unlock(const char *arg, size_t arg_len)
               (unsigned long long)r.boot_count_new);
     /* Signed artifact candidates live in this Store; read them now that it is open. */
     ck_art_stage_load(g_ss, r.step);
+    if (!service_continuity()) {
+        g_service_open = 0;
+        return 0;
+    }
     return 1;
 }
 #endif

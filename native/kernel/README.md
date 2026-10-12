@@ -83,6 +83,21 @@ of them:
   `keyslot_manifest_id`. `store_boot_run` refuses TEST-identity keys in a
   hardware staging build before any disk access (host test `stage_test`,
   including `test_unlock_recovery`; QEMU rows 168-170).
+- **Production continuity on the service lifecycle (P05 cut 1).** Every
+  Store open of a `CK_SERVICE` image (boot with keys, or `unlock`) runs
+  `svc/continuity_service.c`: an unprovisioned Store gets the identity
+  (AgentRoot, AgentState, Manifest) and the ALLEN subject minted in one
+  sealed transaction with RNDR entropy (no entropy: refused, nothing
+  written); a provisioned Store has the subject restored read-only, then the
+  identity resumed at incarnation + 1. A refusal erases the Store keys and
+  keeps the lifecycle LOCKED. The TEST-ONLY mode selection
+  (`continuity_boot.c`, `CK_TEST_CONTINUITY`, the `AIENCONT` plan line) and
+  the Recovery Core are never in a service image (`cont_check`). Serial lines
+  `continuity: PROVISIONED|RESUMED|REFUSED ...` and `allen: GENESIS|RESTORED
+  ...`; `status` appends `continuity=...`. Limits: the approved note is not a
+  Cortex record yet (P06); no Recovery Core, no TPM; aienos#285 not
+  triggered; physical disk qualification NOT_RUN (host test
+  `test_continuity_service`; QEMU rows 171-173).
 - Proof: `scripts/ck_owner_keys_check.sh` (build only, takes the quiet flag)
   checks the refusals, the generator refusals, and builds the hardware staging
   image from the labelled TEST-fixture files in `tests/fixtures/owner/`

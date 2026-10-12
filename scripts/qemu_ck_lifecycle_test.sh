@@ -51,6 +51,16 @@
 #            Store opened at generation 3 boot_count 1, committed generation 4
 #   row 170  secret hygiene: the typed secret is echoed as 64 '*' and the hex
 #            never appears in either serial log; no TEST key banner
+#   row 171  P05 cut 1 continuity GENESIS (unlock boot, after `unlock ok`): the
+#            production continuity service provisions the identity (AgentRoot,
+#            AgentState, Manifest incarnation 1) and the ALLEN subject (sequence 1)
+#            in one transaction (generation 3); `status` reports continuity=provisioned
+#   row 172  P05 cut 1 continuity RESUME (relock boot): the subject is RESTORED
+#            (sequence 1), the identity RESUMED at incarnation 2 (generation 6) with
+#            the same agent id; no second genesis; status continuity=resumed
+#   row 173  shape: the locked boot prints no continuity line; the test-keys image
+#            provisions before `Store open`; the service image carries the
+#            production continuity layer and no TEST mode selection (AIENCONT)
 #   build    the default (diagnostic) image carries no lifecycle; CK_SERVICE is
 #            refused with CK_CONSOLE_SESSION, CK_QEMU_UNSAFE_DMA and a CK_TEST_*
 #            flag; CK_SERVICE_TEST_KEYS is refused with CK_HARDWARE_STAGING
@@ -198,6 +208,7 @@ m1() { # row: the shared M1 checks read ${work}/serial.txt and set failed
 # --- build-shape checks ---
 if grep -aqF "lifecycle: ready" "${default_efi}"; then bad build "default image carries the resident lifecycle"; else ok build "default image carries no resident lifecycle"; fi
 if grep -aqF "TEST-ONLY service image" "${service_efi}"; then bad build "production service image carries the TEST key banner"; else ok build "production service image carries no TEST key banner"; fi
+if grep -aqF "continuity: REFUSED" "${service_efi}" && ! grep -aqF "AIENCONT" "${service_efi}" && ! grep -aqF "RECOVERY_OPERATOR_KEY" "${service_efi}"; then ok 173 "service image carries the production continuity layer and no TEST mode selection"; else bad 173 "service image continuity shape wrong (layer missing, or AIENCONT / TEST operator key present)"; fi
 for combo in "CK_CONSOLE_SESSION=1" "CK_QEMU_UNSAFE_DMA=1" "CK_TEST_STORE_CRASH=1"; do
     set +e; msg="$(make -s -n -C native/kernel OUT="${top}/refuse" full CK_SERVICE=1 "${combo}" 2>&1)"; st=$?; set -e
     if [[ "${st}" != 0 ]] && grep -qE "CK_SERVICE cannot be combined with" <<<"${msg}"; then ok build "refuses CK_SERVICE with ${combo}"; else bad build "did not refuse CK_SERVICE with ${combo} (status ${st})"; fi
@@ -224,6 +235,7 @@ before 162 "NVMe revoke < stop order line" '^dma_gate: nvme bus master revoked' 
 before 162 "stop order < stage result" '^lifecycle: stop order' '^stage lifecycle: ok rc=0$'
 before 162 "stage result < final report" '^stage lifecycle: ok rc=0$' '^report_kind: final'
 rabsent 162 "no panic or fault" '^report_kind: (panic|fault)'
+rabsent 173 "no continuity line while locked" '^(continuity|allen): '
 if [[ "${qemu_status}" == 0 ]]; then ok 162 "QEMU exit 0"; else bad 162 "QEMU exit ${qemu_status}"; fi
 m1 162
 
@@ -232,6 +244,8 @@ boot testkeys "${testkeys_efi}" drive_ready
 rcheck 163 "TEST-ONLY banner" '^lifecycle: TEST-ONLY service image \(CK_SERVICE_TEST_KEYS=1: TEST Store keys; QEMU only, never a production boot\)$'
 rcheck 163 "Store open, NVMe kept bound for the service lifetime" '^store: service lifetime: Store open, NVMe stays bound until the lifecycle stop order$'
 rcheck 163 "lifecycle ready" '^lifecycle: ready state=ready store=open \(operator input: serial\)$'
+rcheck 173 "test-keys image provisions continuity at boot" '^continuity: PROVISIONED agent=[0-9a-f]{64} incarnation=1 sequence=1 cortex=0 branches=1$'
+before 173 "PROVISIONED < Store open line" '^continuity: PROVISIONED' '^store: service lifetime: Store open'
 if [[ -n "$(line_of '^dma_gate: nvme bus master revoked')" && "$(line_of '^dma_gate: nvme bus master revoked')" -lt "$(line_of '^lifecycle: ready state=ready')" ]]; then bad 163 "NVMe revoked before the lifecycle (service lifetime broken)"; else ok 163 "no NVMe revoke before the lifecycle"; fi
 rcheck 164 "task proposed" '^lifecycle: task pending state=serve proposed="note: draft the plan" \(approve \| deny \| cancel\)$'
 rcheck 164 "approve committed to the Store" '^lifecycle: approve committed gen=[0-9]+ id=[0-9a-f]{8} state=ready$'
@@ -261,7 +275,15 @@ rcheck 168 "unlock ok" '^store: unlock ok source=recovery-keyslot slot=1 genesis
 rcheck 168 "lifecycle unlocked to ready" '^lifecycle: unlock ok state=ready$'
 rcheck 168 "status open" '^lifecycle: state=ready store=open pending=- requests='
 rcheck 168 "task proposed" '^lifecycle: task pending state=serve proposed="note: write a note" \(approve \| deny \| cancel\)$'
-rcheck 168 "approve committed generation 3" '^lifecycle: approve committed gen=3 id=[0-9a-f]{8} state=ready$'
+rcheck 168 "approve committed generation 4 (after the continuity genesis at 3)" '^lifecycle: approve committed gen=4 id=[0-9a-f]{8} state=ready$'
+rcheck 171 "genesis inputs declared" '^continuity: genesis source=qualification provenance=store-uuid-only \(identity and ALLEN subject in one transaction\)$'
+rcheck 171 "identity PROVISIONED incarnation 1" '^continuity: PROVISIONED agent=[0-9a-f]{64} incarnation=1 sequence=1 cortex=0 branches=1$'
+rcheck 171 "ALLEN subject GENESIS sequence 1" '^allen: GENESIS subject=[0-9a-f]{64} sequence=1 lineage=[0-9a-f]{64} intents=0 active=0 knowledge=0$'
+before 171 "unlock ok < PROVISIONED" '^store: unlock ok' '^continuity: PROVISIONED'
+before 171 "PROVISIONED < lifecycle unlock ok" '^continuity: PROVISIONED' '^lifecycle: unlock ok'
+rcheck 171 "status reports continuity" '^lifecycle: state=ready store=open pending=- requests=[0-9]+ continuity=provisioned agent=[0-9a-f]{16} incarnation=1 subject_seq=1$'
+unlock_agent="$(grep -oE '^continuity: PROVISIONED agent=[0-9a-f]{64}' "${top}/unlock/serial.txt" | head -1 | sed 's/.*agent=//')"
+[[ -n "${unlock_agent}" ]] || unlock_agent="NO_AGENT"
 rcheck 168 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=7$'
 before 168 "stop order < stage result" '^lifecycle: stop order store=closed' '^stage lifecycle: ok rc=0$'
 rabsent 168 "no panic or fault" '^report_kind: (panic|fault)'
@@ -277,12 +299,19 @@ boot relock "${service_efi}" drive_relock "${unlock_img}"
 rcheck 169 "lifecycle came up locked" '^lifecycle: ready state=locked store=locked'
 rcheck 169 "wrong secret refused by the keyslot tag" '^store: unlock REFUSED proof=keyed step="recovery secret rejected \(K_vol unwrap tag failed\); disk not opened" rc=-2004 \(RecoverySecretRejected\); still LOCKED, disk not reformatted$'
 rcheck 169 "lifecycle still locked after the wrong secret" '^lifecycle: REFUSED verb=unlock state=locked reason="production key source refused: still locked"$'
-rcheck 169 "status still locked" '^lifecycle: state=locked store=locked pending=- requests=2$'
+rcheck 169 "status still locked" '^lifecycle: state=locked store=locked pending=- requests=2 continuity=none$'
 rabsent 169 "not reformatted" '^store: blank disk'
 rcheck 169 "key source line: recovery keyslot resume" '^store: key source=recovery-keyslot genesis=0 '
-rcheck 169 "store opened at generation 3 (keyslot + boot record + note), boot_count 1" '^store: opened generation=3 boot_count=1 prev_commit=[0-9a-f]+ anchor=valid-resume$'
-rcheck 169 "store committed generation 4 boot 2" '^store: committed generation=4 boot_count=2$'
-rcheck 169 "unlock ok, no genesis" '^store: unlock ok source=recovery-keyslot slot=1 genesis=0 generation=4 boot_count=2$'
+rcheck 169 "store opened at generation 4 (keyslot + boot record + continuity genesis + note), boot_count 1" '^store: opened generation=4 boot_count=1 prev_commit=[0-9a-f]+ anchor=valid-resume$'
+rcheck 169 "store committed generation 5 boot 2" '^store: committed generation=5 boot_count=2$'
+rcheck 169 "unlock ok, no genesis" '^store: unlock ok source=recovery-keyslot slot=1 genesis=0 generation=5 boot_count=2$'
+rcheck 172 "ALLEN subject RESTORED sequence 1" '^allen: RESTORED subject=[0-9a-f]{64} sequence=1 lineage=[0-9a-f]{64} intents=0 active=0 knowledge=0$'
+rcheck 172 "identity RESUMED incarnation 2, same agent as the genesis boot" "^continuity: RESUMED agent=${unlock_agent} incarnation=2 sequence=2 cortex=0 branches=1\$"
+rabsent 172 "no second genesis" '^continuity: (PROVISIONED|genesis)'
+rabsent 172 "no degraded mount" '^continuity: (degraded|RESUMED_READONLY|REFUSED)'
+before 172 "unlock ok < RESUMED" '^store: unlock ok' '^continuity: RESUMED'
+before 172 "RESUMED < lifecycle unlock ok" '^continuity: RESUMED' '^lifecycle: unlock ok'
+rcheck 172 "status reports resumed" "^lifecycle: state=ready store=open pending=- requests=[0-9]+ continuity=resumed agent=${unlock_agent:0:16} incarnation=2 subject_seq=1\$"
 rcheck 169 "lifecycle unlocked to ready" '^lifecycle: unlock ok state=ready$'
 rcheck 169 "evidence: one refused unlock" '^lifecycle: evidence requests=5 refused=1 invalid=0 tasks=0 approved=0'
 rcheck 169 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=6$'
@@ -293,7 +322,7 @@ rabsent 170 "secret hex never in the serial log (resume boot)" "${secret_ok}"
 rabsent 170 "wrong secret hex never in the serial log" "${secret_bad}"
 
 if [[ "${fail}" != 0 || -n "${AIENOS_QEMU_VERBOSE:-}" ]]; then
-    for b in service testkeys unlock relock; do echo "---- ${b} serial (lifecycle lines) ----"; grep -E '^(lifecycle|store|stage lifecycle|dma_gate|smmu: nvme|report_kind|mm_usage)' "${top}/${b}/serial.txt" | head -60 || true; done
+    for b in service testkeys unlock relock; do echo "---- ${b} serial (lifecycle lines) ----"; grep -E '^(lifecycle|store|continuity|allen|stage lifecycle|dma_gate|smmu: nvme|report_kind|mm_usage)' "${top}/${b}/serial.txt" | head -60 || true; done
 fi
 if [[ "${fail}" == 0 ]]; then echo "${final_tag}: PASS (QEMU only; hardware NOT_RUN)"; exit 0; fi
 echo "${final_tag}: FAIL"; exit 1

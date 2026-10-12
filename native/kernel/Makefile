@@ -653,6 +653,13 @@ FULL_NAME := full-service$(if $(strip $(CK_HARDWARE_STAGING)),-hardware-staging,
 STAGE_DMA_FLAGS += -DCK_SERVICE=1
 endif
 STAGE_SRCS += $(KDIR)/core/lifecycle.c $(KDIR)/core/lifecycle_fsm.c
+# P05 cut 1: production continuity on the service lifecycle (svc/continuity_service.c):
+# the continuity layer without its TEST-ONLY mode selection (continuity_boot.c)
+# and without the Recovery Core (continuity_recovery.c, TEST operator key).
+STAGE_DMA_FLAGS += -I$(KDIR)/core
+STAGE_SRCS += $(KDIR)/svc/continuity_codec.c $(KDIR)/svc/continuity_resolve.c \
+	$(KDIR)/svc/continuity_resolve_sealed.c $(KDIR)/svc/continuity_commit.c \
+	$(KDIR)/svc/continuity_subject.c $(KDIR)/svc/continuity_subject_provision.c $(KDIR)/svc/continuity_service.c
 endif
 ifeq ($(strip $(CK_TEST_DISK_XLATE_BYPASS)),1)
 FULL_NAME := $(FULL_NAME)-test-xlate-bypass
@@ -859,20 +866,26 @@ define crash_check
 endef
 
 # cont_check(elf): a full image built without CK_TEST_CONTINUITY must carry no
-# continuity wiring code or strings; a TEST continuity image must announce itself.
-# The bare "TEST-ONLY MUTANT" phrase is refused here except in the TEST Store
-# crash image, whose own mutants print it (crash_check refuses it in every
-# image built without CK_TEST_STORE_CRASH; continuity mutants are still caught
-# by the continuity strings).
+# TEST continuity wiring code or strings; a TEST continuity image must announce
+# itself. A CK_SERVICE image carries the production continuity layer (P05 cut 1:
+# cr_provision/cr_resume through svc/continuity_service.c) and must still carry
+# neither the TEST mode selection (ck_cont_boot_stage, AIENCONT plan line) nor
+# the Recovery Core (rc_inspect, the TEST operator key).
 define cont_check
 	@if [ "$(strip $(CK_TEST_CONTINUITY))" = 1 ]; then \
 	  grep -aqF "TEST-ONLY continuity mode selection image" $(1) || { echo "TEST continuity image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
 	else \
 	  m="|TEST-ONLY MUTANT"; [ "$(strip $(CK_TEST_STORE_CRASH))" = 1 ] && m=""; \
-	  s=$$(grep -aoE "AIENCONT|RECOVERY_OPERATOR_KEY|RECOVERY_CORE:|CONTINUITY: $$m" $(1) | sort -u | tr "\n" " "); \
-	  y=$$($(KNM) $(1) | grep -E " (ck_cont_boot_stage|cr_resume|cr_provision|rc_inspect)$$" | tr "\n" " "); \
-	  if [ -n "$$s$$y" ]; then echo "default image carries the TEST continuity wiring: $$s$$y"; rm -f $(1); exit 1; fi; \
-	  echo "no continuity wiring code in $(1)"; \
+	  if [ "$(strip $(CK_SERVICE))" = 1 ]; then \
+	    s=$$(grep -aoE "AIENCONT|RECOVERY_OPERATOR_KEY|RECOVERY_CORE:|CONTINUITY: $$m" $(1) | sort -u | tr "\n" " "); \
+	    y=$$($(KNM) $(1) | grep -E " (ck_cont_boot_stage|rc_inspect)$$" | tr "\n" " "); \
+	    grep -aqF "continuity: REFUSED" $(1) || { echo "service image lacks the production continuity wiring"; rm -f $(1); exit 1; }; \
+	  else \
+	    s=$$(grep -aoE "AIENCONT|RECOVERY_OPERATOR_KEY|RECOVERY_CORE:|CONTINUITY: |continuity: REFUSED$$m" $(1) | sort -u | tr "\n" " "); \
+	    y=$$($(KNM) $(1) | grep -E " (ck_cont_boot_stage|cr_resume|cr_provision|rc_inspect|ck_cont_service_start)$$" | tr "\n" " "); \
+	  fi; \
+	  if [ -n "$$s$$y" ]; then echo "image carries the TEST continuity wiring: $$s$$y"; rm -f $(1); exit 1; fi; \
+	  echo "no TEST continuity wiring in $(1)"; \
 	fi
 endef
 
