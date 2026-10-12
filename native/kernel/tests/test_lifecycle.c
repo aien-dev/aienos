@@ -24,16 +24,19 @@ int main(void)
     CHECK(dec("task   padded   ", &a, &al) == CK_LC_V_TASK && al == 6 && memcmp(a, "padded", 6) == 0);
     CHECK(dec("task", &a, &al) == CK_LC_V_INVALID);        /* task needs text */
     CHECK(dec("status now", &a, &al) == CK_LC_V_INVALID);  /* no argument allowed */
+    CHECK(dec("unlock", &a, &al) == CK_LC_V_UNLOCK && al == 0);
+    CHECK(dec("unlock deadbeef  ", &a, &al) == CK_LC_V_UNLOCK && al == 8 && memcmp(a, "deadbeef", 8) == 0);
+    CHECK(CK_LC_LINE_MAX >= 7 + 64); /* "unlock " + a 64-hex recovery secret fits in one line */
     CHECK(dec("frobnicate", &a, &al) == CK_LC_V_UNKNOWN);
     CHECK(dec("sta\x01tus", &a, &al) == CK_LC_V_INVALID);  /* unprintable */
     {
         char big[CK_LC_LINE_MAX + 2];
         memset(big, 'x', sizeof big - 1); big[sizeof big - 1] = 0;
-        CHECK(dec(big, &a, &al) == CK_LC_V_INVALID);        /* 65 bytes refused whole */
+        CHECK(dec(big, &a, &al) == CK_LC_V_INVALID);        /* CK_LC_LINE_MAX + 1 bytes refused whole */
         char t[CK_LC_LINE_MAX + 1];
         memset(t, 'y', CK_LC_LINE_MAX); t[CK_LC_LINE_MAX] = 0;
         memcpy(t, "task ", 5);
-        CHECK(dec(t, &a, &al) == CK_LC_V_INVALID && al == CK_LC_LINE_MAX - 5); /* text 59 > 48 */
+        CHECK(dec(t, &a, &al) == CK_LC_V_INVALID && al == CK_LC_LINE_MAX - 5); /* text 91 > 48 */
     }
     CHECK(strcmp(ck_lc_verb_name(CK_LC_V_SHUTDOWN), "shutdown") == 0 && strcmp(ck_lc_state_name(CK_LC_SERVE), "serve") == 0);
 

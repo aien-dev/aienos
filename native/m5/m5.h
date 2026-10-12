@@ -102,6 +102,34 @@ int m5_keyslot_wrap(m5_keyslot *s, const uint8_t store_uuid[16], const uint8_t k
 int m5_keyslot_unwrap(const m5_keyslot *s, const uint8_t store_uuid[16],
                       const uint8_t kek[32], uint8_t k_vol_out[32]);
 
+/* ---- KeySlotManifest (kind 21, ADR 0017 section 2.4): the plaintext Store
+ * object that bootstraps K_vol. Fixed part: 128-byte header + 4 descriptors
+ * (640 bytes), then a payload arena the raw-secret profile leaves empty.
+ * Layout is byte-compatible with the Rust KeySlotManifest. ---- */
+#define M5_KSM_KIND 21
+#define M5_KSM_SLOTS 4
+#define M5_KSM_FIXED_LEN 640
+#define M5_KSM_ARENA_MAX 32768
+typedef struct {
+    uint8_t store_uuid[16];
+    uint64_t manifest_sequence;
+    uint8_t previous_keyslot_manifest_id[32]; /* zero at genesis */
+    uint64_t active_key_epoch;
+    uint32_t slot_count; /* descriptors in use, at most M5_KSM_SLOTS */
+    m5_keyslot slots[M5_KSM_SLOTS];
+    uint32_t arena_len; /* payload bytes after the fixed part (decode only) */
+} m5_ksm;
+/* Fixed part only; the caller appends the arena bytes. */
+void m5_ksm_encode(const m5_ksm *m, uint8_t out[M5_KSM_FIXED_LEN]);
+/* Bounded decode of a whole manifest (fixed part + arena). Every descriptor
+ * passes m5_keyslot_decode; payload ranges must lie inside the arena. */
+int m5_ksm_decode(const uint8_t *b, size_t len, m5_ksm *m);
+/* Recovery KEK, high-entropy profile (ADR 0017 section 2.4):
+ * HKDF-SHA256(salt = slot.salt, ikm = raw secret, info =
+ * "AIENOS/M5/RECOVERY-KEK-V1", 32 bytes). On error out is zero. */
+#define M5_RECOVERY_KEK_INFO "AIENOS/M5/RECOVERY-KEK-V1"
+int m5_recovery_kek(const uint8_t salt[16], const uint8_t *secret, size_t secret_len, uint8_t out[32]);
+
 /* ---- SecurityManifest (kind 22): byte-compatible with Rust v1 ----
  * 256 bytes, magic "AIENSEC1", format_version 1, flags 0, reserved 0,
  * root_mac = HMAC(k_root_auth, "AIENOS-M5-ROOT-AUTH-V1\0" || bytes[0..224]).

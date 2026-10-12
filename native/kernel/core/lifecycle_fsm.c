@@ -39,10 +39,12 @@ enum ck_lc_verb ck_lc_decode(const char *line, size_t len, const char **arg, siz
         if (*arg_len == 0 || *arg_len > CK_LC_TASK_MAX) return CK_LC_V_INVALID;
         return CK_LC_V_TASK;
     }
-    if (*arg_len != 0) return CK_LC_V_INVALID; /* every other verb takes no argument */
+    /* unlock carries the optional recovery secret (the binding checks its
+     * shape and never echoes it); every other verb takes no argument. */
+    if (word_is(w, n, "unlock")) return CK_LC_V_UNLOCK;
+    if (*arg_len != 0) return CK_LC_V_INVALID;
     if (word_is(w, n, "help")) return CK_LC_V_HELP;
     if (word_is(w, n, "status")) return CK_LC_V_STATUS;
-    if (word_is(w, n, "unlock")) return CK_LC_V_UNLOCK;
     if (word_is(w, n, "approve")) return CK_LC_V_APPROVE;
     if (word_is(w, n, "deny")) return CK_LC_V_DENY;
     if (word_is(w, n, "cancel")) return CK_LC_V_CANCEL;

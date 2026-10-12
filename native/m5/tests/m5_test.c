@@ -973,10 +973,95 @@ static void t_recovery_store_binding(void)
 }
 
 struct test { const char *name; void (*fn)(void); };
+
+/* ---- KeySlotManifest (kind 21) and the recovery KEK (ADR 0017 section 2.4) ---- */
+
+static m5_ksm ksm_fixture(void)
+{
+    m5_ksm m;
+    memset(&m, 0, sizeof m);
+    memset(m.store_uuid, 0xA0, 16);
+    m.manifest_sequence = 1;
+    m.active_key_epoch = 3;
+    m.slot_count = 2; /* slot 0 reserved Empty (TPM later), slot 1 recovery */
+    m.slots[1] = slot_fixture();
+    m.slots[1].kdf_suite = 0x02;
+    m.slots[1].wrap_suite = M5_WRAP_SUITE_GCMSIV;
+    memset(m.slots[1].salt, 0x5a, 16);
+    return m;
+}
+
+static void t_ksm_roundtrip(void)
+{
+    uint8_t kek[32], nonce[12], kv[32], enc[M5_KSM_FIXED_LEN + 8];
+    memset(kek, 0x42, 32); memset(nonce, 0x24, 12);
+    m5_ksm m = ksm_fixture(), d;
+    CHECK(m5_keyslot_wrap(&m.slots[1], m.store_uuid, kek, K_VOL, nonce) == M5_OK);
+    m5_ksm_encode(&m, enc);
+    CHECK(memcmp(enc, "AIENKSL1", 8) == 0 && enc[8] == 1 && enc[9] == 0 && enc[76] == 2);
+    CHECK(memcmp(enc + 12, m.store_uuid, 16) == 0 && enc[68] == 3);
+    CHECK(all_zero(enc + 80, 48) && all_zero(enc + 128, M5_KEYSLOT_LEN)); /* reserved; slot 0 Empty */
+    CHECK(m5_ksm_decode(enc, M5_KSM_FIXED_LEN, &d) == M5_OK);
+    CHECK(d.slot_count == 2 && d.active_key_epoch == 3 && d.manifest_sequence == 1 && d.arena_len == 0);
+    CHECK(d.slots[1].slot_type == M5_SLOT_RECOVERY_RAW_SECRET && d.slots[1].kdf_suite == 0x02);
+    CHECK(m5_keyslot_unwrap(&d.slots[1], d.store_uuid, kek, kv) == M5_OK && memcmp(kv, K_VOL, 32) == 0);
+    /* an arena is carried as length only */
+    memset(enc + M5_KSM_FIXED_LEN, 7, 8);
+    CHECK(m5_ksm_decode(enc, sizeof enc, &d) == M5_OK && d.arena_len == 8);
+}
+
+static void t_ksm_refusals(void)
+{
+    uint8_t enc[M5_KSM_FIXED_LEN + 8], e2[M5_KSM_FIXED_LEN + 8];
+    m5_ksm m = ksm_fixture(), d;
+    m5_ksm_encode(&m, enc);
+    memset(enc + M5_KSM_FIXED_LEN, 0, 8);
+    CHECK(m5_ksm_decode(enc, M5_KSM_FIXED_LEN - 1, &d) == M5_ERR_BOUNDS);
+    CHECK(m5_ksm_decode(NULL, M5_KSM_FIXED_LEN, &d) == M5_ERR_ARG);
+    memcpy(e2, enc, sizeof enc); e2[0] = 'X';
+    CHECK(m5_ksm_decode(e2, M5_KSM_FIXED_LEN, &d) == M5_ERR_FORMAT);
+    memcpy(e2, enc, sizeof enc); e2[8] = 2; /* format_version */
+    CHECK(m5_ksm_decode(e2, M5_KSM_FIXED_LEN, &d) == M5_ERR_FORMAT);
+    memcpy(e2, enc, sizeof enc); e2[10] = 1; /* flags */
+    CHECK(m5_ksm_decode(e2, M5_KSM_FIXED_LEN, &d) == M5_ERR_FORMAT);
+    memcpy(e2, enc, sizeof enc); e2[100] = 1; /* reserved */
+    CHECK(m5_ksm_decode(e2, M5_KSM_FIXED_LEN, &d) == M5_ERR_FORMAT);
+    memcpy(e2, enc, sizeof enc); e2[76] = 5; /* slot_count > 4 */
+    CHECK(m5_ksm_decode(e2, M5_KSM_FIXED_LEN, &d) == M5_ERR_BOUNDS);
+    memcpy(e2, enc, sizeof enc); e2[128 + 3] = 1; /* slot 0 flags: descriptor refused */
+    CHECK(m5_ksm_decode(e2, M5_KSM_FIXED_LEN, &d) == M5_ERR_FORMAT);
+    /* payload range: slot 1 names 8 bytes of arena that are not there */
+    memcpy(e2, enc, sizeof enc); e2[128 + M5_KEYSLOT_LEN + 108] = 8;
+    CHECK(m5_ksm_decode(e2, M5_KSM_FIXED_LEN, &d) == M5_ERR_BOUNDS);
+    CHECK(m5_ksm_decode(e2, sizeof e2, &d) == M5_OK); /* present: fine */
+    /* a descriptor past slot_count must be Empty */
+    memcpy(e2, enc, sizeof enc); e2[76] = 1;
+    CHECK(m5_ksm_decode(e2, M5_KSM_FIXED_LEN, &d) == M5_ERR_FORMAT);
+}
+
+static void t_recovery_kek_vector(void)
+{
+    /* openssl kdf -keylen 32 -kdfopt digest:SHA256 -kdfopt hexkey:<secret>
+     * -kdfopt hexsalt:<salt> -kdfopt info:AIENOS/M5/RECOVERY-KEK-V1 HKDF */
+    uint8_t secret[32], salt[16], out[32], out2[32];
+    for (int i = 0; i < 32; i++) secret[i] = (uint8_t)i;
+    for (int i = 0; i < 16; i++) salt[i] = (uint8_t)(0xa0 + i);
+    static const uint8_t want[32] = {0x73, 0xa4, 0xe8, 0x99, 0x5a, 0x85, 0x9f, 0xca, 0xb9, 0xbd, 0x19, 0x01, 0x91,
+                                     0xb4, 0x33, 0x4c, 0x5e, 0x75, 0x2c, 0xdc, 0x59, 0x21, 0x4c, 0x00, 0xe0, 0x72,
+                                     0x21, 0xa2, 0x5e, 0xb6, 0x26, 0x38};
+    CHECK(m5_recovery_kek(salt, secret, 32, out) == M5_OK);
+    CHECK(memcmp(out, want, 32) == 0);
+    salt[0] ^= 1;
+    CHECK(m5_recovery_kek(salt, secret, 32, out2) == M5_OK && memcmp(out, out2, 32) != 0);
+    CHECK(m5_recovery_kek(salt, secret, 0, out2) == M5_ERR_ARG && all_zero(out2, 32));
+    CHECK(m5_recovery_kek(NULL, secret, 32, out2) == M5_ERR_ARG && all_zero(out2, 32));
+}
+
 static const struct test TESTS[] = {
 #define T(x) {#x, x}
     T(t_hkdf_rfc5869_case1), T(t_subkeys_deterministic_and_separated), T(t_object_key_binds_every_field),
-    T(t_keyslot_wrap_unwrap), T(t_keyslot_refusals), T(t_secman_roundtrip_rust_v1_layout),
+    T(t_keyslot_wrap_unwrap), T(t_keyslot_refusals), T(t_ksm_roundtrip), T(t_ksm_refusals), T(t_recovery_kek_vector),
+    T(t_secman_roundtrip_rust_v1_layout),
     T(t_secman_wrong_root_auth_key_refused), T(t_secman_every_byte_tamper_refused),
     T(t_env_roundtrip_sizes), T(t_env_header_bounds_each_field), T(t_env_rust_v1_header_and_standard_aad), T(t_env_hostile_header_fuzz),
     T(t_all_or_nothing_late_chunk_failure_zeroes_output),

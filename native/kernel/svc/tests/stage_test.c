@@ -1066,6 +1066,130 @@ static void test_store(void)
 
 /* ---------------- security ---------------- */
 
+/* P04 cut 1: recovery keyslot unlock (ADR 0017 section 2.4 Slot 1) over the
+ * real sealed Store in a file. No key ever comes from the image: K_vol is
+ * drawn at genesis (host: deterministic counter fill) and wrapped under the
+ * HKDF KEK of the operator's raw secret. */
+extern int ck_host_entropy_refuse;
+static int unlock(const uint8_t *S, const uint8_t *uuid, const char *commit, int hw, ck_store_report *r)
+{
+    if (dopen(0)) return -999;
+    int rc = ck_store_unlock_boot(&g_d, S, uuid, commit, hw, r);
+    store_boot_print(r);
+    dclose();
+    return rc;
+}
+static size_t nonzero(const uint8_t *b, size_t n)
+{
+    size_t nz = 0;
+    for (size_t i = 0; i < n; i++) nz += b[i] != 0;
+    return nz;
+}
+static void test_unlock_recovery(void)
+{
+    ck_store_report r;
+    uint8_t S[32], W[32], U[16], V[16];
+    for (int i = 0; i < 32; i++) S[i] = (uint8_t)(i * 7 + 1);
+    memcpy(W, S, 32);
+    W[0] ^= 1;
+    for (int i = 0; i < 16; i++) { U[i] = (uint8_t)(0x40 + i); V[i] = (uint8_t)(0x80 + i); }
+    uint8_t *now = malloc(T_BYTES), *after = malloc(T_BYTES);
+    CHECK(now && after);
+    if (!now || !after) return;
+
+    printf("  [unlock: production key source still BLOCKED_OPERATOR]\n");
+    {
+        ss_keys pk;
+        memset(&pk, 0xEE, sizeof pk);
+        CHECK(ck_store_production_keys(&pk) == CK_SB_E_BLOCKED_OPERATOR && nonzero((const uint8_t *)&pk, sizeof pk) == 0);
+    }
+
+    printf("  [unlock: blank disk, entropy refused -> no genesis, disk untouched]\n");
+    CHECK(dopen(1) == 0);
+    dclose();
+    ck_host_entropy_refuse = 1;
+    int rc = unlock(S, 0, "unlock-0", 0, &r);
+    ck_host_entropy_refuse = 0;
+    CHECK(rc == CK_SB_E_ENTROPY && r.verdict == CK_SB_REFUSED && r.formatted == 0 && r.unlocked_genesis == 0);
+    CHECK(r.proof && strcmp(r.proof, "keyed") == 0);
+    CHECK(load(now) == 0 && nonzero(now, T_BYTES) == 0);
+
+    printf("  [unlock: blank disk, genesis: keyslot manifest + boot record in one transaction]\n");
+    rc = unlock(S, 0, "unlock-1", 0, &r);
+    CHECK(rc == 0 && r.verdict == CK_SB_COMMITTED && r.formatted == 1 && r.unlocked_genesis == 1);
+    CHECK(r.identity_class == M5_ID_PRODUCTION && r.boot_count_prev == 0 && r.boot_count_new == 1);
+    CHECK(r.gen_open == 1 && r.gen_commit == 2 && r.rb == SS_RB_VALID_RESUME); /* ss_format commits the gen-1 anchor */
+    CHECK(r.key_source && strcmp(r.key_source, "recovery-keyslot") == 0);
+    CHECK(store_boot_store()->has_keyslot == 1 && store_boot_store()->keys.identity_class == M5_ID_PRODUCTION);
+
+    printf("  [unlock: reboot, same secret, hardware policy: K_vol unwrapped, no genesis]\n");
+    rc = unlock(S, 0, "unlock-2", 1, &r);
+    CHECK(rc == 0 && r.verdict == CK_SB_COMMITTED && r.formatted == 0 && r.unlocked_genesis == 0);
+    CHECK(r.boot_count_prev == 1 && r.boot_count_new == 2 && strcmp(r.prev_commit, "unlock-1") == 0);
+    CHECK(r.gen_open == 2 && r.gen_commit == 3 && r.rb == SS_RB_VALID_RESUME);
+    CHECK(store_boot_store()->has_keyslot == 1);
+    {
+        /* the open Store serves the lifecycle: one sealed note, then it is back after a reboot */
+        static const uint8_t note[] = "aienos.note.v1\nkeyslot test";
+        ss_object o = {0x4e31, 1, note, sizeof note - 1};
+        uint8_t ids[1][32];
+        CHECK(dopen(0) == 0);
+        CHECK(ss_transact(store_boot_store(), &o, 1, 0, 0, ids) == 0);
+        dclose();
+        rc = unlock(S, 0, "unlock-3", 0, &r);
+        CHECK(rc == 0 && r.gen_open == 4 && r.boot_count_prev == 2);
+        uint8_t rd[64];
+        size_t len = 0;
+        uint16_t kind = 0;
+        CHECK(dopen(0) == 0);
+        CHECK(ss_read(store_boot_store(), ids[0], rd, sizeof rd, &len, &kind) == 0 && kind == 0x4e31 &&
+              len == sizeof note - 1 && memcmp(rd, note, len) == 0);
+        dclose();
+    }
+
+    printf("  [unlock: wrong secret refused by the keyslot tag, disk unchanged]\n");
+    CHECK(load(now) == 0);
+    rc = unlock(W, 0, "unlock-bad", 0, &r);
+    CHECK(rc == CK_SB_E_SECRET_REJECTED && r.verdict == CK_SB_REFUSED && r.formatted == 0);
+    CHECK(r.proof && strcmp(r.proof, "keyed") == 0 && r.rc == CK_SB_E_SECRET_REJECTED);
+    CHECK(load(after) == 0 && memcmp(now, after, T_BYTES) == 0);
+
+    printf("  [unlock: manifest uuid is not the provisioned one, disk unchanged]\n");
+    rc = unlock(S, V, "unlock-uuid", 1, &r);
+    CHECK(rc == CK_SB_E_KEYSLOT_BAD && r.verdict == CK_SB_REFUSED);
+    CHECK(load(after) == 0 && memcmp(now, after, T_BYTES) == 0);
+
+    printf("  [unlock: a TEST-key Store has no keyslot manifest: NoKeyslotManifest, disk unchanged]\n");
+    {
+        ss_keys k;
+        ck_store_test_keys(&k);
+        CHECK(dopen(1) == 0);
+        dclose();
+        CHECK(boot(&k, "test-one", &r) == 0 && r.formatted == 1);
+        CHECK(load(now) == 0);
+        rc = unlock(S, 0, "unlock-test", 0, &r);
+        CHECK(rc == CK_SB_E_NO_KEYSLOT && r.verdict == CK_SB_REFUSED && r.rc == CK_SB_E_NO_KEYSLOT);
+        CHECK(load(after) == 0 && memcmp(now, after, T_BYTES) == 0);
+    }
+
+    printf("  [unlock: provisioned uuid at genesis, then checked on every unlock]\n");
+    CHECK(dopen(1) == 0);
+    dclose();
+    rc = unlock(S, U, "unlock-prov", 1, &r);
+    CHECK(rc == 0 && r.formatted == 1 && r.unlocked_genesis == 1);
+    CHECK(memcmp(store_boot_store()->uuid, U, 16) == 0);
+    rc = unlock(S, V, "unlock-prov-2", 1, &r);
+    CHECK(rc == CK_SB_E_KEYSLOT_BAD);
+    rc = unlock(S, U, "unlock-prov-3", 1, &r);
+    CHECK(rc == 0 && r.formatted == 0 && r.boot_count_prev == 1 && strcmp(r.prev_commit, "unlock-prov") == 0);
+    rc = unlock(S, 0, "unlock-prov-4", 0, &r);
+    CHECK(rc == 0 && r.boot_count_prev == 2); /* no expectation: any manifest uuid */
+
+    unlink(img);
+    free(now);
+    free(after);
+}
+
 static void test_security(void)
 {
     ck_sec_report r;
@@ -2133,6 +2257,7 @@ int main(void)
     test_mmio_unmap();
     test_mmio_stage_report();
     test_store();
+    test_unlock_recovery();
     test_artifact_store();
     test_security();
     test_nvme_shutdown();

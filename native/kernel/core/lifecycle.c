@@ -48,7 +48,7 @@
 void ck_dev_nvme_release(void);
 int ck_store_service_ready(void);
 int ck_store_service_close(void);
-int ck_store_service_unlock(void);
+int ck_store_service_unlock(const char *arg, size_t arg_len);
 
 static ck_lc g_lc;
 static uint8_t g_last_id[32];
@@ -57,7 +57,7 @@ static unsigned g_overlong, g_dropped;
 
 static void help(void)
 {
-    ck_puts("lifecycle: verbs: status unlock task <text> approve deny cancel evidence help shutdown\n");
+    ck_puts("lifecycle: verbs: status unlock [<64-hex recovery secret>] task <text> approve deny cancel evidence help shutdown\n");
 }
 
 static void status(void)
@@ -110,7 +110,7 @@ static void handle_line(const char *line, size_t len)
                   ck_lc_state_name(g_lc.state), g_lc.reason);
         return;
     case CK_LC_R_UNLOCK: {
-        int opened = ck_store_service_unlock();
+        int opened = ck_store_service_unlock(arg, arg_len);
         ck_lc_unlock_done(&g_lc, opened);
         if (opened) ck_printf("lifecycle: unlock ok state=%s\n", ck_lc_state_name(g_lc.state));
         else ck_printf("lifecycle: REFUSED verb=unlock state=%s reason=\"%s\"\n", ck_lc_state_name(g_lc.state), g_lc.reason);
@@ -147,6 +147,19 @@ static void handle_line(const char *line, size_t len)
     }
 }
 
+/* 1 when the line so far is "unlock" followed by its argument: those bytes
+ * are the recovery secret and are echoed as '*' so the serial log never
+ * carries them. */
+static int in_secret(const char *buf, size_t len)
+{
+    static const char verb[] = "unlock";
+    size_t i = 0, j;
+    while (i < len && buf[i] == ' ') i++;
+    for (j = 0; j < sizeof verb - 1; j++)
+        if (i + j >= len || buf[i + j] != verb[j]) return 0;
+    return i + j < len && buf[i + j] == ' ';
+}
+
 /* Bounded serial line editor: printable bytes collected, Backspace edits,
  * CR or LF ends the line; a line past CK_LC_LINE_MAX is refused whole (the
  * rest of it is dropped until the next Enter). Returns 1 when the line is complete. */
@@ -176,8 +189,7 @@ static int rx_line(char *buf, size_t *len, int *overflow)
         if (c < 0x20 || c > 0x7e) { g_dropped++; continue; }
         if (*overflow) continue;
         if (*len >= CK_LC_LINE_MAX) { *overflow = 1; continue; }
-        buf[(*len)++] = c;
-        { char e[2] = { c, 0 }; ck_puts(e); }
+        { char e[2] = { in_secret(buf, *len) ? '*' : c, 0 }; buf[(*len)++] = c; ck_puts(e); }
     }
 }
 

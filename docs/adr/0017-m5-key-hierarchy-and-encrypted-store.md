@@ -158,6 +158,15 @@ reserved (16 B)
 
 ---
 
+#### 2.4.1 Implementation note (C kernel, P04 cut 1, 2026-10-12)
+
+- The manifest is committed as a plaintext kind-21 object **inside a sealed transaction** (`native/store/store_sealed.c`): the keyed transaction record binds its SHA-256, exactly one manifest may be bound at a time, and an unkeyed bootstrap read (`ss_keyslot_bootstrap`) returns the bytes before any key exists. The keyed open re-checks the same bytes. A manifest that is present but unclaimed, duplicated, or whose digest changed is refused.
+- Codec: `native/m5` `m5_ksm_encode` / `m5_ksm_decode` (fixed 640 bytes + arena; every descriptor through `m5_keyslot_decode`; unused descriptors must be Empty).
+- Recovery KEK (raw-secret profile): `m5_recovery_kek` = HKDF-SHA256(salt = slot.salt, ikm = 32-byte secret, info = `AIENOS/M5/RECOVERY-KEK-V1`, 32). HKDF-Extract is `HMAC(salt || 0^16, ikm)`, bit-identical to RFC 5869 for a 16-byte salt (test vector in `m5_test.c`).
+- Keyslot AAD in C binds `store_uuid, slot_id, slot_type, key_epoch` (`AIENOS-M5-KEYSLOT-V2`), a superset of the Rust reference; C is authoritative.
+- The kernel (`ck_store_unlock_boot`) creates the manifest at genesis in the same first transaction as the boot record (index 0 reserved Empty for the TPM slot, index 1 = Recovery_RawSecret, slot_id 1, `active_key_epoch` 1), and derives PRODUCTION-class subkeys with owner hierarchy generation = `active_key_epoch`.
+- Not yet: TPM Slot 0 (BLOCKED_HARDWARE), key rotation (section 2.7), binding `keyslot_manifest_id` into the SecurityManifest, Argon2id profile.
+
 ### 2.5 SecurityManifest (`kind = 22`)
 
 `SecurityManifest` is a 256-byte fixed-size Store v1 object that authenticates authorized logical state under `K_root_auth`:
