@@ -1066,8 +1066,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -1447,6 +1447,26 @@ $(MODEL_MAP_TOOL): $(KDIR)/tools/ck_model_map.c $(NATIVE)/argus/sha256.c $(BOOT)
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -I$(BOOT) -I$(NATIVE)/argus -o $@ $(KDIR)/tools/ck_model_map.c $(NATIVE)/argus/sha256.c
 model-map: $(MODEL_MAP_TOOL)
+
+# GSP firmware container inspector (aienos#286 cut C, host work only: inventory
+# and refusal checks for the NVIDIA GSP-RM ELF container the pinned Linux
+# driver loads for the GB10; docs/GB10_FIRMWARE_INVENTORY.md). Never loads
+# anything. SHA-256 is the kernel's own (argus). The real file is optional:
+# when absent the inspect step is NOT_RUN, the self-test still runs.
+GSP_FW_TOOL := $(OUT)/host/ck_gsp_fw_inspect
+GSP_FW_FILE ?= /lib/firmware/nvidia/580.173.02/gsp_ga10x.bin
+GSP_FW_SHA256 := 32cb7cf3e77f97e92f6e92135939ccb3ba382748144569c0dfccf3338d43d963
+$(GSP_FW_TOOL): $(KDIR)/tools/ck_gsp_fw_inspect.c $(NATIVE)/argus/sha256.c $(NATIVE)/argus/sha256.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -I$(NATIVE)/argus -o $@ $(KDIR)/tools/ck_gsp_fw_inspect.c $(NATIVE)/argus/sha256.c
+gsp-fw-inspect: $(GSP_FW_TOOL)
+gsp-fw-inspect-test: $(GSP_FW_TOOL)
+	$(GSP_FW_TOOL) selftest
+	@if [ -r "$(GSP_FW_FILE)" ]; then \
+	  out=$$($(GSP_FW_TOOL) inspect "$(GSP_FW_FILE)" --family gb10y --expect-version 580.173.02) || { echo "$$out"; echo "CK_GSP_FW_INSPECT_PIN: FAIL (refused)"; exit 1; }; \
+	  echo "$$out" | grep -E '^(fwversion|build_id|signature_section|sha256_file|RESULT)'; \
+	  echo "$$out" | grep -q '^sha256_file $(GSP_FW_SHA256)$$' && echo "CK_GSP_FW_INSPECT_PIN: PASS" || { echo "CK_GSP_FW_INSPECT_PIN: FAIL (digest differs from the pin)"; exit 1; }; \
+	else echo "CK_GSP_FW_INSPECT_PIN: NOT_RUN ($(GSP_FW_FILE) absent)"; fi
 
 # ---- host checker for the AIENOS_CK_SCREEN gate (scripts/qemu_ck_screen_test.sh) ----
 FB_CHECK_TOOL := $(OUT)/host/ck_fb_check
