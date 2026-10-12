@@ -29,4 +29,10 @@
 void ck_slot_service_start(int healthy);
 void ck_slot_service_health(int healthy);
 void ck_slot_service_stop(void);
+/* P11 cut 3: operator verb `update` (lifecycle READY only): write the signed
+ * image in the update inbox partition into the inactive slot and stage it as
+ * the candidate (native/boot/slot_update.h). Prints one "slot: update ..."
+ * outcome line. */
+#include <stddef.h>
+void ck_slot_service_update(const char *arg, size_t len);
 #endif

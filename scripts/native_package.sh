@@ -6,7 +6,7 @@
 #   image/BOOTAA64.EFI     the image, built twice from a clean tree; the two
 #                          builds must be byte-identical or the package is
 #                          refused as not signable (TRUST-1 Q24)
-#   PACKAGE.txt            the provenance record, "key value" lines (format 2):
+#   PACKAGE.txt            the provenance record, "key value" lines (format 3):
 #                          source revision (commit, commit time, tree_clean),
 #                          toolchain (cross prefix, gcc/ld/objcopy/make version
 #                          lines, build host arch), inputs (make goal and
@@ -14,7 +14,11 @@
 #                          pins, model and firmware digests, owner file digests)
 #                          and the resulting image (bytes, SHA-256, SHA-512).
 #                          See write_package_txt and docs/NATIVE_PACKAGE.md.
-#   SHA256SUMS             sha256sum lines over image/BOOTAA64.EFI and PACKAGE.txt
+#   loader/SLOTLDR.EFI     the signed A/B slot loader (P11 cut 3), built twice like
+#                          the image: owner keys (CK_SLOT_KEYS = --owner-pubkeys)
+#                          for hardware-staging, the labelled TEST key otherwise
+#   SHA256SUMS             sha256sum lines over image/BOOTAA64.EFI, loader/SLOTLDR.EFI
+#                          and PACKAGE.txt
 #   PROVENANCE.txt         "package_sha256 <sha256(SHA256SUMS)>": the resulting
 #                          package digest, which is also the slot manifest's
 #                          provenance field (it cannot live in PACKAGE.txt,
@@ -58,7 +62,7 @@ set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo=$(cd "$here/.." && pwd)
 kdir="$repo/native/kernel"
-FORMAT=2
+FORMAT=3 # 3: P11 cut 3 adds loader/SLOTLDR.EFI and its loader_* lines
 MAKEFILE_REL=native/kernel/Makefile
 IMAGE_LD_REL=native/boot/image.ld
 
@@ -122,6 +126,25 @@ build_once() {
     esac
 }
 
+# P11 cut 3: the slot loader that boots the package's slots (docs/NATIVE_PACKAGE.md,
+# "Slot loader in the package"). hardware-staging: the owner public keys file is the
+# loader's trusted-key table (ck_slot_tool keys-c refuses TEST keys in it); core and
+# full: the labelled RFC 8032 TEST key loader (never for hardware).
+loader_keys_of() { if [ "$1" = hardware-staging ]; then echo owner; else echo test; fi; }
+build_loader_once() {
+    # $1 = OUT dir, $2 = variant, $3 = owner pubkeys, $4 = machine id
+    local out="$1" variant="$2" own="$3" mid="$4"
+    if [ "$variant" = hardware-staging ]; then
+        make -s -C "$kdir" OUT="$out" slot-loader CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS="$own" CK_MACHINE_ID="$mid" \
+            CK_SLOT_KEYS="$own" >"$out.loader.log" 2>&1 || refuse "slot loader build failed (see $out.loader.log)"
+    else
+        make -s -C "$kdir" OUT="$out" slot-loader CK_TEST_SLOT_KEY=1 >"$out.loader.log" 2>&1 \
+            || refuse "slot loader build failed (see $out.loader.log)"
+    fi
+    echo "$out/SLOTLDR.EFI"
+}
+
+
 write_package_txt() {
     # $1 = package dir, then named globals of cmd_build
     local dir="$1" own_sha="" mid_sha=""
@@ -170,6 +193,12 @@ write_package_txt() {
         echo "image_sha256 $(sha256_of "$dir/image/BOOTAA64.EFI")"
         echo "image_sha512 $(sha512_of "$dir/image/BOOTAA64.EFI")"
         echo "reproducible two_clean_builds_identical"
+        # the slot loader (P11 cut 3)
+        echo "loader loader/SLOTLDR.EFI"
+        echo "loader_keys $(loader_keys_of "$variant")"
+        echo "loader_bytes $(size_of "$dir/loader/SLOTLDR.EFI")"
+        echo "loader_sha256 $(sha256_of "$dir/loader/SLOTLDR.EFI")"
+        echo "loader_reproducible two_clean_builds_identical"
     } >"$dir/PACKAGE.txt"
 }
 
@@ -256,12 +285,22 @@ cmd_build() {
         refuse "two clean builds differ ($da vs $db): not reproducible, not signable"
     fi
 
-    mkdir -p "$out/image" "$out/slot"
+    local ldr_a ldr_b
+    ldr_a=$(build_loader_once "$scratch/a" "$variant" "$own" "$mid")
+    ldr_b=$(build_loader_once "$scratch/b" "$variant" "$own" "$mid")
+    if [ "$(sha256_of "$ldr_a")" != "$(sha256_of "$ldr_b")" ]; then
+        rm -rf "$scratch"
+        refuse "two clean slot loader builds differ: not reproducible, not signable"
+    fi
+
+    mkdir -p "$out/image" "$out/slot" "$out/loader"
     cp "$img_a" "$out/image/BOOTAA64.EFI"
     chmod 444 "$out/image/BOOTAA64.EFI"
+    cp "$ldr_a" "$out/loader/SLOTLDR.EFI"
+    chmod 444 "$out/loader/SLOTLDR.EFI"
     rm -rf "$scratch"
     write_package_txt "$out"
-    (cd "$out" && sha256sum image/BOOTAA64.EFI PACKAGE.txt >SHA256SUMS)
+    (cd "$out" && sha256sum image/BOOTAA64.EFI loader/SLOTLDR.EFI PACKAGE.txt >SHA256SUMS)
     local prov tool
     prov=$(sha256_of "$out/SHA256SUMS")
     echo "package_sha256 $prov" >"$out/PROVENANCE.txt"
@@ -288,10 +327,13 @@ rec() { awk -v k="$2" '$1==k{sub(/^[^ ]+ /,""); print}' "$1/PACKAGE.txt"; }
 check_package_files() {
     local dir="$1"
     [ -d "$dir" ] || refuse "package directory missing"
-    for f in image/BOOTAA64.EFI PACKAGE.txt SHA256SUMS PROVENANCE.txt slot/MANIFEST.bin; do
+    for f in image/BOOTAA64.EFI loader/SLOTLDR.EFI PACKAGE.txt SHA256SUMS PROVENANCE.txt slot/MANIFEST.bin; do
         [ -f "$dir/$f" ] || refuse "package is missing $f"
     done
     (cd "$dir" && sha256sum -c --quiet --strict SHA256SUMS >/dev/null 2>&1) || refuse "SHA256SUMS does not match the package files"
+    for f in image/BOOTAA64.EFI loader/SLOTLDR.EFI PACKAGE.txt; do
+        [ -n "$(awk -v f="$f" '$2==f' "$dir/SHA256SUMS")" ] || refuse "SHA256SUMS does not cover $f"
+    done
     local fmt
     fmt=$(rec "$dir" format)
     [ "$fmt" = "$FORMAT" ] || refuse "PACKAGE.txt format $fmt is not $FORMAT"
@@ -308,7 +350,8 @@ check_record() {
     local -a required=(format repo commit commit_time tree_clean variant generation policy_generation
         min_rollback_generation toolchain_cross toolchain_cc toolchain_ld toolchain_objcopy toolchain_make
         build_host_arch input_make_goal input_make_vars input_env_ck input_makefile_sha256
-        input_image_ld_sha256 image image_bytes image_sha256 image_sha512 reproducible)
+        input_image_ld_sha256 image image_bytes image_sha256 image_sha512 reproducible
+        loader loader_keys loader_bytes loader_sha256 loader_reproducible)
     for k in "${required[@]}"; do
         [ "$(awk -v k="$k" '$1==k' "$dir/PACKAGE.txt" | wc -l)" = 1 ] || refuse "PACKAGE.txt must hold exactly one $k line"
     done
@@ -318,6 +361,19 @@ check_record() {
     [ "$(rec "$dir" image_sha256)" = "$(sha256_of "$img")" ] || refuse "PACKAGE.txt image_sha256 does not match the image"
     [ "$(rec "$dir" image_sha512)" = "$(sha512_of "$img")" ] || refuse "PACKAGE.txt image_sha512 does not match the image"
     [ "$(rec "$dir" reproducible)" = two_clean_builds_identical ] || refuse "PACKAGE.txt does not record a reproducible build"
+    # The slot loader (P11 cut 3): bytes, digest, reproducibility, and a key source that
+    # matches the variant (TEST-key loaders carry their "TEST-ONLY key" note, owner ones none).
+    local ldr="$dir/loader/SLOTLDR.EFI"
+    [ "$(rec "$dir" loader)" = loader/SLOTLDR.EFI ] || refuse "PACKAGE.txt loader is not loader/SLOTLDR.EFI"
+    [ "$(rec "$dir" loader_bytes)" = "$(size_of "$ldr")" ] || refuse "PACKAGE.txt loader_bytes does not match the loader"
+    [ "$(rec "$dir" loader_sha256)" = "$(sha256_of "$ldr")" ] || refuse "PACKAGE.txt loader_sha256 does not match the loader"
+    [ "$(rec "$dir" loader_reproducible)" = two_clean_builds_identical ] || refuse "PACKAGE.txt does not record a reproducible loader build"
+    [ "$(rec "$dir" loader_keys)" = "$(loader_keys_of "$(rec "$dir" variant)")" ] || refuse "PACKAGE.txt loader_keys does not match the variant"
+    if [ "$(rec "$dir" loader_keys)" = test ]; then
+        LC_ALL=C /usr/bin/grep -aqF "TEST-ONLY key" "$ldr" || refuse "TEST-key loader lacks its TEST-ONLY note"
+    elif LC_ALL=C /usr/bin/grep -aqF "TEST-ONLY" "$ldr"; then
+        refuse "owner-key loader carries a TEST-ONLY note"
+    fi
     local tc; tc=$(rec "$dir" tree_clean)
     case "$tc" in
     yes) ;;
@@ -337,7 +393,7 @@ check_record() {
     [ "$(rec "$dir" input_make_goal)" = "$(make_goal_of "$variant")" ] || refuse "PACKAGE.txt input_make_goal does not match variant $variant"
     [ "$(rec "$dir" input_make_vars)" = "$(make_vars_of "$variant" "$own_sha" "$mid_sha")" ] || refuse "PACKAGE.txt input_make_vars does not match variant $variant"
     echo "record:"
-    for k in image image_bytes image_sha256 image_sha512 reproducible tree_clean input_env_ck variant input_make_goal input_make_vars; do
+    for k in image image_bytes image_sha256 image_sha512 reproducible loader loader_keys loader_bytes loader_sha256 loader_reproducible tree_clean input_env_ck variant input_make_goal input_make_vars; do
         echo "  checked  $k $(rec "$dir" "$k")"
     done
 

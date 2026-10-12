@@ -41,6 +41,7 @@ enum ck_lc_verb {
     CK_LC_V_REMEMBER, /* P06 cut 4: record one owner fact in the Cortex journal (sealed Store) */
     CK_LC_V_FACTS,    /* list the remembered facts read back from the journal */
     CK_LC_V_ROTATE,   /* P04 cut 2b: rotate the recovery secret (current + new, 64 hex each) */
+    CK_LC_V_UPDATE,   /* P11 cut 3: write the inbox image into the inactive slot and stage it */
 };
 
 /* Bounds: one request line, and the task text that a line may carry. */
@@ -63,6 +64,7 @@ enum ck_lc_result {
     CK_LC_R_REMEMBER,      /* remember accepted: the binding must append the fact (task holds the text) */
     CK_LC_R_FACTS,         /* facts accepted: the binding must list the journal */
     CK_LC_R_ROTATE,        /* rotate accepted: the binding must re-wrap K_vol under the new secret */
+    CK_LC_R_UPDATE,        /* update accepted: the binding must run the inactive-slot updater */
 };
 
 typedef struct {
@@ -76,6 +78,7 @@ typedef struct {
     uint32_t requests, refused, invalid, tasks, approved, denied, cancelled;
     uint32_t prompts, replies, gen_cancelled, gen_failed, recalls;
     uint32_t remembers, facts; /* P06 cut 4: accepted remember / facts requests */
+    uint32_t updates;          /* P11 cut 3: accepted update requests */
     char fact[CK_LC_TASK_MAX + 1]; /* text of the remember request being served, else "" */
     size_t fact_len;
     const char *reason; /* last refusal reason, static string */

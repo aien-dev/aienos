@@ -23,6 +23,8 @@
  *         esp-model-aienos ESP_MIB MODEL_FILE STORE_MIB   esp-model plus an
  *                         all-zero AIENOS partition of STORE_MIB at the end:
  *                         one disk with ESP, model and Store (service gate)
+ *         aienos-slots-inbox  AIENOS [1,41) + slots [41,M-17) + update inbox
+ *                         [M-17,M-1) (MIB >= 64; P11 cut 3); prints all three ranges
  *       CORRUPTION: bad-primary-crc bad-backup-crc bad-primary-entries
  *         bad-backup-entries no-pmbr
  *       Prints one line: "gpt_image bs=B blocks=N aienos_first_lba=F
@@ -153,6 +155,21 @@ static int cmd_create(int argc, char **argv)
                "slots_last_lba=%llu\n",
                bs, (unsigned long long)blocks, (unsigned long long)sp[0].first, (unsigned long long)sp[0].last,
                (unsigned long long)sp[1].first, (unsigned long long)sp[1].last);
+        return 0;
+    }
+    if (!strcmp(lay, "aienos-slots-inbox")) {
+        /* P11 cut 3: the same disk plus the update inbox partition (slot_update.h). */
+        static const uint8_t slots_type[16] = CK_SLOT_PART_TYPE_BYTES, inbox_type[16] = CK_SLOT_INBOX_TYPE_BYTES;
+        gw_part sp[3] = {{ck_aienos_part_type, 1 * per, 41 * per - 1u, "AIENOS", 0},
+                         {slots_type, 41 * per, (mib - 17u) * per - 1u, "AIENOS-SLOTS", 0},
+                         {inbox_type, (mib - 17u) * per, (mib - 1u) * per - 1u, "AIENOS-INBOX", 0}};
+        if (argc != 6 || mib < 64) return usage();
+        if (gw_write(argv[2], bs, blocks, sp, 3, flags)) return 1;
+        printf("gpt_image bs=%u blocks=%llu aienos_first_lba=%llu aienos_last_lba=%llu slots_first_lba=%llu "
+               "slots_last_lba=%llu inbox_first_lba=%llu inbox_last_lba=%llu\n",
+               bs, (unsigned long long)blocks, (unsigned long long)sp[0].first, (unsigned long long)sp[0].last,
+               (unsigned long long)sp[1].first, (unsigned long long)sp[1].last, (unsigned long long)sp[2].first,
+               (unsigned long long)sp[2].last);
         return 0;
     }
     for (int i = 6; i < argc; i++) {

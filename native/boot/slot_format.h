@@ -9,7 +9,8 @@
  * record only to consume a candidate try. The service kernel
  * (native/kernel/svc/slot_service.c, cut 2b) promotes a healthy candidate and
  * abandons an exhausted or invalid one over its own NVMe path, told which slot
- * it is by the loader's boot record (below). Staging is cut 3. This header,
+ * it is by the loader's boot record (below). Staging is the cut 3 updater
+ * (slot_update.h, inbox partition type below). This header,
  * slot_select.c and the host tool native/kernel/tools/ck_slot_tool.c pin
  * the format and the decision rules (mutation-tested in make slot-test).
  *
@@ -84,6 +85,14 @@ static inline uint64_t ck_slot_manifest_unit(unsigned slot, uint64_t cap_units)
 #define CK_SLOT_PART_TYPE_TEXT "8B1096CD-7928-4E08-B5E4-C19B6B532760"
 #define CK_SLOT_PART_TYPE_BYTES \
     {0xcd, 0x96, 0x10, 0x8b, 0x28, 0x79, 0x08, 0x4e, 0xb5, 0xe4, 0xc1, 0x9b, 0x6b, 0x53, 0x27, 0x60}
+
+/* 58D9C90E-497A-4848-95DD-EB7E22B0CE96: AIENOS update inbox partition type (P11
+ * cut 3, native/boot/slot_update.h). Same shape as ONE slot: unit 0 is the
+ * signed manifest, the image starts at unit 1. The desk tool writes it
+ * (ck_slot_tool inbox-image); the kernel only reads it. */
+#define CK_SLOT_INBOX_TYPE_TEXT "58D9C90E-497A-4848-95DD-EB7E22B0CE96"
+#define CK_SLOT_INBOX_TYPE_BYTES \
+    {0x0e, 0xc9, 0xd9, 0x58, 0x7a, 0x49, 0x48, 0x48, 0x95, 0xdd, 0xeb, 0x7e, 0x22, 0xb0, 0xce, 0x96}
 
 /* ---- manifest ------------------------------------------------------------ */
 #define CK_SLOT_MANIFEST_MAGIC "AIENSLT1"
