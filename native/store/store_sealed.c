@@ -66,6 +66,7 @@ const char *ss_strerror(int e)
     case SS_E_CRYPTO: return "SealedCryptoFailure";
     case SS_E_NEEDS_REOPEN: return "SealedNeedsReopen";
     case SS_E_FORMAT_VERSION: return "SealedFormatVersion";
+    case SS_E_KEYSLOT: return "SealedKeyslot";
     default: return st_strerror(e);
     }
 }
@@ -212,16 +213,59 @@ static int find_entry(const sv1_entry *e, uint32_t n, const uint8_t id[32])
     return -1;
 }
 
+/* KeySlotManifest shape (ADR 0017 section 2.4) as far as the sealed layer
+ * needs it: length, magic, format version, and the store it names. uuid may
+ * be NULL (bootstrap: the store identity is not known yet). */
+static int keyslot_shape(const uint8_t *b, size_t len, const uint8_t uuid[16])
+{
+    if (len < SS_KEYSLOT_MIN || len > SS_KEYSLOT_MAX) return SS_E_KEYSLOT;
+    if (memcmp(b, "AIENKSL1", 8) != 0 || get16(b + 8) != 1) return SS_E_KEYSLOT;
+    if (uuid && memcmp(b + 12, uuid, 16) != 0) return SS_E_KEYSLOT;
+    return 0;
+}
+
+int ss_keyslot_bootstrap(st_store *scratch, const st_dev *store, ss_workspace *ws, uint8_t *out, size_t cap,
+                         size_t *len)
+{
+    if (len) *len = 0;
+    if (!scratch || !store || !ws || !out || !len) return SS_E_ARG;
+    memset(scratch, 0, sizeof *scratch);
+    int rc = st_open(scratch, store, &ws->st);
+    if (rc != 0) return rc;
+    uint32_t n;
+    const sv1_entry *e = st_catalog(scratch, &n);
+    int at = -1;
+    for (uint32_t i = 0; i < n; i++) {
+        if (e[i].kind != SS_KIND_KEYSLOT || e[i].version != 1) continue;
+        if (at >= 0) return SS_E_KEYSLOT; /* GUARD:bootstrap-single */
+        at = (int)i;
+    }
+    if (at < 0) return SS_E_KEYSLOT;
+    if (e[at].byte_length > SS_KEYSLOT_MAX || e[at].byte_length > cap) return SS_E_KEYSLOT;
+    size_t l;
+    rc = st_read_object(scratch, e[at].object_id, out, cap, &l);
+    if (rc != 0) return rc;
+    if (keyslot_shape(out, l, NULL) != 0) { memset(out, 0, cap); return SS_E_KEYSLOT; } /* GUARD:bootstrap-shape */
+    *len = l;
+    return 0;
+}
+
 /* "m5 open": every record and envelope in the Store catalog. */
 static int verify_records(ss_store *s, uint64_t G)
 {
     ss_workspace *ws = s->ws;
     uint32_t n;
     const sv1_entry *e = st_catalog(&s->st, &n);
-    uint32_t ntx = 0, nc = 0, nenv = 0;
+    uint32_t ntx = 0, nc = 0, nenv = 0, nks = 0;
+    s->has_keyslot = 0;
     for (uint32_t i = 0; i < n; i++) {
         if (e[i].kind == SS_KIND_ENVELOPE && e[i].version == 1) {
             nenv++;
+            continue;
+        }
+        if (e[i].kind == SS_KIND_KEYSLOT && e[i].version == 1) {
+            if (nks) return SS_E_KEYSLOT; /* GUARD:keyslot-single */
+            nks++;
             continue;
         }
         if (e[i].kind != SS_KIND_TXREC || e[i].version != 1) return SS_E_FOREIGN_KIND; /* GUARD:foreign-kind */
@@ -255,16 +299,26 @@ static int verify_records(ss_store *s, uint64_t G)
     /* envelopes: claims and envelope entries are in one-to-one correspondence */
     memset(ws->used, 0, n);
     for (uint32_t k = 0; k < nc; k++) {
+        int ks = ws->claims[k].c.obj.object_kind == SS_KIND_KEYSLOT;
         int at = find_entry(e, n, ws->claims[k].sid);
-        if (at < 0 || e[at].kind != SS_KIND_ENVELOPE) return SS_E_ENVELOPE; /* GUARD:claim-present */
+        if (at < 0 || e[at].kind != (ks ? SS_KIND_KEYSLOT : SS_KIND_ENVELOPE)) return SS_E_ENVELOPE; /* GUARD:claim-present */
         if (ws->used[at]) return SS_E_DUPLICATE; /* GUARD:claim-once */
         ws->used[at] = 1;
         size_t len;
         int rc = st_read_object(&s->st, ws->claims[k].sid, ws->rd, sizeof ws->rd, &len);
         if (rc != 0) return rc;
+        if (ks) {
+            /* plaintext manifest: the keyed commit record binds its digest */
+            uint8_t dg[32];
+            sha256_hash(ws->rd, len, dg);
+            if (!aienos_ct_equal(dg, ws->claims[k].c.object_id, 32)) return SS_E_KEYSLOT; /* GUARD:keyslot-digest */
+            s->has_keyslot = 1;
+            memcpy(s->keyslot_sid, ws->claims[k].sid, 32);
+            continue;
+        }
         if (m5_commit_check_object(&ws->claims[k].c, ws->rd, len) != M5_OK) return SS_E_ENVELOPE; /* GUARD:envelope-digest */
     }
-    if (nc != nenv) return SS_E_ENVELOPE; /* GUARD:unclaimed-envelope */
+    if (nc != nenv + nks) return SS_E_ENVELOPE; /* GUARD:unclaimed-envelope */
     s->nclaims = nc;
     return 0;
 }
@@ -383,9 +437,36 @@ int ss_prepare(ss_store *s, const ss_object *o, size_t n)
     uint64_t ng = G + 1;
     uint8_t *tx = ws->tx;
     memset(tx, 0, SS_TX_MAX);
+    int nks = 0;
     for (size_t i = 0; i < n; i++) {
         if (o[i].len > SS_MAX_PLAINTEXT || (!o[i].bytes && o[i].len)) return SS_E_ARG; /* GUARD:sealed-size */
         if (o[i].kind == 0 || o[i].version == 0) return SS_E_ARG;
+        if (o[i].kind == SS_KIND_KEYSLOT) {
+            /* the KeySlotManifest travels in plaintext: shape-checked here,
+             * one per store (rotation is a later cut), digest-bound by the
+             * commit record exactly like an envelope */
+            if (o[i].version != 1 || keyslot_shape(o[i].bytes, o[i].len, s->uuid) != 0) return SS_E_KEYSLOT; /* GUARD:keyslot-prepare-shape */
+            if (s->has_keyslot || nks++) return SS_E_KEYSLOT; /* GUARD:keyslot-once */
+            uint8_t *e = tx + SS_TX_HDR + i * SS_TX_ENTRY;
+            if (sv1_object_id(SS_KIND_KEYSLOT, 1, o[i].bytes, o[i].len, e) != 0) return SS_E_CRYPTO;
+            m5_commit mc;
+            memset(&mc, 0, sizeof mc);
+            memcpy(mc.obj.store_uuid, s->uuid, 16);
+            mc.obj.object_kind = SS_KIND_KEYSLOT;
+            mc.obj.object_version = 1;
+            mc.obj.key_generation = s->keys.key_generation;
+            mc.obj.identity_class = s->keys.identity_class;
+            mc.store_generation = ng;
+            mc.counter = ng;
+            mc.object_sequence = i;
+            sha256_hash(o[i].bytes, o[i].len, mc.object_id);
+            if (m5_commit_seal(&mc, s->keys.k_root_auth, e + 32) != M5_OK) return SS_E_CRYPTO;
+            ws->objs[i].kind = SS_KIND_KEYSLOT;
+            ws->objs[i].version = 1;
+            ws->objs[i].bytes = o[i].bytes;
+            ws->objs[i].len = o[i].len;
+            continue;
+        }
         uint8_t h[32];
         if (envid_derive(s, ng, (uint32_t)i, o[i].kind, o[i].version, o[i].bytes, o[i].len, h) != 0)
             return SS_E_CRYPTO;
@@ -460,6 +541,10 @@ int ss_commit_prepared(ss_store *s, st_hook hook, void *arg)
         memcpy(c->sid, e, 32);
         if (m5_commit_open(e + 32, M5_COMMIT_LEN, s->keys.k_root_auth, s->keys.identity_class, &c->c) != M5_OK)
             return SS_E_CRYPTO;
+        if (c->c.obj.object_kind == SS_KIND_KEYSLOT) {
+            s->has_keyslot = 1;
+            memcpy(s->keyslot_sid, c->sid, 32);
+        }
     }
     if (hook) hook(arg, SS_CP_BEFORE_ANCHOR);
     rc = anchor_write(s, G + 1, s->last_tx_digest);
@@ -490,6 +575,17 @@ int ss_read(ss_store *s, const uint8_t sid[32], uint8_t *out, size_t cap, size_t
     size_t elen;
     int rc = st_read_object(&s->st, sid, s->ws->rd, sizeof s->ws->rd, &elen);
     if (rc != 0) return rc;
+    if (c->c.obj.object_kind == SS_KIND_KEYSLOT) {
+        /* plaintext manifest: digest-bound by its commit record, returned as is */
+        uint8_t dg[32];
+        sha256_hash(s->ws->rd, elen, dg);
+        if (!aienos_ct_equal(dg, c->c.object_id, 32)) return SS_E_KEYSLOT; /* GUARD:read-keyslot-digest */
+        if (elen > cap) return SS_E_ARG;
+        memcpy(out, s->ws->rd, elen);
+        *len = elen;
+        if (kind) *kind = SS_KIND_KEYSLOT;
+        return 0;
+    }
     if (m5_commit_check_object(&c->c, s->ws->rd, elen) != M5_OK) return SS_E_ENVELOPE; /* GUARD:read-digest */
     rc = m5_envelope_open(s->keys.k_domain, s->keys.identity_class, &c->c.obj, s->ws->rd, elen,
                           out, cap, len);

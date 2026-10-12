@@ -303,14 +303,13 @@ static void test_identity(void)
 /* Forge helper: prepare one object, let edit() change the workspace, commit
  * with the real Store engine, then return the next mount's result. */
 typedef void (*forge_fn)(ss_store *s, void *arg);
-static int forge(forge_fn edit, void *arg)
+static int forge_objs(forge_fn edit, void *arg, const ss_object *o, size_t n)
 {
     rig r;
     ss_store s;
     int rc = sopen(&r, &s, &K);
     if (rc != 0) { rig_close(&r); return -8888; }
-    ss_object o[2] = {{44, 1, P1, 300}, {45, 1, P2, 5000}};
-    rc = ss_prepare(&s, o, 2);
+    rc = ss_prepare(&s, o, n);
     if (rc == 0) {
         edit(&s, arg);
         rc = ss_commit_prepared(&s, NULL, NULL);
@@ -318,6 +317,11 @@ static int forge(forge_fn edit, void *arg)
     rig_close(&r);
     if (rc != 0) return -7777;
     return open_rc(&K);
+}
+static int forge(forge_fn edit, void *arg)
+{
+    ss_object o[2] = {{44, 1, P1, 300}, {45, 1, P2, 5000}};
+    return forge_objs(edit, arg, o, 2);
 }
 
 static void put64le(uint8_t *p, uint64_t v)
@@ -593,6 +597,133 @@ static void cut_before_anchor(void *arg, int cp)
     if (cp == SS_CP_BEFORE_ANCHOR) disk_file_arm_cut(&g_cut_rig->f, 0);
 }
 
+
+/* ---- KeySlotManifest (kind 21): the one plaintext object, digest-bound ---- */
+
+static uint8_t KSM[SS_KEYSLOT_MIN], KSM2[SS_KEYSLOT_MIN], KSM_BAD[SS_KEYSLOT_MIN];
+static void ksm_fill(uint8_t *m, uint64_t seq, const uint8_t uuid[16])
+{
+    memset(m, 0, SS_KEYSLOT_MIN);
+    memcpy(m, "AIENKSL1", 8);
+    m[8] = 1;
+    memcpy(m + 12, uuid, 16);
+    put64le(m + 28, seq);
+    m[76] = 2; /* slot_count; descriptors stay Empty: the sealed layer checks shape only */
+}
+static st_store ks_scratch;
+static int bootstrap_rc(uint8_t *out, size_t cap, size_t *len)
+{
+    rig r;
+    if (rig_open(&r, g_path, g_bs, 0) != 0) return -9999;
+    int rc = ss_keyslot_bootstrap(&ks_scratch, &r.sdev, &g_ws, out, cap, len);
+    rig_close(&r);
+    return rc;
+}
+static int ks_prepare_rc(const ss_object *o, size_t n)
+{
+    rig r;
+    ss_store s;
+    int rc = sopen(&r, &s, &K);
+    if (rc == 0) rc = ss_prepare(&s, o, n);
+    rig_close(&r);
+    return rc;
+}
+static void ed_ks_digest(ss_store *s, void *a) { (void)a; reseal(s, 0, fx_digest); }
+static void ed_ks_second(ss_store *s, void *a)
+{
+    (void)a;
+    s->ws->objs[s->ws->nobjs++] = (st_object){SS_KIND_KEYSLOT, 1, KSM2, sizeof KSM2};
+}
+static void ed_ks_unclaimed(ss_store *s, void *a)
+{
+    (void)a;
+    s->ws->objs[s->ws->nobjs++] = (st_object){SS_KIND_KEYSLOT, 1, KSM, sizeof KSM};
+}
+static void ed_ks_bad_unclaimed(ss_store *s, void *a)
+{
+    (void)a;
+    s->ws->objs[s->ws->nobjs++] = (st_object){SS_KIND_KEYSLOT, 1, KSM_BAD, sizeof KSM_BAD};
+}
+
+static void test_keyslot(void)
+{
+    uint8_t ids[2][32], out[SS_MAX_PLAINTEXT];
+    size_t len = 0;
+    ksm_fill(KSM, 1, RIG_UUID);
+    ksm_fill(KSM2, 2, RIG_UUID);
+    ksm_fill(KSM_BAD, 3, RIG_UUID);
+    KSM_BAD[0] = 'X';
+    make_gen2(ids);
+    SCHECK_EQ(bootstrap_rc(out, sizeof out, &len), SS_E_KEYSLOT, "no manifest to bootstrap from");
+    CHECK(file_load(g_path, img_a, RIG_BYTES) == 0, "snapshot gen 2 (no keyslot)");
+
+    /* prepare-time refusals: shape, store identity, one per store */
+    {
+        uint8_t m[SS_KEYSLOT_MIN];
+        ss_object o[2] = {{SS_KIND_KEYSLOT, 1, m, sizeof m}, {SS_KIND_KEYSLOT, 1, KSM2, sizeof KSM2}};
+        memcpy(m, KSM, sizeof m); m[0] = 'X';
+        SCHECK_EQ(ks_prepare_rc(o, 1), SS_E_KEYSLOT, "bad magic refused at prepare");
+        memcpy(m, KSM, sizeof m); m[8] = 2;
+        SCHECK_EQ(ks_prepare_rc(o, 1), SS_E_KEYSLOT, "format version 2 refused at prepare");
+        memcpy(m, KSM, sizeof m); m[12] ^= 1;
+        SCHECK_EQ(ks_prepare_rc(o, 1), SS_E_KEYSLOT, "another store's manifest refused at prepare");
+        memcpy(m, KSM, sizeof m); o[0].len = SS_KEYSLOT_MIN - 1;
+        SCHECK_EQ(ks_prepare_rc(o, 1), SS_E_KEYSLOT, "short manifest refused at prepare");
+        o[0].len = sizeof m; o[0].version = 2;
+        SCHECK_EQ(ks_prepare_rc(o, 1), SS_E_KEYSLOT, "manifest version 2 refused at prepare");
+        o[0].version = 1;
+        SCHECK_EQ(ks_prepare_rc(o, 2), SS_E_KEYSLOT, "two manifests in one transaction refused");
+        SCHECK_EQ(ks_prepare_rc(o, 1), 0, "one well-formed manifest prepares");
+    }
+
+    /* commit {manifest, object}: bootstrap reads it unkeyed, the keyed open binds it */
+    {
+        rig r;
+        ss_store s;
+        SCHECK_EQ(sopen(&r, &s, &K), 0, "open gen 2");
+        ss_object o[2] = {{SS_KIND_KEYSLOT, 1, KSM, sizeof KSM}, {42, 1, P4, sizeof P4}};
+        uint8_t kid[2][32];
+        SCHECK_EQ(ss_transact(&s, o, 2, NULL, NULL, kid), 0, "gen 3 commits the manifest");
+        CHECK(s.has_keyslot && memcmp(s.keyslot_sid, kid[0], 32) == 0, "manifest bound after commit");
+        rig_close(&r);
+        SCHECK_EQ(bootstrap_rc(out, sizeof out, &len), 0, "bootstrap reads the manifest");
+        CHECK(len == sizeof KSM && memcmp(out, KSM, len) == 0, "bootstrap bytes are the manifest");
+        SCHECK_EQ(sopen(&r, &s, &K), 0, "reopen gen 3");
+        CHECK(s.has_keyslot && memcmp(s.keyslot_sid, kid[0], 32) == 0, "manifest bound at open");
+        uint16_t kind = 0;
+        SCHECK_EQ(ss_read(&s, kid[0], out, sizeof out, &len, &kind), 0, "keyed read of the manifest");
+        CHECK(kind == SS_KIND_KEYSLOT && len == sizeof KSM && memcmp(out, KSM, len) == 0, "read returns plaintext");
+        SCHECK_EQ(check_read(&s, kid[1], P4, sizeof P4, 42), 0, "the envelope beside it opens");
+        ss_object again = {SS_KIND_KEYSLOT, 1, KSM2, sizeof KSM2};
+        SCHECK_EQ(ss_prepare(&s, &again, 1), SS_E_KEYSLOT, "a second manifest is refused while one is bound");
+        /* defence in depth at read: a claim whose digest no longer matches */
+        for (uint32_t k = 0; k < s.nclaims; k++)
+            if (memcmp(g_ws.claims[k].sid, kid[0], 32) == 0) g_ws.claims[k].c.object_id[0] ^= 1;
+        SCHECK_EQ(ss_read(&s, kid[0], out, sizeof out, &len, NULL), SS_E_KEYSLOT, "manifest read with a wrong digest");
+        rig_close(&r);
+    }
+
+    /* forgeries from the no-keyslot snapshot */
+    CHECK(file_save(g_path, img_a, RIG_BYTES) == 0, "restore");
+    {
+        ss_object o[2] = {{SS_KIND_KEYSLOT, 1, KSM, sizeof KSM}, {44, 1, P1, 300}};
+        SCHECK_EQ(forge_objs(ed_ks_digest, NULL, o, 2), SS_E_KEYSLOT, "commit digest not the manifest's");
+    }
+    CHECK(file_save(g_path, img_a, RIG_BYTES) == 0, "restore");
+    {
+        ss_object o[2] = {{SS_KIND_KEYSLOT, 1, KSM, sizeof KSM}, {44, 1, P1, 300}};
+        SCHECK_EQ(forge_objs(ed_ks_second, NULL, o, 2), SS_E_KEYSLOT, "two manifests in the catalog");
+        SCHECK_EQ(bootstrap_rc(out, sizeof out, &len), SS_E_KEYSLOT, "bootstrap refuses two manifests");
+    }
+    CHECK(file_save(g_path, img_a, RIG_BYTES) == 0, "restore");
+    SCHECK_EQ(forge(ed_ks_unclaimed, NULL), SS_E_ENVELOPE, "unclaimed manifest");
+    CHECK(file_save(g_path, img_a, RIG_BYTES) == 0, "restore");
+    SCHECK_EQ(forge(ed_ks_bad_unclaimed, NULL), SS_E_ENVELOPE, "unclaimed malformed manifest refused keyed");
+    SCHECK_EQ(bootstrap_rc(out, sizeof out, &len), SS_E_KEYSLOT, "bootstrap refuses a malformed manifest");
+    CHECK(len == 0, "refused bootstrap reports zero length");
+    CHECK(file_save(g_path, img_a, RIG_BYTES) == 0, "restore");
+}
+
 static void test_anchor_crash(void)
 {
     uint8_t ids[2][32];
@@ -795,6 +926,7 @@ int main(int argc, char **argv)
         test_rollback();
         test_identity();
         test_forgery();
+        test_keyslot();
         test_anchor_crash();
         test_nonce();
         printf("sealed store, %u-byte blocks: %s\n", g_bs, g_failed == before ? "ok" : "FAILED");

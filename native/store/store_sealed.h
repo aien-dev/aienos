@@ -42,6 +42,13 @@
 
 #define SS_KIND_ENVELOPE 0x0510u /* M5 envelope of one application object */
 #define SS_KIND_TXREC 0x0511u    /* sealed transaction record */
+/* ADR 0017 KeySlotManifest: the one plaintext object a sealed store admits.
+ * It is committed inside a sealed transaction, so the keyed transaction
+ * record binds its digest; the unkeyed bootstrap read happens before keys
+ * exist and the keyed open re-checks the same bytes. */
+#define SS_KIND_KEYSLOT 21u
+#define SS_KEYSLOT_MIN 640u /* header + 4 descriptors */
+#define SS_KEYSLOT_MAX SS_MAX_PLAINTEXT
 #define SS_MAX_OBJECTS 8u        /* application objects per transaction */
 #define SS_MAX_PLAINTEXT 16384u  /* bytes per application object */
 #define SS_CHUNK 4096u           /* envelope chunk size */
@@ -66,6 +73,7 @@ enum {
     SS_E_CRYPTO = -312,       /* sealing failed */
     SS_E_NEEDS_REOPEN = -313, /* an anchor write failed; reopen */
     SS_E_FORMAT_VERSION = -314, /* version-1 record (predictable envelope ids): reformat */
+    SS_E_KEYSLOT = -315,        /* keyslot manifest malformed, duplicate, unbound, or absent */
 };
 const char *ss_strerror(int e);
 
@@ -128,7 +136,17 @@ typedef struct {
     uint32_t nclaims;
     int rb;                     /* SS_RB_* from the last open */
     int needs_reopen;
+    int has_keyslot;            /* a kind-21 KeySlotManifest is committed and bound */
+    uint8_t keyslot_sid[32];    /* its Store object id */
 } ss_store;
+
+/* Unkeyed bootstrap read of the KeySlotManifest (kind 21) before any key
+ * exists: structural Store open into scratch, exactly one kind-21 object,
+ * magic and format version checked. SS_E_KEYSLOT when there is none. The
+ * keyed ss_open later re-binds the same bytes through the transaction
+ * record that committed them (has_keyslot, keyslot_sid). */
+int ss_keyslot_bootstrap(st_store *scratch, const st_dev *store, ss_workspace *ws, uint8_t *out, size_t cap,
+                         size_t *len);
 
 /* torn_slot device over a disk_dev (adds the disk layer's I/O splitting). */
 void ss_ts_device(const disk_dev *disk, ts_device *out);

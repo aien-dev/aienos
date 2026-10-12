@@ -250,3 +250,63 @@ int m5_secman_open(const uint8_t *b, size_t len, const uint8_t k_root_auth[32], 
     memcpy(m->root_mac, b + SECMAN_MAC_OFF, 32);
     return M5_OK;
 }
+
+/* ---- KeySlotManifest (kind 21) ---- */
+
+void m5_ksm_encode(const m5_ksm *m, uint8_t out[M5_KSM_FIXED_LEN])
+{
+    memset(out, 0, M5_KSM_FIXED_LEN);
+    memcpy(out, "AIENKSL1", 8);
+    m5_put16(out + 8, 1);
+    m5_put16(out + 10, 0);
+    memcpy(out + 12, m->store_uuid, 16);
+    m5_put64(out + 28, m->manifest_sequence);
+    memcpy(out + 36, m->previous_keyslot_manifest_id, 32);
+    m5_put64(out + 68, m->active_key_epoch);
+    m5_put32(out + 76, m->slot_count);
+    for (int i = 0; i < M5_KSM_SLOTS; i++) m5_keyslot_encode(&m->slots[i], out + 128 + i * M5_KEYSLOT_LEN);
+}
+
+int m5_ksm_decode(const uint8_t *b, size_t len, m5_ksm *m)
+{
+    if (!b || !m) return M5_ERR_ARG;
+    memset(m, 0, sizeof *m);
+    if (len < M5_KSM_FIXED_LEN || len > M5_KSM_FIXED_LEN + M5_KSM_ARENA_MAX) return M5_ERR_BOUNDS;
+    if (memcmp(b, "AIENKSL1", 8) != 0) return M5_ERR_FORMAT;
+    if (m5_get16(b + 8) != 1) return M5_ERR_FORMAT; /* GUARD:ksm-version */
+    if (m5_get16(b + 10) != 0 || !m5_all_zero(b + 80, 48)) return M5_ERR_FORMAT; /* GUARD:ksm-reserved */
+    memcpy(m->store_uuid, b + 12, 16);
+    m->manifest_sequence = m5_get64(b + 28);
+    memcpy(m->previous_keyslot_manifest_id, b + 36, 32);
+    m->active_key_epoch = m5_get64(b + 68);
+    m->slot_count = m5_get32(b + 76);
+    if (m->slot_count > M5_KSM_SLOTS) return M5_ERR_BOUNDS; /* GUARD:ksm-slot-count */
+    m->arena_len = (uint32_t)(len - M5_KSM_FIXED_LEN);
+    for (int i = 0; i < M5_KSM_SLOTS; i++) {
+        int rc = m5_keyslot_decode(b + 128 + i * M5_KEYSLOT_LEN, M5_KEYSLOT_LEN, &m->slots[i]);
+        if (rc != M5_OK) return rc;
+        const m5_keyslot *s = &m->slots[i];
+        if ((uint64_t)s->payload_offset + s->payload_length > m->arena_len) return M5_ERR_BOUNDS; /* GUARD:ksm-payload-range */
+        /* an unused descriptor past slot_count must be Empty */
+        if ((uint32_t)i >= m->slot_count && s->slot_type != M5_SLOT_EMPTY) return M5_ERR_FORMAT; /* GUARD:ksm-unused-empty */
+    }
+    return M5_OK;
+}
+
+int m5_recovery_kek(const uint8_t salt[16], const uint8_t *secret, size_t secret_len, uint8_t out[32])
+{
+    if (out) memset(out, 0, 32);
+    if (!salt || !secret || !out || secret_len == 0) return M5_ERR_ARG;
+    /* HKDF-Extract: HMAC keyed by the 16-byte salt. HMAC zero-pads a short
+     * key, so a 32-byte key of salt || 0^16 is the same PRK as RFC 5869 with
+     * the bare 16-byte salt. */
+    uint8_t k[32], prk[32];
+    memset(k, 0, 32);
+    memcpy(k, salt, 16);
+    aienos_hmac_sha256(k, secret, secret_len, prk);
+    int rc = m5_hkdf_expand(prk, (const uint8_t *)M5_RECOVERY_KEK_INFO, sizeof(M5_RECOVERY_KEK_INFO) - 1, out, 32);
+    aienos_wipe(k, sizeof k);
+    aienos_wipe(prk, sizeof prk);
+    if (rc != M5_OK) memset(out, 0, 32);
+    return rc;
+}

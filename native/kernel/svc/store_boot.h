@@ -20,7 +20,23 @@
  * BLOCKED_OPERATOR seam (K_vol is secret and needs the TRUST-1 key
  * ceremony), so the stage refuses before reading the disk. store_boot_run
  * refuses TEST-identity keys in that build before any disk access, so it
- * never formats a blank disk with them. */
+ * never formats a blank disk with them.
+ *
+ * RECOVERY KEYSLOT UNLOCK (P04 cut 1, ADR 0017 section 2.4 Slot 1).
+ * ck_store_unlock_boot takes the operator's 32-byte raw recovery secret and
+ * never any key material from the image: on a blank disk it draws K_vol,
+ * salt and nonce from the kernel entropy service (RNDR; refused when RNDR
+ * is), wraps K_vol into a Recovery_RawSecret descriptor (slot_id 1, HKDF
+ * KEK) and commits the KeySlotManifest (kind 21, plaintext, bound by the
+ * sealed transaction record) in the same first transaction as the boot
+ * record. On a non-blank disk it reads the manifest before any key exists
+ * (ss_keyslot_bootstrap), derives the KEK, unwraps K_vol and opens the Store
+ * with PRODUCTION-class keys (owner hierarchy generation = active_key_epoch).
+ * A wrong secret is refused by the AES-GCM-SIV tag before the Store is
+ * touched. K_vol lives in a stack buffer for the unwrap only and is wiped.
+ * Limits (cut 1): TPM Slot 0 stays BLOCKED_HARDWARE, no key rotation
+ * (active_key_epoch 1), the manifest is not yet bound into the secman
+ * keyslot_manifest_id field. */
 #ifndef AIENOS_CK_STORE_BOOT_H
 #define AIENOS_CK_STORE_BOOT_H
 #include <stdint.h>
@@ -46,10 +62,17 @@ typedef struct {
     char prev_commit[CK_BOOT_COMMIT_MAX + 1];
     uint64_t store_base_lba, store_units, anchor_lba;
     uint8_t identity_class;   /* identity class of the keys given (M5_ID_*) */
+    int unlocked_genesis;     /* ck_store_unlock_boot: this run created the keyslot manifest */
+    const char *key_source;   /* ck_store_unlock_boot: "recovery-keyslot" */
 } ck_store_report;
 
 #define CK_SB_E_TEST_KEYS (-2001)        /* TEST identity keys refused (hardware staging) */
 #define CK_SB_E_BLOCKED_OPERATOR (-2002) /* production key source needs the operator */
+#define CK_SB_E_NO_KEYSLOT (-2003)       /* non-blank disk carries no KeySlotManifest (not a production Store) */
+#define CK_SB_E_SECRET_REJECTED (-2004)  /* recovery secret did not unwrap K_vol (tag failed) */
+#define CK_SB_E_ENTROPY (-2005)          /* genesis refused: kernel entropy service refused */
+#define CK_SB_E_KEYSLOT_BAD (-2006)      /* manifest decoded but has no usable recovery descriptor / wrong uuid */
+#define CK_SB_SECRET_LEN 32u
 
 /* TEST keys and store uuid. Public, not secret, never production. Not
  * compiled in a CK_HARDWARE_STAGING build. */
@@ -75,6 +98,13 @@ int store_boot_run(const disk_dev *d, const ss_keys *keys, const uint8_t uuid[16
  * CK_HARDWARE_STAGING build, else 0); the host test drives both. */
 int store_boot_run_policy(const disk_dev *d, const ss_keys *keys, const uint8_t uuid[16], const char *commit,
                           int hardware_staging, ck_store_report *r);
+/* Recovery keyslot unlock + boot (see the header comment). secret is the
+ * operator's raw 32-byte recovery secret. expect_uuid (optional) must equal
+ * the manifest's store_uuid and is the uuid of a formatted blank disk; when
+ * NULL a blank disk gets a random uuid and any manifest uuid is accepted.
+ * hardware_staging as store_boot_run_policy. Prints nothing. */
+int ck_store_unlock_boot(const disk_dev *d, const uint8_t secret[CK_SB_SECRET_LEN], const uint8_t *expect_uuid,
+                         const char *commit, int hardware_staging, ck_store_report *r);
 /* Print the report lines (also used by the host test). */
 void store_boot_print(const ck_store_report *r);
 /* The open Store of the last store_boot_run (valid only after it returned 0;

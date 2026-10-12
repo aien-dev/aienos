@@ -210,6 +210,20 @@ int ck_compat_entropy_source(void) { return CK_ENTROPY_HOST; }
 /* Host: the kernel RNDR service is not in play (libc /dev/urandom above). */
 int ck_entropy_status(void) { return 0; }
 const char *ck_entropy_reason(void) { return "host-urandom"; }
+/* Host: deterministic fill (a counter), so key-slot genesis tests are reproducible.
+ * ck_host_entropy_refuse = 1 models an RNDR refusal (fill returns -1, buffer zeroed). */
+int ck_host_entropy_refuse;
+int ck_entropy_fill(void *buf, size_t len)
+{
+    static uint32_t ctr = 0x1000;
+    uint8_t *b = buf;
+    if (ck_host_entropy_refuse) {
+        for (size_t i = 0; i < len; i++) b[i] = 0;
+        return -1;
+    }
+    for (size_t i = 0; i < len; i++) b[i] = (uint8_t)(0xA5u ^ (ctr++ * 2654435761u >> 24));
+    return 0;
+}
 
 /* Host: no IORT by default, so no SMMU (the NVMe gate stays fail-closed). A test may set
  * ck_host_confine_rc = 0 to model an SMMU that confines; every call is recorded. */

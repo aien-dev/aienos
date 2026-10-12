@@ -61,17 +61,28 @@ of them:
   uuid the boot Store uuid, and the boot log prints a SHA-256 fingerprint of
   the owner root key. Nothing in the kernel verifies with the owner root key
   yet.
-- **Production Store keys are BLOCKED_OPERATOR.** Store keys derive from
-  K_vol (ADR 0017), which is secret and cannot come from public material.
-  `ck_store_production_keys` always refuses (`CK_SB_E_BLOCKED_OPERATOR`), so
-  the hardware staging Store stage prints `store: REFUSED proof=keyed
-  step="production Store key source"` and neither reads nor formats the disk.
-  To unblock it the operator must provide, through the TRUST-1 key ceremony:
-  the Gate 3 Owner Root (offline), and a K_vol source the kernel can unwrap
-  at boot: the Gate 5/6 TPM PolicyAuthorize key with the sealed Slot 0 KEK,
-  or the Slot 1 recovery KEK. The in-kernel keyslot unwrap is also not
-  written yet. `store_boot_run` refuses TEST-identity keys in a hardware
-  staging build before any disk access (host test `stage_test`).
+- **Production Store keys: TPM Slot 0 is BLOCKED_HARDWARE, Slot 1 recovery
+  unlock is implemented (P04 cut 1).** Store keys derive from K_vol (ADR
+  0017), which is secret and cannot come from public material.
+  `ck_store_production_keys` (the TPM Slot 0 path) still always refuses
+  (`CK_SB_E_BLOCKED_OPERATOR`), so a diagnostic hardware staging boot prints
+  `store: REFUSED proof=keyed step="production Store key source"` and neither
+  reads nor formats the disk. A `CK_SERVICE` image instead keeps the NVMe
+  bound and comes up LOCKED; the operator types `unlock <64-hex recovery
+  secret>` on the serial console and `ck_store_unlock_boot`
+  (`svc/store_boot.c`) runs the ADR 0017 section 2.4 Slot 1 path: on a blank
+  disk it draws K_vol, salt and nonce from the entropy service (refused when
+  RNDR is), wraps K_vol into a Recovery_RawSecret descriptor (HKDF-SHA256
+  KEK) and commits the KeySlotManifest (kind 21) with the first boot record;
+  on a non-blank disk it reads the manifest before any key exists, unwraps
+  K_vol and opens the Store with PRODUCTION-class keys. A wrong secret fails
+  the AES-GCM-SIV tag before the disk is opened; the secret is echoed as `*`
+  and never printed. Under `CK_HARDWARE_STAGING` the manifest uuid must be
+  the provisioned store uuid. Limits: no TPM path, no key rotation
+  (`active_key_epoch` 1), manifest not yet bound into the secman
+  `keyslot_manifest_id`. `store_boot_run` refuses TEST-identity keys in a
+  hardware staging build before any disk access (host test `stage_test`,
+  including `test_unlock_recovery`; QEMU rows 168-170).
 - Proof: `scripts/ck_owner_keys_check.sh` (build only, takes the quiet flag)
   checks the refusals, the generator refusals, and builds the hardware staging
   image from the labelled TEST-fixture files in `tests/fixtures/owner/`

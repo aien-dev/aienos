@@ -90,6 +90,7 @@ endif
 # tested. A mutant that does not compile counts as a harness failure. Each
 # mutant runs both test programs; it is killed if either fails.
 GUARDS = class-in-kdf slot-empty slot-check slot-suite slot-kdf slot-flags secman-mac \
+	ksm-version ksm-reserved ksm-slot-count ksm-payload-range ksm-unused-empty \
 	env-len env-mode env-envid env-keygen wipe-all \
 	commit-mac commit-class commit-objid commit-envid commit-keygen \
 	anchor-mac anchor-class anchor-missing anchor-store \

@@ -154,6 +154,7 @@ static ss_store *g_ss;
 #ifdef CK_SERVICE
 static int g_service_open;      /* Store open for the service lifetime (core/lifecycle.c) */
 static int g_service_locked_rc; /* last production key source refusal */
+static const disk_dev *g_disk;  /* boot disk kept bound while LOCKED, for a later unlock */
 #endif
 
 int store_boot_run(const disk_dev *d, const ss_keys *keys, const uint8_t uuid[16], const char *commit,
@@ -162,18 +163,16 @@ int store_boot_run(const disk_dev *d, const ss_keys *keys, const uint8_t uuid[16
     return store_boot_run_policy(d, keys, uuid, commit, CK_SB_HW, r);
 }
 
-int store_boot_run_policy(const disk_dev *d, const ss_keys *keys, const uint8_t uuid[16], const char *commit,
-                          int hardware_staging, ck_store_report *r)
+/* static: the open Store (g_ss) keeps pointers to these devices and is
+ * used after the boot returns (store_boot_store, the artifact read). */
+static st_disk g_sd;
+static st_dev g_sdev;
+static ts_device g_tdev;
+
+/* Geometry + workspace + device binding shared by the boot and the unlock.
+ * Fills the layout fields of r; no disk access. */
+static int bind_disk(const disk_dev *d, ck_store_report *r, uint32_t *bpu_out)
 {
-    bz(r, sizeof *r);
-    bcp(r->prev_commit, "none", 5);
-    if (!d || !keys || !uuid || !commit) return fail(r, "geometry", "arguments", -1);
-    r->identity_class = keys->identity_class;
-    /* Before any disk access: a hardware staging build never opens, and
-     * never formats a blank disk, under TEST-identity keys. */
-    if (!ck_store_keys_admissible(keys, hardware_staging))
-        return fail(r, "keyed", "identity class not admissible in this build (TEST keys refused on hardware)",
-                    CK_SB_E_TEST_KEYS);
     if (d->block_size != 512 && d->block_size != 4096) return fail(r, "geometry", "block size", -1);
     uint32_t bpu = CK_LAYOUT_UNIT / d->block_size;
     uint64_t units = d->block_count / bpu;
@@ -188,30 +187,47 @@ int store_boot_run_policy(const disk_dev *d, const ss_keys *keys, const uint8_t 
     if (!g_ws || !g_ss) return fail(r, "io", "allocate workspace", -1);
     bz(g_ss, sizeof *g_ss);
 
-    /* static: the open Store (g_ss) keeps pointers to these devices and is
-     * used after this returns (store_boot_store, the artifact read). */
-    static st_disk sd;
-    static st_dev sdev;
-    static ts_device tdev;
-    int rc = st_disk_bind(&sd, d, r->store_base_lba, r->store_units, &sdev);
+    int rc = st_disk_bind(&g_sd, d, r->store_base_lba, r->store_units, &g_sdev);
     if (rc) return fail(r, "geometry", "st_disk_bind", rc);
-    ss_ts_device(d, &tdev);
+    ss_ts_device(d, &g_tdev);
+    *bpu_out = bpu;
+    return 0;
+}
+
+/* The boot proper. genesis_obj (optional) is committed beside the boot record
+ * in the first transaction of a disk this run formatted (the KeySlotManifest
+ * of ck_store_unlock_boot); on a non-blank disk it is ignored. */
+static int run_policy_ex(const disk_dev *d, const ss_keys *keys, const uint8_t uuid[16], const char *commit,
+                         int hardware_staging, const ss_object *genesis_obj, ck_store_report *r)
+{
+    bz(r, sizeof *r);
+    bcp(r->prev_commit, "none", 5);
+    if (!d || !keys || !uuid || !commit) return fail(r, "geometry", "arguments", -1);
+    r->identity_class = keys->identity_class;
+    /* Before any disk access: a hardware staging build never opens, and
+     * never formats a blank disk, under TEST-identity keys. */
+    if (!ck_store_keys_admissible(keys, hardware_staging))
+        return fail(r, "keyed", "identity class not admissible in this build (TEST keys refused on hardware)",
+                    CK_SB_E_TEST_KEYS);
+    uint32_t bpu = 0;
+    int rc = bind_disk(d, r, &bpu);
+    if (rc) return rc;
 
     int blank = 0;
     rc = is_blank(d, bpu, g_ws->rd, &blank);
     if (rc) return fail(r, "io", "blank check read", rc);
     if (blank) {
-        rc = ss_format(&sdev, &tdev, r->anchor_lba, uuid, keys, g_ws);
+        rc = ss_format(&g_sdev, &g_tdev, r->anchor_lba, uuid, keys, g_ws);
         if (rc) return fail(r, "commit", "format blank disk", rc);
         r->formatted = 1;
     }
 
     /* Proof 1: structural, unkeyed. */
-    rc = st_open(&g_ss->st, &sdev, &g_ws->st);
+    rc = st_open(&g_ss->st, &g_sdev, &g_ws->st);
     if (rc) return fail(r, rc == ST_M_IO ? "io" : "structural", "st_open (unkeyed)", rc);
     /* Proofs 2 and 3: keyed M5 + anti-rollback anchor. */
     bz(g_ss, sizeof *g_ss);
-    rc = ss_open(g_ss, &sdev, &tdev, r->anchor_lba, keys, g_ws);
+    rc = ss_open(g_ss, &g_sdev, &g_tdev, r->anchor_lba, keys, g_ws);
     if (rc) return fail(r, classify(rc), "ss_open (keyed + anchor)", rc);
     r->rb = g_ss->rb;
     r->gen_open = ss_generation(g_ss);
@@ -248,11 +264,13 @@ int store_boot_run_policy(const disk_dev *d, const ss_keys *keys, const uint8_t 
     put32(rec + 8, CK_BOOT_VERSION);
     put64(rec + 16, r->boot_count_new);
     for (size_t i = 0; i < CK_BOOT_COMMIT_MAX && commit[i]; i++) rec[24 + i] = (uint8_t)commit[i];
-    ss_object obj = {CK_BOOT_KIND, CK_BOOT_VERSION, rec, sizeof rec};
+    ss_object objs[2] = {{CK_BOOT_KIND, CK_BOOT_VERSION, rec, sizeof rec}, {0, 0, 0, 0}};
+    size_t nobjs = 1;
+    if (genesis_obj && r->formatted) objs[nobjs++] = *genesis_obj;
 #ifdef CK_TEST_STORE_CRASH
     ck_store_crash_opened(r->gen_open);
 #endif
-    rc = ss_transact(g_ss, &obj, 1, CK_SB_HOOK, 0, 0);
+    rc = ss_transact(g_ss, objs, nobjs, CK_SB_HOOK, 0, 0);
     if (rc) return fail(r, "commit", "ss_transact", rc);
     rc = disk_flush(d);
     if (rc) return fail(r, "io", "flush", rc);
@@ -260,6 +278,157 @@ int store_boot_run_policy(const disk_dev *d, const ss_keys *keys, const uint8_t 
     if (r->gen_commit != r->gen_open + 1) return fail(r, "commit", "generation did not advance by one", -1);
     r->verdict = CK_SB_COMMITTED;
     return 0;
+}
+
+int store_boot_run_policy(const disk_dev *d, const ss_keys *keys, const uint8_t uuid[16], const char *commit,
+                          int hardware_staging, ck_store_report *r)
+{
+    return run_policy_ex(d, keys, uuid, commit, hardware_staging, 0, r);
+}
+
+/* ---- recovery keyslot unlock (ADR 0017 section 2.4, Slot 1) ---- */
+
+/* PRODUCTION-class Store keys from K_vol: owner hierarchy generation is the
+ * manifest's active_key_epoch (1 in cut 1, no rotation yet). */
+static int production_keys_from_kvol(const uint8_t k_vol[32], uint64_t epoch, ss_keys *k)
+{
+    m5_subkeys sk;
+    bz(k, sizeof *k);
+    int rc = m5_derive_subkeys(k_vol, M5_ID_PRODUCTION, epoch, &sk);
+    if (rc) {
+        m5_subkeys_wipe(&sk);
+        return rc;
+    }
+    k->identity_class = M5_ID_PRODUCTION;
+    k->key_generation = epoch;
+    bcp(k->k_root_auth, sk.k_root_auth, 32);
+    bcp(k->k_domain, sk.k_artifact, 32);
+    m5_subkeys_wipe(&sk);
+    return 0;
+}
+
+#define CK_RECOVERY_SLOT_ID 1u
+#define CK_RECOVERY_EPOCH 1u
+
+static uint8_t *g_ksm_buf; /* manifest bytes (bootstrap read / genesis encode) */
+
+int ck_store_unlock_boot(const disk_dev *d, const uint8_t secret[CK_SB_SECRET_LEN], const uint8_t *expect_uuid,
+                         const char *commit, int hardware_staging, ck_store_report *r)
+{
+    ss_keys keys;
+    uint8_t k_vol[32], kek[32], uuid[16];
+    m5_ksm m;
+    int rc, blank = 0;
+    uint32_t bpu = 0;
+    size_t mlen = 0;
+
+    bz(r, sizeof *r);
+    bcp(r->prev_commit, "none", 5);
+    r->identity_class = M5_ID_PRODUCTION;
+    r->key_source = "recovery-keyslot";
+    if (!d || !secret || !commit) return fail(r, "geometry", "arguments", -1);
+    if (!g_ksm_buf) g_ksm_buf = ck_alloc(SS_KEYSLOT_MAX);
+    if (!g_ksm_buf) return fail(r, "io", "allocate keyslot buffer", -1);
+    rc = bind_disk(d, r, &bpu);
+    if (rc) return rc;
+    rc = is_blank(d, bpu, g_ws->rd, &blank);
+    if (rc) return fail(r, "io", "blank check read", rc);
+
+    bz(&m, sizeof m);
+    bz(&keys, sizeof keys);
+    if (blank) {
+        /* Genesis: fresh K_vol, salt and nonce from the kernel entropy service;
+         * refuse (no fallback) when RNDR refuses. The manifest goes into the
+         * same first transaction as the boot record. */
+        uint8_t fresh[32 + 16 + 12 + 16];
+        if (ck_entropy_fill(fresh, sizeof fresh) != 0) {
+            bz(fresh, sizeof fresh);
+            return fail(r, "keyed", "genesis entropy (K_vol, salt, nonce) refused by the entropy service",
+                        CK_SB_E_ENTROPY);
+        }
+        bcp(k_vol, fresh, 32);
+        if (expect_uuid) bcp(uuid, expect_uuid, 16);
+        else bcp(uuid, fresh + 60, 16);
+        bcp(m.store_uuid, uuid, 16);
+        m.manifest_sequence = 1;
+        m.active_key_epoch = CK_RECOVERY_EPOCH;
+        m.slot_count = 2; /* index 0 reserved for the TPM slot (Empty), index 1 recovery */
+        m5_keyslot *sl = &m.slots[1];
+        sl->slot_type = M5_SLOT_RECOVERY_RAW_SECRET;
+        sl->wrap_suite = M5_WRAP_SUITE_GCMSIV;
+        sl->kdf_suite = 0x02; /* HKDF-SHA256 */
+        sl->slot_id = CK_RECOVERY_SLOT_ID;
+        sl->key_epoch = CK_RECOVERY_EPOCH;
+        bcp(sl->salt, fresh + 32, 16);
+        rc = m5_recovery_kek(sl->salt, secret, CK_SB_SECRET_LEN, kek);
+        if (rc == 0) rc = m5_keyslot_wrap(sl, uuid, kek, k_vol, fresh + 48);
+        bz(fresh, sizeof fresh);
+        bz(kek, sizeof kek);
+        if (rc) {
+            bz(k_vol, sizeof k_vol);
+            return fail(r, "keyed", "wrap K_vol into the recovery keyslot", rc);
+        }
+        m5_ksm_encode(&m, g_ksm_buf);
+        mlen = M5_KSM_FIXED_LEN;
+        r->unlocked_genesis = 1;
+    } else {
+        /* Bootstrap: the manifest is read before any key exists, then the
+         * keyed open re-binds the same bytes through the transaction record. */
+        rc = ss_keyslot_bootstrap(&g_ss->st, &g_sdev, g_ws, g_ksm_buf, SS_KEYSLOT_MAX, &mlen);
+        if (rc) return fail(r, rc == ST_M_IO ? "io" : "keyed", "no KeySlotManifest on a non-blank disk", rc == SS_E_KEYSLOT ? CK_SB_E_NO_KEYSLOT : rc);
+        rc = m5_ksm_decode(g_ksm_buf, mlen, &m);
+        if (rc) return fail(r, "keyed", "KeySlotManifest decode", CK_SB_E_KEYSLOT_BAD);
+        if (expect_uuid) {
+            int diff = 0;
+            for (size_t i = 0; i < 16; i++) diff |= m.store_uuid[i] ^ expect_uuid[i];
+            if (diff) return fail(r, "keyed", "KeySlotManifest store_uuid is not this machine's", CK_SB_E_KEYSLOT_BAD);
+        }
+        bcp(uuid, m.store_uuid, 16);
+        const m5_keyslot *sl = 0;
+        for (uint32_t i = 0; i < m.slot_count && i < M5_KSM_SLOTS; i++)
+            if (m.slots[i].slot_type == M5_SLOT_RECOVERY_RAW_SECRET && m.slots[i].kdf_suite == 0x02 &&
+                m.slots[i].wrap_suite == M5_WRAP_SUITE_GCMSIV) {
+                sl = &m.slots[i];
+                break;
+            }
+        if (!sl) return fail(r, "keyed", "no Recovery_RawSecret (HKDF) descriptor in the manifest", CK_SB_E_KEYSLOT_BAD);
+        rc = m5_recovery_kek(sl->salt, secret, CK_SB_SECRET_LEN, kek);
+        if (rc == 0) rc = m5_keyslot_unwrap(sl, uuid, kek, k_vol);
+        bz(kek, sizeof kek);
+        if (rc) {
+            bz(k_vol, sizeof k_vol);
+            return fail(r, "keyed", "recovery secret rejected (K_vol unwrap tag failed); disk not opened",
+                        CK_SB_E_SECRET_REJECTED);
+        }
+        /* The epoch the descriptor wrapped under is the active one in cut 1. */
+        if (sl->key_epoch != m.active_key_epoch) {
+            bz(k_vol, sizeof k_vol);
+            return fail(r, "keyed", "descriptor key_epoch differs from active_key_epoch (rotation not supported)",
+                        CK_SB_E_KEYSLOT_BAD);
+        }
+    }
+    rc = production_keys_from_kvol(k_vol, m.active_key_epoch, &keys);
+    bz(k_vol, sizeof k_vol);
+    if (rc) {
+        bz(&keys, sizeof keys);
+        return fail(r, "keyed", "derive PRODUCTION subkeys", rc);
+    }
+    {
+        ss_object ks = {M5_KSM_KIND, 1, g_ksm_buf, mlen};
+        int genesis = r->unlocked_genesis;
+        rc = run_policy_ex(d, &keys, uuid, commit, hardware_staging, blank ? &ks : 0, r);
+        r->key_source = "recovery-keyslot";
+        r->unlocked_genesis = genesis;
+        if (rc == 0 && !blank && !g_ss->has_keyslot) {
+            /* Opened, but the keyed open did not bind the manifest we
+             * bootstrapped from: refuse rather than serve an unbound keyslot. */
+            bz(&g_ss->keys, sizeof g_ss->keys);
+            rc = fail(r, "keyed", "KeySlotManifest not bound by the sealed transaction records", CK_SB_E_KEYSLOT_BAD);
+        }
+    }
+    bz(&keys, sizeof keys);
+    bz(g_ksm_buf, SS_KEYSLOT_MAX);
+    return rc;
 }
 
 static const char *rb_name(int rb)
@@ -274,6 +443,10 @@ static const char *err_name(int rc)
     if (rc <= -101 && rc >= -212) return st_strerror(rc);
     if (rc == CK_SB_E_TEST_KEYS) return "TestKeysRefused";
     if (rc == CK_SB_E_BLOCKED_OPERATOR) return "BlockedOperator";
+    if (rc == CK_SB_E_NO_KEYSLOT) return "NoKeyslotManifest";
+    if (rc == CK_SB_E_SECRET_REJECTED) return "RecoverySecretRejected";
+    if (rc == CK_SB_E_ENTROPY) return "EntropyRefused";
+    if (rc == CK_SB_E_KEYSLOT_BAD) return "KeyslotManifestUnusable";
     return "error";
 }
 
@@ -297,6 +470,9 @@ void store_boot_print(const ck_store_report *r)
         fmt_line = "store: blank disk (all-zero anchor + Store head): formatted production store\n";
     }
     if (r->formatted) ck_puts(fmt_line);
+    if (r->key_source)
+        ck_printf("store: key source=%s genesis=%d (K_vol source: the Slot 1 recovery descriptor; "
+                  "TPM Slot 0 BLOCKED_HARDWARE; no rotation)\n", r->key_source, r->unlocked_genesis);
     if (r->verdict != CK_SB_COMMITTED) {
         ck_printf("store: REFUSED proof=%s step=\"%s\" rc=%d (%s); disk left as found, not reformatted\n",
                   r->proof, r->step, r->rc, err_name(r->rc));
@@ -344,7 +520,14 @@ int ck_stage_store(void)
                   "disk not read, not formatted\n",
                   rc);
         ck_art_stage_load(0, "production Store key source BLOCKED_OPERATOR");
+#ifdef CK_SERVICE
+        g_service_locked_rc = rc;
+        g_disk = d;
+        ck_puts("store: service lifetime: Store LOCKED, NVMe stays bound for `unlock <64-hex recovery secret>` "
+                "or the lifecycle stop order\n");
+#else
         ck_dev_nvme_release();
+#endif
         return rc;
     }
     rc = store_boot_run(d, &keys, ck_owner_store_uuid, commit ? commit : "unknown", &r);
@@ -375,8 +558,10 @@ int ck_stage_store(void)
               "K_vol needs the TRUST-1 key ceremony, Gate 6 TPM keyslot or the operator recovery keyslot); "
               "disk not read, not formatted\n", rc);
     ck_art_stage_load(0, "production Store key source BLOCKED_OPERATOR");
-    ck_dev_nvme_release();
     g_service_locked_rc = rc;
+    g_disk = d;
+    ck_puts("store: service lifetime: Store LOCKED, NVMe stays bound for `unlock <64-hex recovery secret>` "
+            "or the lifecycle stop order\n");
     (void)commit;
     return rc;
 #else
@@ -419,18 +604,74 @@ int ck_store_service_close(void)
     return 1;
 }
 
-/* "unlock" while LOCKED: ask the production key source again. Today it
- * refuses (CK_SB_E_BLOCKED_OPERATOR); the Store is never opened with any
- * other key here. Returns 1 only when the Store is open. */
-int ck_store_service_unlock(void)
+static int hex_nibble(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/* "unlock" while LOCKED. With no argument the production key source is asked
+ * again and refuses (CK_SB_E_BLOCKED_OPERATOR: no TPM Slot 0 path). With the
+ * operator's 64-hex recovery secret the Slot 1 keyslot path runs on the disk
+ * kept bound at boot (ck_store_unlock_boot). The secret bytes are wiped
+ * before return and never printed. Returns 1 only when the Store is open. */
+int ck_store_service_unlock(const char *arg, size_t arg_len)
 {
     if (g_service_open) return 1;
-    ss_keys keys;
-    int rc = ck_store_production_keys(&keys);
-    bz(&keys, sizeof keys);
-    ck_printf("store: unlock REFUSED proof=keyed step=\"production Store key source\" rc=%d (%s)\n", rc ? rc : g_service_locked_rc,
-              "BlockedOperator: no in-kernel K_vol unwrap yet");
-    return 0;
+    if (arg_len == 0) {
+        ss_keys keys;
+        int rc = ck_store_production_keys(&keys);
+        bz(&keys, sizeof keys);
+        ck_printf("store: unlock REFUSED proof=keyed step=\"production Store key source\" rc=%d (%s)\n",
+                  rc ? rc : g_service_locked_rc, "BlockedOperator: no TPM Slot 0 unwrap; give `unlock <64-hex recovery secret>`");
+        return 0;
+    }
+    uint8_t secret[CK_SB_SECRET_LEN];
+    if (arg_len != 2 * CK_SB_SECRET_LEN) {
+        ck_printf("store: unlock REFUSED proof=keyed step=\"recovery secret syntax\" rc=%d (64 hex digits expected, got %u)\n",
+                  CK_SB_E_SECRET_REJECTED, (unsigned)arg_len);
+        return 0;
+    }
+    for (size_t i = 0; i < CK_SB_SECRET_LEN; i++) {
+        int hi = hex_nibble(arg[2 * i]), lo = hex_nibble(arg[2 * i + 1]);
+        if (hi < 0 || lo < 0) {
+            bz(secret, sizeof secret);
+            ck_printf("store: unlock REFUSED proof=keyed step=\"recovery secret syntax\" rc=%d (not hex)\n",
+                      CK_SB_E_SECRET_REJECTED);
+            return 0;
+        }
+        secret[i] = (uint8_t)((hi << 4) | lo);
+    }
+    if (!g_disk) {
+        bz(secret, sizeof secret);
+        ck_printf("store: unlock REFUSED proof=io step=\"no boot disk bound\" rc=%d\n", g_service_locked_rc);
+        return 0;
+    }
+    ck_store_report r;
+    const char *commit = ck_commit();
+#ifdef CK_HARDWARE_STAGING
+    const uint8_t *expect = ck_owner_store_uuid;
+#else
+    const uint8_t *expect = 0;
+#endif
+    int rc = ck_store_unlock_boot(g_disk, secret, expect, commit ? commit : "unknown", CK_SB_HW, &r);
+    bz(secret, sizeof secret);
+    store_boot_print(&r);
+    if (rc || r.verdict != CK_SB_COMMITTED) {
+        ck_printf("store: unlock REFUSED proof=%s step=\"%s\" rc=%d (%s); still LOCKED, disk not reformatted\n",
+                  r.proof, r.step, r.rc, err_name(r.rc));
+        g_service_locked_rc = r.rc;
+        return 0;
+    }
+    g_service_open = 1;
+    ck_printf("store: unlock ok source=recovery-keyslot slot=%u genesis=%d generation=%llu boot_count=%llu\n",
+              (unsigned)CK_RECOVERY_SLOT_ID, r.unlocked_genesis, (unsigned long long)r.gen_commit,
+              (unsigned long long)r.boot_count_new);
+    /* Signed artifact candidates live in this Store; read them now that it is open. */
+    ck_art_stage_load(g_ss, r.step);
+    return 1;
 }
 #endif
 

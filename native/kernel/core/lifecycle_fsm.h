@@ -38,7 +38,7 @@ enum ck_lc_verb {
 };
 
 /* Bounds: one request line, and the task text that a line may carry. */
-#define CK_LC_LINE_MAX 64
+#define CK_LC_LINE_MAX 96 /* "unlock " + 64 hex = 71 bytes fits */
 #define CK_LC_TASK_MAX 48
 
 /* Outcome of one request against the state machine. */
