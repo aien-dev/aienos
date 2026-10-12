@@ -69,6 +69,7 @@ void ck_dev_nvme_release(void);
 int ck_store_service_ready(void);
 int ck_store_service_close(void);
 int ck_store_service_unlock(const char *arg, size_t arg_len);
+int ck_store_service_rotate(const char *arg, size_t arg_len);
 
 static ck_lc g_lc;
 static uint8_t g_last_id[32];
@@ -88,7 +89,7 @@ static uint32_t g_cx_refused;    /* remember/facts refused by the Store or Corte
 
 static void help(void)
 {
-    ck_puts("lifecycle: verbs: status unlock [<64-hex recovery secret>] task <text> prompt <text> approve deny cancel recall remember <text> facts evidence help shutdown\n");
+    ck_puts("lifecycle: verbs: status unlock [<64-hex recovery secret>] rotate <current 64-hex> <new 64-hex> task <text> prompt <text> approve deny cancel recall remember <text> facts evidence help shutdown\n");
 }
 
 static void status(void)
@@ -446,6 +447,13 @@ static void handle_line(const char *line, size_t len)
         else ck_printf("lifecycle: REFUSED verb=unlock state=%s reason=\"%s\"\n", ck_lc_state_name(g_lc.state), g_lc.reason);
         return;
     }
+    case CK_LC_R_ROTATE: {
+        int ok = ck_store_service_rotate(arg, arg_len);
+        ck_lc_rotate_done(&g_lc, ok);
+        if (ok) ck_printf("lifecycle: rotate ok state=%s\n", ck_lc_state_name(g_lc.state));
+        else ck_printf("lifecycle: REFUSED verb=rotate state=%s reason=\"%s\"\n", ck_lc_state_name(g_lc.state), g_lc.reason);
+        return;
+    }
     case CK_LC_R_COMMIT: {
         int rc = commit_task();
         ck_lc_commit_done(&g_lc, rc);
@@ -484,17 +492,20 @@ static void handle_line(const char *line, size_t len)
     }
 }
 
-/* 1 when the line so far is "unlock" followed by its argument: those bytes
- * are the recovery secret and are echoed as '*' so the serial log never
- * carries them. */
-static int in_secret(const char *buf, size_t len)
+/* 1 when the line so far is "unlock" or "rotate" followed by its argument:
+ * those bytes are recovery secrets and are echoed as '*' so the serial log
+ * never carries them. */
+static int after_verb(const char *buf, size_t len, const char *verb)
 {
-    static const char verb[] = "unlock";
     size_t i = 0, j;
     while (i < len && buf[i] == ' ') i++;
-    for (j = 0; j < sizeof verb - 1; j++)
+    for (j = 0; verb[j]; j++)
         if (i + j >= len || buf[i + j] != verb[j]) return 0;
     return i + j < len && buf[i + j] == ' ';
+}
+static int in_secret(const char *buf, size_t len)
+{
+    return after_verb(buf, len, "unlock") || after_verb(buf, len, "rotate");
 }
 
 /* Bounded serial line editor: printable bytes collected, Backspace edits,

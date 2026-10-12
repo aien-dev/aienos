@@ -600,7 +600,7 @@ static void cut_before_anchor(void *arg, int cp)
 
 /* ---- KeySlotManifest (kind 21): the one plaintext object, digest-bound ---- */
 
-static uint8_t KSM[SS_KEYSLOT_MIN], KSM2[SS_KEYSLOT_MIN], KSM_BAD[SS_KEYSLOT_MIN];
+static uint8_t KSM[SS_KEYSLOT_MIN], KSM2[SS_KEYSLOT_MIN], KSM3[SS_KEYSLOT_MIN], KSM_BAD[SS_KEYSLOT_MIN];
 static void ksm_fill(uint8_t *m, uint64_t seq, const uint8_t uuid[16])
 {
     memset(m, 0, SS_KEYSLOT_MIN);
@@ -609,6 +609,18 @@ static void ksm_fill(uint8_t *m, uint64_t seq, const uint8_t uuid[16])
     memcpy(m + 12, uuid, 16);
     put64le(m + 28, seq);
     m[76] = 2; /* slot_count; descriptors stay Empty: the sealed layer checks shape only */
+}
+static void ksm_link(uint8_t *m, const uint8_t prev[32]) { memcpy(m + 36, prev, 32); }
+/* Forgery: after prepare, flip the genesis manifest's previous id to nonzero
+ * and re-derive the Store ObjectId and the commit digest so every other
+ * guard passes and only the chain rule can refuse it. */
+static void fx_ks_prev_digest(m5_commit *c) { sha256_hash(KSM, sizeof KSM, c->object_id); }
+static void ed_ks_prev_forged(ss_store *s, void *a)
+{
+    (void)a;
+    KSM[36] = 1;
+    sv1_object_id(SS_KIND_KEYSLOT, 1, KSM, sizeof KSM, s->ws->tx + SS_TX_HDR);
+    reseal(s, 0, fx_ks_prev_digest);
 }
 static st_store ks_scratch;
 static int bootstrap_rc(uint8_t *out, size_t cap, size_t *len)
@@ -694,8 +706,41 @@ static void test_keyslot(void)
         SCHECK_EQ(ss_read(&s, kid[0], out, sizeof out, &len, &kind), 0, "keyed read of the manifest");
         CHECK(kind == SS_KIND_KEYSLOT && len == sizeof KSM && memcmp(out, KSM, len) == 0, "read returns plaintext");
         SCHECK_EQ(check_read(&s, kid[1], P4, sizeof P4, 42), 0, "the envelope beside it opens");
+        CHECK(s.nkeyslot == 1, "chain length 1");
+        /* rotation chain (ADR 0017 section 2.7): the next manifest must be
+         * sequence count + 1 and name the bound manifest; anything else refused */
         ss_object again = {SS_KIND_KEYSLOT, 1, KSM2, sizeof KSM2};
-        SCHECK_EQ(ss_prepare(&s, &again, 1), SS_E_KEYSLOT, "a second manifest is refused while one is bound");
+        SCHECK_EQ(ss_prepare(&s, &again, 1), SS_E_KEYSLOT, "sequence 2 without the link to sequence 1 refused");
+        ksm_fill(KSM2, 1, RIG_UUID);
+        SCHECK_EQ(ss_prepare(&s, &again, 1), SS_E_KEYSLOT, "a second sequence-1 manifest refused");
+        ksm_fill(KSM2, 2, RIG_UUID);
+        ksm_link(KSM2, kid[1]);
+        SCHECK_EQ(ss_prepare(&s, &again, 1), SS_E_KEYSLOT, "sequence 2 naming an envelope, not the manifest, refused");
+        ksm_link(KSM2, kid[0]);
+        uint8_t kid2[1][32], kid3[1][32];
+        SCHECK_EQ(ss_transact(&s, &again, 1, NULL, NULL, kid2), 0, "gen 4 commits the sequence-2 manifest");
+        CHECK(s.nkeyslot == 2 && memcmp(s.keyslot_sid, kid2[0], 32) == 0, "the newest manifest is bound after rotation");
+        ss_object third = {SS_KIND_KEYSLOT, 1, KSM3, sizeof KSM3};
+        ksm_fill(KSM3, 4, RIG_UUID);
+        ksm_link(KSM3, kid2[0]);
+        SCHECK_EQ(ss_prepare(&s, &third, 1), SS_E_KEYSLOT, "sequence skip (4 after 2) refused");
+        ksm_fill(KSM3, 3, RIG_UUID);
+        ksm_link(KSM3, kid[0]);
+        SCHECK_EQ(ss_prepare(&s, &third, 1), SS_E_KEYSLOT, "sequence 3 naming sequence 1 refused");
+        ksm_fill(KSM3, 2, RIG_UUID);
+        ksm_link(KSM3, kid2[0]);
+        SCHECK_EQ(ss_prepare(&s, &third, 1), SS_E_KEYSLOT, "sequence 2 again refused");
+        ksm_fill(KSM3, 3, RIG_UUID);
+        ksm_link(KSM3, kid2[0]);
+        SCHECK_EQ(ss_transact(&s, &third, 1, NULL, NULL, kid3), 0, "gen 5 commits the sequence-3 manifest");
+        CHECK(s.nkeyslot == 3 && memcmp(s.keyslot_sid, kid3[0], 32) == 0, "sequence 3 bound");
+        rig_close(&r);
+        SCHECK_EQ(bootstrap_rc(out, sizeof out, &len), 0, "bootstrap reads the chain");
+        CHECK(len == sizeof KSM3 && memcmp(out, KSM3, len) == 0, "bootstrap returns the newest manifest");
+        SCHECK_EQ(sopen(&r, &s, &K), 0, "reopen gen 5");
+        CHECK(s.has_keyslot && s.nkeyslot == 3 && memcmp(s.keyslot_sid, kid3[0], 32) == 0, "chain of 3 bound at open");
+        SCHECK_EQ(ss_read(&s, kid[0], out, sizeof out, &len, &kind), 0, "the superseded manifest stays readable");
+        CHECK(len == sizeof KSM && memcmp(out, KSM, len) == 0, "superseded bytes unchanged");
         /* defence in depth at read: a claim whose digest no longer matches */
         for (uint32_t k = 0; k < s.nclaims; k++)
             if (memcmp(g_ws.claims[k].sid, kid[0], 32) == 0) g_ws.claims[k].c.object_id[0] ^= 1;
@@ -712,8 +757,16 @@ static void test_keyslot(void)
     CHECK(file_save(g_path, img_a, RIG_BYTES) == 0, "restore");
     {
         ss_object o[2] = {{SS_KIND_KEYSLOT, 1, KSM, sizeof KSM}, {44, 1, P1, 300}};
-        SCHECK_EQ(forge_objs(ed_ks_second, NULL, o, 2), SS_E_KEYSLOT, "two manifests in the catalog");
-        SCHECK_EQ(bootstrap_rc(out, sizeof out, &len), SS_E_KEYSLOT, "bootstrap refuses two manifests");
+        ksm_fill(KSM2, 2, RIG_UUID); /* sequence 2 with no link */
+        SCHECK_EQ(forge_objs(ed_ks_second, NULL, o, 2), SS_E_ENVELOPE, "a second manifest unclaimed in the catalog");
+        SCHECK_EQ(bootstrap_rc(out, sizeof out, &len), SS_E_KEYSLOT, "bootstrap refuses a broken chain (sequence 2 without its link)");
+    }
+    CHECK(file_save(g_path, img_a, RIG_BYTES) == 0, "restore");
+    {
+        ss_object o[2] = {{SS_KIND_KEYSLOT, 1, KSM, sizeof KSM}, {44, 1, P1, 300}};
+        SCHECK_EQ(forge_objs(ed_ks_prev_forged, NULL, o, 2), SS_E_KEYSLOT, "claimed genesis manifest with a nonzero previous id (chain rule at the keyed open)");
+        SCHECK_EQ(bootstrap_rc(out, sizeof out, &len), SS_E_KEYSLOT, "bootstrap refuses it too");
+        KSM[36] = 0;
     }
     CHECK(file_save(g_path, img_a, RIG_BYTES) == 0, "restore");
     SCHECK_EQ(forge(ed_ks_unclaimed, NULL), SS_E_ENVELOPE, "unclaimed manifest");

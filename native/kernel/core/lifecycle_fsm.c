@@ -50,6 +50,8 @@ enum ck_lc_verb ck_lc_decode(const char *line, size_t len, const char **arg, siz
     /* unlock carries the optional recovery secret (the binding checks its
      * shape and never echoes it); every other verb takes no argument. */
     if (word_is(w, n, "unlock")) return CK_LC_V_UNLOCK;
+    /* rotate carries "<current 64-hex> <new 64-hex>" (the binding checks it) */
+    if (word_is(w, n, "rotate")) return CK_LC_V_ROTATE;
     if (*arg_len != 0) return CK_LC_V_INVALID;
     if (word_is(w, n, "help")) return CK_LC_V_HELP;
     if (word_is(w, n, "status")) return CK_LC_V_STATUS;
@@ -82,6 +84,7 @@ const char *ck_lc_verb_name(enum ck_lc_verb v)
     case CK_LC_V_RECALL: return "recall";
     case CK_LC_V_REMEMBER: return "remember";
     case CK_LC_V_FACTS: return "facts";
+    case CK_LC_V_ROTATE: return "rotate";
     }
     return "?";
 }
@@ -157,6 +160,11 @@ enum ck_lc_result ck_lc_apply(ck_lc *lc, enum ck_lc_verb v, const char *arg, siz
     case CK_LC_V_UNLOCK:
         if (lc->state != CK_LC_LOCKED) return refuse(lc, "already unlocked");
         return CK_LC_R_UNLOCK;
+    case CK_LC_V_ROTATE:
+        if (lc->state == CK_LC_LOCKED) return refuse(lc, "locked: unlock before rotating the recovery secret");
+        if (lc->state == CK_LC_SERVE) return refuse(lc, "a task is pending: approve, deny or cancel it first");
+        if (arg_len == 0) return refuse(lc, "rotate needs <current 64-hex> <new 64-hex>");
+        return CK_LC_R_ROTATE;
     case CK_LC_V_TASK:
         if (lc->state == CK_LC_LOCKED) return refuse(lc, "locked: no production Store");
         if (lc->state == CK_LC_SERVE) return refuse(lc, "a task is pending: approve, deny or cancel it first");
@@ -224,6 +232,15 @@ void ck_lc_commit_done(ck_lc *lc, int rc)
     } else {
         lc->refused++;
         lc->reason = "commit failed: task still pending (approve again or cancel)";
+    }
+}
+
+void ck_lc_rotate_done(ck_lc *lc, int ok)
+{
+    if (lc->state != CK_LC_READY) return;
+    if (!ok) {
+        lc->refused++;
+        lc->reason = "recovery secret rotation refused: Store unchanged";
     }
 }
 

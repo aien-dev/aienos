@@ -1281,6 +1281,64 @@ static void test_secman(void)
     free(after);
 }
 
+/* P04 cut 2b: recovery secret rotation (ADR 0017 section 2.7 item 1) on the
+ * production Store: proof of possession, one transaction (next
+ * KeySlotManifest + SecurityManifest), old secret retired, chain of three. */
+static int rotate(const uint8_t *cur, const uint8_t *nxt, ck_store_report *r)
+{
+    if (dopen(0)) return -999;
+    int rc = ck_store_rotate_recovery(&g_d, cur, nxt, r);
+    dclose();
+    return rc;
+}
+static void test_rotate(void)
+{
+    ck_store_report r;
+    ss_keys k;
+    uint8_t S1[32], S2[32], S3[32];
+    for (int i = 0; i < 32; i++) { S1[i] = (uint8_t)(i * 7 + 1); S2[i] = (uint8_t)(i * 5 + 2); S3[i] = (uint8_t)(i * 13 + 3); }
+    uint8_t *now = malloc(T_BYTES), *after = malloc(T_BYTES);
+    CHECK(now && after);
+    if (!now || !after) return;
+
+    printf("  [rotate: genesis under S1, rotate S1->S2 in one transaction, S1 retired, S2 opens]\n");
+    CHECK(dopen(1) == 0);
+    dclose();
+    CHECK(unlock(S1, 0, "rt-g", 0, &r) == 0 && r.secman_seq == 1 && r.keyslot_seq == 1 && store_boot_store()->nkeyslot == 1);
+    CHECK(load(now) == 0);
+    CHECK(rotate(S2, S3, &r) == CK_SB_E_SECRET_REJECTED && r.verdict == CK_SB_REFUSED && r.rc == CK_SB_E_SECRET_REJECTED);
+    CHECK(r.proof && strcmp(r.proof, "keyed") == 0);
+    CHECK(load(after) == 0 && memcmp(now, after, T_BYTES) == 0); /* wrong current secret: nothing written */
+    CHECK(store_boot_store()->nkeyslot == 1 && ss_generation(store_boot_store()) == 2);
+    CHECK(rotate(S1, S2, &r) == 0 && r.verdict == CK_SB_COMMITTED && r.keyslot_seq == 2 && r.secman_seq == 2 &&
+          r.secman_keyslot == 1 && r.secman_prev == 1 && r.gen_commit == 3);
+    CHECK(store_boot_store()->nkeyslot == 2);
+    CHECK(load(now) == 0);
+    CHECK(unlock(S1, 0, "rt-old", 1, &r) == CK_SB_E_SECRET_REJECTED && r.verdict == CK_SB_REFUSED);
+    CHECK(load(after) == 0 && memcmp(now, after, T_BYTES) == 0); /* retired secret: disk as found */
+    CHECK(unlock(S2, 0, "rt-new", 1, &r) == 0 && r.secman_seq == 3 && r.secman_keyslot == 1 && r.secman_prev == 1 &&
+          r.keyslot_seq == 2 && r.gen_commit == 4 && store_boot_store()->nkeyslot == 2);
+
+    printf("  [rotate: a second rotation S2->S3 extends the chain to 3; S3 opens, S2 and S1 refused]\n");
+    CHECK(rotate(S2, S3, &r) == 0 && r.keyslot_seq == 3 && r.secman_seq == 4 && r.gen_commit == 5);
+    CHECK(unlock(S2, 0, "rt-2", 1, &r) == CK_SB_E_SECRET_REJECTED);
+    CHECK(unlock(S1, 0, "rt-1", 1, &r) == CK_SB_E_SECRET_REJECTED);
+    CHECK(unlock(S3, 0, "rt-3", 1, &r) == 0 && r.secman_seq == 5 && r.keyslot_seq == 3 && r.gen_commit == 6 &&
+          store_boot_store()->nkeyslot == 3);
+    CHECK(unlock(S3, 0, "rt-3b", 1, &r) == 0 && r.secman_seq == 6 && r.gen_commit == 7);
+
+    printf("  [rotate: a TEST-key Store has no keyslot to rotate]\n");
+    ck_store_test_keys(&k);
+    CHECK(dopen(1) == 0);
+    dclose();
+    CHECK(boot(&k, "rt-t", &r) == 0);
+    CHECK(rotate(S1, S2, &r) == CK_SB_E_NO_KEYSLOT && r.verdict == CK_SB_REFUSED);
+
+    unlink(img);
+    free(now);
+    free(after);
+}
+
 /* P05 cut 1: production continuity on the service lifecycle
  * (svc/continuity_service.c) over the real sealed Store in a file, opened the
  * production way (recovery keyslot unlock). Identity + ALLEN subject are
@@ -2562,6 +2620,7 @@ int main(void)
     test_store();
     test_unlock_recovery();
     test_secman();
+    test_rotate();
     test_continuity_service();
     test_cortex_journal();
     test_artifact_store();

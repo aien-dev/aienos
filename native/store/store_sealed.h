@@ -42,11 +42,16 @@
 
 #define SS_KIND_ENVELOPE 0x0510u /* M5 envelope of one application object */
 #define SS_KIND_TXREC 0x0511u    /* sealed transaction record */
-/* ADR 0017 KeySlotManifest: the one plaintext object a sealed store admits.
- * It is committed inside a sealed transaction, so the keyed transaction
- * record binds its digest; the unkeyed bootstrap read happens before keys
- * exist and the keyed open re-checks the same bytes. */
+/* ADR 0017 KeySlotManifest: the one plaintext object kind a sealed store
+ * admits. It is committed inside a sealed transaction, so the keyed
+ * transaction record binds its digest; the unkeyed bootstrap read happens
+ * before keys exist and the keyed open re-checks the same bytes. Rotation
+ * (ADR 0017 section 2.7) appends a new manifest whose manifest_sequence is
+ * the count + 1 and whose previous_keyslot_manifest_id is the Store ObjectId
+ * of the manifest it supersedes: the manifests on a Store form one chain
+ * 1..N and the newest (N) is the bound one. At most one per transaction. */
 #define SS_KIND_KEYSLOT 21u
+#define SS_KS_CHAIN_MAX 64u /* manifests (genesis + rotations) a Store may hold */
 #define SS_KEYSLOT_MIN 640u /* header + 4 descriptors */
 #define SS_KEYSLOT_MAX SS_MAX_PLAINTEXT
 #define SS_MAX_OBJECTS 8u        /* application objects per transaction */
@@ -73,7 +78,7 @@ enum {
     SS_E_CRYPTO = -312,       /* sealing failed */
     SS_E_NEEDS_REOPEN = -313, /* an anchor write failed; reopen */
     SS_E_FORMAT_VERSION = -314, /* version-1 record (predictable envelope ids): reformat */
-    SS_E_KEYSLOT = -315,        /* keyslot manifest malformed, duplicate, unbound, or absent */
+    SS_E_KEYSLOT = -315,        /* keyslot manifest malformed, chain broken, unbound, or absent */
 };
 const char *ss_strerror(int e);
 
@@ -121,6 +126,7 @@ typedef struct {
     size_t nobjs;
     ss_claim claims[ST_CAT_CAP];
     ss_txinfo txs[ST_CAT_CAP];
+    struct { uint8_t sid[32]; uint8_t prev[32]; uint64_t seq; } ks[SS_KS_CHAIN_MAX]; /* keyslot chain */
     uint32_t bygen[ST_CAT_CAP]; /* generation - 2 -> index in txs */
     uint8_t used[ST_CAT_CAP];   /* catalog entry already claimed */
 } ss_workspace;
@@ -136,15 +142,18 @@ typedef struct {
     uint32_t nclaims;
     int rb;                     /* SS_RB_* from the last open */
     int needs_reopen;
-    int has_keyslot;            /* a kind-21 KeySlotManifest is committed and bound */
-    uint8_t keyslot_sid[32];    /* its Store object id */
+    int has_keyslot;            /* a kind-21 KeySlotManifest chain is committed and bound */
+    uint8_t keyslot_sid[32];    /* Store object id of the newest manifest (sequence nkeyslot) */
+    uint32_t nkeyslot;          /* manifests in the chain (0 on a Store without one) */
 } ss_store;
 
-/* Unkeyed bootstrap read of the KeySlotManifest (kind 21) before any key
- * exists: structural Store open into scratch, exactly one kind-21 object,
- * magic and format version checked. SS_E_KEYSLOT when there is none. The
- * keyed ss_open later re-binds the same bytes through the transaction
- * record that committed them (has_keyslot, keyslot_sid). */
+/* Unkeyed bootstrap read of the newest KeySlotManifest (kind 21) before any
+ * key exists: structural Store open into scratch, every kind-21 object
+ * shape-checked (magic, format version) and the chain 1..N verified by
+ * manifest_sequence and previous_keyslot_manifest_id; out receives the
+ * newest. SS_E_KEYSLOT when there is none or the chain is broken. The keyed
+ * ss_open later re-binds the same bytes through the transaction records
+ * that committed them (has_keyslot, keyslot_sid, nkeyslot). */
 int ss_keyslot_bootstrap(st_store *scratch, const st_dev *store, ss_workspace *ws, uint8_t *out, size_t cap,
                          size_t *len);
 

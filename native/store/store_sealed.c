@@ -224,6 +224,43 @@ static int keyslot_shape(const uint8_t *b, size_t len, const uint8_t uuid[16])
     return 0;
 }
 
+/* manifest_sequence and previous_keyslot_manifest_id of a shape-checked
+ * manifest (m5_ksm_encode layout: sequence at 28, previous id at 36). */
+static void ks_fields(const uint8_t *b, uint64_t *seq, uint8_t prev[32])
+{
+    *seq = 0;
+    for (int i = 7; i >= 0; i--) *seq = (*seq << 8) | b[28 + i];
+    memcpy(prev, b + 36, 32);
+}
+
+/* The chain rule: the n manifests carry sequences 1..n exactly once, the
+ * sequence-1 manifest has a zero previous id and every later one names the
+ * Store ObjectId of its predecessor. Returns the index of the newest
+ * (sequence n) or -1. */
+static int ks_chain(const ss_workspace *ws, uint32_t n)
+{
+    uint8_t zero[32];
+    int newest = -1;
+    memset(zero, 0, 32);
+    if (n == 0 || n > SS_KS_CHAIN_MAX) return -1;
+    for (uint32_t i = 0; i < n; i++) {
+        uint64_t q = ws->ks[i].seq;
+        if (q < 1 || q > n) return -1;
+        for (uint32_t j = 0; j < i; j++)
+            if (ws->ks[j].seq == q) return -1; /* GUARD:keyslot-chain-duplicate */
+        if (q == 1) {
+            if (memcmp(ws->ks[i].prev, zero, 32) != 0) return -1; /* GUARD:keyslot-chain-genesis */
+        } else {
+            int found = 0;
+            for (uint32_t j = 0; j < n; j++)
+                if (ws->ks[j].seq == q - 1 && memcmp(ws->ks[j].sid, ws->ks[i].prev, 32) == 0) found = 1;
+            if (!found) return -1; /* GUARD:keyslot-chain-link */
+        }
+        if (q == n) newest = (int)i;
+    }
+    return newest;
+}
+
 int ss_keyslot_bootstrap(st_store *scratch, const st_dev *store, ss_workspace *ws, uint8_t *out, size_t cap,
                          size_t *len)
 {
@@ -232,20 +269,28 @@ int ss_keyslot_bootstrap(st_store *scratch, const st_dev *store, ss_workspace *w
     memset(scratch, 0, sizeof *scratch);
     int rc = st_open(scratch, store, &ws->st);
     if (rc != 0) return rc;
-    uint32_t n;
+    uint32_t n, nk = 0;
     const sv1_entry *e = st_catalog(scratch, &n);
     int at = -1;
+    size_t l;
     for (uint32_t i = 0; i < n; i++) {
         if (e[i].kind != SS_KIND_KEYSLOT || e[i].version != 1) continue;
-        if (at >= 0) return SS_E_KEYSLOT; /* GUARD:bootstrap-single */
-        at = (int)i;
+        if (nk >= SS_KS_CHAIN_MAX) return SS_E_KEYSLOT; /* GUARD:bootstrap-chain-cap */
+        if (e[i].byte_length > SS_KEYSLOT_MAX || e[i].byte_length > cap) return SS_E_KEYSLOT;
+        rc = st_read_object(scratch, e[i].object_id, out, cap, &l);
+        if (rc != 0) return rc;
+        if (keyslot_shape(out, l, NULL) != 0) { memset(out, 0, cap); return SS_E_KEYSLOT; } /* GUARD:bootstrap-shape */
+        memcpy(ws->ks[nk].sid, e[i].object_id, 32);
+        ks_fields(out, &ws->ks[nk].seq, ws->ks[nk].prev);
+        nk++;
     }
-    if (at < 0) return SS_E_KEYSLOT;
-    if (e[at].byte_length > SS_KEYSLOT_MAX || e[at].byte_length > cap) return SS_E_KEYSLOT;
-    size_t l;
+    if (nk == 0) return SS_E_KEYSLOT;
+    int newest = ks_chain(ws, nk);
+    if (newest < 0) { memset(out, 0, cap); return SS_E_KEYSLOT; } /* GUARD:bootstrap-chain */
+    at = find_entry(e, n, ws->ks[newest].sid);
+    if (at < 0) { memset(out, 0, cap); return SS_E_KEYSLOT; }
     rc = st_read_object(scratch, e[at].object_id, out, cap, &l);
     if (rc != 0) return rc;
-    if (keyslot_shape(out, l, NULL) != 0) { memset(out, 0, cap); return SS_E_KEYSLOT; } /* GUARD:bootstrap-shape */
     *len = l;
     return 0;
 }
@@ -264,7 +309,7 @@ static int verify_records(ss_store *s, uint64_t G)
             continue;
         }
         if (e[i].kind == SS_KIND_KEYSLOT && e[i].version == 1) {
-            if (nks) return SS_E_KEYSLOT; /* GUARD:keyslot-single */
+            if (nks >= SS_KS_CHAIN_MAX) return SS_E_KEYSLOT; /* GUARD:keyslot-chain-cap */
             nks++;
             continue;
         }
@@ -298,6 +343,7 @@ static int verify_records(ss_store *s, uint64_t G)
     memcpy(s->last_tx_digest, G >= 2 ? ws->txs[ws->bygen[G - 2]].digest : zero, 32);
     /* envelopes: claims and envelope entries are in one-to-one correspondence */
     memset(ws->used, 0, n);
+    uint32_t nk = 0;
     for (uint32_t k = 0; k < nc; k++) {
         int ks = ws->claims[k].c.obj.object_kind == SS_KIND_KEYSLOT;
         int at = find_entry(e, n, ws->claims[k].sid);
@@ -312,13 +358,23 @@ static int verify_records(ss_store *s, uint64_t G)
             uint8_t dg[32];
             sha256_hash(ws->rd, len, dg);
             if (!aienos_ct_equal(dg, ws->claims[k].c.object_id, 32)) return SS_E_KEYSLOT; /* GUARD:keyslot-digest */
-            s->has_keyslot = 1;
-            memcpy(s->keyslot_sid, ws->claims[k].sid, 32);
+            if (keyslot_shape(ws->rd, len, s->uuid) != 0) return SS_E_KEYSLOT; /* GUARD:keyslot-open-shape */
+            if (nk >= SS_KS_CHAIN_MAX) return SS_E_KEYSLOT;
+            memcpy(ws->ks[nk].sid, ws->claims[k].sid, 32);
+            ks_fields(ws->rd, &ws->ks[nk].seq, ws->ks[nk].prev);
+            nk++;
             continue;
         }
         if (m5_commit_check_object(&ws->claims[k].c, ws->rd, len) != M5_OK) return SS_E_ENVELOPE; /* GUARD:envelope-digest */
     }
     if (nc != nenv + nks) return SS_E_ENVELOPE; /* GUARD:unclaimed-envelope */
+    if (nk) {
+        int newest = ks_chain(ws, nk);
+        if (newest < 0) return SS_E_KEYSLOT; /* GUARD:keyslot-chain */
+        s->has_keyslot = 1;
+        s->nkeyslot = nk;
+        memcpy(s->keyslot_sid, ws->ks[newest].sid, 32);
+    }
     s->nclaims = nc;
     return 0;
 }
@@ -443,10 +499,21 @@ int ss_prepare(ss_store *s, const ss_object *o, size_t n)
         if (o[i].kind == 0 || o[i].version == 0) return SS_E_ARG;
         if (o[i].kind == SS_KIND_KEYSLOT) {
             /* the KeySlotManifest travels in plaintext: shape-checked here,
-             * one per store (rotation is a later cut), digest-bound by the
-             * commit record exactly like an envelope */
+             * one per transaction, admitted only as the next link of the
+             * chain (sequence count + 1 naming the bound manifest; sequence
+             * 1 with a zero previous id on a Store without one), digest-bound
+             * by the commit record exactly like an envelope */
             if (o[i].version != 1 || keyslot_shape(o[i].bytes, o[i].len, s->uuid) != 0) return SS_E_KEYSLOT; /* GUARD:keyslot-prepare-shape */
-            if (s->has_keyslot || nks++) return SS_E_KEYSLOT; /* GUARD:keyslot-once */
+            if (nks++) return SS_E_KEYSLOT; /* GUARD:keyslot-once-per-tx */
+            {
+                uint64_t q;
+                uint8_t prev[32], zero[32];
+                memset(zero, 0, 32);
+                ks_fields(o[i].bytes, &q, prev);
+                if (s->nkeyslot >= SS_KS_CHAIN_MAX) return SS_E_KEYSLOT; /* GUARD:keyslot-chain-full */
+                if (q != (uint64_t)s->nkeyslot + 1) return SS_E_KEYSLOT; /* GUARD:keyslot-next-sequence */
+                if (memcmp(prev, s->has_keyslot ? s->keyslot_sid : zero, 32) != 0) return SS_E_KEYSLOT; /* GUARD:keyslot-next-previous */
+            }
             uint8_t *e = tx + SS_TX_HDR + i * SS_TX_ENTRY;
             if (sv1_object_id(SS_KIND_KEYSLOT, 1, o[i].bytes, o[i].len, e) != 0) return SS_E_CRYPTO;
             m5_commit mc;
@@ -543,6 +610,7 @@ int ss_commit_prepared(ss_store *s, st_hook hook, void *arg)
             return SS_E_CRYPTO;
         if (c->c.obj.object_kind == SS_KIND_KEYSLOT) {
             s->has_keyslot = 1;
+            s->nkeyslot++;
             memcpy(s->keyslot_sid, c->sid, 32);
         }
     }
