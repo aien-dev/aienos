@@ -326,6 +326,43 @@ $(error CK_TEST_CONSOLE_MUTATION needs CK_CONSOLE_SESSION=1)
 endif
 endif
 
+# CK_SERVICE=1 builds the resident production lifecycle image (core/lifecycle.c,
+# native v1 plan P03): after every boot stage the kernel serves bounded operator
+# requests on the serial console until "shutdown" (Store closed, NVMe released,
+# then reset), instead of resetting at once. Own OUT subdirectory full-service/.
+# Allowed with CK_HARDWARE_STAGING (it is the production entry); refused with
+# every TEST-only flag. The production key source refuses today, so this image
+# stays LOCKED. CK_SERVICE_TEST_KEYS=1 (TEST-ONLY, full-service-testkeys/, only
+# scripts/qemu_ck_lifecycle_test.sh) opens the Store with the TEST keys so the
+# ready/serve/commit paths run in QEMU; refused with CK_HARDWARE_STAGING.
+CK_SERVICE ?=
+CK_SERVICE_TEST_KEYS ?=
+ifneq ($(strip $(CK_SERVICE)),)
+ifneq ($(strip $(CK_SERVICE)),1)
+$(error CK_SERVICE must be empty or 1)
+endif
+ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),)
+$(error CK_SERVICE cannot be combined with CK_QEMU_UNSAFE_DMA)
+endif
+ifneq ($(strip $(CK_CONSOLE_SESSION)),)
+$(error CK_SERVICE cannot be combined with CK_CONSOLE_SESSION)
+endif
+ifneq ($(strip $(CK_TEST_XHCI_MUTATION)$(CK_TEST_STORE_CRASH)$(CK_TEST_CONTINUITY)$(CK_TEST_FWCFG_ARTIFACTS)$(CK_TEST_SMP_SKIP_CPU)$(CK_TEST_ROLLBACK)$(CK_TEST_STALE_HANDOFF)$(CK_TEST_DISK_XLATE_BYPASS)),)
+$(error CK_SERVICE cannot be combined with a CK_TEST_* flag)
+endif
+endif
+ifneq ($(strip $(CK_SERVICE_TEST_KEYS)),)
+ifneq ($(strip $(CK_SERVICE_TEST_KEYS)),1)
+$(error CK_SERVICE_TEST_KEYS must be empty or 1)
+endif
+ifneq ($(strip $(CK_SERVICE)),1)
+$(error CK_SERVICE_TEST_KEYS needs CK_SERVICE=1)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_SERVICE_TEST_KEYS (TEST keys) cannot be combined with CK_HARDWARE_STAGING)
+endif
+endif
+
 # TEST-ONLY Store crash hook (svc/store_crash.h; only
 # scripts/qemu_ck_store_crash_test.sh sets it): the Store stage reads a crash
 # plan from the scratch unit, runs on a volatile write cache and halts at the
@@ -606,6 +643,17 @@ STAGE_SRCS += $(KDIR)/svc/continuity_codec.c $(KDIR)/svc/continuity_resolve.c \
 	$(KDIR)/svc/continuity_resolve_sealed.c $(KDIR)/svc/continuity_commit.c $(KDIR)/svc/continuity_recovery.c \
 	$(KDIR)/svc/continuity_boot.c $(KDIR)/svc/continuity_subject.c $(KDIR)/svc/continuity_subject_provision.c
 endif
+ifeq ($(strip $(CK_SERVICE)),1)
+# Own OUT subdirectory: service objects never mix with a diagnostic image.
+ifeq ($(strip $(CK_SERVICE_TEST_KEYS)),1)
+FULL_NAME := full-service-testkeys
+STAGE_DMA_FLAGS += -DCK_SERVICE=1 -DCK_SERVICE_TEST_KEYS=1
+else
+FULL_NAME := full-service$(if $(strip $(CK_HARDWARE_STAGING)),-hardware-staging,)
+STAGE_DMA_FLAGS += -DCK_SERVICE=1
+endif
+STAGE_SRCS += $(KDIR)/core/lifecycle.c $(KDIR)/core/lifecycle_fsm.c
+endif
 ifeq ($(strip $(CK_TEST_DISK_XLATE_BYPASS)),1)
 FULL_NAME := $(FULL_NAME)-test-xlate-bypass
 STAGE_DMA_FLAGS += -DCK_TEST_DISK_XLATE_BYPASS=1
@@ -715,6 +763,22 @@ define console_check
 	  grep -aqF "TEST-ONLY console session MUTATION BUILD" $(1) || { echo "console mutation image lacks its TEST-ONLY banner"; rm -f $(1); exit 1; }; \
 	else \
 	  if grep -aqF "TEST-ONLY console session MUTATION" $(1); then echo "image carries the console mutation without asking"; rm -f $(1); exit 1; fi; \
+	fi
+endef
+
+# service_check(elf): only a CK_SERVICE image may carry the resident lifecycle;
+# only a CK_SERVICE_TEST_KEYS image its TEST-ONLY banner.
+define service_check
+	@if [ "$(strip $(CK_SERVICE))" = 1 ]; then \
+	  grep -aqF "lifecycle: ready" $(1) || { echo "service image lacks the resident lifecycle"; rm -f $(1); exit 1; }; \
+	else \
+	  if grep -aqF "lifecycle: ready" $(1); then echo "diagnostic image carries the resident lifecycle"; rm -f $(1); exit 1; fi; \
+	  echo "no resident lifecycle in $(1)"; \
+	fi
+	@if [ "$(strip $(CK_SERVICE_TEST_KEYS))" = 1 ]; then \
+	  grep -aqF "TEST-ONLY service image" $(1) || { echo "service test-keys image lacks its TEST-ONLY banner"; rm -f $(1); exit 1; }; \
+	else \
+	  if grep -aqF "TEST-ONLY service image" $(1); then echo "image carries TEST Store keys without asking"; rm -f $(1); exit 1; fi; \
 	fi
 endef
 
@@ -850,6 +914,7 @@ $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	$(call owner_check,$@)
 	$(call xhci_mut_check,$@)
 	$(call console_check,$@)
+	$(call service_check,$@)
 	$(call smp_check,$@)
 	$(call crash_check,$@)
 	$(call b7b_check,$@)
@@ -864,10 +929,10 @@ $(FULL_EFI): $(FULL_ELF)
 # ---- host unit tests ----
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
-	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/acpi_dev.c
+	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/acpi_dev.c $(KDIR)/core/lifecycle_fsm.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision
+	test_continuity_subject test_continuity_subject_provision test_lifecycle
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 

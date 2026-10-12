@@ -151,6 +151,10 @@ static const char *classify(int rc)
 /* Workspace lives across boots of the host test; the kernel uses it once. */
 static ss_workspace *g_ws;
 static ss_store *g_ss;
+#ifdef CK_SERVICE
+static int g_service_open;      /* Store open for the service lifetime (core/lifecycle.c) */
+static int g_service_locked_rc; /* last production key source refusal */
+#endif
 
 int store_boot_run(const disk_dev *d, const ss_keys *keys, const uint8_t uuid[16], const char *commit,
                    ck_store_report *r)
@@ -360,17 +364,75 @@ int ck_stage_store(void)
         }
     }
 #endif
+#if defined(CK_SERVICE) && !defined(CK_SERVICE_TEST_KEYS)
+    /* Production service image without owner provisioning: the production
+     * key source only (it refuses today: no in-kernel K_vol unwrap, P04). No
+     * TEST key is ever used here. */
+    rc = ck_store_production_keys(&keys);
+    bz(&keys, sizeof keys);
+    if (rc == 0) rc = CK_SB_E_BLOCKED_OPERATOR; /* no Store UUID without CK_HARDWARE_STAGING provisioning */
+    ck_printf("store: REFUSED proof=keyed step=\"production Store key source\" rc=%d (service image stays LOCKED: "
+              "K_vol needs the TRUST-1 key ceremony, Gate 6 TPM keyslot or the operator recovery keyslot); "
+              "disk not read, not formatted\n", rc);
+    ck_art_stage_load(0, "production Store key source BLOCKED_OPERATOR");
+    ck_dev_nvme_release();
+    g_service_locked_rc = rc;
+    (void)commit;
+    return rc;
+#else
     ck_store_test_keys(&keys);
     rc = store_boot_run(d, &keys, ck_store_test_uuid, commit ? commit : "unknown", &r);
+#endif
 #endif
     bz(&keys, sizeof keys);
     store_boot_print(&r);
     /* Signed artifact candidates live in this Store: read them while the disk
      * is still bound (the loader verifies them later, as untrusted bytes). */
     ck_art_stage_load(r.verdict == CK_SB_COMMITTED ? g_ss : 0, r.step);
+#ifdef CK_SERVICE
+    /* Service lifetime (core/lifecycle.c): an open Store keeps the NVMe bound
+     * until the lifecycle stop order releases it, in that order. A refused
+     * Store releases the disk now, exactly as the diagnostic image does. */
+    if (r.verdict == CK_SB_COMMITTED) {
+        g_service_open = 1;
+        ck_puts("store: service lifetime: Store open, NVMe stays bound until the lifecycle stop order\n");
+        return rc;
+    }
+#endif
     ck_dev_nvme_release(); /* last disk user: revoke NVMe bus mastering */
     return rc;
 }
+
+#ifdef CK_SERVICE
+int ck_store_service_ready(void)
+{
+    return g_service_open && g_ss;
+}
+
+/* Stop order step 1: erase the Store keys. Every commit is already durable
+ * (ss_transact returns after its final flush), so nothing is pending. */
+int ck_store_service_close(void)
+{
+    if (!g_service_open) return 0;
+    g_service_open = 0;
+    if (g_ss) bz(&g_ss->keys, sizeof g_ss->keys);
+    return 1;
+}
+
+/* "unlock" while LOCKED: ask the production key source again. Today it
+ * refuses (CK_SB_E_BLOCKED_OPERATOR); the Store is never opened with any
+ * other key here. Returns 1 only when the Store is open. */
+int ck_store_service_unlock(void)
+{
+    if (g_service_open) return 1;
+    ss_keys keys;
+    int rc = ck_store_production_keys(&keys);
+    bz(&keys, sizeof keys);
+    ck_printf("store: unlock REFUSED proof=keyed step=\"production Store key source\" rc=%d (%s)\n", rc ? rc : g_service_locked_rc,
+              "BlockedOperator: no in-kernel K_vol unwrap yet");
+    return 0;
+}
+#endif
 
 ss_store *store_boot_store(void)
 {

@@ -259,6 +259,17 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
         ck_printf("stage console: %s rc=%d\n", crc == 0 ? "ok" : "FAIL", crc);
     }
 
+    /* Resident production lifecycle (core/lifecycle.c; only a CK_SERVICE=1
+     * image links it, weak and absent otherwise). The product boundary: the
+     * service serves bounded operator requests here until its stop order,
+     * then falls through to the final report and the reset below. */
+    if (ck_lifecycle_run) {
+        ck_set_stage("lifecycle");
+        int lrc = ck_lifecycle_run();
+        ck_irq_cpu_enable(0);
+        ck_printf("stage lifecycle: %s rc=%d\n", lrc == 0 ? "ok" : "FAIL", lrc);
+    }
+
     ck_set_stage("final");
     ck_puts("\n");
     ck_report_header("final");
