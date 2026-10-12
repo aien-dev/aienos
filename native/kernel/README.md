@@ -237,7 +237,9 @@ hardware image, `scripts/stage_one_time_boot_ck_full.sh` (`--dry-run` prints
 every command and touches nothing; `--apply` builds `make full
 CK_HARDWARE_STAGING=1` with the operator's own owner files, copies it to
 `\EFI\AIENOS\aienos-ck-full.efi`, and sets BootNext once; it never
-reboots). Do not run it yet: until the SMMU service accepts the Spark IORT,
+reboots). The B7b probe boot has its own variant,
+`scripts/stage_one_time_boot_ck_b7b.sh` (adds `CK_B7B_PROBE=1`, builds
+twice and refuses on a digest mismatch, stages `aienos-ck-b7b.efi`). Do not run it yet: until the SMMU service accepts the Spark IORT,
 the run can only show the fail-closed deny lines above, not a keyboard.
 The steps below are the procedure that run will follow, so it can be
 reviewed now.

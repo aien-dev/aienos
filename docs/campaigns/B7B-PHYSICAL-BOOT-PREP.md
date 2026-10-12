@@ -27,8 +27,13 @@ Built and tested without hardware (PR #302, squash `863bef83`, issue #286 commen
   IDR0/IDR1, unconfines. `--self-test`: 19 canned logs and 4 Makefile refusals. Local runs recorded in the PR: all PASS.
 - Expected Spark output: `docs/GB10_IORT_DECODE.md` section 10, labelled *expected, not observed*.
 
-Not built, and therefore a blocker (section 4, G7): a probe variant of the one-time staging script
-(`scripts/stage_one_time_boot_ck.sh` / `_full.sh`); it touches the boot-entry staging path and is left for this campaign.
+Built 2026-10-12 (native v1 package P02): the probe variant of the one-time staging script,
+`scripts/stage_one_time_boot_ck_b7b.sh` (`--dry-run` / `--apply`, same shape as `_full.sh`). It builds the probe
+hardware staging image twice and refuses on a digest mismatch, checks the image carries the segment-15 probe and no
+TEST marker, and stages it as `\EFI\AIENOS\aienos-ck-b7b.efi` with a `STAGED-CK-B7B.TXT` record. Its dry run was
+executed on the Spark on 2026-10-12 (read-only; it stopped on four preflight items, among them the recovery stick not
+being inserted), and two builds of the image at commit `51c05da` with the labelled TEST-FIXTURE owner files (a build
+check only, never a boot) gave one digest. What remains for G7 is Drake reading the dry run.
 
 ## 2. People and things required (all physical, all Drake's)
 
@@ -58,9 +63,9 @@ failure.
 | P7 | `bash scripts/qemu_verify_recovery_media.sh` | the recovery environment boots in QEMU with zero hard disks |
 | P8 | `bash scripts/qemu_ck_rollback_test.sh` and `bash scripts/qemu_native_rollback_test.sh` | the rollback gates pass for this commit |
 | P9 | `bash scripts/qemu_ck_b7b_probe_test.sh --self-test`, then with no flag, then `--positive` | `AIENOS_CK_B7B_PROBE_SELF_TEST: PASS`, `AIENOS_CK_B7B_PROBE: PASS`, `AIENOS_CK_B7B_PROBE_POSITIVE: PASS` |
-| P10 | `bash scripts/ck_repro_build.sh full` (builds twice, compares) and the probe build `make -C native/kernel full CK_B7B_PROBE=1 CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS=<file> CK_MACHINE_ID=<file>` | two equal digests; the probe image digest written down. UNVERIFIED that `ck_repro_build.sh` accepts the probe flag; read its help first |
+| P10 | `bash scripts/ck_repro_build.sh full` (builds twice, compares); the probe staging image is built twice by the stage script itself (P12 shows the commands, `--apply` runs them and STOPs on a digest mismatch; `ck_repro_build.sh` does not build staging images, verified 2026-10-12 by reading it) | two equal digests for the default full image; the probe image digest is written down from the stage script output |
 | P11 | `bash scripts/native_boot_preflight.sh --image <probe image .efi> --expect-sha256 <digest from P10>` | last line `NATIVE_PREFLIGHT: READY`; the `ASK` lines are Drake's and are answered in person |
-| P12 | `bash scripts/stage_one_time_boot_ck.sh --dry-run` (or the probe variant's dry run, once it exists) | prints every command, touches nothing; Drake reads it |
+| P12 | `AIENOS_OWNER_PUBKEYS=<file> AIENOS_MACHINE_ID=<file> bash scripts/stage_one_time_boot_ck_b7b.sh --dry-run` | prints every command, touches nothing, ends "Pre-flight clean"; Drake reads it |
 | P13 | the recovery stick, tested in person: booted once in an earlier attended window per `docs/RECOVERY_MEDIA_MACHINE1.md`, evidence kept | the evidence file from that boot is on hand. UNVERIFIED whether a current one exists; no script checks this |
 
 Secure Boot is recorded, never changed. As of 2026-10-01 it is OFF for development by owner decision
@@ -79,8 +84,9 @@ UNVERIFIED here and is part of Drake's go/no-go.
   on screen).
 - G5 `BootNext` unset, `BootOrder` unchanged (P4), Linux is the running system.
 - G6 Everyone can state the abort rule (section 7) from memory.
-- G7 A reviewed probe variant of the staging script exists and its dry run (P12) was read by Drake. **Today this is
-  false; therefore today the answer is NO-GO.**
+- G7 A reviewed probe variant of the staging script exists (`scripts/stage_one_time_boot_ck_b7b.sh`, since 2026-10-12)
+  and its dry run (P12) was read by Drake. **The script exists; the read-through has not happened; therefore today the
+  answer is still NO-GO.**
 - G8 Drake says "go" out loud in the window, and the witness writes the time.
 
 **NO-GO (any one):** any preflight STOP line; a dirty tree; the stick missing; an unexpected `BootNext`; a digest
@@ -93,7 +99,7 @@ that Drake wants answered first.
 2. In Linux, capture the "before" state (needs sudo; Drake runs it):
    `sudo scripts/verify_native_rollback.sh --capture-pre evidence/pre_boot_capture.json`.
    The staging script does this itself; do not capture twice.
-3. Stage once: the probe variant of the stage script with `--apply` (needs sudo; it writes only the staging directory
+3. Stage once: `sudo` is asked for by `scripts/stage_one_time_boot_ck_b7b.sh --apply` with the owner files set (needs sudo; it writes only the staging directory
    `\EFI\AIENOS` on the ESP and sets `BootNext` once; it never reboots and never changes `BootOrder`). Read its
    output aloud; it must end with `BootNext` set and `Boot0004 AIENOSRECOV` still listed.
 4. Reboot by Drake's hand (`sudo reboot`). Start the clock.
@@ -103,8 +109,9 @@ that Drake wants answered first.
    `smmu: instance 1 up base=0x13000000`; the reserved-range line; `b7b_probe: confined ...`;
    `b7b_probe: instance=1 idr0=0x........ idr1=0x........ st_level=. sidsize=..`; `b7b_probe: unconfine rc=0 (ok)`;
    `AIENOS_B7B_PROBE: CONFINED_AND_RELEASED`.
-6. The image holds the console for its hold time (120 s on the infer image; UNVERIFIED for the probe image) and then
-   resets. Do not touch anything. The next start is Linux because `BootNext` is already consumed.
+6. The image holds the console for 120 s (`CK_FB_HOLD_S=120`, set by the stage script; the probe returns to kmain and
+   the full image's normal final report, hold and reset follow, so the hold is the full image's own; UNVERIFIED on
+   the real console until this window) and then resets. Do not touch anything. The next start is Linux because `BootNext` is already consumed.
 7. Back in Linux: `sudo scripts/verify_native_rollback.sh --capture-post evidence/post_boot_capture.json`, then
    `--pre ... --post ... --verify` (ten invariants). Read the verdict aloud.
 
@@ -136,6 +143,11 @@ that Drake wants answered first.
 
 - UNKNOWN whether the GB10 or the HDA0 audio device attempts DMA while no OS drives them, after SMMUv3 B is left
   enabled with every stream aborting until the next reset. An abort there is recorded as an event, not acted on.
+  Checked 2026-10-12 against the code (`native/kernel/core/smmu_svc.c`, the unconfine path): the kernel drains the
+  event queue only while unconfining, and counts only events for the stream being unconfined; after the probe no
+  event is read. So a later GB10 or HDA0 abort would NOT appear on screen in this window. It is not answered by the
+  Spark user guide either (DOCS SILENT); the window records only what the screen shows. Answering it needs a later
+  probe build that reads and prints the event queue before the final report (a P07 item), not a change to this one.
 - UNVERIFIED that the Spark's real IORT routes segment 15 rid 0x100 to instance 1; this is the expectation from
   decoded tables (`GB10_IORT_DECODE.md` sections 3 and 9), and the first thing the window tests.
 - UNVERIFIED hold time and reset behavior of the probe image on the real console.
@@ -151,5 +163,6 @@ with limits; a physical PASS is claimed only for what was seen.
 ## 10. Statement of non-execution
 
 This page prepares a boot. It is not an authorization. No command in sections 3 or 5 has been run for this campaign
-beyond the host-side QEMU gates already recorded in PR #302, and nothing in it will run on the Spark until Drake has
-opened an attended window and said "go" in it.
+beyond the host-side QEMU gates already recorded in PR #302 and the read-only dry run of the staging script on
+2026-10-12 (it printed its commands and stopped; nothing was built into the ESP, no boot entry was created, `BootNext`
+stayed unset), and nothing in it will run on the Spark until Drake has opened an attended window and said "go" in it.
