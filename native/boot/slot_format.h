@@ -6,8 +6,10 @@
  * (native/boot/slot_loader.c, P11 cut 2a, owner decision 2026-10-12), a
  * separate chain loader in FRONT of the unchanged stub + kernel image
  * (native/boot/efi_main.c is not modified). The loader writes the control
- * record only to consume a candidate try. The kernel-side writer (stage,
- * promote, abandon from the native NVMe path) is cut 2b. This header,
+ * record only to consume a candidate try. The service kernel
+ * (native/kernel/svc/slot_service.c, cut 2b) promotes a healthy candidate and
+ * abandons an exhausted or invalid one over its own NVMe path, told which slot
+ * it is by the loader's boot record (below). Staging is cut 3. This header,
  * slot_select.c and the host tool native/kernel/tools/ck_slot_tool.c pin
  * the format and the decision rules (mutation-tested in make slot-test).
  *
@@ -188,6 +190,84 @@ int ck_slot_stage_candidate(struct ck_slot_control *c, unsigned slot, uint64_t g
 int ck_slot_promote(struct ck_slot_control *c, unsigned booted_slot, uint64_t generation,
                     uint64_t policy_generation, const char **why);
 int ck_slot_abandon_candidate(struct ck_slot_control *c, const char **why);
+
+
+/* ---- boot record: what SLOTLDR.EFI hands the kernel (P11 cut 2b) ---------- */
+/* The control record alone cannot tell a kernel which slot it is: "candidate
+ * on its last try" and "candidate out of tries, active booted" both read
+ * tries=0. Before StartImage the loader therefore writes this record into one
+ * page it allocates with the memory type below, a UEFI OS-loader type (UEFI
+ * 2.10 section 7.2 AllocatePages: 0x80000000..0xFFFFFFFF are reserved for OS
+ * loaders). That page survives ExitBootServices and appears in the final
+ * memory map the unchanged stub already copies into the CHANDOF3 handoff, so
+ * neither the stub nor the handoff changes. The kernel's frame allocator only
+ * hands out EfiConventionalMemory, so the page is never reused.
+ *
+ * Trust: the record is written by the loader that verified the image, before
+ * ExitBootServices, i.e. inside the same firmware + loader trust boundary as
+ * the handoff itself. Its digest catches a torn or stray page, not an
+ * attacker inside that boundary. The kernel still cross-checks the slot's
+ * manifest on disk (generation, image_sha512) before it writes anything. */
+#define CK_SLOT_BOOT_MEMTYPE 0x80000A1Eu  /* OS-loader memory type of the boot record page */
+#define CK_SLOT_BOOT_MAGIC "AIENSLB1"
+#define CK_SLOT_BOOT_VERSION 1u
+#define CK_SLOT_BOOT_BYTES 256u
+#define CK_SLOT_BOOT_SIGNED 224u          /* digest = SHA-256 over bytes [0, 224) */
+
+struct ck_slot_boot_record {
+    uint8_t magic[8];                 /*   0 "AIENSLB1" */
+    uint32_t version;                 /*   8 1 */
+    uint8_t boot_slot;                /*  12 0 or 1: the slot whose image the loader started */
+    uint8_t reason;                   /*  13 enum ck_slot_reason of the loader's decision */
+    uint8_t tries;                    /*  14 tries_remaining on disk when the image started */
+    uint8_t control_present;          /*  15 1 = a valid control record was read (and committed when asked) */
+    uint64_t control_seq;             /*  16 torn-slot sequence of that record (0 without one) */
+    uint64_t generation;              /*  24 manifest generation of the started image */
+    uint64_t policy_generation;       /*  32 manifest policy_generation of the started image */
+    uint8_t image_sha512[64];         /*  40 manifest image_sha512 of the started image */
+    uint8_t loader_commit[40];        /* 104 loader build commit, ASCII, zero padded */
+    uint8_t reserved[80];             /* 144 zero */
+    uint8_t digest[32];               /* 224 SHA-256 over bytes [0, 224) */
+};
+_Static_assert(sizeof(struct ck_slot_boot_record) == CK_SLOT_BOOT_BYTES, "ck_slot_boot_record size");
+_Static_assert(offsetof(struct ck_slot_boot_record, digest) == CK_SLOT_BOOT_SIGNED, "boot record digest");
+
+/* Fill the digest (loader side). */
+void ck_slot_boot_seal(struct ck_slot_boot_record *b);
+/* Structure + digest + ranges (kernel side). 0 = ok, -1 with *why. */
+int ck_slot_boot_check(const struct ck_slot_boot_record *b, const char **why);
+
+/* ---- what the kernel does with its slot (P11 cut 2b) ---------------------- */
+/* Pure decision, shared by the kernel (svc/slot_service.c) and the host
+ * self-test. Inputs: the boot record (valid), the control record recovered
+ * from disk (NULL when absent or corrupt), the started slot's manifest from
+ * disk (structurally checked by the caller, NULL when unreadable) and whether
+ * the service reached its health milestone. Rules, in order:
+ *   - no control record, or the on-disk manifest of the started slot does
+ *     not match the boot record (generation, image_sha512): REFUSE, write
+ *     nothing (the disk changed under us or the record lies);
+ *   - reason CANDIDATE_TRY and control still names that slot as candidate:
+ *     healthy -> PROMOTE (ck_slot_promote with the manifest's generation and
+ *     policy_generation); not healthy -> WAIT (nothing written; tries keep
+ *     counting down in the loader);
+ *   - reason CANDIDATE_EXHAUSTED or CANDIDATE_INVALID, control has a
+ *     candidate and its active slot is the started slot -> ABANDON
+ *     (ck_slot_abandon_candidate: candidate cleared, FAILED flag set; the
+ *     active slot stays). This is slot_select.c rule 3's "abandoned by the
+ *     kernel later". Not gated on health: the loader already decided.
+ *   - anything else -> NONE.
+ * *out holds the record to commit for PROMOTE and ABANDON. */
+enum ck_slot_action {
+    CK_SLOT_A_NONE = 0,
+    CK_SLOT_A_PROMOTE,
+    CK_SLOT_A_ABANDON,
+    CK_SLOT_A_WAIT,
+    CK_SLOT_A_REFUSE,
+};
+enum ck_slot_action ck_slot_kernel_action(const struct ck_slot_boot_record *b, const struct ck_slot_control *ctl,
+                                          const struct ck_slot_manifest *booted, int healthy,
+                                          struct ck_slot_control *out, const char **why);
+const char *ck_slot_action_text(enum ck_slot_action a);
 
 /* Text for a reason code (static string). */
 const char *ck_slot_reason_text(enum ck_slot_reason r);

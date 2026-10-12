@@ -27,6 +27,14 @@
  *      FlushBlocks, read it back, and only then boot the candidate. That is
  *      what bounds attempts when a candidate hangs or never promotes. If the
  *      commit fails the candidate is treated as invalid and selection reruns.
+ *   4b. (cut 2b) Hand the kernel one boot record (slot_format.h struct
+ *      ck_slot_boot_record: slot, reason, tries, control sequence, the
+ *      manifest's generation and digest) in one page of OS-loader memory type
+ *      CK_SLOT_BOOT_MEMTYPE. The page survives ExitBootServices and appears in
+ *      the memory map the unchanged stub hands over; the service kernel
+ *      (svc/slot_service.c) promotes or abandons from it. No page: the kernel
+ *      writes nothing. The control record is committed through
+ *      ck_slot_control_commit (slot_control.c), the routine the kernel uses.
  *   5. One decision line, then LoadImage(SourceBuffer = the verified bytes,
  *      DevicePath = this loader's own LoadedImageDevicePath, so the chained
  *      stub's LoadedImage->DeviceHandle is still the boot volume and its
@@ -35,13 +43,13 @@
  *   the firmware, which goes on to its next boot option.
  *
  * Never: UEFI variables, runtime services, ExitBootServices (the chained
- * stub leaves boot services itself), any write other than the control
+ * stub leaves boot services itself), any disk write other than the control
  * region, any write when the control record is missing or corrupt.
  * Freestanding C with the kernel's flags; no kernel objects are linked. */
 #include <stdarg.h>
 #include "efi.h"
 #include "slot_format.h"
-#include "../store/torn_slot.h"
+#include "slot_control.h"
 #include "../kernel/core/fmt.h"
 
 #ifndef AIENOS_COMMIT
@@ -85,7 +93,7 @@ static uint8_t hdr[4096];
 static uint8_t ents[GPT_ENT_MAX + 4096] __attribute__((aligned(4096)));
 static uint8_t bounce[CK_SLOT_UNIT] __attribute__((aligned(4096)));
 static struct ck_slot_manifest man[CK_SLOT_COUNT] __attribute__((aligned(4096)));
-static struct ck_slot_control ctl_rec, ctl_back;
+static struct ck_slot_control ctl_rec;
 
 /* ---- console -------------------------------------------------------------- */
 struct line {
@@ -335,6 +343,43 @@ static const char *unusable_why(const struct ck_slot_eval *e, const struct ck_sl
     return "not selectable";
 }
 
+/* ---- boot record for the kernel (P11 cut 2b, slot_format.h) ------------------ */
+/* One page of the OS-loader memory type CK_SLOT_BOOT_MEMTYPE: it survives
+ * ExitBootServices and shows up in the final memory map the unchanged stub
+ * copies into the handoff. If the allocation fails the image still boots;
+ * its kernel then finds no record and writes nothing (no promotion, no
+ * abandon): fail closed, the tries counter still bounds a candidate. */
+static void hand_over(unsigned b, const struct ck_slot_decision *d, const struct ck_slot_control *ctl,
+                      uint64_t seq, const struct ck_slot_manifest *m)
+{
+    uint64_t pa = 0;
+    struct ck_slot_boot_record *br;
+    const char *c = AIENOS_COMMIT;
+    EFI_STATUS s = bs->AllocatePages(AllocateAnyPages, CK_SLOT_BOOT_MEMTYPE, 1, &pa);
+    if (s != EFI_SUCCESS || !pa) {
+        say("slot_loader: boot record NOT handed over (AllocatePages status=0x%llx): the kernel will write nothing\n",
+            (unsigned long long)s);
+        return;
+    }
+    br = (struct ck_slot_boot_record *)(uintptr_t)pa;
+    memset(br, 0, PAGE);
+    memcpy(br->magic, CK_SLOT_BOOT_MAGIC, 8);
+    br->version = CK_SLOT_BOOT_VERSION;
+    br->boot_slot = (uint8_t)b;
+    br->reason = (uint8_t)d->reason;
+    br->tries = d->loader_write ? d->ctl_out.tries_remaining : (ctl ? ctl->tries_remaining : 0);
+    br->control_present = ctl ? 1 : 0;
+    br->control_seq = ctl ? seq : 0;
+    br->generation = m->generation;
+    br->policy_generation = m->policy_generation;
+    memcpy(br->image_sha512, m->image_sha512, 64);
+    for (unsigned i = 0; i < sizeof br->loader_commit && c[i]; i++)
+        br->loader_commit[i] = (uint8_t)c[i];
+    ck_slot_boot_seal(br);
+    say("slot_loader: boot record handed over type=0x%x slot=%c reason=%s seq=%llu\n", CK_SLOT_BOOT_MEMTYPE, 'A' + b,
+        ck_slot_reason_text(d->reason), (unsigned long long)br->control_seq);
+}
+
 EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 {
     static const EFI_GUID lidp_guid = LOADED_IMAGE_DEVICE_PATH_GUID_INIT;
@@ -428,12 +473,10 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 
     ck_slot_select(ctl, ev, &d);
     if (d.loader_write) {
-        int crc = ts_commit(&r, (const uint8_t *)&d.ctl_out);
         uint64_t bseq = 0;
+        int crc = ck_slot_control_commit(&r, &d.ctl_out, &bseq);
         if (crc == TS_OK)
-            crc = ts_recover(&r, (uint8_t *)&ctl_back, &bseq, 0);
-        if (crc == TS_OK && memcmp(&ctl_back, &d.ctl_out, sizeof ctl_back) != 0)
-            crc = TS_CORRUPT;
+            seq = bseq;
         if (crc != TS_OK) {
             unsigned c = (unsigned)d.boot_slot;
             say("slot_loader: control commit failed (rc=%d): the candidate is not booted\n", crc);
@@ -461,6 +504,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     if (img[b ^ 1u])
         bs->FreePages((uint64_t)(uintptr_t)img[b ^ 1u], pages[b ^ 1u]);
 
+    hand_over(b, &d, ctl, seq, &man[b]);
     void *dp = 0;
     if (bs->HandleProtocol(image, &lidp_guid, &dp) != EFI_SUCCESS)
         dp = 0;

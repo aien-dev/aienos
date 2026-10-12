@@ -358,3 +358,123 @@ const char *ck_slot_reason_text(enum ck_slot_reason r)
     }
     return "unknown";
 }
+
+/* ---- boot record (P11 cut 2b) ---------------------------------------------- */
+void ck_slot_boot_seal(struct ck_slot_boot_record *b)
+{
+    sha256_hash((const uint8_t *)b, CK_SLOT_BOOT_SIGNED, b->digest);
+}
+
+int ck_slot_boot_check(const struct ck_slot_boot_record *b, const char **why)
+{
+    static const uint8_t magic[8] = CK_SLOT_BOOT_MAGIC;
+    uint8_t d[SHA256_DIGEST_SIZE];
+    const char *w = 0;
+    if (!b)
+        w = "no boot record";
+    else if (!eq_bytes(b->magic, magic, 8))
+        w = "bad boot record magic";
+    else if (b->version != CK_SLOT_BOOT_VERSION)
+        w = "unsupported boot record version";
+    else {
+        sha256_hash((const uint8_t *)b, CK_SLOT_BOOT_SIGNED, d);
+        if (!eq_bytes(d, b->digest, sizeof d))
+            w = "boot record digest mismatch";
+        else if (b->boot_slot >= CK_SLOT_COUNT)
+            w = "boot record slot out of range";
+        else if (b->reason <= CK_SLOT_R_NONE || b->reason >= CK_SLOT_R_RECOVERY_REQUIRED)
+            w = "boot record reason out of range";
+        else if (b->control_present > 1)
+            w = "boot record control flag out of range";
+        else if (b->tries > CK_SLOT_MAX_TRIES)
+            w = "boot record tries above the bound";
+        else if (b->generation == 0 || b->policy_generation > b->generation)
+            w = "boot record generation fields";
+        else if (!all_zero(b->reserved, sizeof b->reserved))
+            w = "boot record reserved bytes nonzero";
+        else if (!b->control_present && (b->reason != CK_SLOT_R_NO_CONTROL || b->control_seq != 0))
+            w = "boot record claims a decision without a control record";
+        else if (b->control_present && b->reason == CK_SLOT_R_NO_CONTROL)
+            w = "boot record claims no control with a control record";
+    }
+    if (why)
+        *why = w;
+    return w ? -1 : 0;
+}
+
+enum ck_slot_action ck_slot_kernel_action(const struct ck_slot_boot_record *b, const struct ck_slot_control *ctl,
+                                          const struct ck_slot_manifest *booted, int healthy,
+                                          struct ck_slot_control *out, const char **why)
+{
+    const char *w = 0;
+    unsigned s;
+    if (ck_slot_boot_check(b, &w) != 0) {
+        if (why)
+            *why = w;
+        return CK_SLOT_A_REFUSE;
+    }
+    s = b->boot_slot;
+    if (!ctl || ck_slot_control_check(ctl, &w) != 0) {
+        if (why)
+            *why = ctl ? w : "no control record on disk";
+        return CK_SLOT_A_REFUSE;
+    }
+    if (!booted || ck_slot_manifest_check(booted, &w) != 0) {
+        if (why)
+            *why = booted ? w : "started slot's manifest unreadable";
+        return CK_SLOT_A_REFUSE;
+    }
+    if (booted->generation != b->generation || booted->policy_generation != b->policy_generation ||
+        !eq_bytes(booted->image_sha512, b->image_sha512, 64)) {
+        if (why)
+            *why = "started slot's manifest on disk differs from the boot record";
+        return CK_SLOT_A_REFUSE;
+    }
+    copy_bytes((uint8_t *)out, (const uint8_t *)ctl, sizeof *out);
+    if (b->reason == CK_SLOT_R_CANDIDATE_TRY) {
+        if (ctl->candidate_slot != s) {
+            if (why)
+                *why = "control no longer names the started slot as candidate";
+            return CK_SLOT_A_NONE;
+        }
+        if (!healthy) {
+            if (why)
+                *why = "health milestone not reached";
+            return CK_SLOT_A_WAIT;
+        }
+        if (ck_slot_promote(out, s, booted->generation, booted->policy_generation, &w) != 0) {
+            if (why)
+                *why = w;
+            return CK_SLOT_A_REFUSE;
+        }
+        if (why)
+            *why = 0;
+        return CK_SLOT_A_PROMOTE;
+    }
+    if ((b->reason == CK_SLOT_R_CANDIDATE_EXHAUSTED || b->reason == CK_SLOT_R_CANDIDATE_INVALID) &&
+        ctl->candidate_slot != CK_SLOT_NONE && ctl->active_slot == s) {
+        if (ck_slot_abandon_candidate(out, &w) != 0) {
+            if (why)
+                *why = w;
+            return CK_SLOT_A_REFUSE;
+        }
+        if (why)
+            *why = 0;
+        return CK_SLOT_A_ABANDON;
+    }
+    if (why)
+        *why = "nothing to write";
+    return CK_SLOT_A_NONE;
+}
+
+const char *ck_slot_action_text(enum ck_slot_action a)
+{
+    switch (a) {
+    case CK_SLOT_A_NONE: return "none";
+    case CK_SLOT_A_PROMOTE: return "promote";
+    case CK_SLOT_A_ABANDON: return "abandon";
+    case CK_SLOT_A_WAIT: return "wait";
+    case CK_SLOT_A_REFUSE: return "refuse";
+    }
+    return "unknown";
+}

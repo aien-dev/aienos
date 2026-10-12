@@ -201,6 +201,12 @@ __attribute__((weak)) void ck_stage_quiesce(void);
  * CK_CONSOLE_SESSION=1): the operator console session. kmain calls it after every
  * other boot step and before the final report; absent in every default image. */
 __attribute__((weak)) int ck_stage_console_session(void);
+/* Optional slot hook (svc/slot_service.c, only in a CK_SERVICE=1 image):
+ * ck_kernel_entry calls it right after ck_handoff_check, while the firmware
+ * identity map is still live, to copy SLOTLDR.EFI's boot record (P11 cut 2b).
+ * It only reads; absent (weak) in every diagnostic image. */
+struct ck_handoff;
+__attribute__((weak)) void ck_slot_boot_capture(const struct ck_handoff *h);
 /* Resident production lifecycle (core/lifecycle.c, only in a CK_SERVICE=1 image):
  * serves bounded operator requests after every boot stage until its stop order,
  * then returns 0 so kmain prints the final report and resets. Absent (weak) in

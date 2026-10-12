@@ -7,6 +7,11 @@
  * view, dev/disk_part.h), or NULL when the devices stage bound no disk or the
  * disk has no valid AIENOS partition. */
 const disk_dev *ck_dev_boot_disk(void);
+/* The AIENOS image slots partition of the same bound NVMe disk (a second
+ * bounds-checked partition view, P11 cut 2b), or NULL; *rc_out (optional) is
+ * 0, the CK_GPT_* refusal, or CK_DEV_NO_BOOT_DISK. */
+#define CK_DEV_NO_BOOT_DISK (-1)
+const disk_dev *ck_dev_slots_disk(int *rc_out);
 /* Revoke the NVMe function's bus mastering once the last disk user (the
  * Store stage) is done, or after a failed bind; prints the dma_gate line.
  * The boot disk is unavailable afterwards. */

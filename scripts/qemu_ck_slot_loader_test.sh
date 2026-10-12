@@ -28,6 +28,14 @@
 #  7 both slots invalid: "recovery_required (A: ...; B: ...)", the loader returns
 #    to the firmware, no kernel runs (QEMU is stopped by the row timeout).
 #  8 B validly signed but below the generation floor: refused, boots A.
+#  P11 cut 2b (the service kernel promotes / abandons; svc/slot_service.c), one NVMe
+#  disk with the Store and slots partitions, "shutdown" sent once the lifecycle is ready:
+#  9 healthy candidate B: the kernel promotes it (active=B, floor 2); next boot
+#    is a steady boot of B, nothing written.
+# 10 candidate that never becomes healthy (Store LOCKED): last try spent, not
+#    promoted; next boot falls back to A and the kernel abandons B (flags 0x01).
+# 11 negative control: the service image started without SLOTLDR finds no boot
+#    record and writes nothing.
 #
 # Output: one PASS/FAIL line per check, then
 #     AIENOS_CK_SLOT_LOADER: PASS|FAIL|NOT_RUN [(...)]
@@ -50,10 +58,18 @@ mk() { make -s -C native/kernel CROSS="${cross}" "$@" >/dev/null; }
 mk OUT="${out}" AIENOS_COMMIT="${commit}" CK_TEST_SLOT_KEY=1 slot-loader slot-tool gpt-image
 mk OUT="${out}/payload-a" AIENOS_COMMIT="slotA-${commit}"
 mk OUT="${out}/payload-b" AIENOS_COMMIT="slotB-${commit}"
+# P11 cut 2b service payloads (rows 9-11): TEST-key service image as A and B, the plain
+# service image (no production keys: stays LOCKED) as L.
+mk OUT="${out}/svc-a" AIENOS_COMMIT="slotA-${commit}" CK_SERVICE=1 CK_SERVICE_TEST_KEYS=1 full
+mk OUT="${out}/svc-b" AIENOS_COMMIT="slotB-${commit}" CK_SERVICE=1 CK_SERVICE_TEST_KEYS=1 full
+mk OUT="${out}/svc-l" AIENOS_COMMIT="slotL-${commit}" CK_SERVICE=1 full
 tool="${out}/host/ck_slot_tool"
 gpt="${out}/host/ck_gpt_image"
 img_a="${out}/payload-a/BOOTAA64.EFI"
 img_b="${out}/payload-b/BOOTAA64.EFI"
+svc_a="${out}/svc-a/full-service-testkeys/BOOTAA64.EFI"
+svc_b="${out}/svc-b/full-service-testkeys/BOOTAA64.EFI"
+svc_l="${out}/svc-l/full-service/BOOTAA64.EFI"
 
 . "${repo_root}/scripts/lib_gate_hold.sh"
 if ! gh_quiet_check || ! gh_lock_take qemu_ck_slot_loader_test "${AIENOS_GATE_MINUTES:-60}"; then
@@ -63,6 +79,7 @@ if ! gh_quiet_check || ! gh_lock_take qemu_ck_slot_loader_test "${AIENOS_GATE_MI
 fi
 work="$(mktemp -d)"
 cleanup() {
+    [[ -z "${qpid:-}" ]] || kill "${qpid}" 2>/dev/null || true
     rm -rf "${work}"
     gh_lock_release
 }
@@ -289,10 +306,142 @@ ran 8 A
 tool_agrees 8 "${work}/c_floor" "${A2}" "${B1}" "boot_slot=A reason=candidate_invalid_active loader_write=0"
 row_end 8
 
+
+# ==== P11 cut 2b: the service kernel promotes / abandons (svc/slot_service.c) =====
+# One NVMe disk (ck_gpt_image layout aienos-slots: AIENOS Store partition + slots
+# partition), the ESP as above. Payloads: the TEST-key service image built twice
+# (slotA- / slotB- commits: Store formats, continuity provisions, lifecycle READY =
+# healthy) and the plain service image as slot L (no production keys in a QEMU
+# build: the Store stays LOCKED = never healthy). The operator line "shutdown" is
+# sent over the PL011 pipe once the lifecycle is ready; the image then resets.
+gline="$("${gpt}" create "${work}/svc.img" 512 64 aienos-slots)"
+first="$(sed -n 's/.*slots_first_lba=\([0-9]*\).*/\1/p' <<<"${gline}")"
+last="$(sed -n 's/.*slots_last_lba=\([0-9]*\).*/\1/p' <<<"${gline}")"
+[[ -n "${first}" && -n "${last}" ]] || { bad "ck_gpt_image aienos-slots gave no slots geometry: ${gline}"; first=0; last=0; }
+disk="${work}/svc.img"
+cp "${disk}" "${work}/blank.img"
+mm SA1 "${svc_a}" 1
+mm SB2 "${svc_b}" 2 2
+mm SL2 "${svc_l}" 2 2
+SA1="${work}/SA1,${svc_a}"
+SB2="${work}/SB2,${svc_b}"
+SL2="${work}/SL2,${svc_l}"
+# c_stage_b with tries 1: the loader's own decision applied twice (select --out).
+slots --a "${SA1}" --b "${SL2}" --control "${work}/c_stage_b"
+cap_s="$(geo_val image_cap)"
+"${tool}" select --control "${work}/c_stage_b" --a "${SA1}" --b "${SL2}" --test-key --cap "${cap_s}" --out "${work}/c_t2" >/dev/null || true
+"${tool}" select --control "${work}/c_t2" --a "${SA1}" --b "${SL2}" --test-key --cap "${cap_s}" --out "${work}/c_t1" >/dev/null || true
+
+qpid=""
+sboot() { # name timeout-seconds [efi]: ESP with SLOTLDR (or efi), NVMe ${disk}; "shutdown" once ready
+    local name="$1" to="$2" efi="${3:-${out}/SLOTLDR.EFI}" w t0 rc dpid
+    w="${work}/s-${name}"
+    mkdir -p "${w}/esp/EFI/BOOT" "${w}/esp/EFI/AIENOS"
+    touch "${w}/esp/EFI/AIENOS/BOOTREPORT.TXT"
+    cp "${efi}" "${w}/esp/EFI/BOOT/BOOTAA64.EFI"
+    cp "${vars_fd}" "${w}/vars.fd"
+    mkfifo "${w}/ser.in" "${w}/ser.out"
+    : >"${w}/serial.raw"
+    t0="$(date +%s)"
+    timeout "${to}" qemu-system-aarch64 \
+        -M virt,virtualization=on,gic-version=3,iommu=smmuv3 -accel tcg,thread=single -cpu max -smp 4 -m 2048 \
+        -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
+        -drive if=pflash,format=raw,file="${w}/vars.fd" \
+        -drive if=none,id=esp,format=raw,file=fat:rw:"${w}/esp" \
+        -device virtio-blk-pci,drive=esp \
+        -drive if=none,id=nvme0,format=raw,file="${disk}" \
+        -device nvme,drive=nvme0,serial=aienos-slot-test \
+        -device ramfb -display none -nic none -monitor none \
+        -chardev pipe,id=ser,path="${w}/ser" -serial chardev:ser -no-reboot 2>"${w}/qemu.err" &
+    qpid=$!
+    cat "${w}/ser.out" >>"${w}/serial.raw" &
+    dpid=$!
+    exec 4>"${w}/ser.in"
+    while kill -0 "${qpid}" 2>/dev/null; do
+        if tr -d '\r' <"${w}/serial.raw" | grep -qE '^lifecycle: ready state=|^report_kind: (panic|fault|final)'; then break; fi
+        sleep 1
+    done
+    if tr -d '\r' <"${w}/serial.raw" | grep -q '^lifecycle: ready state='; then
+        sleep 1
+        printf 'shutdown\r' >&4 || true
+    fi
+    set +e
+    wait "${qpid}"
+    rc=$?
+    set -e
+    qpid=""
+    exec 4>&- 2>/dev/null || true
+    wait "${dpid}" 2>/dev/null || true
+    boots=$((boots + 1))
+    qemu_secs=$((qemu_secs + $(date +%s) - t0))
+    tr -d '\r' <"${w}/serial.raw" >"${w}/serial.log"
+    [[ -z "${AIENOS_LOG_DIR:-}" ]] || cp "${w}/serial.log" "${AIENOS_LOG_DIR}/qemu_ck_slot_loader_${name}.log"
+    echo "boot ${name}: qemu exit ${rc} after $(( $(date +%s) - t0 )) s"
+    last_rc="${rc}"
+    last_log="${w}/serial.log"
+}
+before() { # row label first-text second-text: both present, first earlier
+    local a b
+    a="$({ grep -nF -m1 -- "$3" "${last_log}" || true; } | cut -d: -f1)"
+    b="$({ grep -nF -m1 -- "$4" "${last_log}" || true; } | cut -d: -f1)"
+    if [[ -n "${a}" && -n "${b}" && "${a}" -lt "${b}" ]]; then ok "row $1: $2 (lines ${a} < ${b})"; else bad "row $1: $2 (lines ${a:-none} ${b:-none})"; show=1; fi
+}
+svc_to="${AIENOS_SLOT_SERVICE_TIMEOUT:-420}"
+
+# ---- row 9: candidate B healthy -> promoted by the kernel; next boot steady ------
+slots --a "${SA1}" --b "${SB2}" --control "${work}/c_stage_b"
+sboot r9-try "${svc_to}"
+has 9 "candidate try committed by the loader" "slot_loader: control committed seq=2 tries=2"
+has 9 "boot record handed over" "slot_loader: boot record handed over type=0x80000a1e slot=B reason=candidate_try seq=2"
+has 9 "kernel read the record" "slot: booted slot B reason=candidate_try generation=2 tries=2 control_seq=2"
+has 9 "kernel promoted B after health" "slot: promoted slot B to active generation=2 floor=2 seq=3"
+has 9 "health: lifecycle READY" "lifecycle: ready state=ready store=open"
+before 9 "continuity committed before the promotion" "continuity: PROVISIONED" "slot: promoted slot B"
+ran 9 B
+ctl_is 9 "control on disk: B active, floor raised to its policy generation" "seq=3 control: active=1 candidate=none tries=0 flags=0x00 floor=2 last_good=2"
+sboot r9-steady "${svc_to}"
+has 9 "next boot: B is the active slot" "slot_loader: boot=B reason=active gen=2 tries=0 floor=2"
+lacks 9 "next boot: loader writes nothing" "slot_loader: control committed"
+has 9 "next boot: kernel writes nothing" "slot: nothing to write (nothing to write) active=B"
+ran 9 B
+ctl_is 9 "control unchanged by the steady boot" "seq=3 control: active=1 candidate=none tries=0"
+row_end 9
+
+# ---- row 10: candidate never healthy -> not promoted; exhausted -> abandoned; A stays
+slots --a "${SA1}" --b "${SL2}" --control "${work}/c_t1"
+ctl_is 10 "fixture: candidate B with one try left" "seq=1 control: active=0 candidate=1 tries=1"
+sboot r10-locked "${svc_to}"
+has 10 "last try committed" "slot_loader: control committed seq=2 tries=0"
+has 10 "candidate L booted" "aienos_commit: slotL-${commit}"
+has 10 "Store stays locked (no keys)" "lifecycle: ready state=locked"
+has 10 "kernel waits for health" "slot: candidate B waiting for health (tries left 0): not promoted yet"
+has 10 "stop order says not promoted" "slot: candidate B NOT promoted this boot"
+lacks 10 "no promotion" "slot: promoted"
+ctl_is 10 "control: tries spent, nothing promoted" "seq=2 control: active=0 candidate=1 tries=0 flags=0x00"
+sboot r10-exhausted "${svc_to}"
+has 10 "loader falls back to A" "slot_loader: boot=A reason=candidate_exhausted_active gen=1 tries=0"
+has 10 "kernel read the record" "slot: booted slot A reason=candidate_exhausted_active"
+has 10 "kernel abandoned the candidate" "slot: candidate abandoned (marked failed) active=A stays seq=3"
+ran 10 A
+ctl_is 10 "control: candidate cleared, failed flag, A still active" "seq=3 control: active=0 candidate=none tries=0 flags=0x01"
+region "${work}/c10.region"
+"${tool}" control-recover --region "${work}/c10.region" --out "${work}/c10" >/dev/null || true
+tool_agrees 10 "${work}/c10" "${SA1}" "${SL2}" "boot_slot=A reason=active loader_write=0"
+row_end 10
+
+# ---- row 11: negative control: no boot record (service started without SLOTLDR) ---
+slots --a "${SA1}" --b "${SB2}" --control "${work}/c_stage_b"
+sboot r11-direct "${svc_to}" "${svc_a}"
+has 11 "kernel says it has no record" "slot: no boot record (not started by SLOTLDR.EFI): slot service idle, nothing written"
+has 11 "healthy service" "lifecycle: ready state=ready store=open"
+lacks 11 "no promotion without the loader's record" "slot: promoted"
+ctl_is 11 "control untouched" "seq=1 control: active=0 candidate=1 tries=3"
+row_end 11
+
 gh_lock_release
 echo "slot loader gate: ${boots} boots, ${checks} checks, ${fails} failures, QEMU ${qemu_secs} s (commit ${commit:0:12}; QEMU only, hardware NOT_RUN)"
 if [[ "${fails}" == 0 ]]; then
-    echo "${tag}: PASS (8 rows, ${boots} boots, ${checks} checks; QEMU, not hardware)"
+    echo "${tag}: PASS (11 rows, ${boots} boots, ${checks} checks; QEMU, not hardware)"
 else
     echo "${tag}: FAIL (${fails} of ${checks} checks)"
     exit 1

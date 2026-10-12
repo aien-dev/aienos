@@ -18,6 +18,8 @@
  *                         CK_SLOT_PART_TYPE_TEXT, native/boot/slot_format.h), left
  *                         zero; prints "gpt_image bs=B blocks=N slots_first_lba=F
  *                         slots_last_lba=L" (slot loader gate)
+ *         aienos-slots    AIENOS [1,41) all zero + slots [41,M-1) (MIB >= 48;
+ *                         P11 cut 2b service boot disk); prints both ranges
  *       CORRUPTION: bad-primary-crc bad-backup-crc bad-primary-entries
  *         bad-backup-entries no-pmbr
  *       Prints one line: "gpt_image bs=B blocks=N aienos_first_lba=F
@@ -125,6 +127,19 @@ static int cmd_create(int argc, char **argv)
         if (gw_write(argv[2], bs, blocks, &sp, 1, flags)) return 1;
         printf("gpt_image bs=%u blocks=%llu slots_first_lba=%llu slots_last_lba=%llu\n", bs,
                (unsigned long long)blocks, (unsigned long long)sp.first, (unsigned long long)sp.last);
+        return 0;
+    }
+    if (!strcmp(lay, "aienos-slots")) {
+        /* P11 cut 2b: the service boot disk with its image slots (one NVMe disk). */
+        static const uint8_t slots_type[16] = CK_SLOT_PART_TYPE_BYTES;
+        gw_part sp[2] = {{ck_aienos_part_type, 1 * per, 41 * per - 1u, "AIENOS", 0},
+                         {slots_type, 41 * per, (mib - 1u) * per - 1u, "AIENOS-SLOTS", 0}};
+        if (argc != 6 || mib < 48) return usage();
+        if (gw_write(argv[2], bs, blocks, sp, 2, flags)) return 1;
+        printf("gpt_image bs=%u blocks=%llu aienos_first_lba=%llu aienos_last_lba=%llu slots_first_lba=%llu "
+               "slots_last_lba=%llu\n",
+               bs, (unsigned long long)blocks, (unsigned long long)sp[0].first, (unsigned long long)sp[0].last,
+               (unsigned long long)sp[1].first, (unsigned long long)sp[1].last);
         return 0;
     }
     for (int i = 6; i < argc; i++) {

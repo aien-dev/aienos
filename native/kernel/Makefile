@@ -702,6 +702,9 @@ STAGE_DMA_FLAGS += -I$(KDIR)/core
 STAGE_SRCS += $(KDIR)/svc/continuity_codec.c $(KDIR)/svc/continuity_resolve.c \
 	$(KDIR)/svc/continuity_resolve_sealed.c $(KDIR)/svc/continuity_commit.c \
 	$(KDIR)/svc/continuity_subject.c $(KDIR)/svc/continuity_subject_provision.c $(KDIR)/svc/continuity_service.c
+# P11 cut 2b: kernel-side slot promotion / abandon (svc/slot_service.c) over the shared
+# slot decision rules and control-commit routine of SLOTLDR.EFI (native/boot).
+STAGE_SRCS += $(KDIR)/svc/slot_service.c $(BOOT)/slot_select.c $(BOOT)/slot_control.c
 endif
 ifeq ($(strip $(CK_TEST_DISK_XLATE_BYPASS)),1)
 FULL_NAME := $(FULL_NAME)-test-xlate-bypass
@@ -1582,9 +1585,9 @@ gsp-rpc-test: $(GSP_RPC_TOOL)
 # freestanding flags and needs only the image's own digest/signature primitives.
 # No image code changes in this cut; the loader does not read slots yet.
 SLOT_TOOL := $(OUT)/host/ck_slot_tool
-SLOT_TOOL_SRCS := $(KDIR)/tools/ck_slot_tool.c $(BOOT)/slot_select.c $(NATIVE)/sig/sha512.c \
+SLOT_TOOL_SRCS := $(KDIR)/tools/ck_slot_tool.c $(BOOT)/slot_select.c $(BOOT)/slot_control.c $(NATIVE)/sig/sha512.c \
 	$(NATIVE)/sig/ed25519.c $(NATIVE)/sig/ct.c $(NATIVE)/argus/sha256.c $(NATIVE)/store/torn_slot.c
-$(SLOT_TOOL): $(SLOT_TOOL_SRCS) $(BOOT)/slot_format.h
+$(SLOT_TOOL): $(SLOT_TOOL_SRCS) $(BOOT)/slot_format.h $(BOOT)/slot_control.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -o $@ $(SLOT_TOOL_SRCS)
 slot-tool: $(SLOT_TOOL)
@@ -1624,13 +1627,13 @@ SLOTLDR_DIR := $(OUT)/slotldr
 SLOTLDR_ELF := $(SLOTLDR_DIR)/slotldr.elf
 SLOTLDR_EFI := $(OUT)/SLOTLDR.EFI
 SLOTLDR_KEYS_C := $(SLOTLDR_DIR)/slot_keys.c
-SLOTLDR_C := $(BOOT)/slot_loader.c $(BOOT)/slot_select.c $(NATIVE)/sig/sha512.c $(NATIVE)/sig/ed25519.c \
+SLOTLDR_C := $(BOOT)/slot_loader.c $(BOOT)/slot_select.c $(BOOT)/slot_control.c $(NATIVE)/sig/sha512.c $(NATIVE)/sig/ed25519.c \
 	$(NATIVE)/sig/ct.c $(NATIVE)/argus/sha256.c $(NATIVE)/store/torn_slot.c $(KDIR)/core/libc_min.c \
 	$(KDIR)/core/fmt.c
 SLOTLDR_OBJS := $(patsubst $(NATIVE)/%.c,$(SLOTLDR_DIR)/obj/%.o,$(SLOTLDR_C)) \
 	$(SLOTLDR_DIR)/obj/boot/efi_entry.o $(SLOTLDR_DIR)/obj/slot_keys.o
 SLOTLDR_CFLAGS := $(KCFLAGS) $(ART_INC) -I$(NATIVE)/store
-SLOTLDR_HDRS := $(BOOT)/slot_format.h $(BOOT)/efi.h $(NATIVE)/store/torn_slot.h $(KDIR)/core/fmt.h $(ART_HDRS)
+SLOTLDR_HDRS := $(BOOT)/slot_format.h $(BOOT)/slot_control.h $(BOOT)/efi.h $(NATIVE)/store/torn_slot.h $(KDIR)/core/fmt.h $(ART_HDRS)
 SLOTLDR_KEY_SRC := $(if $(strip $(CK_TEST_SLOT_KEY)),--test-key,$(if $(strip $(CK_SLOT_KEYS)),--keys $(abspath $(CK_SLOT_KEYS)),))
 $(SLOTLDR_DIR)/obj/%.o: $(NATIVE)/%.c $(SLOTLDR_HDRS)
 	@mkdir -p $(dir $@)

@@ -1,7 +1,8 @@
-# Native image slots: install, update and recovery without Linux (P11 cuts 1 and 2a)
+# Native image slots: install, update and recovery without Linux (P11 cuts 1, 2a and 2b)
 
-STATUS: cut 1 (format, rules, host tool) and cut 2a (SLOTLDR.EFI, a separate
-slot loader in front of the unchanged image, QEMU gate PASS) done; the owner
+STATUS: cut 1 (format, rules, host tool), cut 2a (SLOTLDR.EFI, a separate
+slot loader in front of the unchanged image, QEMU gate PASS) and cut 2b
+(kernel-side promote / abandon, section 8) done; the owner
 approved the loader on 2026-10-12 (section 2). Nothing here has run on
 hardware (hardware NOT_RUN). The kernel image and its stub are unchanged.
 SECURITY_IMPACT: PERSISTENT_FORMAT + RECOVERY (a new on-disk format and a new
@@ -215,7 +216,7 @@ nothing and to re-release anything.
    recovery media built by our tools, for the dual-invalid case. Then N7 is
    run on the physical candidate inside an attended window.
 
-   **Cut 2b (next): kernel-side promote.** After its health milestone the
+   **Cut 2b (done, QEMU; section 8): kernel-side promote.** After its health milestone the
    kernel writes the control record over its own NVMe path (promote the
    candidate, or mark it failed), so a good update becomes the active slot
    instead of only being tried three times.
@@ -280,3 +281,77 @@ Host tool additions for the gate: `ck_slot_tool slots-image` (writes the
 control record and both slots into a slots partition of a disk image),
 `ck_slot_tool keys-c`, `ck_slot_tool sign-test --test2` (a second,
 untrusted TEST key), and `ck_gpt_image` layout `slots`.
+
+## 8. Kernel promotion and abandon (cut 2b)
+
+Cut 2a left two things to the kernel: making a good candidate the active slot,
+and marking a candidate that ran out of tries as failed. Both are now done by
+the service kernel (`CK_SERVICE=1`), in `native/kernel/svc/slot_service.c`,
+with the loader's own rules and commit routine. There is no second
+implementation of the record format.
+
+**How the kernel learns which slot it is.** The control record alone cannot
+tell: "candidate on its last try" and "candidate out of tries, active booted"
+both read `tries=0`. Before `StartImage`, SLOTLDR.EFI therefore allocates
+one page of the OS-loader memory type `0x80000A1E` and writes a 256-byte boot
+record into it (`struct ck_slot_boot_record`, `slot_format.h`): booted slot,
+the loader's reason, tries, the control sequence it read or committed, the
+started manifest's generation, policy generation and image SHA-512, the
+loader commit, and a SHA-256 over the first 224 bytes. The page survives
+`ExitBootServices` and is listed in the memory map the unchanged stub already
+copies into the handoff, so neither the stub nor the handoff format changes.
+The kernel copies it in `ck_kernel_entry` right after `ck_handoff_check`,
+while the firmware identity map is still live (the kernel never maps that
+memory type afterwards, and its frame allocator only hands out conventional
+memory, so the page is never reused). The digest catches a torn or stray
+page; it is not a signature, because the record comes from inside the same
+firmware + loader trust boundary as the handoff itself.
+
+**What the kernel does** (`ck_slot_kernel_action`, `slot_select.c`, pure and
+self-tested):
+
+| Boot record and disk | Action | Write |
+|---|---|---|
+| no record (image not started by SLOTLDR), record fails its checks, no slots partition, no control record, the started slot's manifest on disk differs from the record, or the control sequence moved since the loader read it | refuse, say why | none |
+| reason `candidate_try`, control still names the slot, health reached | **promote**: active = this slot, candidate cleared, floor raised to the image's policy generation (never lowered) | one control commit |
+| reason `candidate_try`, health not reached | wait; at the stop order the kernel says the candidate was not promoted | none (the loader keeps counting tries down) |
+| reason `candidate_exhausted` or `candidate_invalid`, a candidate is set and the booted slot is the active one | **abandon**: candidate cleared, `CANDIDATE_FAILED` flag set, active slot unchanged | one control commit |
+| anything else (steady boot of the active slot) | nothing | none |
+
+Health is the service's own milestone, nothing new: the Store is open,
+continuity committed this boot (PROVISIONED or RESUMED, the self-test
+record the lifecycle already writes) and the lifecycle is READY. It is
+checked when the lifecycle starts and again after a successful `unlock`.
+Abandon is not gated on health: the loader already decided.
+
+**The write.** One control record commit through the torn-slot protocol
+(`ck_slot_control_commit`, `native/boot/slot_control.c`, shared with the
+loader and `ck_slot_tool`): body, flush, commit header, flush, then read back
+and compare. It goes over the kernel's own NVMe path, through a second
+bounded partition view of the slots partition (`ck_dev_slots_disk`, found
+with the same strict GPT validation as the AIENOS partition, primary and
+backup), never a whole-disk handle. A failed commit leaves the previous record
+authoritative and is reported.
+
+**Gate.** Rows 9-11 of `scripts/qemu_ck_slot_loader_test.sh` (GATES.md
+rows 195-197) boot SLOTLDR.EFI and the service image from one NVMe disk
+(`ck_gpt_image` layout `aienos-slots`: the Store partition and the slots
+partition):
+
+- row 9: a healthy candidate B is promoted by the kernel (control
+  `active=1 floor=2`), and the next boot is a steady boot of B with no write;
+- row 10: a candidate that never becomes healthy (the plain service image,
+  whose Store stays locked) spends its last try without promotion; the next
+  boot falls back to A and the kernel abandons B (`flags=0x01`), A stays
+  active and the host tool agrees the next decision is a steady boot of A;
+- row 11 (negative control): the service image started directly, without
+  SLOTLDR, finds no boot record and writes nothing although it is healthy.
+
+Both slots invalid stays row 7: `recovery_required`, no image started, the
+control record untouched. `make -C native/kernel slot-test` adds the boot
+record mutations (each refused with its reason), the kernel-action scenarios
+and the shared commit routine.
+
+Not here: the updater that writes a new candidate into the inactive slot
+(cut 3) and the recovery image for the dual-invalid case (cut 4). Hardware
+NOT_RUN.
