@@ -184,8 +184,10 @@ nothing and to re-release anything.
    10 control mutations, 16 selection scenarios including the bounded tries
    and the floor, the transitions, and torn-slot commit/recover with a
    simulated torn write) and the freestanding proof (`slot-free`). The
-   signing path is offline: `ck_slot_tool tbs` emits the 448 signed bytes,
-   the owner signs them on the air-gapped machine with OpenSSL
+   signing path is offline: `ck_slot_tool tbs M --pubkey HEX64 --out F`
+   emits the 448 signed bytes (the owner public key is required because
+   `signer_id`, its SHA-256, lies inside the signed bytes; aienos#324), the
+   owner signs them on the air-gapped machine with OpenSSL
    (`pkeyutl -sign -rawin`), `attach-sig` verifies and attaches. No private
    key ever touches the Spark. The TEST signer exists for tests only.
    **Cut 1b (merged with this note's follow-up): the package.**
