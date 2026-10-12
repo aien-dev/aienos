@@ -258,6 +258,8 @@ endif
 # ingests a GGUF from QEMU fw_cfg and calls the Rust unit. C flags stay
 # -mgeneral-regs-only. QEMU gate only; not combinable with CK_RUST_LIBS (two
 # Rust staticlibs would duplicate compiler_builtins) nor hardware staging.
+# The same image then runs the bounded session API (native v1 P06:
+# open/prompt/step/cancel/close in crates/aienos-infer-kernel/src/session.rs).
 CK_INFER_LIB ?=
 ifneq ($(strip $(CK_INFER_LIB)),)
 ifneq ($(strip $(CK_HARDWARE_STAGING)),)

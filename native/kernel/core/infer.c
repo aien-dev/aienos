@@ -53,6 +53,32 @@ struct infer_result {
 };
 extern int32_t aienos_infer_run(const uint8_t *model, uint64_t len, struct infer_result *out);
 
+/* Bounded resident session (crates/aienos-infer-kernel/src/session.rs,
+ * native v1 P06): load once, accept a prompt, one step per call so the
+ * kernel can cancel between steps, decode, unload. Mirrors of SessionLimits
+ * and SessionInfo (#[repr(C)]). */
+struct infer_limits {
+    uint32_t kv_capacity, max_new, max_prompt_bytes, heap_reserve;
+};
+struct infer_info {
+    uint32_t tensors, vocab, layers, heap_used_kib;
+};
+extern int32_t aienos_infer_session_open(const uint8_t *model, uint64_t len, const struct infer_limits *l,
+                                         struct infer_info *info);
+extern int32_t aienos_infer_session_prompt(const uint8_t *text, uint32_t len);
+extern int32_t aienos_infer_session_step(uint32_t *token, uint64_t *us);
+extern int32_t aienos_infer_session_cancel(void);
+extern int32_t aienos_infer_session_tokens(uint32_t *out, uint32_t cap);
+extern int32_t aienos_infer_session_text(const uint32_t *ids, uint32_t n, uint8_t *out, uint32_t cap);
+extern int32_t aienos_infer_session_close(void);
+extern void aienos_infer_heap_stats(uint64_t *used, uint64_t *peak);
+#define SESS_E_STATE (-12)
+#define SESS_E_PROMPT_BYTES (-16)
+#define SESS_STEP_DONE 0
+#define SESS_STEP_PREFILL 1
+#define SESS_STEP_TOKEN 2
+#define SESS_STEP_LAST 3
+
 #define CPACR_FPEN_SHIFT 20
 #define PAGE 4096ull
 #define HEAP_BYTES (256ull << 20)    /* bump-allocator region for the Rust unit */
@@ -204,6 +230,126 @@ static void hex(char *out, const uint8_t *b, unsigned n)
         out[2 * i + 1] = d[b[i] & 15];
     }
     out[2 * n] = 0;
+}
+
+/* Session limits of the probe: a 64-position cache, 16 generated tokens, a
+ * 256-byte prompt and 64 KiB of heap kept free (every prompt costs a few
+ * KiB that the bump allocator never gives back). */
+#define SESS_KV 64u
+#define SESS_MAX_NEW 16u
+#define SESS_PROMPT_BYTES 256u
+#define SESS_RESERVE (64u << 10)
+
+/* One request: prompt, then steps until done or until `cancel_after` steps,
+ * then cancel. Prints one line per request. Returns 1 when the request
+ * behaved (count of produced tokens as expected, no error), 0 otherwise.
+ * `expect`/`nexpect`: the exact token list a complete reply must equal. */
+static int session_request(unsigned which, const char *text, unsigned cancel_after, const uint32_t *expect,
+                           unsigned nexpect)
+{
+    uint64_t t0 = ck_time_us(), used = 0, peak = 0, pre_us = 0, tok_us_sum = 0;
+    unsigned steps = 0, prefill = 0, produced = 0, last = 0;
+    int32_t ids = aienos_infer_session_prompt((const uint8_t *)text, (uint32_t)strlen(text));
+    if (ids < 0) {
+        ck_printf("infer: session prompt=%u REFUSED rc=%d\n", which, ids);
+        return 0;
+    }
+    int32_t rc = 0;
+    for (;;) {
+        if (cancel_after && steps == cancel_after) break;
+        uint32_t t = 0;
+        uint64_t us = 0;
+        rc = aienos_infer_session_step(&t, &us);
+        if (rc < 0 || rc == SESS_STEP_DONE) break;
+        steps++;
+        if (rc == SESS_STEP_PREFILL) { prefill++; pre_us += us; continue; }
+        produced++;
+        tok_us_sum += us;
+        if (rc == SESS_STEP_LAST) { last = 1; break; }
+    }
+    static uint32_t toks[SESS_MAX_NEW];
+    static uint8_t text_out[INFER_TEXT_BYTES];
+    int32_t n = aienos_infer_session_tokens(toks, SESS_MAX_NEW);
+    int ok = rc >= 0 && n == (int32_t)produced;
+    if (cancel_after) {
+        int32_t c = aienos_infer_session_cancel();
+        ok = ok && c == (int32_t)produced && steps == cancel_after;
+        /* After a cancel the next step must do nothing. */
+        ok = ok && aienos_infer_session_step(0, 0) == SESS_STEP_DONE;
+        aienos_infer_heap_stats(&used, &peak);
+        ck_printf("infer: session prompt=%u ids=%d cancel_after_steps=%u steps=%u prefill=%u produced=%u idle_step=%s heap_used_kib=%llu rc=%d\n",
+                  which, ids, cancel_after, steps, prefill, produced, "done", (unsigned long long)(used / 1024), rc);
+        return ok;
+    }
+    ok = ok && last && (unsigned)ids == prefill && produced == nexpect;
+    for (unsigned i = 0; ok && i < nexpect; i++) ok = ok && toks[i] == expect[i];
+    int32_t tl = aienos_infer_session_text(toks, (uint32_t)produced, text_out, INFER_TEXT_BYTES);
+    ok = ok && tl >= 0;
+    escape(esc, text_out, tl > 0 ? (uint32_t)tl : 0);
+    aienos_infer_heap_stats(&used, &peak);
+    ck_printf("infer: session prompt=%u ids=%d steps=%u prefill=%u produced=%u last=%s prefill_us=%llu mean_tok_us=%llu tokens=",
+              which, ids, steps, prefill, produced, last ? "yes" : "no", (unsigned long long)pre_us,
+              (unsigned long long)(produced > 1 ? tok_us_sum / (produced - 1) : 0));
+    for (unsigned i = 0; i < produced; i++) ck_printf("%s%u", i ? " " : "", toks[i]);
+    ck_printf(" text=%s heap_used_kib=%llu request_us=%llu rc=%d\n", esc, (unsigned long long)(used / 1024),
+              (unsigned long long)(ck_time_us() - t0), rc);
+    return ok;
+}
+
+/* The bounded session over the ingested model: open with explicit limits,
+ * a request cancelled during its prefill, the golden prompt run to its end
+ * through the step API (must equal the one-shot probe's reply), a second
+ * cancelled request after a completed one, the cheap refusals, close, and
+ * the heap region returned. Prints AIENOS_CK_INFER_SESSION: PASS|FAIL. */
+static void session_run(uint64_t mpa, uint64_t msize)
+{
+    uint64_t hpa = 0, frames_before = ck_mm_free_frames();
+    if (ck_mm_frames_alloc(HEAP_BYTES / PAGE, &hpa)) {
+        ck_printf("infer: session FAIL (no frames for the heap)\nAIENOS_CK_INFER_SESSION: FAIL\n");
+        return;
+    }
+    aienos_infer_heap_init((uintptr_t)hpa, HEAP_BYTES);
+    uint64_t daif = ck_rd(daif);
+    __asm__ volatile("msr daifset, #0xf" ::: "memory");
+
+    struct infer_limits lim = { SESS_KV, SESS_MAX_NEW, SESS_PROMPT_BYTES, SESS_RESERVE };
+    struct infer_info info = { 0, 0, 0, 0 };
+    uint64_t t0 = ck_time_us();
+    int32_t rc = aienos_infer_session_open((const uint8_t *)(uintptr_t)mpa, msize, &lim, &info);
+    ck_printf("infer: session open rc=%d tensors=%u vocab=%u layers=%u kv_capacity=%u max_new=%u max_prompt_bytes=%u heap_reserve_kib=%u heap_used_kib=%u open_us=%llu\n",
+              rc, info.tensors, info.vocab, info.layers, lim.kv_capacity, lim.max_new, lim.max_prompt_bytes,
+              lim.heap_reserve >> 10, info.heap_used_kib, (unsigned long long)(ck_time_us() - t0));
+    int ok = rc == 0;
+    if (ok) {
+        /* Cheap refusals: a second open, an over-long prompt, a step with no
+         * request pending. None of them touches the model. */
+        static char longp[SESS_PROMPT_BYTES + 2];
+        memset(longp, 'a', sizeof longp - 1);
+        longp[sizeof longp - 1] = 0;
+        int32_t r_open = aienos_infer_session_open((const uint8_t *)(uintptr_t)mpa, msize, &lim, &info);
+        int32_t r_bytes = aienos_infer_session_prompt((const uint8_t *)longp, (uint32_t)strlen(longp));
+        int32_t r_idle = aienos_infer_session_step(0, 0);
+        ck_printf("infer: session refusals open_twice=%d prompt_bytes=%d step_idle=%d\n", r_open, r_bytes, r_idle);
+        ok = ok && r_open == SESS_E_STATE && r_bytes == SESS_E_PROMPT_BYTES && r_idle == SESS_STEP_DONE;
+
+        ok = session_request(1, "Say hello.", 3, 0, 0) && ok;
+        ok = session_request(2, "What is the capital of France?", 0, expect_gen,
+                             sizeof expect_gen / sizeof expect_gen[0]) && ok;
+        ok = session_request(3, "Say hello.", 1, 0, 0) && ok;
+    }
+    uint64_t used = 0, peak = 0;
+    aienos_infer_heap_stats(&used, &peak);
+    int32_t crc = aienos_infer_session_close();
+    ok = ok && crc == 0 && aienos_infer_session_close() == SESS_E_STATE;
+    ck_wr(daif, daif);
+    aienos_infer_heap_init(0, 0);
+    int f = ck_mm_frames_free(hpa, HEAP_BYTES / PAGE);
+    uint64_t frames_after = ck_mm_free_frames();
+    ok = ok && f == 0 && frames_after == frames_before;
+    ck_printf("infer: session close rc=%d heap_used_kib=%llu heap_peak_kib=%llu frames_free_before=%llu frames_free_after=%llu rc=%d\n",
+              crc, (unsigned long long)(used / 1024), (unsigned long long)(peak / 1024),
+              (unsigned long long)frames_before, (unsigned long long)frames_after, f);
+    ck_printf("AIENOS_CK_INFER_SESSION: %s\n", ok ? "PASS" : "FAIL");
 }
 
 void ck_infer_run(void)
@@ -360,20 +506,28 @@ void ck_infer_run(void)
     for (uint32_t i = 0; ok && i < ntok; i++)
         ok = ok && res.tokens[i] == expect_gen[i];
 
-    /* Unload: the Rust unit kept nothing (its objects died at return); forget
-     * its heap region, then return every frame of the heap (and of the model
-     * when it came over fw_cfg; the disk model stays in LoaderData, never a
-     * frame). The free-frame count must come back to what it was before. */
+    /* Unload the one-shot unit: it kept nothing (its objects died at return);
+     * forget its heap region and return the heap frames. The model stays for
+     * the session below. */
     aienos_infer_heap_init(0, 0);
-    int f1 = mpages ? ck_mm_frames_free(mpa, mpages) : 0, f2 = ck_mm_frames_free(hpa, HEAP_BYTES / PAGE);
+    int f2 = ck_mm_frames_free(hpa, HEAP_BYTES / PAGE);
+    ck_printf("AIENOS_CK_INFER: %s\n", ok ? "PASS" : "FAIL");
+
+    /* Bounded session on the same model bytes, its own fresh heap region. */
+    session_run(mpa, msize);
+
+    /* Return the model's frames when it came over fw_cfg (the disk model stays
+     * in LoaderData, never a frame). The free-frame count must come back to
+     * what it was before the ingest. */
+    int f1 = mpages ? ck_mm_frames_free(mpa, mpages) : 0;
     uint64_t frames_after = ck_mm_free_frames();
     struct ck_mm_usage mu;
     ck_mm_usage(&mu);
     ck_printf("infer: unloaded heap_live_kib=%llu frames_free_before=%llu frames_free_after=%llu frames_returned=%llu rc=%d,%d\n",
               (unsigned long long)((mu.heap_bytes - mu.heap_free) / 1024), (unsigned long long)frames_before,
               (unsigned long long)frames_after, (unsigned long long)(mpages + HEAP_BYTES / PAGE), f1, f2);
-    ok = ok && f1 == 0 && f2 == 0 && frames_after == frames_before;
-    ck_printf("AIENOS_CK_INFER: %s\n", ok ? "PASS" : "FAIL");
+    if (!(f1 == 0 && f2 == 0 && frames_after == frames_before))
+        ck_puts("infer: frames NOT returned\nAIENOS_CK_INFER: FAIL\n");
 }
 #else
 void ck_infer_run(void) {}

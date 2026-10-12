@@ -27,6 +27,10 @@
 
 extern crate alloc;
 
+/// Bounded resident session (open / prompt / step / cancel / close); see
+/// `session.rs`. The one-shot probe below stays as the golden regression.
+pub mod session;
+
 use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
@@ -156,6 +160,33 @@ unsafe impl GlobalAlloc for Bump {
             core::ptr::copy_nonoverlapping(p, n, l.size().min(new_size));
         }
         n
+    }
+}
+
+/// Bytes of the region still unallocated (0 when no region is set).
+pub(crate) fn heap_remaining() -> usize {
+    // SAFETY: single core, interrupts masked (see the allocator contract).
+    unsafe { (*HEAP.end.get()).saturating_sub(*HEAP.next.get()) }
+}
+
+/// Bytes allocated so far (cursor minus base; 0 when no region is set).
+pub(crate) fn heap_used() -> usize {
+    // SAFETY: as above.
+    unsafe { (*HEAP.next.get()).saturating_sub(*HEAP.base.get()) }
+}
+
+/// Reports the allocator's used and peak bytes, for the kernel's evidence
+/// lines (a session's creep across prompts is visible here).
+///
+/// # Safety
+/// `used` and `peak` must be valid or null.
+#[no_mangle]
+pub unsafe extern "C" fn aienos_infer_heap_stats(used: *mut u64, peak: *mut u64) {
+    if !used.is_null() {
+        *used = heap_used() as u64;
+    }
+    if !peak.is_null() {
+        *peak = *HEAP.peak.get() as u64;
     }
 }
 
