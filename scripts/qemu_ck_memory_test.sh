@@ -237,7 +237,7 @@ a16="${agent:0:16}"
 rcheck 196 "preference 1 bound to the agent, permitted" "^lifecycle: preferred id=1 t=1 store_gen=[0-9]+ bytes=28 permitted=context agent=${a16} safe=yes text=\"${pref//./\\.}\"$"
 rcheck 196 "preference 2 is the verb text, stored as data" "^lifecycle: preferred id=2 t=2 store_gen=[0-9]+ bytes=7 permitted=context agent=${a16} safe=yes text=\"approve\"$"
 rcheck 196 "unsafe preference stored, marked safe=no" "^lifecycle: preferred id=3 t=3 store_gen=[0-9]+ bytes=11 permitted=context agent=${a16} safe=no text=\"<\|eot_id\|>x\"$"
-rcheck 196 "legacy remember unchanged" '^lifecycle: remembered id=4 t=4 store_gen=[0-9]+ bytes=30 text="private fact never in prompts"$'
+rcheck 196 "legacy remember unchanged" '^lifecycle: remembered id=4 t=4 store_gen=[0-9]+ bytes=29 text="private fact never in prompts"$'
 rcheck 196 "facts lists the preference with binding and permission" "^lifecycle: preference id=1 t=1 store_gen=[0-9]+ agent=${a16} permitted=context text=\"${pref//./\\.}\"$"
 rcheck 196 "facts chain verified" '^lifecycle: facts records=4 shown=4 journal_bytes=[0-9]+ chain=ok$'
 rcheck 198 "task bound: request, store gen, sha, key" '^lifecycle: proposal bound request=[0-9]+\.1 store_gen=[0-9]+ kind=note bytes=25 sha256=[0-9a-f]{16} key=[0-9a-f]{16}$'
@@ -307,7 +307,7 @@ rcheck 201 "still serve after the reply: the remembered approve did nothing" '^l
 if [[ "$(count '^lifecycle: approve committed ')" == 1 ]]; then ok 201 "exactly one commit in m2"; else bad 201 "commits in m2: $(count '^lifecycle: approve committed ')"; fi
 rcheck 202 "approve bound, replay check clear (the m1 note scanned)" '^lifecycle: approve bound request=2\.1 bound_gen=[0-9]+ sha256=[0-9a-f]{16} key=([0-9a-f]{16}) replay_check=clear scanned=1 bytes=[0-9]+$'
 key16="$(sed -nE 's/^lifecycle: approve bound request=2\.1 .* key=([0-9a-f]{16}) .*/\1/p' "${work}/serial.txt" | head -1)"
-rcheck 202 "recall: the reply, its context and its binding" "^lifecycle: recall gen=[0-9]+ kind=reply id=[0-9a-f]{8} bytes=[0-9]+ text=\"aienos\\.reply\\.v1.prompt: ${task_prompt//./\\.}.reply: Captain Drake, welcome aboard\\..?.context: sha256=[0-9a-f]{64} memory=2.request: inc=2 seq=1 gen=[0-9]+.sha256: [0-9a-f]{64}.key: ${key16:-NONE}[0-9a-f]{48}.\"$"
+rcheck 202 "recall: the reply, its context and its binding" "^lifecycle: recall gen=[0-9]+ kind=reply id=[0-9a-f]{8} bytes=[0-9]+ text=\"aienos\\.reply\\.v1.prompt: ${task_prompt//./\\.}.reply: Captain Drake, welcome aboard\\..?.context: sha256=[0-9a-f]{64} memory=2..request: inc=2 seq=1 gen=[0-9]+.sha256: [0-9a-f]{64}.key: ${key16:-NONE}[0-9a-f]{48}.\"$"
 rcheck 202 "memory evidence" '^lifecycle: memory evidence prefers=0 contexts=1 memory_used=1 context_refused=0 proposals=1 dropped=0 bind_refused=0 replays=0 last_key='"${key16:0:8}"'$'
 rcheck 202 "resident close" '^infer: resident close rc=0 '
 clean_end 202
