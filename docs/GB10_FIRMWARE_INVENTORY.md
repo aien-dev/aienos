@@ -35,6 +35,12 @@ the driver on the box; fetched read-only into a scratch directory, not vendored)
   container exactly as the driver does, refuses every malformed shape it was
   given in its self-test (22 mutations plus every truncation), and proves the
   file on this box matches the pinned digest. It never loads anything.
+- Two more hosted tools, same rule (nothing is ever sent to the chip):
+  `ck_gsp_cot_encode` builds and checks the exact message the driver sends to
+  SEC2 (section 10), and `ck_gsp_bindata_extract` reads the eight GB10B
+  firmware arrays out of the public driver source with our own inflater and
+  hash code, cross-checks every size, record and digest, and writes them as
+  files (section 11). `make -C native/kernel test` runs all three self-tests.
 - The largest remaining unknowns for a native bring-up (section 8) are the
   SEC2 command protocol details beyond what the driver source shows, the
   exact GspFwWprMeta/boot-argument layout expected by this GSP-FMC build, and
@@ -93,15 +99,35 @@ The driver embeds these as C byte arrays ("bindata") with an MIT licence header
 `kgspGetBinArchiveGspRmFmcGfwProdSigned_GB10B` [g_kernel_gsp_nvoc.c:924-926]
 (debug-fused parts use the `...DebugSigned_GB10B` archive, [889-891]).
 
-| Archive label | Original file name (NVIDIA internal) | Bytes |
-|---|---|---|
-| GspRmBoot_GB10B UCODE_IMAGE_PROD | kernel/inc/gspcc/bin/g_gsp_gb10b_dyn_prd_image.bin | 196,608 |
-| GspRmBoot_GB10B UCODE_DESC_PROD | kernel/inc/gspcc/bin/g_gsp_gb10b_dyn_prd_desc.bin | 84 (RM_RISCV_UCODE_DESC) |
-| GspRmBoot_GB10B UCODE_IMAGE_DBG / DESC_DBG | ..._dbg_image.bin / ..._dbg_desc.bin | 196,608 / 84 |
-| GspRmFmcGfwProdSigned_GB10B UCODE_IMAGE | kernel/inc/gspcc/bin/g_gsp_gb10b_dyn_prd_gfw_image.bin | 195,912 |
-| GspRmFmcGfwProdSigned_GB10B UCODE_HASH | g_gsp_gb10b_dyn_prd_gfw_hash.bin | 48 (SHA-384) |
-| GspRmFmcGfwProdSigned_GB10B UCODE_SIG | g_gsp_gb10b_dyn_prd_gfw_sig.bin | 384 |
-| GspRmFmcGfwProdSigned_GB10B UCODE_PKEY | g_gsp_gb10b_dyn_prd_gfw_pub_key.bin | 384 |
+| Archive label | Original file name (NVIDIA internal) | Bytes | Stored as | sha256 of the bytes [OBSERVED] |
+|---|---|---|---|---|
+| GspRmBoot_GB10B UCODE_IMAGE_PROD | kernel/inc/gspcc/bin/g_gsp_gb10b_dyn_prd_image.bin | 196,608 | raw | 427a691d8453f02548d395f40ac900eb0d5b8ea864e8f14f958eef890ba400a2 |
+| GspRmBoot_GB10B UCODE_DESC_PROD | kernel/inc/gspcc/bin/g_gsp_gb10b_dyn_prd_desc.bin | 84 (RM_RISCV_UCODE_DESC) | deflate, 28 bytes | 8371a29f1c68da89b73bdc87af477c37f0b4e05939c58379d0e3d29efc5575b5 |
+| GspRmBoot_GB10B UCODE_IMAGE_DBG | kernel/inc/gspcc/bin/g_gsp_gb10b_dyn_dbg_image.bin | 196,608 | raw | 709b88a88fc7ae9bd56b010bcc0a8269d4d40b3c0454aa5b366e8d562d83a404 |
+| GspRmBoot_GB10B UCODE_DESC_DBG | kernel/inc/gspcc/bin/g_gsp_gb10b_dyn_dbg_desc.bin | 84 | deflate, 28 bytes | 8371a29f... (byte-identical to DESC_PROD) |
+| GspRmFmcGfwProdSigned_GB10B UCODE_IMAGE | kernel/inc/gspcc/bin/g_gsp_gb10b_dyn_prd_gfw_image.bin | 195,912 | raw | b13ead4b9a6b8a0d268f3094cc4f4521d6be8a9a525edbc9a8f3f397c86f1f2e |
+| GspRmFmcGfwProdSigned_GB10B UCODE_HASH | g_gsp_gb10b_dyn_prd_gfw_hash.bin | 48 (SHA-384) | raw | f0389f3a9ce3bb6093e80bfc924bbe2a4ece0199b080a37f64bc1fef63f7500c |
+| GspRmFmcGfwProdSigned_GB10B UCODE_SIG | g_gsp_gb10b_dyn_prd_gfw_sig.bin | 384 | raw | 9db429257a18e7c5c1a3df185001c671e21bec4e94c719a574d2ce72e2e07272 |
+| GspRmFmcGfwProdSigned_GB10B UCODE_PKEY | g_gsp_gb10b_dyn_prd_gfw_pub_key.bin | 384 | raw | e9bbc669c27ad8827b5bbc2b2f52fdb47718659a651088869a5f3b11d2df7816 |
+
+Digests measured 2026-10-12 by `ck_gsp_bindata_extract` over the two files
+fetched from the 580.173.02 tag (raw.githubusercontent.com, path
+`src/nvidia/generated/<file>`); the 580.173.02 Makefile pin
+(`make -C native/kernel gsp-bindata-test`) checks the two image digests and
+the decoded descriptor on every run. `UCODE_HASH` equals SHA-384 of
+`UCODE_IMAGE` [OBSERVED, checked by the tool].
+
+Array storage format [SOURCE]: each array is a `BINDATA_STORAGE_PVT` record
+(uncompressed size, compressed size, data pointer, bCompressed,
+bFileOverride, bReferencedDuringLoad) and an archive table
+(`BINDATA_ARCHIVE` with `entryNum` and label/storage pairs) [bin_data_pvt.h,
+bin_data.h]. A compressed array is a gzip member without the 10-byte gzip
+header: raw DEFLATE, then CRC-32 and ISIZE, little endian. The driver inflates
+it with its own zlib-style decoder (`utilGzAllocate`/`utilGzGetData`,
+bin_data.c:36-45,96); the nouveau extractor prepends exactly that header
+before `gzip.decompress` [nouveau/extract-firmware-nouveau.py:107-108].
+The 28-byte descriptor is 20 bytes of fixed-Huffman DEFLATE plus the two
+trailers [OBSERVED]; our decoder verifies both.
 
 Source files: `src/nvidia/generated/g_bindata_kgspGetBinArchiveGspRmBoot_GB10B.c`
 (2,466,261 bytes of C) and
@@ -111,9 +137,27 @@ file. The README says the `nouveau/` script "is used to extract some of the
 firmware binary images (and related data) encoded in the source code and store
 them as distinct files. These files are used by the Nouveau device driver"
 [README.md:170-173]; that script knows gh100, gb100 and gb202 FMC images, not
-gb10b [nouveau/extract-firmware-nouveau.py:655-662,775-781]. Extracting the
-GB10B arrays would be our own small step over the same public source.
-[INFERRED (high)]
+gb10b [nouveau/extract-firmware-nouveau.py:655-662,775-781]. DONE
+2026-10-12: `ck_gsp_bindata_extract` (section 11) is that step, written
+against the generated-file grammar and the storage records, not against the
+nouveau script.
+
+Descriptor decode [SOURCE rmRiscvUcode.h:36-87, 21 u32 fields; OBSERVED
+values]: version 5; bootloader/riscvElf/swbrom offsets and sizes 0;
+manifest at 0x0 size 0xa00; monitorData at 0xa00 size 0xa600; monitorCode at
+0xb000 size 0x24d00 (ends at 0x2fd00, inside the 196,608-byte image);
+bIsMonitorEnabled 1; appVersion 0; fbReservedSize 0; bSignedAsCode 0. The
+driver shifts these offsets by `RISCV_BR_ADDR_ALIGNMENT` = 8 bits when it
+programs them [kernel_gsp_gh100.c:47, kernel_gsp_ga102.c:44], so the tool
+refuses any region that is not 256-byte aligned.
+
+Which archive the driver picks for GB10B [SOURCE]: the HAL dispatch for
+`kgspGetGspRmBootUcodeStorage` lands on the GB100 variant
+[kernel_gsp_gb100.c:115-149], which outside confidential computing calls the
+GA102 variant [kernel_gsp_ga102.c:101-120]: the `GspRmBoot` archive's
+`UCODE_IMAGE_PROD` and `UCODE_DESC_PROD` (the DBG pair only on a debug-fused
+part). The `GspRmFmcGfwProdSigned` quartet goes into the SEC2 chain-of-trust
+payload (section 10).
 
 ### 3.4 Pieces that are NOT on the host side at all
 
@@ -247,9 +291,9 @@ code into AIENOS would require carrying the MIT notice (none was copied here).
 
 - Cut C "inventory" is done by this document; "parsers and refusal tests for
   firmware metadata" by `ck_gsp_fw_inspect`. The next host-only steps that do
-  not need the machine: (a) a small extractor over the two public
-  `g_bindata_*_GB10B.c` files that writes the eight arrays as files with
-  digests (our own tool, no Python); (b) DONE 2026-10-12: the encoder, decoder
+  not need the machine: (a) DONE 2026-10-12: `ck_gsp_bindata_extract`
+  (section 11) writes the eight arrays as files with digests, own DEFLATE and
+  SHA-384, `make -C native/kernel gsp-bindata-test`; (b) DONE 2026-10-12: the encoder, decoder
   and refusal tests for `NVDM_PAYLOAD_COT`, the MCTP/NVDM headers, the EMEM
   packet and `GSP_FMC_BOOT_PARAMS` are `ck_gsp_cot_encode` (section 10);
   (c) remaining: an encoder for `GspFwWprMeta` (256 bytes, layout known, the
@@ -282,11 +326,19 @@ code into AIENOS would require carrying the MIT notice (none was copied here).
    mapping, channel, submit) but which RPCs are mandatory is not established.
 5. [UNKNOWN] Whether the confidential-computing (`_cc_`) sections or the SPDM
    session are ever required on this platform. Assumed not [INFERRED (high)].
-6. [UNKNOWN] The exact meaning of the `GspRmBoot_GB10B` image versus the
-   `GspRmFmcGfwProdSigned_GB10B` image (both ~196 KiB): the SEC2 path sends the
-   FMC archive, the boot-binary preparation copies the GspRmBoot image and its
-   RM_RISCV_UCODE_DESC; which one the GSP's boot ROM consumes on GB10B, and how
-   the descriptor offsets are used, was not traced end to end.
+6. [RESOLVED on the host side 2026-10-12, SOURCE; consumer side INFERRED
+   (medium)] `GspRmFmcGfwProdSigned_GB10B` (image, hash, signature, public
+   key) is what SEC2 receives in the chain-of-trust payload (section 10).
+   `GspRmBoot_GB10B` (image plus RM_RISCV_UCODE_DESC) is what
+   `kgspPopulateWprMeta_GH100` describes to the FMC as the "GSP-FMC ucode"
+   bootloader: `sizeOfBootloader`, `sysmemAddrOfBootloader`,
+   `bootloaderCodeOffset`/`DataOffset`/`ManifestOffset` come from that image
+   and the descriptor's monitorCode/monitorData/manifest offsets
+   [kernel_gsp_gh100.c:295-335]; the direct boot-ROM path programs the same
+   three regions into `NV_PGSP_FALCON_BCR_DMAADDR_*` [kernel_gsp_gh100.c:
+   `_kgspBootstrapGspFmc_GH100`], which GB10B does not take (section 11).
+   Who reads the WprMeta bootloader fields on the SEC2 path (FMC or ACR) runs
+   inside NVIDIA code and is not readable.
 7. [UNKNOWN] Reset and re-open behavior on GB10B after a failed FMC boot
    (`kgspResetHw_GB100` waits for "reset access"); needed for the
    resource-incarnation protection (#285) before any repeated attempt.
@@ -305,7 +357,13 @@ fsp_mctp_format.h, fsp_emem_channels.h, kernel_sec2.c (`ksec2SendMessage`,
 `ksec2PollForCanSend`), g_kernel_sec2_nvoc.c/.h (version, sizes, SEID),
 gspifpub.h, gsp_init_args.h, gsp_fw_wpr_meta.h, kernel_gsp_gh100.c
 (`kgspSetupGspFmcArgs`), and published/blackwell/gb10b dev_sec_pri.h,
-dev_gsp.h, dev_falcon_v4.h. Not read: the GSP RPC layer, the libos
+dev_gsp.h, dev_falcon_v4.h; for sections 3.3 and 11 also rmRiscvUcode.h,
+bin_data.c, bin_data.h, bin_data_pvt.h, kernel_gsp_ga102.c,
+nouveau/extract-firmware-nouveau.py (lines 82-114 only), kernel_gsp_gh100.c
+(`kgspBootstrap_GH100`, `_kgspLockdownReleasedOrFmcError`,
+`kgspPopulateWprMeta_GH100`, `_kgspBootstrapGspFmc_GH100`), g_kern_fsp_nvoc.c
+(the `PDB_PROP_KFSP_IS_MISSING` chip list), and the full bindata record
+tables of both GB10B files. Not read: the GSP RPC layer, the libos
 init-argument block, ACR or GSP internals (not available). No Context7 or web manual covers this layer; the
 DGX Spark user guide is silent on GSP firmware loading (DOCS SILENT on native
 GSP bring-up).
@@ -391,3 +449,68 @@ Evidence 2026-10-12 on the box: `CK_GSP_COT_ENCODE_SELFTEST: PASS` (80 checks:
 both layouts against the compiler, golden header words, encode/decode round
 trips, 46 field mutations and every header truncation refused by name), same
 under ASan/UBSan.
+
+## 11. Extracted arrays and the GB10B boot decision [SOURCE]
+
+Tool: `native/kernel/tools/ck_gsp_bindata_extract.c` (hosted C, no
+dependencies beyond our own `native/argus/sha256.c`; SHA-384, CRC-32 and the
+raw-DEFLATE decoder, stored/fixed/dynamic blocks, are in the tool).
+`make -C native/kernel gsp-bindata-extract` builds it;
+`make -C native/kernel gsp-bindata-test` runs the self-test and, when the two
+driver files are present under `GSP_BINDATA_DIR` (default
+`~/.cache/aienos/open-gpu-kernel-modules-580.173.02`), the pin check; it is
+part of `make test`. Without the files the pin line reads `NOT_RUN`, never
+PASS.
+
+What it checks before it writes a byte: the generated-file grammar
+(`FUNCTION`, `FILE NAME`, `FILE TYPE BINARY`, `COMPRESSION`, `COMPLEX_STRUCT
+NO`, `DATA SIZE`, `COMPRESSED SIZE`), the array identifier
+`kgspBinArchive<stem>_BINDATA_LABEL_<label>_data`, the storage record
+(both sizes, the data pointer, `bCompressed`), the archive table (`entryNum`,
+order, labels), duplicate labels, more than 16 arrays or 8 MiB per array;
+for compressed arrays the DEFLATE stream, the CRC-32 and the ISIZE trailer;
+then the meaning: `UCODE_DESC_*` is 84 bytes, version 5, monitor enabled,
+with manifest/monitor regions inside the matching `UCODE_IMAGE_*` and
+256-byte aligned; `UCODE_HASH` is 48 bytes and equals SHA-384 of
+`UCODE_IMAGE`; `UCODE_SIG` and `UCODE_PKEY` are 384 bytes; any other label is
+refused. Any failure prints `REFUSED: <reason>` and exits 2.
+
+Usage: `ck_gsp_bindata_extract extract FILE [--out DIR]` prints one
+`array <function> <label> file=... stored=N compressed=yes|no size=N
+sha256=...` line per array, the decoded descriptors, `hash384 ... equals
+sha384(UCODE_IMAGE)` and `RESULT OK arrays=N`; `selftest` prints
+`CK_GSP_BINDATA_EXTRACT_SELFTEST: PASS|FAIL (N checks, M failures)`.
+
+Evidence 2026-10-12 on the box: `CK_GSP_BINDATA_EXTRACT_SELFTEST: PASS (124
+checks, 0 failures)`, same under ASan/UBSan; both GB10B files extract with
+`RESULT OK arrays=4` and the digests in section 3.3;
+`CK_GSP_BINDATA_PIN: PASS`; a foreign C file is refused ("no arrays found").
+
+The boot decision the driver makes for GB10B, as the native kernel would have
+to mirror it [SOURCE kernel_gsp_gh100.c:833-995 `kgspBootstrap_GH100`,
+reached for GB10B through the dispatch else-branch, g_kernel_gsp_nvoc.c:719]:
+
+1. If a KernelFsp object exists and `PDB_PROP_KFSP_DISABLE_GSPFMC` is not
+   set: "boot GSP via FSP" (`kfspSendBootCommands`). GB10B is not in the
+   FSP-present chip list ("GH100 | GB100 | GB102 | GB110 | GB112 | GB202 |
+   GB203 | GB205 | GB206 | GB207"), so `PDB_PROP_KFSP_IS_MISSING` is true
+   [g_kern_fsp_nvoc.c:227-236]: not this branch.
+2. Else if a KernelSec2 object has `PDB_PROP_KSEC2_BOOT_GSPFMC`: "boot GSP
+   via SEC2" (`ksec2SendBootCommands`, section 10). True for "GB10B | GB20B |
+   GB20C" [g_kernel_sec2_nvoc.c:446-450]: **this is the GB10B path.**
+3. Else the direct path `_kgspBootstrapGspFmc_GH100`: program
+   `NV_PGSP_FALCON_BCR_DMAADDR_FMCCODE/FMCDATA/PKCPARAM` from the GspRmBoot
+   image and the descriptor's monitorCode/monitorData/manifest offsets, then
+   `NV_PGSP_FALCON_CPUCTL_STARTCPU`. Not taken on GB10B.
+
+After the SEC2 send, in order: `ksec2WaitForGspTargetMaskReleased`
+(conditional on `PDB_PROP_KSEC2_GSP_MODE_GSPRM`, kernel_sec2_gb10b.c:368 and
+:224/:250/:469); `gpuTimeoutCondWait(_kgspLockdownReleasedOrFmcError)`
+(kernel_gsp_gh100.c:492 onward: `NV_PFALCON_FALCON_MAILBOX0` carries ACR/FMC
+error codes, treated as fatal; the boot-argument address may still sit in the
+mailboxes until the FMC clears them); then any non-zero MAILBOX0 is "GSP-FMC
+reported an error"; `kflcnIsRiscvActive`; then "Waiting for GSP fw RM to be
+ready" (the RPC init handshake, section 8 item 4). Each of these is a
+measurable checkpoint for the attended window, with its own timeout and its
+own refusal line. Nothing in this section has been run on the chip.
+

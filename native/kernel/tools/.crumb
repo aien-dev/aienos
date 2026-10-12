@@ -7,14 +7,14 @@
     "generated": {
       "children": [],
       "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "compiled_at": "2026-10-12T11:57:55Z",
+      "compiled_at": "2026-10-12T12:21:27Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:544d6b8c2ccf34b032a365b1ce1af2b6cef275e015751f9a08718a9b5b9e9d4f",
+      "digest": "sha256:62f6ec248db3b6415da5d71b60b24fcb0cb8f4c8ec8478b36874e291c4f1ba24",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "files": 14,
-      "generated_at_commit": "20847ab80738c427be90ca3a1ba0c6b69ee0a90c",
-      "source_tree": "sha256:9dfee8bc08b527940f95dfc286ca69933a45d817697046de0b05b0805bea4e86"
+      "files": 15,
+      "generated_at_commit": "e09825afddde294659ca4a06354990e7ff530b62",
+      "source_tree": "sha256:34d0d607f3d5f92784e0433c1755ddc6feeafb2beb0892402a20482dd6a356f8"
     },
     "owner_lane": "",
     "provenance": {
@@ -82,6 +82,6 @@
   },
   "layer": "native/kernel/tools",
   "name": "native/kernel/tools",
-  "purpose": "Directory native/kernel/tools. Purpose not yet described by a human.",
+  "purpose": "Hosted (Linux-built) checkers for the native kernel, run by `make -C native/kernel test`; nothing here runs on the chip or sends anything to a device. ck_gsp_fw_inspect: GSP-RM firmware container parser + pin check. ck_gsp_cot_encode: byte-exact SEC2 chain-of-trust message encoder/decoder (docs/GB10_FIRMWARE_INVENTORY.md section 10). ck_gsp_bindata_extract: extracts and verifies the eight GB10B firmware arrays compiled into the pinned driver source, own DEFLATE/CRC-32/SHA-384 (section 11). Each tool has a selftest that refuses malformed input by name; NOT_RUN is never PASS.",
   "schema_version": "1.0.0"
 }
