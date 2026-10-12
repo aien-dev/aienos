@@ -352,6 +352,121 @@ static void session_run(uint64_t mpa, uint64_t msize)
     ck_printf("AIENOS_CK_INFER_SESSION: %s\n", ok ? "PASS" : "FAIL");
 }
 
+#ifdef CK_INFER_RESIDENT
+/* Resident mode (native v1 P06, CK_SERVICE images built with CK_INFER_LIB):
+ * the ingested model and one bounded session stay open from boot to the
+ * lifecycle stop order. */
+static struct {
+    int open;
+    uint64_t mpa, msize, mpages, hpa, frames_before;
+} g_res;
+
+int ck_infer_resident(void) { return g_res.open; }
+
+static void resident_open(uint64_t mpa, uint64_t msize, uint64_t mpages, uint64_t hpa, uint64_t frames_before)
+{
+    uint64_t v = ck_rd(cpacr_el1);
+    v |= 3ull << CPACR_FPEN_SHIFT;
+    ck_wr(cpacr_el1, v);
+    ck_isb();
+    aienos_infer_heap_init((uintptr_t)hpa, HEAP_BYTES);
+    struct infer_limits lim = { SESS_KV, SESS_MAX_NEW, SESS_PROMPT_BYTES, SESS_RESERVE };
+    struct infer_info info = { 0, 0, 0, 0 };
+    uint64_t t0 = ck_time_us(), daif = ck_rd(daif);
+    __asm__ volatile("msr daifset, #0xf" ::: "memory");
+    int32_t rc = aienos_infer_session_open((const uint8_t *)(uintptr_t)mpa, msize, &lim, &info);
+    ck_wr(daif, daif);
+    ck_printf("infer: resident open rc=%d tensors=%u vocab=%u layers=%u kv_capacity=%u max_new=%u max_prompt_bytes=%u heap_reserve_kib=%u heap_used_kib=%u open_us=%llu\n",
+              rc, info.tensors, info.vocab, info.layers, lim.kv_capacity, lim.max_new, lim.max_prompt_bytes,
+              lim.heap_reserve >> 10, info.heap_used_kib, (unsigned long long)(ck_time_us() - t0));
+    if (rc != 0) {
+        aienos_infer_heap_init(0, 0);
+        ck_mm_frames_free(hpa, HEAP_BYTES / PAGE);
+        if (mpages) ck_mm_frames_free(mpa, mpages);
+        ck_puts("infer: resident FAIL (session did not open; frames returned)\n");
+        return;
+    }
+    g_res.open = 1;
+    g_res.mpa = mpa;
+    g_res.msize = msize;
+    g_res.mpages = mpages;
+    g_res.hpa = hpa;
+    g_res.frames_before = frames_before;
+}
+
+int ck_infer_prompt(const char *text, size_t len, int (*cancel_poll)(void), struct ck_infer_reply *r)
+{
+    if (!g_res.open) return SESS_E_STATE;
+    memset(r, 0, sizeof *r);
+    uint64_t t0 = ck_time_us(), daif = ck_rd(daif);
+    __asm__ volatile("msr daifset, #0xf" ::: "memory");
+    int32_t ids = aienos_infer_session_prompt((const uint8_t *)text, (uint32_t)len);
+    ck_wr(daif, daif);
+    if (ids < 0) return ids;
+    r->prompt_ids = (uint32_t)ids;
+    int32_t rc = 0;
+    for (;;) {
+        uint32_t t = 0;
+        uint64_t us = 0;
+        __asm__ volatile("msr daifset, #0xf" ::: "memory");
+        rc = aienos_infer_session_step(&t, &us);
+        ck_wr(daif, daif);
+        if (rc < 0 || rc == SESS_STEP_DONE) break;
+        r->steps++;
+        if (rc != SESS_STEP_PREFILL) r->produced++;
+        if (rc == SESS_STEP_LAST) break;
+        if (cancel_poll && cancel_poll()) {
+            __asm__ volatile("msr daifset, #0xf" ::: "memory");
+            aienos_infer_session_cancel();
+            ck_wr(daif, daif);
+            r->cancelled = 1;
+            break;
+        }
+    }
+    r->rc = rc;
+    r->us = ck_time_us() - t0;
+    if (rc < 0) return rc;
+    if (!r->cancelled) {
+        __asm__ volatile("msr daifset, #0xf" ::: "memory");
+        int32_t n = aienos_infer_session_tokens(r->ids, CK_INFER_REPLY_IDS);
+        int32_t tl = aienos_infer_session_text(r->ids, n > 0 && n <= CK_INFER_REPLY_IDS ? (uint32_t)n : 0, r->text,
+                                              CK_INFER_REPLY_TEXT);
+        ck_wr(daif, daif);
+        if (n < 0) return n;
+        if (tl < 0) return tl;
+        r->produced = (uint32_t)n;
+        r->text_len = (uint32_t)tl;
+        /* A completed request is consumed: the session is idle for the next prompt. */
+        __asm__ volatile("msr daifset, #0xf" ::: "memory");
+        aienos_infer_session_cancel();
+        ck_wr(daif, daif);
+    }
+    return 0;
+}
+
+void ck_infer_resident_close(void)
+{
+    if (!g_res.open) return;
+    uint64_t daif = ck_rd(daif), used = 0, peak = 0;
+    __asm__ volatile("msr daifset, #0xf" ::: "memory");
+    aienos_infer_heap_stats(&used, &peak);
+    int32_t crc = aienos_infer_session_close();
+    ck_wr(daif, daif);
+    aienos_infer_heap_init(0, 0);
+    int f2 = ck_mm_frames_free(g_res.hpa, HEAP_BYTES / PAGE);
+    int f1 = g_res.mpages ? ck_mm_frames_free(g_res.mpa, g_res.mpages) : 0;
+    uint64_t frames_after = ck_mm_free_frames();
+    struct ck_mm_usage mu;
+    ck_mm_usage(&mu);
+    g_res.open = 0;
+    ck_printf("infer: resident close rc=%d heap_used_kib=%llu heap_peak_kib=%llu\n", crc, (unsigned long long)(used / 1024),
+              (unsigned long long)(peak / 1024));
+    ck_printf("infer: unloaded heap_live_kib=%llu frames_free_before=%llu frames_free_after=%llu frames_returned=%llu rc=%d,%d\n",
+              (unsigned long long)((mu.heap_bytes - mu.heap_free) / 1024), (unsigned long long)g_res.frames_before,
+              (unsigned long long)frames_after, (unsigned long long)(g_res.mpages + HEAP_BYTES / PAGE), f1, f2);
+}
+#endif /* CK_INFER_RESIDENT */
+
 void ck_infer_run(void)
 {
     const char *why = 0;
@@ -460,6 +575,14 @@ void ck_infer_run(void)
         return;
     }
 
+#ifdef CK_INFER_RESIDENT
+    /* Service image: the model stays resident for the lifecycle's prompt verb
+     * (core/lifecycle.c); the one-shot probe and session_run below are the
+     * QEMU probe image's regression, not the service's job. */
+    resident_open(mpa, msize, mpages, hpa, frames_before);
+    return;
+#endif
+
     /* FP/SIMD on, every exception masked for the Rust unit (see core/fpu.c).
      * The FP registers are left dirty afterwards (nothing else in the kernel
      * reads them; EL0 traps on FP). */
@@ -531,4 +654,16 @@ void ck_infer_run(void)
 }
 #else
 void ck_infer_run(void) {}
+#endif
+
+#ifndef CK_INFER_RESIDENT
+/* No resident session: the diagnostic image, the QEMU probe image and a
+ * service image built without CK_INFER_LIB (every hardware image today). */
+int ck_infer_resident(void) { return 0; }
+int ck_infer_prompt(const char *text, size_t len, int (*cancel_poll)(void), struct ck_infer_reply *r)
+{
+    (void)text; (void)len; (void)cancel_poll; (void)r;
+    return -12; /* no session in this image */
+}
+void ck_infer_resident_close(void) {}
 #endif

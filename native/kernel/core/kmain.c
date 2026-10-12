@@ -229,8 +229,14 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     /* One FP/SIMD-enabled Rust unit (core/fpu.c), probe build only. */
     ck_fpu_run();
 
-    /* Ingest the GGUF over fw_cfg and call the Rust inference unit (core/infer.c), probe build only. */
+    /* Ingest the GGUF over fw_cfg and call the Rust inference unit (core/infer.c), probe build only.
+     * A CK_INFER_RESIDENT service image opens the session after the store
+     * stage instead (below), so the session's frame accounting (free frames
+     * at open == free frames at close) brackets only its own allocations and
+     * not the NVMe queues the store stage binds for the service lifetime. */
+#ifndef CK_INFER_RESIDENT
     ck_infer_run();
+#endif
 
     /* M3 isolation checks (core/m3.c), before any stage registers an IRQ. */
     ck_m3_run();
@@ -243,6 +249,11 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
      * stage: its default candidate source is the boot disk Store, read by that
      * stage before the NVMe DMA revoke. No stage registers an IRQ. */
     ck_artifact_run();
+#ifdef CK_INFER_RESIDENT
+    /* Resident inference session for the lifecycle (core/infer.c): model
+     * ingest and session open after the store stage, before the lifecycle. */
+    ck_infer_run();
+#endif
     struct ck_mm_usage mu;
     ck_mm_usage(&mu);
     ck_printf("mm_usage: stack_bytes=%llu stack_used=%llu heap_bytes=%llu heap_free=%llu heap_min_free=%llu\n",

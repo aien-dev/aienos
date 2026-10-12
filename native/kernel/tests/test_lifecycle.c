@@ -28,6 +28,10 @@ int main(void)
     CHECK(dec("unlock deadbeef  ", &a, &al) == CK_LC_V_UNLOCK && al == 8 && memcmp(a, "deadbeef", 8) == 0);
     CHECK(CK_LC_LINE_MAX >= 7 + 64); /* "unlock " + a 64-hex recovery secret fits in one line */
     CHECK(dec("frobnicate", &a, &al) == CK_LC_V_UNKNOWN);
+    CHECK(dec("prompt hi", &a, &al) == CK_LC_V_PROMPT && al == 2 && memcmp(a, "hi", 2) == 0);
+    CHECK(dec("prompt", &a, &al) == CK_LC_V_INVALID);       /* prompt needs text */
+    CHECK(dec("recall", &a, &al) == CK_LC_V_RECALL && al == 0);
+    CHECK(dec("recall x", &a, &al) == CK_LC_V_INVALID);     /* no argument allowed */
     CHECK(dec("sta\x01tus", &a, &al) == CK_LC_V_INVALID);  /* unprintable */
     {
         char big[CK_LC_LINE_MAX + 2];
@@ -84,5 +88,62 @@ int main(void)
     ck_lc_commit_done(&lc, 0); /* ignored outside SERVE */
     CHECK(lc.approved == 1);
     CHECK(lc.requests == 14);
+
+    /* P06: prompt and recall. Locked: both refused, nothing counted. */
+    ck_lc_init(&lc);
+    ck_lc_start(&lc, 0);
+    CHECK(req(&lc, "prompt hi") == CK_LC_R_REFUSED && lc.prompts == 0 && strstr(lc.reason, "locked"));
+    CHECK(req(&lc, "recall") == CK_LC_R_REFUSED && lc.recalls == 0 && lc.refused == 2);
+    /* ready: prompt asks the kernel to generate (state stays READY, the
+     * prompt is the task text); the reply becomes the pending proposal */
+    ck_lc_init(&lc);
+    ck_lc_start(&lc, 1);
+    CHECK(req(&lc, "prompt What is the capital of France?") == CK_LC_R_GENERATE && lc.state == CK_LC_READY && lc.prompts == 1);
+    CHECK(strcmp(lc.task, "What is the capital of France?") == 0 && lc.task_len == 30 && lc.pending == CK_LC_PENDING_NONE);
+    ck_lc_generate_done(&lc, CK_LC_GEN_REPLY, "Paris.", 6);
+    CHECK(lc.state == CK_LC_SERVE && lc.pending == CK_LC_PENDING_REPLY && lc.replies == 1);
+    CHECK(lc.reply_len == 6 && strcmp(lc.reply, "Paris.") == 0 && strcmp(lc.task, "What is the capital of France?") == 0);
+    CHECK(req(&lc, "prompt again") == CK_LC_R_REFUSED && lc.state == CK_LC_SERVE && lc.prompts == 1); /* one proposal at a time */
+    CHECK(req(&lc, "task note") == CK_LC_R_REFUSED && lc.tasks == 0);
+    CHECK(req(&lc, "approve") == CK_LC_R_COMMIT && lc.pending == CK_LC_PENDING_REPLY);
+    ck_lc_commit_done(&lc, 0);
+    CHECK(lc.state == CK_LC_READY && lc.approved == 1 && lc.pending == CK_LC_PENDING_NONE);
+    CHECK(lc.reply_len == 0 && lc.reply[0] == 0 && lc.task_len == 0 && lc.task[0] == 0);
+    /* cancelled between steps: nothing pending, counted apart from `cancel` of a proposal */
+    CHECK(req(&lc, "prompt Say hello.") == CK_LC_R_GENERATE);
+    ck_lc_generate_done(&lc, CK_LC_GEN_CANCELLED, 0, 0);
+    CHECK(lc.state == CK_LC_READY && lc.gen_cancelled == 1 && lc.cancelled == 0 && lc.task_len == 0 && lc.pending == CK_LC_PENDING_NONE);
+    /* failed, empty and overlong replies: nothing pending, gen_failed counts */
+    CHECK(req(&lc, "prompt Say hello.") == CK_LC_R_GENERATE);
+    ck_lc_generate_done(&lc, CK_LC_GEN_FAILED, 0, 0);
+    CHECK(lc.state == CK_LC_READY && lc.gen_failed == 1 && lc.task_len == 0);
+    CHECK(req(&lc, "prompt x") == CK_LC_R_GENERATE);
+    ck_lc_generate_done(&lc, CK_LC_GEN_REPLY, "", 0);
+    CHECK(lc.state == CK_LC_READY && lc.gen_failed == 2);
+    {
+        char big[CK_LC_REPLY_MAX + 2];
+        memset(big, 'r', sizeof big - 1); big[sizeof big - 1] = 0;
+        CHECK(req(&lc, "prompt x") == CK_LC_R_GENERATE);
+        ck_lc_generate_done(&lc, CK_LC_GEN_REPLY, big, CK_LC_REPLY_MAX + 1);
+        CHECK(lc.state == CK_LC_READY && lc.gen_failed == 3 && lc.reply_len == 0);
+        CHECK(req(&lc, "prompt x") == CK_LC_R_GENERATE);
+        ck_lc_generate_done(&lc, CK_LC_GEN_REPLY, big, CK_LC_REPLY_MAX); /* exactly the bound fits */
+        CHECK(lc.state == CK_LC_SERVE && lc.reply_len == CK_LC_REPLY_MAX && lc.replies == 2);
+    }
+    /* a reply arriving with no prompt pending is ignored (kernel-internal misuse) */
+    CHECK(req(&lc, "deny") == CK_LC_R_OK && lc.state == CK_LC_READY && lc.denied == 1 && lc.reply_len == 0);
+    ck_lc_generate_done(&lc, CK_LC_GEN_REPLY, "stray", 5);
+    CHECK(lc.state == CK_LC_READY && lc.replies == 2 && lc.pending == CK_LC_PENDING_NONE);
+    /* recall is answered in READY and in SERVE and never changes the state */
+    CHECK(req(&lc, "recall") == CK_LC_R_RECALL && lc.recalls == 1 && lc.state == CK_LC_READY);
+    CHECK(req(&lc, "task n") == CK_LC_R_OK && req(&lc, "recall") == CK_LC_R_RECALL && lc.recalls == 2);
+    CHECK(lc.state == CK_LC_SERVE && lc.pending == CK_LC_PENDING_NOTE);
+    /* shutdown drops a pending reply, never commits it; then everything is refused */
+    CHECK(req(&lc, "cancel") == CK_LC_R_OK && req(&lc, "prompt z") == CK_LC_R_GENERATE);
+    ck_lc_generate_done(&lc, CK_LC_GEN_REPLY, "zz", 2);
+    CHECK(lc.state == CK_LC_SERVE && req(&lc, "shutdown") == CK_LC_R_STOP);
+    CHECK(lc.state == CK_LC_QUIESCE && lc.reply_len == 0 && lc.task_len == 0 && lc.pending == CK_LC_PENDING_NONE);
+    CHECK(req(&lc, "prompt q") == CK_LC_R_REFUSED && req(&lc, "recall") == CK_LC_R_REFUSED);
+    CHECK(lc.requests == 18 && lc.prompts == 7 && lc.refused == 4 && lc.approved == 1);
     return ck_t_verdict("CK_LIFECYCLE");
 }

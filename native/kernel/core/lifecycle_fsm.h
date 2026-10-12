@@ -35,11 +35,16 @@ enum ck_lc_verb {
     CK_LC_V_CANCEL,
     CK_LC_V_EVIDENCE,
     CK_LC_V_SHUTDOWN,
+    CK_LC_V_PROMPT, /* native v1 P06: bounded generation from the resident model */
+    CK_LC_V_RECALL, /* read back the newest approved object from the Store */
 };
 
 /* Bounds: one request line, and the task text that a line may carry. */
 #define CK_LC_LINE_MAX 96 /* "unlock " + 64 hex = 71 bytes fits */
 #define CK_LC_TASK_MAX 48
+#define CK_LC_REPLY_MAX 256 /* generated reply bytes kept for approval (INFER_TEXT_BYTES) */
+/* What is pending in SERVE: an operator note (task) or a generated reply. */
+enum ck_lc_pending { CK_LC_PENDING_NONE = 0, CK_LC_PENDING_NOTE, CK_LC_PENDING_REPLY };
 
 /* Outcome of one request against the state machine. */
 enum ck_lc_result {
@@ -49,19 +54,25 @@ enum ck_lc_result {
     CK_LC_R_COMMIT,        /* approve accepted: the binding must commit the task */
     CK_LC_R_UNLOCK,        /* unlock accepted: the binding must try the key source */
     CK_LC_R_STOP,          /* shutdown accepted: the binding must run the stop order */
+    CK_LC_R_GENERATE,      /* prompt accepted: the binding must generate (task holds the prompt) */
+    CK_LC_R_RECALL,        /* recall accepted: the binding must read the newest approved object */
 };
 
 typedef struct {
     enum ck_lc_state state;
-    char task[CK_LC_TASK_MAX + 1]; /* pending task text in SERVE, else "" */
+    char task[CK_LC_TASK_MAX + 1]; /* pending note text, or the prompt of a pending reply, in SERVE; else "" */
     size_t task_len;
+    char reply[CK_LC_REPLY_MAX + 1]; /* generated reply awaiting approval (pending == REPLY), else "" */
+    size_t reply_len;
+    enum ck_lc_pending pending;
     /* counters for the evidence verb (bounded, wrap is harmless) */
     uint32_t requests, refused, invalid, tasks, approved, denied, cancelled;
+    uint32_t prompts, replies, gen_cancelled, gen_failed, recalls;
     const char *reason; /* last refusal reason, static string */
 } ck_lc;
 
 /* Decode one request line (len bytes, no terminator required). arg and arg_len
- * receive the text after "task" (trimmed), else an empty span. */
+ * receive the text after "task" or "prompt" (trimmed), else an empty span. */
 enum ck_lc_verb ck_lc_decode(const char *line, size_t len, const char **arg, size_t *arg_len);
 const char *ck_lc_verb_name(enum ck_lc_verb v);
 const char *ck_lc_state_name(enum ck_lc_state s);
@@ -76,6 +87,12 @@ enum ck_lc_result ck_lc_apply(ck_lc *lc, enum ck_lc_verb v, const char *arg, siz
  * with reason), unlock outcome (1 opened: LOCKED -> READY). */
 void ck_lc_commit_done(ck_lc *lc, int rc);
 void ck_lc_unlock_done(ck_lc *lc, int opened);
+/* Generation outcome after CK_LC_R_GENERATE: a reply of n bytes (1..CK_LC_REPLY_MAX)
+ * becomes the pending proposal (READY -> SERVE, replies++); cancelled (the
+ * operator typed cancel between steps) or failed/refused (n == 0) drops the
+ * prompt and stays READY with the counter named by the outcome. */
+enum ck_lc_gen { CK_LC_GEN_REPLY = 0, CK_LC_GEN_CANCELLED, CK_LC_GEN_FAILED };
+void ck_lc_generate_done(ck_lc *lc, enum ck_lc_gen outcome, const char *reply, size_t n);
 void ck_lc_stopped(ck_lc *lc);
 
 #endif
