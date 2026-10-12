@@ -1,0 +1,198 @@
+# scripts/qemu_ck_lifecycle_test.sh, local TCG run on the Spark host, 2026-10-12, worker w-console (aienos#328).
+# Tree: aienos d60d904 code (base ff5da2d); docs-only edits after the run started. 193 ROW PASS, 0 ROW FAIL.
+# Rows 163 (ready line names the UART) and 167c (input counters) are new or changed in this PR.
+ROW build PASS  default image carries no resident lifecycle
+ROW build PASS  production service image carries no TEST key banner
+ROW 173 PASS  service image carries the production continuity layer and no TEST mode selection
+ROW build PASS  refuses CK_SERVICE with CK_CONSOLE_SESSION=1
+ROW build PASS  refuses CK_SERVICE with CK_QEMU_UNSAFE_DMA=1
+ROW build PASS  refuses CK_SERVICE with CK_TEST_STORE_CRASH=1
+ROW build PASS  refuses TEST keys with CK_HARDWARE_STAGING
+ROW 160 PASS  lifecycle after mm_usage (lines 113 < 114)
+ROW 160 PASS  Store stage refused with the production key source (BlockedOperator), disk not read
+ROW 160 PASS  Store LOCKED keeps the NVMe bound for a later unlock
+ROW 160 PASS  no NVMe revoke before the locked lifecycle
+ROW 160 PASS  no TEST key banner
+ROW 161 PASS  task refused while locked
+ROW 161 PASS  unlock refused, still locked
+ROW 161 PASS  unlock asked the production key source again
+ROW 161 PASS  status answered
+ROW 161 PASS  help answered
+ROW 161 PASS  evidence answered
+ROW 162 PASS  stop order with no Store
+ROW 162 PASS  locked lifecycle ready < NVMe revoke (revoke only at the stop order) (lines 114 < 129)
+ROW 162 PASS  NVMe revoke < stop order line (lines 129 < 131)
+ROW 162 PASS  stop order < stage result (lines 131 < 133)
+ROW 162 PASS  stage result < final report (lines 133 < 137)
+ROW 162 PASS  no panic or fault
+ROW 173 PASS  no continuity line while locked
+ROW 162 PASS  QEMU exit 0
+ROW 162 PASS  M1 checks
+ROW 163 PASS  TEST-ONLY banner
+ROW 163 PASS  Store open, NVMe kept bound for the service lifetime
+ROW 163 PASS  lifecycle ready
+ROW 182 PASS  TEST-key Store: security manifest sequence 1 at genesis, no keyslot
+ROW 173 PASS  test-keys image provisions continuity at boot
+ROW 173 PASS  PROVISIONED < Store open line (lines 110 < 112)
+ROW 163 PASS  no NVMe revoke before the lifecycle
+ROW 164 PASS  task proposed
+ROW 164 PASS  approve committed to the Store
+ROW 165 PASS  second task while pending refused
+ROW 165 PASS  approve with nothing pending refused
+ROW 165 PASS  deny drops
+ROW 165 PASS  cancel drops
+ROW 166 PASS  overlong line refused whole
+ROW 166 PASS  evidence counts
+ROW 167 PASS  stop order closed the Store
+ROW 167c PASS  input counters after the stop order (PL011, polled)
+ROW 167c PASS  stop order line < input counters (lines 159 < 160)
+ROW 167c PASS  no console-input refusal on QEMU virt
+ROW 179 PASS  remember created the journal (header transaction, no records yet)
+ROW 179 PASS  remembered as record 1 (one sealed transaction)
+ROW 179 PASS  facts lists the fact in the same boot
+ROW 179 PASS  facts summary, chain verified
+ROW 179 PASS  journal closed first in the stop order
+ROW 179 PASS  cortex closed < stop order line (lines 155 < 159)
+ROW 179 PASS  no refusal of remember or facts
+ROW 167 PASS  lifecycle ready < NVMe revoke (revoke only at the stop order) (lines 124 < 157)
+ROW 167 PASS  NVMe revoke < stop order line (lines 157 < 159)
+ROW 167 PASS  stop order < stage result (lines 159 < 161)
+ROW 167 PASS  stage result < final report (lines 161 < 165)
+ROW 167 PASS  no panic or fault
+ROW 167 PASS  QEMU exit 0
+ROW 167 PASS  M1 checks
+ROW 168 PASS  lifecycle came up locked
+ROW 168 PASS  short secret refused (64 hex digits expected)
+ROW 168 PASS  blank disk formatted as a production store
+ROW 168 PASS  key source line: recovery keyslot genesis
+ROW 168 PASS  store committed generation 2 boot 1
+ROW 183 PASS  production genesis: security manifest sequence 1 binds the keyslot
+ROW 168 PASS  unlock ok
+ROW 168 PASS  lifecycle unlocked to ready
+ROW 168 PASS  status open
+ROW 168 PASS  task proposed
+ROW 168 PASS  approve committed generation 4 (after the continuity genesis at 3)
+ROW 171 PASS  genesis inputs declared
+ROW 171 PASS  identity PROVISIONED incarnation 1
+ROW 171 PASS  ALLEN subject GENESIS sequence 1
+ROW 171 PASS  unlock ok < PROVISIONED (lines 126 < 129)
+ROW 171 PASS  PROVISIONED < lifecycle unlock ok (lines 129 < 131)
+ROW 171 PASS  status reports continuity
+ROW 168 PASS  stop order closed the Store
+ROW 180 PASS  production Store: journal created after the note (header at generation 5)
+ROW 180 PASS  production Store: fact committed at generation 6
+ROW 180 PASS  production Store: facts lists it
+ROW 180 PASS  evidence counts the two verbs
+ROW 180 PASS  no refusal of remember or facts
+ROW 168 PASS  stop order < stage result (lines 152 < 154)
+ROW 168 PASS  no panic or fault
+ROW 168 PASS  QEMU exit 0
+ROW 168 PASS  M1 checks
+ROW 170 PASS  secret hex never in the serial log (genesis boot)
+ROW 170 PASS  typed secret echoed as 64 '*'
+ROW 170 PASS  no TEST key banner
+ROW 169 PASS  lifecycle came up locked
+ROW 169 PASS  wrong secret refused by the keyslot tag
+ROW 169 PASS  lifecycle still locked after the wrong secret
+ROW 169 PASS  status still locked
+ROW 169 PASS  not reformatted
+ROW 169 PASS  key source line: recovery keyslot resume
+ROW 169 PASS  store opened at generation 6 (keyslot + boot record + continuity genesis + note + journal header + fact), boot_count 1
+ROW 169 PASS  store committed generation 7 boot 2
+ROW 183 PASS  production resume: security manifest sequence 2 links the genesis one, keyslot bound
+ROW 183 PASS  no SecurityManifest refusal in any boot
+ROW 169 PASS  unlock ok, no genesis
+ROW 172 PASS  ALLEN subject RESTORED sequence 1
+ROW 172 PASS  identity RESUMED incarnation 2, same agent as the genesis boot
+ROW 172 PASS  no second genesis
+ROW 172 PASS  no degraded mount
+ROW 172 PASS  unlock ok < RESUMED (lines 130 < 133)
+ROW 172 PASS  RESUMED < lifecycle unlock ok (lines 133 < 134)
+ROW 172 PASS  status reports resumed
+ROW 169 PASS  lifecycle unlocked to ready
+ROW 169 PASS  evidence: one refused unlock
+ROW 169 PASS  stop order closed the Store
+ROW 181 PASS  cold boot: journal opened from the disk, chain verified (1 record, 2 chunks)
+ROW 181 PASS  cold boot: the fact answers from the disk, not restated
+ROW 181 PASS  cold boot: facts summary
+ROW 181 PASS  cold boot: the fact was never typed in this boot
+ROW 181 PASS  cold boot: nothing remembered in this boot
+ROW 181 PASS  cold boot: evidence shows facts only
+ROW 181 PASS  cold boot: journal closed before the stop order
+ROW 181 PASS  cold boot: cortex closed < stop order (lines 145 < 149)
+ROW 169 PASS  no panic or fault
+ROW 169 PASS  QEMU exit 0
+ROW 169 PASS  M1 checks
+ROW 170 PASS  secret hex never in the serial log (resume boot)
+ROW 170 PASS  wrong secret hex never in the serial log
+ROW 184 PASS  lifecycle came up locked
+ROW 184 PASS  store opened at generation 6 (the boot-3 disk), boot_count 1
+ROW 184 PASS  boot transaction: security manifest sequence 2
+ROW 184 PASS  unlock ok with the current secret
+ROW 184 PASS  continuity RESUMED incarnation 2
+ROW 184 PASS  rotation committed: KeySlotManifest sequence 2, SecurityManifest sequence 3, one generation (9)
+ROW 184 PASS  lifecycle rotate ok, state ready
+ROW 184 PASS  rotate not refused
+ROW 184 PASS  typed rotate line echoed as 129 '*'
+ROW 184 PASS  status ready after rotation
+ROW 184 PASS  stop order closed the Store
+ROW 184 PASS  no panic or fault
+ROW 184 PASS  QEMU exit 0
+ROW 184 PASS  M1 checks
+ROW 184 PASS  current secret hex never in the serial log (rotation boot)
+ROW 184 PASS  new secret hex never in the serial log (rotation boot)
+ROW 185 PASS  lifecycle came up locked
+ROW 185 PASS  old secret refused by the keyslot tag of the newest manifest
+ROW 185 PASS  lifecycle still locked after the old secret
+ROW 185 PASS  status still locked
+ROW 185 PASS  store opened at generation 9 (rotation committed), boot_count 2
+ROW 185 PASS  security manifest sequence 4 links the rotation one, keyslot bound
+ROW 185 PASS  no SecurityManifest refusal after rotation
+ROW 185 PASS  new secret unlock ok, no genesis
+ROW 185 PASS  continuity RESUMED incarnation 3
+ROW 185 PASS  no second genesis
+ROW 185 PASS  not reformatted
+ROW 185 PASS  lifecycle unlocked to ready
+ROW 185 PASS  the fact still answers from the disk after rotation
+ROW 185 PASS  evidence: one refused unlock
+ROW 185 PASS  stop order closed the Store
+ROW 185 PASS  no panic or fault
+ROW 185 PASS  QEMU exit 0
+ROW 185 PASS  M1 checks
+ROW 185 PASS  old secret hex never in the serial log (post-rotation boot)
+ROW 185 PASS  new secret hex never in the serial log (post-rotation boot)
+ROW 174 PASS  only the CK_INFER_LIB service image carries the resident session
+ROW 174 PASS  TEST-ONLY fw_cfg model source declared
+ROW 174 PASS  resident session open with the declared limits
+ROW 174 PASS  resident open < lifecycle ready (lines 126 < 129)
+ROW 174 PASS  TEST-ONLY banner
+ROW 174 PASS  generating line
+ROW 174 PASS  golden reply ids (17 prompt ids, 25 steps)
+ROW 174 PASS  reply is the pending proposal
+ROW 174 PASS  approve committed the reply object
+ROW 175 PASS  second prompt cancelled between steps (produced 0, nothing pending)
+ROW 175 PASS  the cancel was not refused
+ROW 175 PASS  no prompt refused
+ROW 175 PASS  recall (same boot) reads the reply back through the sealed Store
+ROW 176 PASS  evidence counters
+ROW 176 PASS  resident close
+ROW 176 PASS  unload returned every frame (1020855 = 1020855)
+ROW 176 PASS  resident close < unload line (lines 147 < 148)
+ROW 176 PASS  unload line < stop order (lines 148 < 152)
+ROW 176 PASS  stop order closed the Store
+ROW 176 PASS  stop order < stage result (lines 152 < 154)
+ROW 176 PASS  no panic or fault
+ROW 176 PASS  QEMU exit 0
+ROW 176 PASS  M1 checks
+ROW 175 PASS  cold boot: resident session open again
+ROW 175 PASS  cold boot: continuity RESUMED on the same disk
+ROW 175 PASS  cold boot: no second genesis
+ROW 175 PASS  cold boot: recall returns the approved reply from the disk
+ROW 175 PASS  cold boot: evidence shows one recall, no prompt
+ROW 175 PASS  cold boot: unload returned every frame (1020855 = 1020855)
+ROW 175 PASS  cold boot: stop order closed the Store
+ROW 175 PASS  cold boot: no panic or fault
+ROW 175 PASS  cold boot: QEMU exit 0
+ROW 175 PASS  M1 checks
+AIENOS_CK_LIFECYCLE_INFER: PASS (QEMU only; hardware NOT_RUN)
+AIENOS_CK_LIFECYCLE: PASS (QEMU only; hardware NOT_RUN)

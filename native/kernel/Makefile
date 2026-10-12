@@ -692,7 +692,7 @@ else
 FULL_NAME := full-service$(if $(strip $(CK_HARDWARE_STAGING)),-hardware-staging,)
 STAGE_DMA_FLAGS += -DCK_SERVICE=1
 endif
-STAGE_SRCS += $(KDIR)/core/lifecycle.c $(KDIR)/core/lifecycle_fsm.c
+STAGE_SRCS += $(KDIR)/core/lifecycle.c $(KDIR)/core/lifecycle_fsm.c $(KDIR)/core/line_rx.c
 # P06 cut 3: the canonical Omega Cortex store over the sealed Store (svc/cortex_journal.c).
 STAGE_SRCS += $(STAGE_CORTEX_SRCS)
 # P05 cut 1: production continuity on the service lifecycle (svc/continuity_service.c):
@@ -984,10 +984,11 @@ $(FULL_EFI): $(FULL_ELF)
 # ---- host unit tests ----
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
-	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/acpi_dev.c $(KDIR)/core/lifecycle_fsm.c
+	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/acpi_dev.c $(KDIR)/core/lifecycle_fsm.c \
+	$(KDIR)/core/line_rx.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision test_lifecycle
+	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 

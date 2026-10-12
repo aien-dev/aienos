@@ -207,17 +207,22 @@ __attribute__((weak)) int ck_stage_console_session(void);
  * every diagnostic image. */
 __attribute__((weak)) int ck_lifecycle_run(void);
 
-/* PL011 serial receive (core/console.c), polled. ck_console_rx_ready: 1 when the
- * console UART is a PL011 whose UARTCR has UARTEN and RXE set (*cr gets UARTCR);
- * 0 otherwise (16550, none, receiver off): then no byte is ever read. ck_console_rx_poll:
- * -1 when the receive FIFO is empty (UARTFR.RXFE), -2 for a byte with an error
- * flag (UARTDR[11:8]; dropped and counted, more may be waiting), else the byte
- * of UARTDR[7:0]. */
+/* Console serial receive (core/console.c + core/uart_rx.h), POLLED, no
+ * interrupts. It uses the UART the transmit side chose from the ACPI SPCR:
+ * PL011/SBSA (QEMU virt) or 16550 (types 0x00/0x01/0x12; the DGX Spark's
+ * console is type 0x01 at 0x16A00000). ck_console_rx_ready: 1 when that UART
+ * can deliver bytes (PL011: UARTCR UARTEN and RXE; 16550: LCR.DLAB clear and
+ * LSR not all ones), *cr gets the proving register (PL011 UARTCR, 16550
+ * LCR << 8 | LSR); 0 for no console UART or a receiver that is off: then no
+ * byte is ever read. ck_console_rx_poll: -1 nothing waiting, -2 a byte lost or
+ * damaged (overrun, parity, framing, break; dropped and counted, more may be
+ * waiting), else the byte. The kernel never writes a UART control register. */
 const char *ck_console_uart_name(void);
 uint64_t ck_console_uart_base(void);
 int ck_console_rx_ready(uint32_t *cr);
 int ck_console_rx_poll(void);
 unsigned ck_console_rx_errors(void);
+unsigned ck_console_rx_overruns(void);
 
 /* Resident inference (core/infer.c, native v1 P06): a CK_SERVICE image built
  * with CK_INFER_LIB keeps the ingested model and one bounded session open

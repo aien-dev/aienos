@@ -66,28 +66,45 @@ What this session does **not** prove, stated so nobody reads more into it:
 
 ### 2.2 Blocking prerequisites (each one alone makes today a NO-GO)
 
-**B1. Operator input on the Spark's console.** The lifecycle reads operator
-lines only from a PL011 serial receiver (`native/kernel/core/lifecycle.c`
-header: "Operator input: the polled PL011 serial receive ... The USB keyboard
-binding stays with the xHCI session code and is a later cut";
-`native/kernel/GATES.md` row 167b). `ck_console_rx_ready` returns 0 for any
-UART that is not PL011/SBSA (`native/kernel/core/console.c` lines 185-193),
-and then the lifecycle prints `lifecycle: REFUSED no operator input (console
-UART has no PL011 receiver): stop order` and shuts down
-(`lifecycle.c` ck_lifecycle_run). The Spark's console UART is described as
-16550-style at `0x16A00000` (`docs/MILESTONES.md` line 239,
-`docs/HARDWARE_TEST_RIG.md` line 96) and Linux on the Spark boots with
-`earlycon=uart,mmio32,0x16A00000 console=ttyS0,921600`
-(`evidence/trust1_gate0_capture_2026-09-30/eventlog_parsed.yaml` line 747),
-which is the 8250/16550 driver. The SPCR interface type itself is UNVERIFIED
-(the table is root-only; not read for this plan). Also UNVERIFIED: whether
-any serial cable is wired (`docs/HARDWARE_TEST_RIG.md` line 50 plans a Pi GPIO
-UART at 3.3 V). Needed: a desk-side cut that binds the USB keyboard to the
-lifecycle line editor (the keyboard and xHCI path already exist:
-`native/kernel/dev/usb_kbd.c`, CONSOLE gate), or 16550 receive in
-`core/console.c` plus a wired, verified serial link, each with a QEMU gate.
-Recommended: the USB keyboard, because the screen and keyboard are already
-the attended setup and need no wiring.
+**B1. Operator input on the Spark's console.** Half solved at the desk
+(aienos#328); the other half is an operator step that needs a cable.
+
+Verified on the Spark on 2026-10-12 (read-only, Linux running, no write):
+the ACPI SPCR (80 bytes, revision 2) names interface type **0x01** (16550
+subset, Linux `ACPI_DBG2_16550_SUBSET`), a memory-mapped UART at
+**0x16A00000** with 32-bit dword-spaced registers (GAS access size 3),
+interrupt GSIV 878, baud byte 7 (115200). Linux drives the same port as
+`ttyS0` (`console=ttyS0,921600`, device `MTKI0511:00`, ACPI `\_SB_.COM1`,
+`io_type=3` 32-bit MMIO, `iomem_reg_shift=2`, `uartclk=26000000`).
+Before aienos#328 the kernel accepted SPCR types 0x00 and 0x12 only, so by
+the code (not observed on the machine) it had no serial console on the
+Spark at all, and the lifecycle would have stopped with `REFUSED no
+operator input`.
+
+Implemented by aienos#328 (desk, host-tested; `native/kernel/GATES.md`
+rows 167c-167f): the kernel selects that 16550 from the SPCR for output and
+for operator input, reads it with 32-bit accesses, polls it (no
+interrupts) between lifecycle steps and between generation steps (so
+`cancel` works), refuses overlong lines and lines with a receive error
+(overrun, parity, framing, break) whole, and prints `lifecycle: ready ...
+(operator input: serial 16550 at 0x16a00000, polled)`. With no supported
+UART it prints `lifecycle: REFUSED console input unsupported on this
+platform` and stops. QEMU cannot run the 16550 path (QEMU virt has only a
+PL011); the PL011 path passes the full lifecycle QEMU gate.
+
+Still an operator step and UNVERIFIED: (1) whether the Spark's 16550 is
+wired to a connector you can reach (no documented external serial port;
+`docs/HARDWARE_TEST_RIG.md` plans the hub Pi's 3.3 V GPIO UART); (2) the
+line speed AIENOS inherits, because the kernel never reprograms the UART
+(try 115200 from the SPCR first, then 921600, 8N1, no flow control).
+**A prompt on the screen does not prove input.** What proves it: the bytes
+you type echo back on the serial terminal, `status` is answered with a
+`lifecycle: state=... store=...` line, and `shutdown` is answered with
+`lifecycle: shutdown accepted`, the `lifecycle: stop order ...` line and
+the final report. If no reachable serial connector exists, the remaining
+path is the local USB keyboard bound to the service lifecycle (the keyboard
+and xHCI code exist in `native/kernel/dev/usb_kbd.c`, CONSOLE gate, in a
+TEST-only image), which is a separate desk cut not done yet.
 
 **B2. A hardware service image with resident CPU inference.** The milestone
 image is `make full CK_SERVICE=1 CK_HARDWARE_STAGING=1 CK_INFER_LIB=...`.
@@ -202,7 +219,7 @@ below. Any one of these stops the session:
 | S2 | nothing new on screen for 60 s at any time outside generation; during generation (after `lifecycle: generating`), nothing for 600 s | abort |
 | S3 | `Secure Boot Violation` or any firmware refusal | firmware returns to `BootOrder` by itself; record, never bypass |
 | S4 | any `report_kind: panic` or `report_kind: fault`, any `panic:` line, any handoff refusal line of `docs/BOOT_HANDOFF_CONTRACT.md` section 6 | abort (the kernel resets itself) |
-| S5 | `lifecycle: REFUSED no operator input` | soft (the image already stopped): B1 is not solved |
+| S5 | `lifecycle: REFUSED console input unsupported on this platform` or `REFUSED console input not ready`, or no echo / no answer to `status` on the serial terminal | a refusal: soft (the image already stopped); no echo or no answer: abort. Either way B1 is not solved |
 | S6 | `disk: no AIENOS partition, refusing writes` or `store: ... no boot disk` | soft: B3 is not solved |
 | S7 | any `store: ... REFUSED` or `store: unlock REFUSED` line after `unlock <S>` (wrong secret, keyslot, SecurityManifest, rollback anchor), any `continuity: REFUSED`, `degraded` or `RESUMED_READONLY` | soft; never retype a different secret in the same window |
 | S8 | `store: blank disk ... formatted` in boot 2 (the Store did not survive) | soft; a finding against N2 |
