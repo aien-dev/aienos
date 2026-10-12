@@ -37,6 +37,9 @@
 
 #ifdef CK_INFER_PROBE
 #include "sha256.h"
+#if defined(CK_INFER_DISK_ONLY) && !defined(CK_INFER_RESIDENT)
+#error "CK_INFER_DISK_ONLY is the hardware service image (CK_SERVICE=1 + CK_INFER_LIB + CK_HARDWARE_STAGING) only"
+#endif
 
 extern void aienos_infer_heap_init(uintptr_t base, uintptr_t len);
 /* Mirror of crates/aienos-infer-kernel/src/lib.rs `InferResult` (#[repr(C)]). */
@@ -82,8 +85,10 @@ extern void aienos_infer_heap_stats(uint64_t *used, uint64_t *peak);
 #define CPACR_FPEN_SHIFT 20
 #define PAGE 4096ull
 #define HEAP_BYTES (256ull << 20)    /* bump-allocator region for the Rust unit */
+#ifndef CK_INFER_DISK_ONLY
 #define DMA_CHUNK (64ull << 20)      /* fw_cfg DMA length is 32 bit; read in chunks */
 #define MODEL_FILE "opt/aienos/model"
+#endif
 
 /* The prompt's expected first four ids (crates/aienos-infer/tests/fixtures/ref_fr.txt). */
 static const uint32_t expect_ids[4] = {128000, 128006, 882, 128007};
@@ -109,6 +114,10 @@ static void escape(char *out, const uint8_t *b, uint32_t n)
     *out = 0;
 }
 
+#ifndef CK_INFER_DISK_ONLY
+/* QEMU fw_cfg ingest (TEST-ONLY). Compiled out of the hardware service image
+ * (CK_INFER_DISK_ONLY, Makefile: CK_INFER_LIB + CK_HARDWARE_STAGING), whose
+ * only model source is the boot disk (MODEL.MAP). */
 static volatile uint8_t *fwcfg;
 
 static uint32_t be32(const uint8_t *b)
@@ -218,6 +227,7 @@ static int fw_dma_read(int sel, uint64_t pa, uint32_t len)
     }
     return -2;
 }
+#endif /* !CK_INFER_DISK_ONLY */
 
 /* The Rust unit's panic handler lands here: report and stop, never return. */
 __attribute__((noreturn)) void aienos_infer_panic(void) { ck_panic("infer: Rust unit panicked or ran out of heap"); }
@@ -469,15 +479,24 @@ void ck_infer_resident_close(void)
 
 void ck_infer_run(void)
 {
-    const char *why = 0;
     /* Source 1, the boot disk: the UEFI stub read the model through the
      * firmware's Block I/O driver before ExitBootServices and recorded it in
      * CHANDOF2 (native/boot/efi_model.c, native/boot/model_map.h). The bytes
      * live in EfiLoaderData the frame allocator never hands out (mm/mmu.c
      * reserves the range). This is the path that exists on hardware.
-     * Source 2, QEMU fw_cfg: TEST-ONLY, below, when the stub found no map. */
+     * Source 2, QEMU fw_cfg: TEST-ONLY, below, when the stub found no map;
+     * compiled out of the hardware service image (CK_INFER_DISK_ONLY). */
     const struct ck_handoff *h = ck_handoff_get();
     int from_disk = h && (h->model_flags & CK_HANDOFF_MODEL_PRESENT);
+#ifdef CK_INFER_DISK_ONLY
+    uint32_t size = 0;
+    if (!from_disk) {
+        ck_puts("infer: ingest REFUSED (no boot-disk model: MODEL.MAP absent or refused by the stub; "
+                "this image has no other model source)\n");
+        return;
+    }
+#else
+    const char *why = 0;
     uint64_t base = from_disk ? 0 : fwcfg_from_dsdt(&why);
     uint16_t sel = 0;
     uint32_t size = 0;
@@ -511,6 +530,7 @@ void ck_infer_run(void)
               MODEL_FILE, size);
 
     }
+#endif /* CK_INFER_DISK_ONLY */
     uint64_t msize = from_disk ? h->model_len : (uint64_t)size;
     uint64_t mpa = from_disk ? h->model_base : 0, hpa = 0, mpages = 0;
     if (from_disk) {
@@ -542,6 +562,7 @@ void ck_infer_run(void)
         return;
     }
 
+#ifndef CK_INFER_DISK_ONLY
     if (!from_disk) {
         uint64_t t0 = ck_time_us();
         int rc = 0;
@@ -556,6 +577,7 @@ void ck_infer_run(void)
         ck_printf("infer: ingest bytes=%llu dma_us=%llu\n", (unsigned long long)msize,
                   (unsigned long long)(ck_time_us() - t0));
     }
+#endif
 
     uint64_t t1 = ck_time_us();
     sha256_ctx ctx;
