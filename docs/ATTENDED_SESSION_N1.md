@@ -118,7 +118,7 @@ Spark has one NVMe, `nvme0n1`, with exactly two partitions: the ESP
 sectors, so after the root partition only the 33 sectors of the backup GPT
 remain (read 2026-10-12 from `/sys/block/nvme0n1/`). There is no room for an
 AIENOS partition without shrinking the Linux root filesystem, which can only
-be done with it unmounted (from the recovery stick), and which changes the
+be done with it unmounted (ext4 does not shrink online; whether the recovery stick carries the tools is not checked), and which changes the
 Linux disk. That conflicts with "Linux side left untouched" and needs its
 own owner decision and its own attended window, with a verified backup
 first. Whether the Spark has a free slot for a second NVMe is UNKNOWN. Until
