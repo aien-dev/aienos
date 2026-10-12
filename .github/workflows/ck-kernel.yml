@@ -104,6 +104,9 @@ jobs:
           AIENOS_GATE_LOCK: ${{ runner.temp }}/qemu-gate-lock
         run: bash scripts/ck_owner_keys_check.sh
 
+      - name: Hardware inference service image make refusals and the supported line (build only, aienos#34 gate N3)
+        run: bash scripts/qemu_ck_service_disk_test.sh --build-only
+
       - name: Check the host tests left the tree clean (the gate runner refuses a dirty tree)
         run: |
           git status --porcelain --untracked-files=normal

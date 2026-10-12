@@ -650,9 +650,9 @@ golden prompt stepped to its end (its ids must equal the one-shot reply and the 
 the cache reset after a cancel), "Say hello." cancelled again after one step, close, every frame returned,
 `AIENOS_CK_INFER_SESSION: PASS|FAIL`. The lifecycle `prompt` verb (operator prompt -> bounded output -> approve ->
 Store, P06 cut 2) runs the same session resident in a `CK_SERVICE=1 CK_INFER_LIB=...` image (LIFECYCLE rows
-174-176). Limits: `CK_INFER_LIB` cannot combine with `CK_HARDWARE_STAGING` or `CK_RUST_LIBS` and the QEMU model
-source is TEST-ONLY fw_cfg, so the hardware service image has no inference yet (the MODEL.MAP boot-disk source
-is the hardware path); the bump allocator never frees, so each prompt costs a few KiB until close
+174-176). Limits: `CK_INFER_LIB` cannot combine with `CK_RUST_LIBS`, and with `CK_HARDWARE_STAGING` only in the
+service image (`CK_SERVICE=1`), which compiles no fw_cfg reader and takes the model only from the boot disk
+(MODEL.MAP; SERVICE_DISK rows 200-210); the QEMU probe and test-keys images keep the TEST-ONLY fw_cfg source; the bump allocator never frees, so each prompt costs a few KiB until close
 (`heap_used_kib` per line).
 
 | # | check | gate | status |
