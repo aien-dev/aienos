@@ -171,6 +171,13 @@ nothing and to re-release anything.
    the owner signs them on the air-gapped machine with OpenSSL
    (`pkeyutl -sign -rawin`), `attach-sig` verifies and attaches. No private
    key ever touches the Spark. The TEST signer exists for tests only.
+   **Cut 1b (merged with this note's follow-up): the package.**
+   `scripts/native_package.sh` builds the image twice from a committed tree,
+   refuses the package if the two builds differ, records `PACKAGE.txt`
+   (commit, variant, image digests, toolchain, component pins, model and
+   firmware digests) and `SHA256SUMS`, and sets the slot manifest's
+   provenance to the SHA-256 of `SHA256SUMS`, so the owner's one signature
+   over the manifest binds the whole package. `docs/NATIVE_PACKAGE.md`.
 2. **Stub reads a slot (after the owner's yes).** The stub locates the
    slots partition on the boot disk, reads C, reads both manifests and
    images, calls `ck_slot_select`, commits the try if asked, and chain-loads

@@ -1066,8 +1066,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -1565,6 +1565,15 @@ slot-free: $(BOOT)/slot_select.c $(BOOT)/slot_format.h
 	@bad=$$($(CROSS)nm -u $(OUT)/free/slot_select.o | awk '{print $$2}' | grep -vxF $(foreach a,$(SLOT_FREE_ALLOWED_U),-e $(a)) || true); \
 	if [ -n "$$bad" ]; then echo "slot-free: FAIL unexpected undefined symbols: $$bad"; exit 1; fi; \
 	echo "SLOT_FREE: PASS (undefined: $(SLOT_FREE_ALLOWED_U))"
+
+# ---- reproducible native package (scripts/native_package.sh, P11 cut 1b) ----
+# Builds the image twice from a clean tree, refuses if they differ, records
+# PACKAGE.txt + SHA256SUMS, binds them into the slot manifest's provenance and
+# verifies the owner signature. package-test = scripts/native_package_test.sh
+# (TEST signer and TEST-FIXTURE owner files only; ~35 s; nothing booted).
+package-test: $(SLOT_TOOL)
+	NATIVE_PACKAGE_TOOL_OUT=$(OUT) bash $(REPO)/scripts/native_package_test.sh | grep -E '^NATIVE_PACKAGE_TEST: (PASS|FAIL)' | grep -q PASS || { NATIVE_PACKAGE_TOOL_OUT=$(OUT) bash $(REPO)/scripts/native_package_test.sh | grep -E '^FAIL|NATIVE_PACKAGE_TEST'; exit 1; }
+	@echo "NATIVE_PACKAGE_TEST: PASS"
 
 # ---- host checker for the AIENOS_CK_SCREEN gate (scripts/qemu_ck_screen_test.sh) ----
 FB_CHECK_TOOL := $(OUT)/host/ck_fb_check
