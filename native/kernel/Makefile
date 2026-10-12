@@ -1066,8 +1066,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -1467,6 +1467,49 @@ gsp-fw-inspect-test: $(GSP_FW_TOOL)
 	  echo "$$out" | grep -E '^(fwversion|build_id|signature_section|sha256_file|RESULT)'; \
 	  echo "$$out" | grep -q '^sha256_file $(GSP_FW_SHA256)$$' && echo "CK_GSP_FW_INSPECT_PIN: PASS" || { echo "CK_GSP_FW_INSPECT_PIN: FAIL (digest differs from the pin)"; exit 1; }; \
 	else echo "CK_GSP_FW_INSPECT_PIN: NOT_RUN ($(GSP_FW_FILE) absent)"; fi
+
+# ---- host encoder/decoder for the SEC2 chain-of-trust boot message (aienos#286 cut C/D host work) ----
+# Byte-exact NVDM-over-MCTP packet and GSP_FMC_BOOT_PARAMS layouts from the pinned
+# driver source; self-test = layouts, golden headers, round trips, every mutation refused.
+# Never loads anything. docs/GB10_FIRMWARE_INVENTORY.md section 10.
+GSP_COT_TOOL := $(OUT)/host/ck_gsp_cot_encode
+$(GSP_COT_TOOL): $(KDIR)/tools/ck_gsp_cot_encode.c $(NATIVE)/argus/sha256.c $(NATIVE)/argus/sha256.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -I$(NATIVE)/argus -o $@ $(KDIR)/tools/ck_gsp_cot_encode.c $(NATIVE)/argus/sha256.c
+gsp-cot-encode: $(GSP_COT_TOOL)
+gsp-cot-test: $(GSP_COT_TOOL)
+	$(GSP_COT_TOOL) selftest | grep -E '^CK_GSP_COT_ENCODE_SELFTEST: (PASS|FAIL)' | grep -q PASS || { $(GSP_COT_TOOL) selftest | grep -E 'FAIL|SELFTEST'; exit 1; }
+	@$(GSP_COT_TOOL) selftest | tail -1
+
+# ---- host extractor for the GB10B firmware arrays compiled into the pinned driver (aienos#286 cut C host work) ----
+# Parses the two public generated files g_bindata_kgspGetBinArchive{GspRmBoot,GspRmFmcGfwProdSigned}_GB10B.c
+# (MIT), cross-checks every size/flag/record, inflates the compressed descriptor with our own
+# DEFLATE decoder (CRC-32 + ISIZE trailer verified), checks UCODE_HASH == SHA-384(UCODE_IMAGE)
+# and the RM_RISCV_UCODE_DESC offsets, and writes the arrays as files. Never loads anything.
+# The driver files are optional (fetch them from the 580.173.02 tag into GSP_BINDATA_DIR);
+# when absent the pin step is NOT_RUN, the self-test still runs. docs/GB10_FIRMWARE_INVENTORY.md 3.3 and 11.
+GSP_BINDATA_TOOL := $(OUT)/host/ck_gsp_bindata_extract
+GSP_BINDATA_DIR ?= $(HOME)/.cache/aienos/open-gpu-kernel-modules-580.173.02
+GSP_BINDATA_FMC_IMAGE_SHA256 := b13ead4b9a6b8a0d268f3094cc4f4521d6be8a9a525edbc9a8f3f397c86f1f2e
+GSP_BINDATA_BOOT_PROD_SHA256 := 427a691d8453f02548d395f40ac900eb0d5b8ea864e8f14f958eef890ba400a2
+$(GSP_BINDATA_TOOL): $(KDIR)/tools/ck_gsp_bindata_extract.c $(NATIVE)/argus/sha256.c $(NATIVE)/argus/sha256.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Werror -I$(NATIVE)/argus -o $@ $(KDIR)/tools/ck_gsp_bindata_extract.c $(NATIVE)/argus/sha256.c
+gsp-bindata-extract: $(GSP_BINDATA_TOOL)
+gsp-bindata-test: $(GSP_BINDATA_TOOL)
+	$(GSP_BINDATA_TOOL) selftest | grep -E '^CK_GSP_BINDATA_EXTRACT_SELFTEST: (PASS|FAIL)' | grep -q PASS || { $(GSP_BINDATA_TOOL) selftest | grep -E 'FAIL|SELFTEST'; exit 1; }
+	@$(GSP_BINDATA_TOOL) selftest | tail -1
+	@fmc="$(GSP_BINDATA_DIR)/g_bindata_kgspGetBinArchiveGspRmFmcGfwProdSigned_GB10B.c"; boot="$(GSP_BINDATA_DIR)/g_bindata_kgspGetBinArchiveGspRmBoot_GB10B.c"; \
+	if [ -r "$$fmc" ] && [ -r "$$boot" ]; then \
+	  out=$$($(GSP_BINDATA_TOOL) extract "$$fmc") || { echo "$$out"; echo "CK_GSP_BINDATA_PIN: FAIL (FMC file refused)"; exit 1; }; \
+	  echo "$$out" | grep -E '^(hash384|array .* UCODE_IMAGE |RESULT)'; \
+	  echo "$$out" | grep -q '^array .* UCODE_IMAGE .* size=195912 sha256=$(GSP_BINDATA_FMC_IMAGE_SHA256)$$' || { echo "CK_GSP_BINDATA_PIN: FAIL (FMC image digest differs from the pin)"; exit 1; }; \
+	  out=$$($(GSP_BINDATA_TOOL) extract "$$boot") || { echo "$$out"; echo "CK_GSP_BINDATA_PIN: FAIL (boot file refused)"; exit 1; }; \
+	  echo "$$out" | grep -E '^(desc UCODE_DESC_PROD|array .* UCODE_IMAGE_PROD |RESULT)'; \
+	  echo "$$out" | grep -q '^array .* UCODE_IMAGE_PROD .* size=196608 sha256=$(GSP_BINDATA_BOOT_PROD_SHA256)$$' || { echo "CK_GSP_BINDATA_PIN: FAIL (boot PROD image digest differs from the pin)"; exit 1; }; \
+	  echo "$$out" | grep -q '^desc UCODE_DESC_PROD version=5 manifest=0x0+0xa00 monitor_data=0xa00+0xa600 monitor_code=0xb000+0x24d00 monitor_enabled=1 ' || { echo "CK_GSP_BINDATA_PIN: FAIL (descriptor differs from the pin)"; exit 1; }; \
+	  echo "CK_GSP_BINDATA_PIN: PASS"; \
+	else echo "CK_GSP_BINDATA_PIN: NOT_RUN ($(GSP_BINDATA_DIR) lacks the two GB10B bindata files)"; fi
 
 # ---- host checker for the AIENOS_CK_SCREEN gate (scripts/qemu_ck_screen_test.sh) ----
 FB_CHECK_TOOL := $(OUT)/host/ck_fb_check

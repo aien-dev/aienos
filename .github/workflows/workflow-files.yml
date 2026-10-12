@@ -1,0 +1,27 @@
+# Always-on guard: a workflow file GitHub cannot parse yields a run with zero
+# jobs that never shows in the PR checks, so the job it carries silently stops
+# running (2026-10-12: ck-kernel.yml, four hours). This job has no path filter
+# and is a required check on main, so that silence becomes a red check.
+name: Workflow files accepted
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  accepted:
+    name: workflow files accepted
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every workflow run on this commit has jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: sh scripts/workflow_files_check.sh "$SHA"
