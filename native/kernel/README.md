@@ -243,18 +243,28 @@ driver; reading a powered-down block could fault), and whether
 `tests/fixtures/spark_xhci_acpi_expected.txt` (KEYBOARD row 32b, NOT_RUN).
 
 
+### Service lifecycle serial input (native v1 N1, aienos#328)
+
+Status: **host-tested 16550, QEMU PL011.** `GATES.md` rows 167c-167f. Hardware NOT_RUN.
+
+- **One console table.** The boot stub picks the console UART from the ACPI SPCR once (`ck_console_set_uart`); output and operator input both use it. PL011/SBSA (types 0x03, 0x0d, 0x0e: QEMU virt) and 16550 (types 0x00, 0x01, 0x12). The DGX Spark's SPCR (read on the machine 2026-10-12) is type 0x01, a 32-bit dword-spaced 16550 at 0x16A00000; before this cut the kernel refused that type, so by the code (not observed on the machine) it had no serial console on the Spark at all.
+- **Polled, never interrupt driven.** The lifecycle polls the receiver between its steps and, while the model generates, between generation steps, so `cancel` works. No UART register is written: the line speed is whatever the firmware left (the SPCR says 115200; UNVERIFIED on the machine).
+- **Bounded lines.** `core/line_rx.c`: 144 bytes; an overlong line, or one in which the UART reported an overrun, parity, framing or break error, is refused whole and never run.
+- **Refusals.** No supported UART: `lifecycle: REFUSED console input unsupported on this platform` and the stop order. Receiver off or not answering: `REFUSED console input not ready`.
+- **Operator step.** A serial cable (3.3 V) to that UART and a terminal on the other end. Whether the Spark exposes it on a reachable connector is UNVERIFIED. The local USB keyboard on the service image is a separate cut.
+
 ### Console session (Campaign 3 cut C3-1a, QEMU test image only)
 
 Status: **QEMU only.** CK gate `CONSOLE` (rows 146-155 in `GATES.md`). Hardware NOT_RUN. The default image does not contain it.
 
 `make full CK_CONSOLE_SESSION=1` builds a TEST-ONLY image with a final boot stage `console`, entered only after every other boot step. The bounded boot shell above (60 s, idle 15 s) and the recovery window are unchanged. The session then keeps taking input for as long as the operator uses it, with no time limit and no idle exit, until the shell's `exit`:
 
-- **Two sources, one line.** PL011 serial receive (polled, on the UART base the console already prints to; the kernel only reads UARTCR and never reconfigures the UART) and the USB keyboard both feed the same 64-byte line editor and the same shell. Printable keys only; a 65th key makes the whole line refused.
+- **Two sources, one line.** Serial receive (polled, on the UART the console already prints to: PL011/SBSA or 16550 per the ACPI SPCR, `core/uart_rx.h`; the kernel only reads UART registers and never reconfigures the UART) and the USB keyboard both feed the same 64-byte line editor and the same shell. Printable keys only; a 65th key makes the whole line refused.
 - **No interleaving inside a line.** The first source that types into a line owns it until Enter. Keys from the other source are dropped and counted in a printed line: `console_input: dropped N key(s) from <source> while <owner> owned the line`.
 - **DMA confinement unchanged.** The USB half runs inside a second xHCI fence: SMMU window first, no SMMU means no DMA, and its DMA stays in that one window for the whole session. `exit` halts the controller, turns bus mastering off, returns the stream to abort and prints the same revoke lines. If the keyboard is unavailable, is unplugged (PORTSC connect bit clear) or its endpoint halts, the fence is revoked and serial goes on alone. Only a printable key claims a line, so Backspace on an empty line cannot lock the other source out.
 - **No new authority.** The console runs the existing commands only (`help mem el report uptime exit`).
 
-Not yet: the 16550 UART (only PL011 receive is read), any recovery-access change, and any hardware run (the Spark's UART and USB are unmeasured by this code).
+Not yet: any recovery-access change and any hardware run (the Spark's UART and USB are unmeasured by this code; 16550 receive, aienos#328, is host-tested only).
 
 ### Physical attended boot: what it will look like
 

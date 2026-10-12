@@ -43,6 +43,12 @@
 #   row 167  stop order: store=closed, then dma_gate nvme bus master revoked,
 #            then smmu stream back to abort, then stage lifecycle ok, then the
 #            final report; QEMU exit 0; M1 checks
+#   row 167c operator input is the POLLED serial receive of the SPCR console
+#            UART: the ready line names it (`serial pl011 at 0x9000000, polled`
+#            on QEMU virt), and after the stop order `lifecycle: input
+#            uart=pl011 rx_errors=0 overruns=0 damaged_lines=0 overlong=1`; no
+#            `REFUSED console input` line (the 16550 path is host-tested only:
+#            QEMU virt has no memory-mapped 16550, see GATES.md row 167d)
 #   row 168  unlock genesis (service image, blank disk): `unlock deadbeef` refused
 #            (64 hex digits expected); `unlock <secret>` formats a production
 #            Store with the keyslot manifest (genesis=1, generation 2, boot 1),
@@ -339,7 +345,7 @@ m1 162
 boot testkeys "${testkeys_efi}" drive_ready
 rcheck 163 "TEST-ONLY banner" '^lifecycle: TEST-ONLY service image \(CK_SERVICE_TEST_KEYS=1: TEST Store keys; QEMU only, never a production boot\)$'
 rcheck 163 "Store open, NVMe kept bound for the service lifetime" '^store: service lifetime: Store open, NVMe stays bound until the lifecycle stop order$'
-rcheck 163 "lifecycle ready" '^lifecycle: ready state=ready store=open \(operator input: serial\)$'
+rcheck 163 "lifecycle ready" '^lifecycle: ready state=ready store=open \(operator input: serial pl011 at 0x9000000, polled\)$'
 rcheck 182 "TEST-key Store: security manifest sequence 1 at genesis, no keyslot" '^store: security manifest sequence=1 generation=2 keyslot=none previous=genesis$'
 rcheck 173 "test-keys image provisions continuity at boot" '^continuity: PROVISIONED agent=[0-9a-f]{64} incarnation=1 sequence=1 cortex=0 branches=1$'
 before 173 "PROVISIONED < Store open line" '^continuity: PROVISIONED' '^store: service lifetime: Store open'
@@ -353,6 +359,9 @@ rcheck 165 "cancel drops" '^lifecycle: cancelled state=ready$'
 rcheck 166 "overlong line refused whole" '^lifecycle: REFUSED verb=invalid reason="line longer than 144 bytes"$'
 rcheck 166 "evidence counts" '^lifecycle: evidence requests=12 refused=2 invalid=0 tasks=3 approved=1 denied=1 cancelled=1 overlong=1 last_commit_gen=[0-9]+ last_id=[0-9a-f]{8} prompts=0 replies=0 gen_cancelled=0 gen_failed=0 recalls=0 inference=none remembers=1 facts=1 cortex=open records=1$'
 rcheck 167 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=13$'
+rcheck 167c "input counters after the stop order (PL011, polled)" '^lifecycle: input uart=pl011 rx_errors=0 overruns=0 damaged_lines=0 overlong=1 dropped=[0-9]+$'
+before 167c "stop order line < input counters" '^lifecycle: stop order store=closed' '^lifecycle: input uart=pl011 '
+rabsent 167c "no console-input refusal on QEMU virt" '^lifecycle: REFUSED console input'
 rcheck 179 "remember created the journal (header transaction, no records yet)" '^lifecycle: cortex open records=0 chunks=1 journal_bytes=32 store_gen=[0-9]+ heap_used_kib=[0-9]+ chain=ok$'
 rcheck 179 "remembered as record 1 (one sealed transaction)" '^lifecycle: remembered id=1 t=1 store_gen=[0-9]+ bytes=18 text="prefer short notes"$'
 rcheck 179 "facts lists the fact in the same boot" '^lifecycle: fact id=1 t=1 store_gen=[0-9]+ text="prefer short notes"$'

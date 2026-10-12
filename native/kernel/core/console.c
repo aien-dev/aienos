@@ -8,6 +8,7 @@
 #include "ck_internal.h"
 #include "fbcon.h"
 #include "arch.h"
+#include "uart_rx.h"
 
 #ifndef CK_FB_HOLD_S
 #define CK_FB_HOLD_S 0
@@ -28,23 +29,14 @@ void ck_console_set_efi(void (*write)(const char *s, size_t n))
 
 int ck_console_set_uart(const struct ck_spcr *s)
 {
+    int kind;
+    unsigned stride;
     if (!s || s->space != 0 || !s->base)
         return -1;
-    switch (s->interface_type) {
-    case 0x03: /* ARM PL011 */
-    case 0x0d: /* ARM SBSA generic UART, 32-bit only */
-    case 0x0e: /* ARM SBSA generic UART */
-        uart_kind = 1;
-        uart_stride = 4;
-        break;
-    case 0x00: /* 16550 */
-    case 0x12: /* 16550 with GAS */
-        uart_kind = 2;
-        uart_stride = s->access_size == 3 ? 4 : s->access_size == 4 ? 8 : 1;
-        break;
-    default:
+    if (ck_uart_from_spcr(s->interface_type, s->access_size, &kind, &stride) != 0)
         return -1;
-    }
+    uart_kind = kind;
+    uart_stride = stride;
     uart_phys = s->base;
     uart = (volatile uint8_t *)(uintptr_t)s->base;
     return 0;
@@ -68,10 +60,12 @@ static void uart_putc(char c)
             ;
         *(volatile uint32_t *)(uart + 0x00) = (uint8_t)c;
     } else if (uart_kind == 2) {
-        volatile uint8_t *lsr = uart + 5 * uart_stride;
-        for (unsigned i = 0; i < 1000000 && !(*lsr & 0x20); i++)
+        /* Access width from the SPCR GAS (ck_16550_width): the Spark's 16550
+         * is dword-spaced and Linux drives it with 32-bit accesses only. */
+        unsigned w = ck_16550_width(uart_stride);
+        for (unsigned i = 0; i < 1000000 && !(ck_uart_rd(uart, CK_16550_LSR * uart_stride, w) & 0x20); i++)
             ;
-        if (uart_stride == 4)
+        if (w == 4)
             *(volatile uint32_t *)uart = (uint8_t)c;
         else
             *uart = (uint8_t)c;
@@ -174,39 +168,34 @@ void ck_printf(const char *fmt, ...)
     va_end(ap);
 }
 
-/* ---- PL011 receive, polled (console session; see include/ck.h) ----
- * Registers (offsets and bits from Linux include/linux/amba/serial.h, the Arm
- * PL011 TRM page being unreadable here; see the docs-read record): UARTDR at
- * 0x00 (DATA bits 7:0, error flags OE/BE/PE/FE bits 11:8), UARTFR at 0x18
- * (RXFE bit 4 = receive FIFO empty), UARTCR at 0x30 (UARTEN bit 0, RXE bit 9).
- * The kernel only READS UARTCR; it never reconfigures the UART. */
-static unsigned rx_errs;
+/* ---- console receive, POLLED (operator input; see include/ck.h) ----
+ * The receive side uses the UART the transmit side already chose from the
+ * ACPI SPCR (ck_console_set_uart): PL011/SBSA (QEMU virt) or 16550 (the DGX
+ * Spark, SPCR type 0x01 at 0x16A00000). Register decode, readiness and the
+ * error rules live in core/uart_rx.h, shared with the host test. No
+ * interrupt is used: the lifecycle polls between its steps. The kernel never
+ * writes a UART control register (baud, FIFO, enables stay as the firmware
+ * left them). */
+static struct ck_uart_rx_count rx_count;
 
 int ck_console_rx_ready(uint32_t *cr)
 {
-    if (uart_kind != 1)
-        return 0;
-    uint32_t v = *(volatile uint32_t *)(uart + 0x30);
-    if (cr)
-        *cr = v;
-    return (v & 1u) && (v & (1u << 9));
+    return ck_uart_rx_ready(uart_kind, uart, uart_stride, cr);
 }
 
 int ck_console_rx_poll(void)
 {
-    if (uart_kind != 1)
-        return -1;
-    if (*(volatile uint32_t *)(uart + 0x18) & (1u << 4))
-        return -1;
-    uint32_t d = *(volatile uint32_t *)(uart + 0x00);
-    if (d & 0xf00u) {
-        rx_errs++;
-        return -2; /* an errored byte: dropped and counted, distinct from an empty FIFO */
-    }
-    return (int)(d & 0xffu);
+    if (uart_kind != CK_UART_PL011 && uart_kind != CK_UART_16550)
+        return CK_UART_RX_EMPTY;
+    return ck_uart_rx_take(uart_kind, uart, uart_stride, &rx_count);
 }
 
 unsigned ck_console_rx_errors(void)
 {
-    return rx_errs;
+    return rx_count.errors;
+}
+
+unsigned ck_console_rx_overruns(void)
+{
+    return rx_count.overruns;
 }

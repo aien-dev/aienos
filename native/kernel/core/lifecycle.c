@@ -6,10 +6,14 @@
  * image ends in ck_reset(). The diagnostic images are untouched (they do not
  * link this file; the weak ck_lifecycle_run is absent there).
  *
- * Operator input: the polled PL011 serial receive the console already owns
- * (core/console.c), one bounded line editor (CK_LC_LINE_MAX bytes, overlong
- * lines refused whole). The USB keyboard binding stays with the xHCI session
- * code and is a later cut. Verbs and transitions: core/lifecycle_fsm.c.
+ * Operator input: the POLLED serial receive of the console UART the boot
+ * stub chose from the ACPI SPCR (core/console.c, core/uart_rx.h: PL011/SBSA
+ * on QEMU virt, 16550 on the DGX Spark), no interrupts. One bounded line
+ * assembler (core/line_rx.c: CK_LC_LINE_MAX bytes, overlong or damaged lines
+ * refused whole) serves the prompt and the cancel poll between generation
+ * steps. Neither UART kind: `console input unsupported on this platform` and
+ * the stop order. The USB keyboard binding stays with the xHCI session code
+ * and is a later cut. Verbs and transitions: core/lifecycle_fsm.c.
  *
  * Store: the sealed Store opened by the store stage stays open and the NVMe
  * stays bound for the service lifetime (svc/store_boot.c, CK_SERVICE). An
@@ -46,6 +50,7 @@
 #include "ck.h"
 #include "ck_internal.h"
 #include "lifecycle_fsm.h"
+#include "line_rx.h"
 #include "store_boot.h"
 #include "store_sealed.h"
 #include "continuity_service.h"
@@ -74,7 +79,7 @@ int ck_store_service_rotate(const char *arg, size_t arg_len);
 static ck_lc g_lc;
 static uint8_t g_last_id[32];
 static uint64_t g_last_gen;
-static unsigned g_overlong, g_dropped;
+static unsigned g_overlong;
 
 /* The Cortex store over the sealed Store (P06 cuts 3 and 4). */
 #define CK_CX_SUBJECTS 2u        /* subject 0: the owner (facts); 1: reserved for ALLEN */
@@ -163,31 +168,19 @@ static int commit_task(void)
     return rc;
 }
 
-/* Between generation steps the console is polled: a complete line "cancel"
- * abandons the request; any other complete line is refused (only cancel is
- * accepted while generating). */
-static char g_gen_line[CK_LC_LINE_MAX + 1];
-static size_t g_gen_len;
+/* Between generation steps the console is polled (no interrupts): a complete
+ * line "cancel" abandons the request; any other complete line, and an
+ * overlong or damaged one, is refused and never run (only cancel is
+ * accepted while generating). Same line rules as the prompt (core/line_rx.c). */
+static struct ck_line_rx g_gen_rx;
+static void gen_refuse(enum ck_lc_verb v, const char *reason)
+{
+    g_lc.refused++;
+    ck_printf("lifecycle: REFUSED verb=%s reason=\"%s\"\n", ck_lc_verb_name(v), reason);
+}
 static int cancel_poll(void)
 {
-    for (;;) {
-        int b = ck_console_rx_poll();
-        if (b == -1) return 0;
-        if (b == -2) continue;
-        char c = (char)b;
-        if (c == '\r' || c == '\n') {
-            const char *arg;
-            size_t arg_len;
-            enum ck_lc_verb v = g_gen_len ? ck_lc_decode(g_gen_line, g_gen_len, &arg, &arg_len) : CK_LC_V_EMPTY;
-            g_gen_len = 0;
-            if (v == CK_LC_V_CANCEL) return 1;
-            if (v == CK_LC_V_EMPTY) continue;
-            g_lc.refused++;
-            ck_printf("lifecycle: REFUSED verb=%s reason=\"generating: only cancel is accepted\"\n", ck_lc_verb_name(v));
-            continue;
-        }
-        if (c >= 0x20 && c <= 0x7e && g_gen_len < CK_LC_LINE_MAX) g_gen_line[g_gen_len++] = c;
-    }
+    return ck_line_rx_cancel_poll(&g_gen_rx, ck_console_rx_poll, gen_refuse);
 }
 
 /* prompt accepted: the resident model generates a bounded reply, which
@@ -206,7 +199,7 @@ static void generate(void)
         return;
     }
     ck_printf("lifecycle: generating prompt=\"%s\" (cancel stops it between steps)\n", g_lc.task);
-    g_gen_len = 0;
+    ck_line_rx_init(&g_gen_rx);
     int rc = ck_infer_prompt(g_lc.task, g_lc.task_len, cancel_poll, &r);
     if (rc < 0) {
         ck_lc_generate_done(&g_lc, CK_LC_GEN_FAILED, 0, 0);
@@ -508,63 +501,71 @@ static int in_secret(const char *buf, size_t len)
     return after_verb(buf, len, "unlock") || after_verb(buf, len, "rotate");
 }
 
-/* Bounded serial line editor: printable bytes collected, Backspace edits,
- * CR or LF ends the line; a line past CK_LC_LINE_MAX is refused whole (the
- * rest of it is dropped until the next Enter). Returns 1 when the line is complete. */
-static int rx_line(char *buf, size_t *len, int *overflow)
+/* Bounded serial line editor over the POLLED console receive (no
+ * interrupts): the rules are core/line_rx.c (printable bytes collected,
+ * Backspace edits, CR or LF ends the line, a line past CK_LC_LINE_MAX or one
+ * with a lost or damaged byte is refused whole at its Enter). This function
+ * only echoes. At most CK_LINE_RX_BURST bytes per call. Returns 1 when
+ * g_rx.buf[0..g_rx.len) is a complete line. */
+static struct ck_line_rx g_rx;
+static int rx_line(void)
 {
-    for (;;) {
+    for (unsigned n = 0; n < CK_LINE_RX_BURST; n++) {
         int b = ck_console_rx_poll();
-        if (b == -1) return 0;
-        if (b == -2) continue; /* error byte: counted by the console, dropped here */
-        char c = (char)b;
-        if (c == '\r' || c == '\n') {
-            if (*overflow) {
-                g_overlong++;
-                ck_puts("\n");
-                ck_printf("lifecycle: REFUSED verb=invalid reason=\"line longer than %u bytes\"\n", (unsigned)CK_LC_LINE_MAX);
-                *overflow = 0;
-                *len = 0;
-                return 0;
-            }
+        if (b == CK_LINE_RX_EMPTY) return 0;
+        switch (ck_line_rx_feed(&g_rx, b)) {
+        case CK_LINE_ECHO: {
+            char e[2] = { in_secret(g_rx.buf, g_rx.len - 1) ? '*' : g_rx.buf[g_rx.len - 1], 0 };
+            ck_puts(e);
+            break;
+        }
+        case CK_LINE_ERASE: ck_puts("\b \b"); break;
+        case CK_LINE_DONE: ck_puts("\n"); return 1;
+        case CK_LINE_OVERLONG:
+            g_overlong++;
             ck_puts("\n");
-            return 1;
+            ck_printf("lifecycle: REFUSED verb=invalid reason=\"line longer than %u bytes\"\n", (unsigned)CK_LC_LINE_MAX);
+            return 0;
+        case CK_LINE_DAMAGED:
+            ck_puts("\n");
+            ck_puts("lifecycle: REFUSED verb=invalid reason=\"receive error in the line (overrun, parity, framing or break): type it again\"\n");
+            return 0;
+        default: break;
         }
-        if (c == 0x7f || c == 0x08) {
-            if (*len && !*overflow) { (*len)--; ck_puts("\b \b"); }
-            continue;
-        }
-        if (c < 0x20 || c > 0x7e) { g_dropped++; continue; }
-        if (*overflow) continue;
-        if (*len >= CK_LC_LINE_MAX) { *overflow = 1; continue; }
-        { char e[2] = { in_secret(buf, *len) ? '*' : c, 0 }; buf[(*len)++] = c; ck_puts(e); }
     }
+    return 0;
 }
 
 /* Returns 0 after an orderly stop (kmain then prints the final report and
  * resets). Never returns while serving. */
 int ck_lifecycle_run(void)
 {
-    char line[CK_LC_LINE_MAX + 1];
-    size_t len = 0;
-    int overflow = 0;
-    uint32_t cr;
+    uint32_t cr = 0;
     ck_lc_init(&g_lc);
+    ck_line_rx_init(&g_rx);
+    ck_line_rx_init(&g_gen_rx);
 #ifdef CK_SERVICE_TEST_KEYS
     ck_puts("lifecycle: TEST-ONLY service image (CK_SERVICE_TEST_KEYS=1: TEST Store keys; QEMU only, never a production boot)\n");
 #endif
     ck_lc_start(&g_lc, ck_store_service_ready());
-    if (!ck_console_rx_ready(&cr)) {
-        ck_puts("lifecycle: REFUSED no operator input (console UART has no PL011 receiver): stop order\n");
+    /* Operator input is the console UART the boot stub chose from the ACPI
+     * SPCR (PL011/SBSA or 16550), POLLED: no interrupt is ever enabled. */
+    const char *uname = ck_console_uart_name();
+    if (uname[0] == 'n') { /* "none": no console UART of a kind this kernel drives */
+        ck_puts("lifecycle: REFUSED console input unsupported on this platform (no PL011/SBSA or 16550 console UART in the ACPI SPCR): stop order\n");
+        ck_lc_apply(&g_lc, CK_LC_V_SHUTDOWN, "", 0);
+    } else if (!ck_console_rx_ready(&cr)) {
+        ck_printf("lifecycle: REFUSED console input not ready (uart=%s base=0x%llx regs=0x%x): stop order\n", uname,
+                  (unsigned long long)ck_console_uart_base(), cr);
         ck_lc_apply(&g_lc, CK_LC_V_SHUTDOWN, "", 0);
     } else {
-        ck_printf("lifecycle: ready state=%s store=%s (operator input: serial)\n", ck_lc_state_name(g_lc.state),
-                  ck_store_service_ready() ? "open" : "locked");
+        ck_printf("lifecycle: ready state=%s store=%s (operator input: serial %s at 0x%llx, polled)\n",
+                  ck_lc_state_name(g_lc.state), ck_store_service_ready() ? "open" : "locked", uname,
+                  (unsigned long long)ck_console_uart_base());
         ck_puts("> ");
         while (g_lc.state != CK_LC_QUIESCE) {
-            if (rx_line(line, &len, &overflow)) {
-                handle_line(line, len);
-                len = 0;
+            if (rx_line()) {
+                handle_line(g_rx.buf, g_rx.len);
                 if (g_lc.state != CK_LC_QUIESCE) ck_puts("> ");
             } else {
                 __asm__ volatile("yield");
@@ -581,5 +582,8 @@ int ck_lifecycle_run(void)
     ck_lc_stopped(&g_lc);
     ck_printf("lifecycle: stop order store=%s nvme=released state=%s requests=%u\n", closed ? "closed" : "was-locked",
               ck_lc_state_name(g_lc.state), g_lc.requests);
+    ck_printf("lifecycle: input uart=%s rx_errors=%u overruns=%u damaged_lines=%u overlong=%u dropped=%u\n", uname,
+              ck_console_rx_errors(), ck_console_rx_overruns(), g_rx.damaged_lines + g_gen_rx.damaged_lines,
+              g_rx.overlong + g_gen_rx.overlong, g_rx.dropped + g_gen_rx.dropped);
     return 0;
 }

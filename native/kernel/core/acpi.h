@@ -73,7 +73,7 @@ int ck_place_task(const struct ck_cpu_topology *t, uint32_t task_index, uint8_t 
                   uint32_t *core);
 
 struct ck_spcr {
-    uint8_t interface_type; /* 0x03 PL011, 0x0d/0x0e SBSA, 0x00/0x12 16550 */
+    uint8_t interface_type; /* 0x03 PL011, 0x0d/0x0e SBSA, 0x00/0x01/0x12 16550 (core/uart_rx.h) */
     uint8_t space;          /* GAS address space: 0 = system memory */
     uint8_t bit_width;
     uint8_t access_size;    /* GAS access size: 1 byte .. 4 qword */
