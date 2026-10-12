@@ -49,7 +49,8 @@ refuses the TEST keys:
         CK_OWNER_PUBKEYS=<owner public keys file> CK_MACHINE_ID=<machine id file>
 
 Normally use `scripts/stage_one_time_boot_ck_full.sh --dry-run`, which prints
-every command it would run and touches nothing.
+every command it would run and touches nothing (for the B7b probe boot:
+`scripts/stage_one_time_boot_ck_b7b.sh --dry-run`, same contract).
 
 ## 2. Preflight checklist before any attended boot
 
