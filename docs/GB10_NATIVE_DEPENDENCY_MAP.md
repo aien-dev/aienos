@@ -202,7 +202,7 @@ Two orders exist for native AIENOS. Order 1 (older): M5 trust, M6 network, M7 in
 
 - Cut A in full: this map, the platform-services contract, hiding `NvrmMem` behind typed handles, moving `nvrm_mthd` and `nvrm_gp_entry` into a shared encoding header, a freestanding link target for the codegen, QMD and engine files, backend contract tests over the existing fake. INFERRED (high): no kernel or hardware change.
 - B host fixtures: multi-segment MCFG parsing tests, fake config-space access that fails on any write, GPU identity fixture on a nonzero segment, malformed and overlapping entry tests. These are pure parsing and fixtures. The issue already authorizes "Host-only interface, parser, fixture, and refusal work".
-- C host work: inventory of firmware and protocol sources, parsers and refusal tests for firmware metadata. No loading.
+- C host work: inventory of firmware and protocol sources, parsers and refusal tests for firmware metadata. No loading. DONE 2026-10-12: docs/GB10_FIRMWARE_INVENTORY.md and native/kernel/tools/ck_gsp_fw_inspect.c (`make -C native/kernel gsp-fw-inspect-test`); the next host-only steps and the remaining unknowns are listed there (sections 7 and 8).
 - D host work: simulated-device tests for allocator, address-space bookkeeping and refusal paths, using no real GPU.
 
 ### Cannot start until #163's decision is made, or needs coordination first
@@ -240,7 +240,7 @@ Where it may bite here. A GPU channel is the likely domain-1 kernel channel (INF
 
 ## 8. Known unknowns
 
-1. UNKNOWN: GB10 GSP firmware transport and initialization protocol, exact firmware blobs and versions, and what is public. Our source contains none of it (RM does it, [nvrm.c:223](https://github.com/aien-dev/physics/blob/6d7cf0d4d8eb2cda7b512100ff6058e25dbb3ddf/nvrm/nvrm.c#L223)). Blocks cut C.
+1. PARTLY RESOLVED 2026-10-12 (docs/GB10_FIRMWARE_INVENTORY.md): the blobs, versions, digests, the SEC2-boots-GSP-FMC path on GB10B and the licence limits are now inventoried from the public driver source at tag 580.173.02; what is public: everything the host hands to the chip. Still UNKNOWN: the COT payload and WPR-meta layouts, SEC2 preconditions at AIENOS entry, and the mandatory RPC subset (inventory section 8). Our source contains none of it (RM does it, [nvrm.c:223](https://github.com/aien-dev/physics/blob/6d7cf0d4d8eb2cda7b512100ff6058e25dbb3ddf/nvrm/nvrm.c#L223)). Still blocks the machine-side part of cut C.
 2. UNKNOWN: GPU MMU page-table format, TLB invalidation and fault-reporting registers on GB10, as implemented by the pinned driver. Our code only requests mappings.
 3. UNKNOWN: how the work-submit token is derived and the channel is made runnable without RM (`GET_WORK_SUBMIT_TOKEN`, `GPFIFO_SCHEDULE`).
 4. UNKNOWN: which words of the captured constant bank 0 template and the 18-word setup prefix are context-independent versus values RM chose. Needed before a native context can reuse the Omega QMD and cbank builders.
