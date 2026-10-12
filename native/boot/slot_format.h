@@ -2,12 +2,14 @@
  * reads to choose which native image boots, and a kernel writes to install,
  * update and roll back WITHOUT Linux (native v1 plan P11, gate N7).
  *
- * STATUS: PROPOSED format (docs/NATIVE_IMAGE_SLOTS.md). Nothing writes it yet
- * and no image reads it: native/boot/efi_main.c is unchanged (loader
- * expansion is frozen, BOOT_HANDOFF_CONTRACT.md; the owner decides whether
- * the loader grows slot selection). This header, slot_select.c and the host
- * tool native/kernel/tools/ck_slot_tool.c pin the format and the decision
- * rules so they can be reviewed and mutation-tested before any loader change.
+ * STATUS (docs/NATIVE_IMAGE_SLOTS.md): format v1. Read by SLOTLDR.EFI
+ * (native/boot/slot_loader.c, P11 cut 2a, owner decision 2026-10-12), a
+ * separate chain loader in FRONT of the unchanged stub + kernel image
+ * (native/boot/efi_main.c is not modified). The loader writes the control
+ * record only to consume a candidate try. The kernel-side writer (stage,
+ * promote, abandon from the native NVMe path) is cut 2b. This header,
+ * slot_select.c and the host tool native/kernel/tools/ck_slot_tool.c pin
+ * the format and the decision rules (mutation-tested in make slot-test).
  *
  * Accepted design this follows: ADR 0006 (transactional A/B slots, health
  * milestones before promotion) and TRUST-1 Q19 (A = known-good, B =
@@ -62,6 +64,19 @@
 #define CK_SLOT_NONE 0xFFu
 #define CK_SLOT_MAX_TRIES 3u              /* bounded candidate boot attempts */
 #define CK_SLOT_MIN_CAP_UNITS 2u          /* manifest + at least one image unit */
+
+/* Geometry from the partition size alone (U = whole 4096-byte units in the
+ * partition): CAP = (U - 4) / 2 units per slot; slot s starts at unit
+ * 4 + s * CAP (its manifest), its image at the next unit, at most
+ * (CAP - 1) * 4096 bytes. Shared by SLOTLDR.EFI and ck_slot_tool. */
+static inline uint64_t ck_slot_cap_units(uint64_t part_units)
+{
+    return part_units < CK_SLOT_FIRST_UNIT ? 0 : (part_units - CK_SLOT_FIRST_UNIT) / CK_SLOT_COUNT;
+}
+static inline uint64_t ck_slot_manifest_unit(unsigned slot, uint64_t cap_units)
+{
+    return CK_SLOT_FIRST_UNIT + (uint64_t)slot * cap_units;
+}
 
 /* 8B1096CD-7928-4E08-B5E4-C19B6B532760: AIENOS image slots partition type. */
 #define CK_SLOT_PART_TYPE_TEXT "8B1096CD-7928-4E08-B5E4-C19B6B532760"
