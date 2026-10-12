@@ -27,6 +27,9 @@ int main(void)
     CHECK(dec("unlock", &a, &al) == CK_LC_V_UNLOCK && al == 0);
     CHECK(dec("unlock deadbeef  ", &a, &al) == CK_LC_V_UNLOCK && al == 8 && memcmp(a, "deadbeef", 8) == 0);
     CHECK(CK_LC_LINE_MAX >= 7 + 64); /* "unlock " + a 64-hex recovery secret fits in one line */
+    CHECK(CK_LC_LINE_MAX >= 7 + 64 + 1 + 64); /* "rotate " + current + " " + new */
+    CHECK(dec("rotate aa bb", &a, &al) == CK_LC_V_ROTATE && al == 5 && memcmp(a, "aa bb", 5) == 0);
+    CHECK(dec("rotate", &a, &al) == CK_LC_V_ROTATE && al == 0);
     CHECK(dec("frobnicate", &a, &al) == CK_LC_V_UNKNOWN);
     CHECK(dec("prompt hi", &a, &al) == CK_LC_V_PROMPT && al == 2 && memcmp(a, "hi", 2) == 0);
     CHECK(dec("prompt", &a, &al) == CK_LC_V_INVALID);       /* prompt needs text */
@@ -56,6 +59,7 @@ int main(void)
     CHECK(lc.state == CK_LC_LOCKED);
     CHECK(req(&lc, "status") == CK_LC_R_OK && req(&lc, "help") == CK_LC_R_OK && req(&lc, "evidence") == CK_LC_R_OK);
     CHECK(req(&lc, "task hello") == CK_LC_R_REFUSED && lc.state == CK_LC_LOCKED && lc.tasks == 0);
+    CHECK(req(&lc, "rotate aa bb") == CK_LC_R_REFUSED && lc.state == CK_LC_LOCKED); /* unlock first */
     CHECK(req(&lc, "approve") == CK_LC_R_REFUSED && req(&lc, "deny") == CK_LC_R_REFUSED && req(&lc, "cancel") == CK_LC_R_REFUSED);
     CHECK(req(&lc, "unlock") == CK_LC_R_UNLOCK);
     ck_lc_unlock_done(&lc, 0);
@@ -64,6 +68,13 @@ int main(void)
     ck_lc_unlock_done(&lc, 1);
     CHECK(lc.state == CK_LC_READY);
     CHECK(req(&lc, "unlock") == CK_LC_R_REFUSED); /* already unlocked */
+    CHECK(req(&lc, "rotate") == CK_LC_R_REFUSED && lc.state == CK_LC_READY); /* needs both secrets */
+    CHECK(req(&lc, "rotate aa bb") == CK_LC_R_ROTATE);
+    ck_lc_rotate_done(&lc, 0);
+    CHECK(lc.state == CK_LC_READY && strstr(lc.reason, "rotation refused"));
+    CHECK(req(&lc, "rotate aa bb") == CK_LC_R_ROTATE);
+    ck_lc_rotate_done(&lc, 1);
+    CHECK(lc.state == CK_LC_READY);
     CHECK(req(&lc, "shutdown") == CK_LC_R_STOP && lc.state == CK_LC_QUIESCE);
     CHECK(req(&lc, "status") == CK_LC_R_REFUSED && strcmp(lc.reason, "stopping") == 0);
     ck_lc_stopped(&lc);

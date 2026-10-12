@@ -38,7 +38,7 @@
 #            with a Store generation and object id; state back to ready
 #   row 165  deny and cancel drop pending tasks; a second task while pending is
 #            refused; approve with nothing pending is refused
-#   row 166  bounds: a 97-byte line is refused whole and never run; evidence
+#   row 166  bounds: a 145-byte line is refused whole and never run; evidence
 #            shows tasks=3 approved=1 denied=1 cancelled=1 overlong=1
 #   row 167  stop order: store=closed, then dma_gate nvme bus master revoked,
 #            then smmu stream back to abort, then stage lifecycle ok, then the
@@ -99,6 +99,20 @@
 #            (boot 4) `sequence=2 generation=7 keyslot=bound previous=linked` (the
 #            manifest read back verified under K_root_auth, bound the keyslot the
 #            keyed open bound, carried key_epoch 1 and the manifest count)
+#   row 184  P04 cut 2b recovery secret rotation (boot 7, the boot-3 disk, so a
+#            second cold resume at generation 6): after `unlock <ok>` (boot
+#            record 7, continuity resume 8), `rotate <ok> <new>` proves
+#            possession of the current secret, then one transaction (generation
+#            9) commits KeySlotManifest sequence 2 (K_vol re-wrapped under the
+#            new secret, linked to manifest 1) and SecurityManifest sequence 3
+#            binding it; `lifecycle: rotate ok state=ready`; the typed line is
+#            echoed as 129 '*'; neither secret appears in the serial log
+#   row 185  P04 cut 2b after rotation (boot 8, the boot-7 disk): the old secret
+#            is refused by the keyslot tag (RecoverySecretRejected, disk not
+#            opened); the new secret opens the Store at generation 9, the keyed
+#            open binds the chain of two manifests, SecurityManifest sequence 4
+#            links the rotation one (keyslot=bound previous=linked), continuity
+#            RESUMES incarnation 3; no SecurityManifest refusal
 #   build    the default (diagnostic) image carries no lifecycle; CK_SERVICE is
 #            refused with CK_CONSOLE_SESSION, CK_QEMU_UNSAFE_DMA and a CK_TEST_*
 #            flag; CK_SERVICE_TEST_KEYS is refused with CK_HARDWARE_STAGING
@@ -166,6 +180,7 @@ ser_wait() { wait_for 180 "$1" '^report_kind: (panic|fault|final)' || true; }
 # QEMU-only recovery secrets (public test values, 32 bytes as 64 hex; never a production secret)
 secret_ok="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 secret_bad="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1eff"
+secret_new="202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
 
 boot() { # name efi driver [nvme.img to reuse]
     work="${top}/$1"
@@ -218,7 +233,7 @@ drive_ready() {
     ser_line approve
     ser_line "task to be denied"; ser_line deny
     ser_line "task to be cancelled"; ser_line cancel
-    ser_line "$(printf 'x%.0s' $(seq 97))"
+    ser_line "$(printf 'x%.0s' $(seq 145))"
     ser_line "remember prefer short notes"; ser_wait '^lifecycle: (remembered|REFUSED verb=remember)'
     ser_line facts; ser_wait '^lifecycle: (facts records=|facts none|REFUSED verb=facts)'
     ser_line evidence
@@ -253,6 +268,22 @@ drive_infer() {
 }
 drive_infer_recall() {
     ser_line status; ser_line recall; ser_line evidence; ser_line shutdown
+}
+drive_rotate() {
+    ser_line "unlock ${secret_ok}"; ser_wait '^(lifecycle: unlock ok|lifecycle: REFUSED verb=unlock)'
+    ser_line "rotate ${secret_ok} ${secret_new}"; ser_wait '^(lifecycle: rotate ok|lifecycle: REFUSED verb=rotate)'
+    ser_line status
+    ser_line evidence
+    ser_line shutdown
+}
+drive_rotated() {
+    ser_line "unlock ${secret_ok}"; ser_wait '^(lifecycle: unlock ok|lifecycle: REFUSED verb=unlock)'
+    ser_line status
+    ser_line "unlock ${secret_new}"; ser_wait '^(lifecycle: unlock ok|lifecycle: REFUSED verb=unlock)'
+    ser_line status
+    ser_line facts; ser_wait '^lifecycle: (facts records=|facts none|REFUSED verb=facts)'
+    ser_line evidence
+    ser_line shutdown
 }
 drive_relock() {
     ser_line "unlock ${secret_bad}"; ser_wait '^(lifecycle: unlock ok|lifecycle: REFUSED verb=unlock)'
@@ -292,7 +323,7 @@ rcheck 161 "task refused while locked" '^lifecycle: REFUSED verb=task state=lock
 rcheck 161 "unlock refused, still locked" '^lifecycle: REFUSED verb=unlock state=locked reason="production key source refused: still locked"'
 rcheck 161 "unlock asked the production key source again" '^store: unlock REFUSED proof=keyed step="production Store key source" rc=-2002'
 rcheck 161 "status answered" '^lifecycle: state=locked store=locked pending=- requests='
-rcheck 161 "help answered" '^lifecycle: verbs: status unlock \[<64-hex recovery secret>\] task <text> prompt <text> approve deny cancel recall remember <text> facts evidence help shutdown$'
+rcheck 161 "help answered" '^lifecycle: verbs: status unlock \[<64-hex recovery secret>\] rotate <current 64-hex> <new 64-hex> task <text> prompt <text> approve deny cancel recall remember <text> facts evidence help shutdown$'
 rcheck 161 "evidence answered" '^lifecycle: evidence requests=5 refused=2 invalid=0 tasks=0 approved=0'
 rcheck 162 "stop order with no Store" '^lifecycle: stop order store=was-locked nvme=released state=stop requests=6$'
 before 162 "locked lifecycle ready < NVMe revoke (revoke only at the stop order)" '^lifecycle: ready state=locked' '^dma_gate: nvme bus master revoked'
@@ -319,7 +350,7 @@ rcheck 165 "second task while pending refused" '^lifecycle: REFUSED verb=task st
 rcheck 165 "approve with nothing pending refused" '^lifecycle: REFUSED verb=approve state=ready reason="nothing pending"'
 rcheck 165 "deny drops" '^lifecycle: denied state=ready$'
 rcheck 165 "cancel drops" '^lifecycle: cancelled state=ready$'
-rcheck 166 "overlong line refused whole" '^lifecycle: REFUSED verb=invalid reason="line longer than 96 bytes"$'
+rcheck 166 "overlong line refused whole" '^lifecycle: REFUSED verb=invalid reason="line longer than 144 bytes"$'
 rcheck 166 "evidence counts" '^lifecycle: evidence requests=12 refused=2 invalid=0 tasks=3 approved=1 denied=1 cancelled=1 overlong=1 last_commit_gen=[0-9]+ last_id=[0-9a-f]{8} prompts=0 replies=0 gen_cancelled=0 gen_failed=0 recalls=0 inference=none remembers=1 facts=1 cortex=open records=1$'
 rcheck 167 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=13$'
 rcheck 179 "remember created the journal (header transaction, no records yet)" '^lifecycle: cortex open records=0 chunks=1 journal_bytes=32 store_gen=[0-9]+ heap_used_kib=[0-9]+ chain=ok$'
@@ -410,6 +441,49 @@ m1 169
 rabsent 170 "secret hex never in the serial log (resume boot)" "${secret_ok}"
 rabsent 170 "wrong secret hex never in the serial log" "${secret_bad}"
 
+# --- boot 7 (runs right after boot 4): same disk, rotate the recovery secret (P04 cut 2b) ---
+boot rotate "${service_efi}" drive_rotate "${unlock_img}"
+rcheck 184 "lifecycle came up locked" '^lifecycle: ready state=locked store=locked'
+rcheck 184 "store opened at generation 6 (the boot-3 disk), boot_count 1" '^store: opened generation=6 boot_count=1 prev_commit=[0-9a-f]+ anchor=valid-resume$'
+rcheck 184 "boot transaction: security manifest sequence 2" '^store: security manifest sequence=2 generation=7 keyslot=bound previous=linked$'
+rcheck 184 "unlock ok with the current secret" '^store: unlock ok source=recovery-keyslot slot=1 genesis=0 generation=7 boot_count=2$'
+rcheck 184 "continuity RESUMED incarnation 2" "^continuity: RESUMED agent=${unlock_agent} incarnation=2 sequence=2 cortex=0 branches=1\$"
+rcheck 184 "rotation committed: KeySlotManifest sequence 2, SecurityManifest sequence 3, one generation (9)" '^store: rotated recovery keyslot manifest_sequence=2 security_sequence=3 generation=9 \(previous secret retired\)$'
+rcheck 184 "lifecycle rotate ok, state ready" '^lifecycle: rotate ok state=ready$'
+rabsent 184 "rotate not refused" '^(lifecycle: REFUSED verb=rotate|store: rotate REFUSED)'
+rcheck 184 "typed rotate line echoed as 129 '*'" '^> rotate \*{129}$'
+rcheck 184 "status ready after rotation" "^lifecycle: state=ready store=open pending=- requests=3 continuity=resumed agent=${unlock_agent:0:16} incarnation=2 subject_seq=1\$"
+rcheck 184 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=[0-9]+$'
+rabsent 184 "no panic or fault" '^report_kind: (panic|fault)'
+if [[ "${qemu_status}" == 0 ]]; then ok 184 "QEMU exit 0"; else bad 184 "QEMU exit ${qemu_status}"; fi
+m1 184
+rabsent 184 "current secret hex never in the serial log (rotation boot)" "${secret_ok}"
+rabsent 184 "new secret hex never in the serial log (rotation boot)" "${secret_new}"
+rotate_img="${top}/rotate/nvme.img"
+
+# --- boot 8 (before the inference boots 5 and 6): same disk, the old secret is retired, the new one resumes ---
+boot rotated "${service_efi}" drive_rotated "${rotate_img}"
+rcheck 185 "lifecycle came up locked" '^lifecycle: ready state=locked store=locked'
+rcheck 185 "old secret refused by the keyslot tag of the newest manifest" '^store: unlock REFUSED proof=keyed step="recovery secret rejected \(K_vol unwrap tag failed\); disk not opened" rc=-2004 \(RecoverySecretRejected\); still LOCKED, disk not reformatted$'
+rcheck 185 "lifecycle still locked after the old secret" '^lifecycle: REFUSED verb=unlock state=locked reason="production key source refused: still locked"$'
+rcheck 185 "status still locked" '^lifecycle: state=locked store=locked pending=- requests=2 continuity=none$'
+rcheck 185 "store opened at generation 9 (rotation committed), boot_count 2" '^store: opened generation=9 boot_count=2 prev_commit=[0-9a-f]+ anchor=valid-resume$'
+rcheck 185 "security manifest sequence 4 links the rotation one, keyslot bound" '^store: security manifest sequence=4 generation=10 keyslot=bound previous=linked$'
+rabsent 185 "no SecurityManifest refusal after rotation" '^store: (unlock )?REFUSED proof=keyed step="SecurityManifest'
+rcheck 185 "new secret unlock ok, no genesis" '^store: unlock ok source=recovery-keyslot slot=1 genesis=0 generation=10 boot_count=3$'
+rcheck 185 "continuity RESUMED incarnation 3" "^continuity: RESUMED agent=${unlock_agent} incarnation=3 sequence=3 cortex=0 branches=1\$"
+rabsent 185 "no second genesis" '^continuity: (PROVISIONED|genesis)'
+rabsent 185 "not reformatted" '^store: blank disk'
+rcheck 185 "lifecycle unlocked to ready" '^lifecycle: unlock ok state=ready$'
+rcheck 185 "the fact still answers from the disk after rotation" '^lifecycle: fact id=1 t=1 store_gen=6 text="prefer short notes"$'
+rcheck 185 "evidence: one refused unlock" '^lifecycle: evidence requests=6 refused=1 invalid=0 '
+rcheck 185 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=7$'
+rabsent 185 "no panic or fault" '^report_kind: (panic|fault)'
+if [[ "${qemu_status}" == 0 ]]; then ok 185 "QEMU exit 0"; else bad 185 "QEMU exit ${qemu_status}"; fi
+m1 185
+rabsent 185 "old secret hex never in the serial log (post-rotation boot)" "${secret_ok}"
+rabsent 185 "new secret hex never in the serial log (post-rotation boot)" "${secret_new}"
+
 # --- boots 5 and 6: test-keys image with the resident inference session (P06 cut 2) ---
 infer_tag="AIENOS_CK_LIFECYCLE_INFER"
 infer_boots=""
@@ -484,7 +558,7 @@ else
 fi
 
 if [[ "${fail}" != 0 || -n "${AIENOS_QEMU_VERBOSE:-}" ]]; then
-    for b in service testkeys unlock relock ${infer_boots}; do echo "---- ${b} serial (lifecycle lines) ----"; grep -E '^(lifecycle|store|continuity|allen|infer|stage lifecycle|dma_gate|smmu: nvme|report_kind|mm_usage)' "${top}/${b}/serial.txt" | head -80 || true; done
+    for b in service testkeys unlock relock rotate rotated ${infer_boots}; do echo "---- ${b} serial (lifecycle lines) ----"; grep -E '^(lifecycle|store|continuity|allen|infer|stage lifecycle|dma_gate|smmu: nvme|report_kind|mm_usage)' "${top}/${b}/serial.txt" | head -80 || true; done
 fi
 if [[ "${fail}" == 0 ]]; then echo "${final_tag}: PASS (QEMU only; hardware NOT_RUN)"; exit 0; fi
 echo "${final_tag}: FAIL"; exit 1

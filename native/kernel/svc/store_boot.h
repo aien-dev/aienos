@@ -50,11 +50,28 @@
  * equal to the number of manifests on the Store. A Store with history but
  * no manifest, or a manifest failing any check, is refused (CK_SB_E_SECMAN)
  * before the boot record is written and the keys are wiped.
- * Limits (cut 2a): TPM Slot 0 stays BLOCKED_HARDWARE, no key rotation
- * (active_key_epoch 1); only the boot transaction writes a manifest
- * (approve, continuity and journal commits do not advance
- * security_sequence); agent_root_id, continuity_manifest_id and
- * migration_manifest_id stay zero (not yet linked). */
+ *
+ * KEY ROTATION (P04 cut 2b, ADR 0017 section 2.7 item 1, credential
+ * rotation). ck_store_rotate_recovery takes the current and the new raw
+ * recovery secret while the production Store is open: the current secret
+ * must unwrap K_vol from the bound manifest (proof of possession, nothing is
+ * written otherwise), a fresh salt and nonce come from the entropy service,
+ * and one transaction commits the next KeySlotManifest of the chain
+ * (manifest_sequence + 1, previous_keyslot_manifest_id = the bound manifest,
+ * same K_vol and active_key_epoch, the Recovery_RawSecret descriptor
+ * re-wrapped under the new KEK) together with a SecurityManifest
+ * (security_sequence + 1) that binds the new manifest. The sealed store
+ * admits a manifest only as the next link of the chain and binds the newest
+ * one, so the next unlock accepts the new secret only: the old descriptor is
+ * superseded, its ciphertext stays on the append-only Store (ADR 0017
+ * section 2.7 item 2: a K_vol compromise needs migration, not rotation).
+ * K_vol lives in a stack buffer for the rewrap only and is wiped.
+ * Limits (cut 2b): TPM Slot 0 stays BLOCKED_HARDWARE (slot 0 Empty);
+ * active_key_epoch stays 1 (K_vol never changes in place); only the boot
+ * and rotation transactions write a SecurityManifest (approve, continuity
+ * and journal commits do not advance security_sequence); agent_root_id,
+ * continuity_manifest_id and migration_manifest_id stay zero (not yet
+ * linked). */
 #ifndef AIENOS_CK_STORE_BOOT_H
 #define AIENOS_CK_STORE_BOOT_H
 #include <stdint.h>
@@ -84,6 +101,7 @@ typedef struct {
     int unlocked_genesis;     /* ck_store_unlock_boot: this run created the keyslot manifest */
     const char *key_source;   /* ck_store_unlock_boot: "recovery-keyslot" */
     uint64_t secman_seq;      /* security_sequence of the SecurityManifest this boot committed */
+    uint64_t keyslot_seq;     /* manifest_sequence of the KeySlotManifest bound (unlock) or committed (rotate) */
     int secman_keyslot;       /* 1: it binds the KeySlotManifest ObjectId (production Store) */
     int secman_prev;          /* 1: it links the manifest it supersedes (0 at genesis) */
 } ck_store_report;
@@ -129,6 +147,12 @@ int store_boot_run_policy(const disk_dev *d, const ss_keys *keys, const uint8_t 
  * hardware_staging as store_boot_run_policy. Prints nothing. */
 int ck_store_unlock_boot(const disk_dev *d, const uint8_t secret[CK_SB_SECRET_LEN], const uint8_t *expect_uuid,
                          const char *commit, int hardware_staging, ck_store_report *r);
+/* Recovery secret rotation on the open production Store (see the header
+ * comment): current must unwrap K_vol from the bound KeySlotManifest, next is
+ * the new raw secret. One transaction (next manifest + SecurityManifest) or
+ * nothing. Prints nothing. */
+int ck_store_rotate_recovery(const disk_dev *d, const uint8_t current[CK_SB_SECRET_LEN],
+                             const uint8_t next[CK_SB_SECRET_LEN], ck_store_report *r);
 /* Print the report lines (also used by the host test). */
 void store_boot_print(const ck_store_report *r);
 /* The open Store of the last store_boot_run (valid only after it returned 0;

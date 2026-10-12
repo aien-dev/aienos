@@ -162,6 +162,10 @@ static const char *classify(int rc)
 /* Workspace lives across boots of the host test; the kernel uses it once. */
 static ss_workspace *g_ws;
 static ss_store *g_ss;
+/* The newest SecurityManifest after a committed boot or rotation (P04 cut
+ * 2a/2b): sequence and Store ObjectId the next manifest links to. */
+static uint64_t g_secman_seq;
+static uint8_t g_secman_sid[32];
 
 /* SecurityManifest refusal: the Store is not served and the keys are wiped. */
 static int secman_refuse(ck_store_report *r, const char *step)
@@ -350,12 +354,15 @@ static int run_policy_ex(const disk_dev *d, const ss_keys *keys, const uint8_t u
 #ifdef CK_TEST_STORE_CRASH
     ck_store_crash_opened(r->gen_open);
 #endif
-    rc = ss_transact(g_ss, objs, nobjs, CK_SB_HOOK, 0, 0);
+    uint8_t ids[3][32];
+    rc = ss_transact(g_ss, objs, nobjs, CK_SB_HOOK, 0, ids);
     if (rc) return fail(r, "commit", "ss_transact", rc);
     rc = disk_flush(d);
     if (rc) return fail(r, "io", "flush", rc);
     r->gen_commit = ss_generation(g_ss);
     if (r->gen_commit != r->gen_open + 1) return fail(r, "commit", "generation did not advance by one", -1);
+    g_secman_seq = r->secman_seq;
+    bcp(g_secman_sid, ids[1], 32);
     r->verdict = CK_SB_COMMITTED;
     return 0;
 }
@@ -499,6 +506,7 @@ int ck_store_unlock_boot(const disk_dev *d, const uint8_t secret[CK_SB_SECRET_LE
         rc = run_policy_ex(d, &keys, uuid, commit, hardware_staging, blank ? &ks : 0, r);
         r->key_source = "recovery-keyslot";
         r->unlocked_genesis = genesis;
+        r->keyslot_seq = m.manifest_sequence;
         if (rc == 0 && !blank && !g_ss->has_keyslot) {
             /* Opened, but the keyed open did not bind the manifest we
              * bootstrapped from: refuse rather than serve an unbound keyslot. */
@@ -509,6 +517,106 @@ int ck_store_unlock_boot(const disk_dev *d, const uint8_t secret[CK_SB_SECRET_LE
     bz(&keys, sizeof keys);
     bz(g_ksm_buf, SS_KEYSLOT_MAX);
     return rc;
+}
+
+/* The Recovery_RawSecret (HKDF, GCM-SIV) descriptor of a decoded manifest. */
+static m5_keyslot *recovery_slot(m5_ksm *m)
+{
+    for (uint32_t i = 0; i < m->slot_count && i < M5_KSM_SLOTS; i++)
+        if (m->slots[i].slot_type == M5_SLOT_RECOVERY_RAW_SECRET && m->slots[i].kdf_suite == 0x02 &&
+            m->slots[i].wrap_suite == M5_WRAP_SUITE_GCMSIV)
+            return &m->slots[i];
+    return 0;
+}
+
+int ck_store_rotate_recovery(const disk_dev *d, const uint8_t current[CK_SB_SECRET_LEN],
+                             const uint8_t next[CK_SB_SECRET_LEN], ck_store_report *r)
+{
+    m5_ksm m;
+    m5_keyslot *sl;
+    uint8_t k_vol[32], kek[32], fresh[16 + 12], smb[M5_SECMAN_LEN], ids[2][32];
+    size_t mlen = 0;
+    uint16_t kind = 0;
+    int rc;
+
+    bz(r, sizeof *r);
+    bcp(r->prev_commit, "none", 5);
+    r->identity_class = M5_ID_PRODUCTION;
+    r->key_source = "recovery-keyslot";
+    if (!d || !current || !next) return fail(r, "geometry", "arguments", -1);
+    if (!g_ss || !g_ws || !g_ksm_buf || g_ss->keys.identity_class != M5_ID_PRODUCTION || !g_ss->has_keyslot)
+        return fail(r, "keyed", "no open production Store with a KeySlotManifest to rotate", CK_SB_E_NO_KEYSLOT);
+    r->gen_open = ss_generation(g_ss);
+    rc = ss_read(g_ss, g_ss->keyslot_sid, g_ksm_buf, SS_KEYSLOT_MAX, &mlen, &kind);
+    if (rc || kind != M5_KSM_KIND) return fail(r, "keyed", "read the bound KeySlotManifest", rc ? rc : CK_SB_E_KEYSLOT_BAD);
+    bz(&m, sizeof m);
+    if (m5_ksm_decode(g_ksm_buf, mlen, &m) != 0 || m.arena_len != 0 || mlen != M5_KSM_FIXED_LEN)
+        return fail(r, "keyed", "KeySlotManifest decode (raw-secret profile, no arena)", CK_SB_E_KEYSLOT_BAD);
+    if (m.manifest_sequence != g_ss->nkeyslot)
+        return fail(r, "keyed", "bound manifest sequence is not the chain length", CK_SB_E_KEYSLOT_BAD);
+    sl = recovery_slot(&m);
+    if (!sl) return fail(r, "keyed", "no Recovery_RawSecret (HKDF) descriptor in the manifest", CK_SB_E_KEYSLOT_BAD);
+    /* proof of possession: the current secret must unwrap K_vol */
+    rc = m5_recovery_kek(sl->salt, current, CK_SB_SECRET_LEN, kek);
+    if (rc == 0) rc = m5_keyslot_unwrap(sl, g_ss->uuid, kek, k_vol);
+    bz(kek, sizeof kek);
+    if (rc) {
+        bz(k_vol, sizeof k_vol);
+        return fail(r, "keyed", "current recovery secret rejected (K_vol unwrap tag failed); nothing written",
+                    CK_SB_E_SECRET_REJECTED);
+    }
+    if (ck_entropy_fill(fresh, sizeof fresh) != 0) {
+        bz(k_vol, sizeof k_vol);
+        bz(fresh, sizeof fresh);
+        return fail(r, "keyed", "rotation entropy (salt, nonce) refused by the entropy service", CK_SB_E_ENTROPY);
+    }
+    /* next link of the chain: same K_vol and epoch, new salt, K_vol re-wrapped under the new KEK */
+    m.manifest_sequence += 1;
+    bcp(m.previous_keyslot_manifest_id, g_ss->keyslot_sid, 32);
+    bcp(sl->salt, fresh, 16);
+    rc = m5_recovery_kek(sl->salt, next, CK_SB_SECRET_LEN, kek);
+    if (rc == 0) rc = m5_keyslot_wrap(sl, g_ss->uuid, kek, k_vol, fresh + 16);
+    bz(kek, sizeof kek);
+    bz(k_vol, sizeof k_vol);
+    bz(fresh, sizeof fresh);
+    if (rc) {
+        bz(&m, sizeof m);
+        return fail(r, "keyed", "wrap K_vol under the new recovery secret", rc);
+    }
+    m5_ksm_encode(&m, g_ksm_buf);
+    r->keyslot_seq = m.manifest_sequence;
+    bz(&m, sizeof m);
+    /* the SecurityManifest of the rotation transaction binds the new manifest */
+    {
+        m5_secman n;
+        bz(&n, sizeof n);
+        bcp(n.store_uuid, g_ss->uuid, 16);
+        n.generation = r->gen_open + 1;
+        n.security_sequence = g_secman_seq + 1;
+        n.epoch = n.generation;
+        n.key_epoch = g_ss->keys.key_generation;
+        bcp(n.previous_security_manifest_id, g_secman_sid, 32);
+        if (sv1_object_id(M5_KSM_KIND, 1, g_ksm_buf, M5_KSM_FIXED_LEN, n.keyslot_manifest_id) != 0)
+            return fail(r, "commit", "KeySlotManifest ObjectId", -1);
+        if (m5_secman_seal(&n, g_ss->keys.k_root_auth, smb) != 0) return fail(r, "commit", "seal SecurityManifest", -1);
+        r->secman_seq = n.security_sequence;
+        r->secman_keyslot = 1;
+        r->secman_prev = 1;
+    }
+    {
+        ss_object objs[2] = {{M5_KSM_KIND, 1, g_ksm_buf, M5_KSM_FIXED_LEN}, {CK_SECMAN_KIND, 1, smb, M5_SECMAN_LEN}};
+        rc = ss_transact(g_ss, objs, 2, CK_SB_HOOK, 0, ids);
+    }
+    bz(g_ksm_buf, SS_KEYSLOT_MAX);
+    if (rc) return fail(r, "commit", "ss_transact", rc);
+    rc = disk_flush(d);
+    if (rc) return fail(r, "io", "flush", rc);
+    r->gen_commit = ss_generation(g_ss);
+    if (r->gen_commit != r->gen_open + 1) return fail(r, "commit", "generation did not advance by one", -1);
+    g_secman_seq = r->secman_seq;
+    bcp(g_secman_sid, ids[1], 32);
+    r->verdict = CK_SB_COMMITTED;
+    return 0;
 }
 
 static const char *rb_name(int rb)
@@ -785,6 +893,54 @@ int ck_store_service_unlock(const char *arg, size_t arg_len)
         g_service_open = 0;
         return 0;
     }
+    return 1;
+}
+
+/* 64 hex digits -> 32 secret bytes; 0 ok. out is wiped on refusal. */
+static int parse_secret(const char *a, size_t n, uint8_t out[CK_SB_SECRET_LEN])
+{
+    if (n != 2 * CK_SB_SECRET_LEN) return -1;
+    for (size_t i = 0; i < CK_SB_SECRET_LEN; i++) {
+        int hi = hex_nibble(a[2 * i]), lo = hex_nibble(a[2 * i + 1]);
+        if (hi < 0 || lo < 0) {
+            bz(out, CK_SB_SECRET_LEN);
+            return -1;
+        }
+        out[i] = (uint8_t)((hi << 4) | lo);
+    }
+    return 0;
+}
+
+/* "rotate <current 64-hex> <new 64-hex>" while READY (P04 cut 2b). Both
+ * secrets are wiped before return and never printed. Returns 1 only when
+ * the rotation transaction committed. */
+int ck_store_service_rotate(const char *arg, size_t arg_len)
+{
+    uint8_t cur[CK_SB_SECRET_LEN], nxt[CK_SB_SECRET_LEN];
+    ck_store_report r;
+    if (!g_service_open || !g_disk) {
+        ck_printf("store: rotate REFUSED proof=keyed step=\"Store not open\" rc=%d\n", CK_SB_E_NO_KEYSLOT);
+        return 0;
+    }
+    if (arg_len != 4 * CK_SB_SECRET_LEN + 1 || arg[2 * CK_SB_SECRET_LEN] != ' ' ||
+        parse_secret(arg, 2 * CK_SB_SECRET_LEN, cur) != 0 ||
+        parse_secret(arg + 2 * CK_SB_SECRET_LEN + 1, 2 * CK_SB_SECRET_LEN, nxt) != 0) {
+        bz(cur, sizeof cur);
+        bz(nxt, sizeof nxt);
+        ck_printf("store: rotate REFUSED proof=keyed step=\"recovery secret syntax\" rc=%d (two 64-hex secrets expected, got %u bytes)\n",
+                  CK_SB_E_SECRET_REJECTED, (unsigned)arg_len);
+        return 0;
+    }
+    int rc = ck_store_rotate_recovery(g_disk, cur, nxt, &r);
+    bz(cur, sizeof cur);
+    bz(nxt, sizeof nxt);
+    if (rc || r.verdict != CK_SB_COMMITTED) {
+        ck_printf("store: rotate REFUSED proof=%s step=\"%s\" rc=%d (%s); Store unchanged, still open\n", r.proof, r.step,
+                  r.rc, err_name(r.rc));
+        return 0;
+    }
+    ck_printf("store: rotated recovery keyslot manifest_sequence=%llu security_sequence=%llu generation=%llu (previous secret retired)\n",
+              (unsigned long long)r.keyslot_seq, (unsigned long long)r.secman_seq, (unsigned long long)r.gen_commit);
     return 1;
 }
 #endif

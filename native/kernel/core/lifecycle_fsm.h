@@ -40,10 +40,11 @@ enum ck_lc_verb {
     CK_LC_V_RECALL, /* read back the newest approved object from the Store */
     CK_LC_V_REMEMBER, /* P06 cut 4: record one owner fact in the Cortex journal (sealed Store) */
     CK_LC_V_FACTS,    /* list the remembered facts read back from the journal */
+    CK_LC_V_ROTATE,   /* P04 cut 2b: rotate the recovery secret (current + new, 64 hex each) */
 };
 
 /* Bounds: one request line, and the task text that a line may carry. */
-#define CK_LC_LINE_MAX 96 /* "unlock " + 64 hex = 71 bytes fits */
+#define CK_LC_LINE_MAX 144 /* "rotate " + 64 hex + " " + 64 hex = 136 bytes fits */
 #define CK_LC_TASK_MAX 48
 #define CK_LC_REPLY_MAX 256 /* generated reply bytes kept for approval (INFER_TEXT_BYTES) */
 /* What is pending in SERVE: an operator note (task) or a generated reply. */
@@ -61,6 +62,7 @@ enum ck_lc_result {
     CK_LC_R_RECALL,        /* recall accepted: the binding must read the newest approved object */
     CK_LC_R_REMEMBER,      /* remember accepted: the binding must append the fact (task holds the text) */
     CK_LC_R_FACTS,         /* facts accepted: the binding must list the journal */
+    CK_LC_R_ROTATE,        /* rotate accepted: the binding must re-wrap K_vol under the new secret */
 };
 
 typedef struct {
@@ -96,6 +98,9 @@ enum ck_lc_result ck_lc_apply(ck_lc *lc, enum ck_lc_verb v, const char *arg, siz
  * with reason), unlock outcome (1 opened: LOCKED -> READY). */
 void ck_lc_commit_done(ck_lc *lc, int rc);
 void ck_lc_unlock_done(ck_lc *lc, int opened);
+/* Rotation outcome after CK_LC_R_ROTATE: the state never changes; a refusal
+ * by the Store (wrong current secret, no keyslot) counts as refused. */
+void ck_lc_rotate_done(ck_lc *lc, int ok);
 /* Generation outcome after CK_LC_R_GENERATE: a reply of n bytes (1..CK_LC_REPLY_MAX)
  * becomes the pending proposal (READY -> SERVE, replies++); cancelled (the
  * operator typed cancel between steps) or failed/refused (n == 0) drops the

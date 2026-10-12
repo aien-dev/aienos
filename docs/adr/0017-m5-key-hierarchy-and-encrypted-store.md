@@ -165,7 +165,7 @@ reserved (16 B)
 - Recovery KEK (raw-secret profile): `m5_recovery_kek` = HKDF-SHA256(salt = slot.salt, ikm = 32-byte secret, info = `AIENOS/M5/RECOVERY-KEK-V1`, 32). HKDF-Extract is `HMAC(salt || 0^16, ikm)`, bit-identical to RFC 5869 for a 16-byte salt (test vector in `m5_test.c`).
 - Keyslot AAD in C binds `store_uuid, slot_id, slot_type, key_epoch` (`AIENOS-M5-KEYSLOT-V2`), a superset of the Rust reference; C is authoritative.
 - The kernel (`ck_store_unlock_boot`) creates the manifest at genesis in the same first transaction as the boot record (index 0 reserved Empty for the TPM slot, index 1 = Recovery_RawSecret, slot_id 1, `active_key_epoch` 1), and derives PRODUCTION-class subkeys with owner hierarchy generation = `active_key_epoch`.
-- Not yet: TPM Slot 0 (BLOCKED_HARDWARE), key rotation (section 2.7), Argon2id profile. The `keyslot_manifest_id` binding into the SecurityManifest is P04 cut 2a (section 2.5.1).
+- Not yet: TPM Slot 0 (BLOCKED_HARDWARE), Argon2id profile. The `keyslot_manifest_id` binding into the SecurityManifest is P04 cut 2a (section 2.5.1); recovery secret rotation is P04 cut 2b (section 2.7.1).
 
 ### 2.5 SecurityManifest (`kind = 22`)
 
@@ -237,6 +237,15 @@ Replay detection halts into `RecoveryRequired::RollbackDetected`, strictly prohi
    - Transferred to a fresh Store container with a new `store_uuid` and new $K_{\text{vol}}'$.
    - An authorized `MigrationManifest` (kind = 23) is signed by the TRUST-1 offline Owner Authority.
    - The target Store imports the identical `AgentRoot` (`genesis_store_uuid` preserved) and resumes continuity at `migration_parent_id`.
+
+#### 2.7.1 Implementation note (C kernel, P04 cut 2b, 2026-10-12)
+
+Item 1 is implemented for the recovery secret (`native/kernel/svc/store_boot.c` `ck_store_rotate_recovery`, serial verb `rotate <current 64-hex> <new 64-hex>` while READY):
+
+- Store v1 is append-only, so a KeySlotManifest is never replaced: manifests form a chain (`native/store/store_sealed.c`). Sequences 1..n appear exactly once, sequence 1 carries a zero `previous_keyslot_manifest_id`, every later manifest names the Store ObjectId of its predecessor, and the newest is the bound one. A transaction may add at most one manifest, only as sequence n+1 naming the bound manifest. The unkeyed bootstrap read walks the same chain and returns the newest; a broken, duplicated or forged chain is `SS_E_KEYSLOT` both unkeyed and keyed.
+- Rotation first unwraps `K_vol` with the current secret from the bound manifest (proof of possession; a wrong secret writes nothing). One sealed transaction then commits the next KeySlotManifest (same `K_vol`, `active_key_epoch` unchanged, slot 1 re-wrapped under the new secret with a fresh salt and nonce from the entropy service) together with the SecurityManifest of section 2.5 (`security_sequence` + 1, linked to the previous one, `keyslot_manifest_id` = the new manifest). `K_vol` is wiped before the transaction is written and is never kept resident between unlock and rotation.
+- Afterwards the old secret fails the AES-GCM-SIV tag of the newest manifest (`RecoverySecretRejected`). Superseded manifests stay on disk and readable, as the append-only design requires; they cannot open the Store because the keyed open binds only the newest.
+- Not in this cut: a change of `K_vol` (item 2, out-of-band migration), TPM Slot 0 (BLOCKED_HARDWARE), the Argon2id profile, the owner-root path. Evidence: `native/kernel/GATES.md` LIFECYCLE rows 184 and 185, host `stage-test` test_rotate and `store_sealed_test` chain tests.
 
 ---
 
