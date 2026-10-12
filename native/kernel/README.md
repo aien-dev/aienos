@@ -99,6 +99,37 @@ of them:
   Cortex record yet (P06); no Recovery Core, no TPM; aienos#285 not
   triggered; physical disk qualification NOT_RUN (host test
   `test_continuity_service`; QEMU rows 171-173).
+- **Resident inference in the hardware service image (aienos#34, gate N3).**
+  The one supported hardware inference build is the service image with the
+  model from the verified boot disk:
+
+      cargo build --release --target aarch64-unknown-none --manifest-path crates/aienos-infer-kernel/Cargo.toml
+      make -C native/kernel full CK_SERVICE=1 CK_HARDWARE_STAGING=1 \
+          CK_OWNER_PUBKEYS=<owner public keys file> CK_MACHINE_ID=<machine id file> \
+          CK_INFER_LIB=<path to libaienos_infer_kernel.a> CK_FB_HOLD_S=120
+      # -> target/native-kernel/full-service-hardware-staging/BOOTAA64.EFI
+
+  It compiles `core/infer.c` with `CK_INFER_DISK_ONLY`: the fw_cfg model
+  reader is not compiled in (Makefile `fwcfg_check` greps the image for
+  `fw_cfg`, `opt/aienos/model` and the `fw_dma_read` symbol), the model comes
+  only from `MODEL.MAP` read by the UEFI stub (`native/boot/efi_model.c`),
+  the kernel recomputes the pinned SHA-256 before decoding, and with no map
+  it prints `infer: ingest REFUSED (no boot-disk model ...)` and the
+  lifecycle refuses `prompt` ("no inference unit"). The Makefile still
+  refuses with hardware staging: `CK_INFER_LIB` without `CK_SERVICE` (the
+  one-shot probe image), `CK_SERVICE_TEST_KEYS`, `CK_TEST_FWCFG_ARTIFACTS`,
+  every other `CK_TEST_*` flag, `CK_RUST_LIBS`, `CK_QEMU_UNSAFE_DMA`,
+  `CK_CONSOLE_SESSION` and missing owner files. The QEMU inference images
+  (probe, test-keys service) keep their TEST-ONLY fw_cfg source unchanged.
+  Staging: `scripts/stage_one_time_boot_ck_service.sh --dry-run|--apply`
+  builds the image twice in clean folders, makes `MODEL.MAP` against the
+  pinned model, prints every write with its SHA-256 and (dry run) writes
+  nothing; `--target-image IMG --extents ...` stages a disk image instead of
+  the machine. Proof: `scripts/qemu_ck_service_disk_test.sh` (GATES.md
+  SERVICE_DISK rows 200-210: refusals, dry run byte-identical, two cold boots
+  on one emulated disk with generated owner files and secrets, two negative
+  controls); `--build-only` runs the `make` refusals alone. Limits: QEMU
+  only; Spark NVMe, Spark console input and the owner key ceremony NOT_RUN.
 - Proof: `scripts/ck_owner_keys_check.sh` (build only, takes the quiet flag)
   checks the refusals, the generator refusals, and builds the hardware staging
   image from the labelled TEST-fixture files in `tests/fixtures/owner/`

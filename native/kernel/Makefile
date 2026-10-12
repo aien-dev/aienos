@@ -17,6 +17,12 @@
 #                        both files; tools/ck_owner_gen.c checks them); its
 #                        Store stage refuses (production key source is
 #                        BLOCKED_OPERATOR). scripts/ck_owner_keys_check.sh
+#   make full CK_SERVICE=1 CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS=<file> CK_MACHINE_ID=<file> CK_INFER_LIB=<lib>
+#                        the production service image with resident inference,
+#                        model from the boot disk only (MODEL.MAP, no fw_cfg code):
+#                        $(OUT)/full-service-hardware-staging/. Staged by
+#                        scripts/stage_one_time_boot_ck_service.sh; proof
+#                        scripts/qemu_ck_service_disk_test.sh (aienos#34, gate N3)
 #   make full CK_TEST_XHCI_MUTATION=bm-left-on|no-revoke|grant-no-smmu|no-sweep
 #                        TEST-ONLY image that breaks one xHCI DMA fence row on
 #                        purpose: $(OUT)/full-test-xhci-<name>/ (only
@@ -287,15 +293,29 @@ endif
 # Inference ingest probe (aienos#34 lane 4): CK_INFER_LIB=<path to
 # libaienos_infer_kernel.a> links that Rust no_std staticlib (aienos-infer +
 # bump allocator) and compiles core/infer.c (-DCK_INFER_PROBE=1): the kernel
-# ingests a GGUF from QEMU fw_cfg and calls the Rust unit. C flags stay
-# -mgeneral-regs-only. QEMU gate only; not combinable with CK_RUST_LIBS (two
-# Rust staticlibs would duplicate compiler_builtins) nor hardware staging.
+# ingests a GGUF from the boot disk (MODEL.MAP, read by the UEFI stub) or, in
+# the QEMU images only, from fw_cfg, and calls the Rust unit. C flags stay
+# -mgeneral-regs-only. Not combinable with CK_RUST_LIBS (two Rust staticlibs
+# would duplicate compiler_builtins).
 # The same image then runs the bounded session API (native v1 P06:
 # open/prompt/step/cancel/close in crates/aienos-infer-kernel/src/session.rs).
+#
+# Hardware staging (native v1 P06 / gate N3, aienos#34): exactly one inference
+# image may be built with CK_HARDWARE_STAGING, the resident production service
+# image
+#   make full CK_SERVICE=1 CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS=<file>
+#        CK_MACHINE_ID=<file> CK_INFER_LIB=<lib>
+# It gets -DCK_INFER_DISK_ONLY=1: the QEMU fw_cfg ingest is compiled out (the
+# fwcfg_check below requires no fw_cfg code or string in the image), and with
+# no MODEL.MAP the kernel refuses instead of looking anywhere else. The
+# one-shot probe image (no CK_SERVICE) stays QEMU only.
 CK_INFER_LIB ?=
 ifneq ($(strip $(CK_INFER_LIB)),)
 ifneq ($(strip $(CK_HARDWARE_STAGING)),)
-$(error CK_INFER_LIB (inference probe, QEMU gate only) cannot be combined with CK_HARDWARE_STAGING)
+ifneq ($(strip $(CK_SERVICE)),1)
+$(error CK_INFER_LIB with CK_HARDWARE_STAGING needs CK_SERVICE=1: only the resident service image (boot-disk model, MODEL.MAP) is a hardware inference image; the one-shot probe stays QEMU only)
+endif
+CK_EXTRA_CFLAGS += -DCK_INFER_DISK_ONLY=1
 endif
 ifneq ($(strip $(CK_RUST_LIBS)),)
 $(error CK_INFER_LIB and CK_RUST_LIBS cannot be combined: two Rust staticlibs duplicate compiler_builtins)
@@ -303,7 +323,8 @@ endif
 CK_EXTRA_CFLAGS += -DCK_INFER_PROBE=1
 # native v1 P06 cut 2: in a service image the model and one bounded session
 # stay resident for the lifecycle's `prompt` verb (core/lifecycle.c) instead
-# of running the one-shot probe. QEMU gate only (fw_cfg TEST-ONLY source).
+# of running the one-shot probe. Model source: the boot disk (MODEL.MAP); the
+# QEMU test images also keep the TEST-ONLY fw_cfg fallback.
 ifeq ($(strip $(CK_SERVICE)),1)
 CK_EXTRA_CFLAGS += -DCK_INFER_RESIDENT=1
 endif
@@ -787,17 +808,25 @@ $(foreach s,$(STAGE_SRCS),$(eval $(call stage_rule,$(s))))
 
 # fwcfg_check(elf): a default image (no CK_TEST_FWCFG_ARTIFACTS) must carry no
 # fw_cfg artifact code or strings; a test image must carry its announcement.
-# The inference probe image (CK_INFER_LIB, aienos#34 lane 4) reads its model over
-# fw_cfg by design: it must carry its own TEST-ONLY announcement instead.
+# The QEMU inference images (CK_INFER_LIB without hardware staging, aienos#34
+# lane 4) read their model over fw_cfg when no MODEL.MAP is found: they must
+# carry their own TEST-ONLY announcement instead. The hardware service image
+# with inference (CK_INFER_LIB + CK_HARDWARE_STAGING, boot-disk only) must
+# carry the boot-disk source line, the resident session, and no fw_cfg code.
 define fwcfg_check
-	@if [ -n "$(strip $(CK_INFER_LIB))" ]; then \
+	@if [ -n "$(strip $(CK_INFER_LIB))" ] && [ -z "$(strip $(CK_HARDWARE_STAGING))" ]; then \
 	  grep -aqF "TEST-ONLY QEMU fw_cfg model ingest" $(1) || { echo "inference probe image lacks its TEST-ONLY fw_cfg announcement"; rm -f $(1); exit 1; }; \
 	elif [ "$(strip $(CK_TEST_FWCFG_ARTIFACTS))" = 1 ]; then \
 	  grep -aqF "TEST-ONLY QEMU fw_cfg side channel" $(1) || { echo "test fw_cfg image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
 	else \
-	  s=$$(grep -aoE "opt/aienos/artifacts|fw_cfg|QEMU0002" $(1) | sort -u | tr "\n" " "); \
-	  y=$$($(KNM) $(1) | grep -E " (fw_select|fw_read|fw_skip|fw_find|fwcfg_from_dsdt|fwcfg_source|fwcfg)$$" | tr "\n" " "); \
+	  s=$$(grep -aoE "opt/aienos/artifacts|opt/aienos/model|fw_cfg|QEMU0002" $(1) | sort -u | tr "\n" " "); \
+	  y=$$($(KNM) $(1) | grep -E " (fw_select|fw_read|fw_skip|fw_find|fw_dma_read|fwcfg_from_dsdt|fwcfg_source|fwcfg)$$" | tr "\n" " "); \
 	  if [ -n "$$s$$y" ]; then echo "default image carries fw_cfg artifact code: $$s$$y"; rm -f $(1); exit 1; fi; \
+	  if [ -n "$(strip $(CK_INFER_LIB))" ]; then \
+	    grep -aqF "infer_source_mode: boot-disk model" $(1) || { echo "hardware inference image lacks the boot-disk model source"; rm -f $(1); exit 1; }; \
+	    grep -aqF "infer: resident open" $(1) || { echo "hardware inference image lacks the resident session"; rm -f $(1); exit 1; }; \
+	    echo "hardware inference image: boot-disk model source only, no fw_cfg code in $(1)"; \
+	  fi; \
 	  echo "no fw_cfg artifact code in $(1)"; \
 	fi
 endef

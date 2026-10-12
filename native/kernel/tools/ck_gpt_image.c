@@ -20,6 +20,9 @@
  *                         slots_last_lba=L" (slot loader gate)
  *         aienos-slots    AIENOS [1,41) all zero + slots [41,M-1) (MIB >= 48;
  *                         P11 cut 2b service boot disk); prints both ranges
+ *         esp-model-aienos ESP_MIB MODEL_FILE STORE_MIB   esp-model plus an
+ *                         all-zero AIENOS partition of STORE_MIB at the end:
+ *                         one disk with ESP, model and Store (service gate)
  *       CORRUPTION: bad-primary-crc bad-backup-crc bad-primary-entries
  *         bad-backup-entries no-pmbr
  *       Prints one line: "gpt_image bs=B blocks=N aienos_first_lba=F
@@ -57,11 +60,16 @@ static int usage(void)
  * model_len=M model_extents=LBA:COUNT,LBA:COUNT,LBA:COUNT" (file order). */
 static int esp_model(int argc, char **argv, uint32_t bs, uint64_t blocks, uint64_t per, unsigned flags)
 {
-    if (argc != 8) return usage();
+    /* esp-model-aienos (argc 9): the model-home partition ends STORE_MIB
+     * earlier and an all-zero AIENOS partition takes [M-1-STORE_MIB, M-1). */
+    int with_store = argc == 9;
+    if (argc != 8 && !with_store) return usage();
     uint64_t esp_mib = strtoull(argv[6], NULL, 10);
     const char *mpath = argv[7];
     uint64_t mib = blocks / per;
-    if (esp_mib < 16 || esp_mib + 4 >= mib) return usage();
+    uint64_t store_mib = with_store ? strtoull(argv[8], NULL, 10) : 0;
+    if (with_store && store_mib < 16) return usage();
+    if (esp_mib < 16 || esp_mib + 4 + store_mib >= mib) return usage();
     FILE *mf = fopen(mpath, "rb");
     if (!mf) { fprintf(stderr, "cannot open %s\n", mpath); return 1; }
     fseeko(mf, 0, SEEK_END);
@@ -69,7 +77,7 @@ static int esp_model(int argc, char **argv, uint32_t bs, uint64_t blocks, uint64
     fseeko(mf, 0, SEEK_SET);
     uint64_t sectors = (mlen + bs - 1) / bs, gap = (1u << 20) / bs;
     uint64_t a = sectors / 3, b = sectors / 3, c = sectors - a - b;
-    uint64_t p1_first = (1 + esp_mib) * per, p1_last = (mib - 1u) * per - 1u;
+    uint64_t p1_first = (1 + esp_mib) * per, p1_last = (mib - 1u - store_mib) * per - 1u;
     if (p1_first + 3 * gap + sectors > p1_last + 1) {
         fprintf(stderr, "image too small for the model: need %llu more MiB\n",
                 (unsigned long long)((p1_first + 3 * gap + sectors - p1_last) / per + 1));
@@ -78,10 +86,11 @@ static int esp_model(int argc, char **argv, uint32_t bs, uint64_t blocks, uint64
     }
     /* disk order: C, A, B */
     uint64_t lba_c = p1_first + gap, lba_a = lba_c + c + gap, lba_b = lba_a + a + gap;
-    gw_part p[2];
+    gw_part p[3];
     p[0] = (gw_part){gw_esp_type, 1 * per, (1 + esp_mib) * per - 1u, "ESP", 0};
     p[1] = (gw_part){gw_linux_type, p1_first, p1_last, "model-home", 0};
-    if (gw_write(argv[2], bs, blocks, p, 2, flags)) { fclose(mf); return 1; }
+    p[2] = (gw_part){ck_aienos_part_type, p1_last + 1u, (mib - 1u) * per - 1u, "AIENOS", 0};
+    if (gw_write(argv[2], bs, blocks, p, with_store ? 3 : 2, flags)) { fclose(mf); return 1; }
     int fd = open(argv[2], O_WRONLY);
     if (fd < 0) { fclose(mf); fprintf(stderr, "cannot reopen %s\n", argv[2]); return 1; }
     struct { uint64_t lba, count; } ext[3] = {{lba_a, a}, {lba_b, b}, {lba_c, c}};
@@ -107,6 +116,9 @@ static int esp_model(int argc, char **argv, uint32_t bs, uint64_t blocks, uint64
            bs, (unsigned long long)blocks, (unsigned long long)p[0].first, (unsigned long long)p[0].last,
            (unsigned long long)mlen, (unsigned long long)lba_a, (unsigned long long)a,
            (unsigned long long)lba_b, (unsigned long long)b, (unsigned long long)lba_c, (unsigned long long)c);
+    if (with_store)
+        printf("gpt_image aienos_first_lba=%llu aienos_last_lba=%llu\n", (unsigned long long)p[2].first,
+               (unsigned long long)p[2].last);
     return 0;
 }
 
@@ -119,7 +131,8 @@ static int cmd_create(int argc, char **argv)
     uint64_t per = (1024u * 1024u) / bs, blocks = mib * per;
     const char *lay = argv[5];
     unsigned flags = 0;
-    if (!strcmp(lay, "esp-model")) return esp_model(argc, argv, bs, blocks, per, flags);
+    if (!strcmp(lay, "esp-model") && argc == 8) return esp_model(argc, argv, bs, blocks, per, flags);
+    if (!strcmp(lay, "esp-model-aienos") && argc == 9) return esp_model(argc, argv, bs, blocks, per, flags);
     if (!strcmp(lay, "slots")) {
         static const uint8_t slots_type[16] = CK_SLOT_PART_TYPE_BYTES;
         gw_part sp = {slots_type, 1 * per, (mib - 1u) * per - 1u, "AIENOS-SLOTS", 0};
