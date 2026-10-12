@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# LIFECYCLE gate for the AIENOS C kernel (native v1 plan P03 + P04 cut 1): rows
-# 160-170 of native/kernel/GATES.md "LIFECYCLE resident production lifecycle". C-only.
+# LIFECYCLE gate for the AIENOS C kernel (native v1 plan P03 + P04 cut 1 + P05
+# cut 1 + P06 cut 2): rows 160-176 of native/kernel/GATES.md "LIFECYCLE resident
+# production lifecycle". C-only.
 # QEMU is not hardware: a PASS here qualifies nothing physical.
 #
 # Boots two CK_SERVICE images in QEMU AArch64 (AAVMF, NVMe disk, iommu=smmuv3),
@@ -61,6 +62,24 @@
 #   row 173  shape: the locked boot prints no continuity line; the test-keys image
 #            provisions before `Store open`; the service image carries the
 #            production continuity layer and no TEST mode selection (AIENCONT)
+#   row 174  P06 cut 2 (boot 5, test-keys image built with CK_INFER_LIB, model over
+#            the TEST-ONLY fw_cfg channel, -m 4096): the model and one bounded
+#            session are resident from boot (`infer: resident open rc=0`, before
+#            `lifecycle: ready`); `prompt What is the capital of France?` generates
+#            the golden reply (ids 791 6864 315 9822 374 12366 13 128009, 17
+#            prompt ids, 25 steps) which becomes the pending proposal; `approve`
+#            commits it as one sealed reply object (kind 'R1')
+#   row 175  `prompt Say hello.` then `cancel` stops generation between steps
+#            (steps >= 1, produced 0, state ready, nothing pending); `recall` reads
+#            the newest approved object back through the sealed Store (kind=reply,
+#            the prompt and "The capital of France is Paris."); boot 6 (same
+#            disk, cold boot): continuity RESUMED, `recall` answers from the disk
+#   row 176  evidence counters (prompts=2 replies=1 gen_cancelled=1 gen_failed=0
+#            inference=resident); stop order: `infer: resident close` and
+#            `infer: unloaded` (every frame returned) before the stop order line;
+#            QEMU exit 0; M1 checks. Separate verdict AIENOS_CK_LIFECYCLE_INFER:
+#            NOT_RUN (never a silent pass) when the model file, cargo or the Rust
+#            target aarch64-unknown-none is missing; TCG needs ~25 min for it
 #   build    the default (diagnostic) image carries no lifecycle; CK_SERVICE is
 #            refused with CK_CONSOLE_SESSION, CK_QEMU_UNSAFE_DMA and a CK_TEST_*
 #            flag; CK_SERVICE_TEST_KEYS is refused with CK_HARDWARE_STAGING
@@ -91,7 +110,7 @@ testkeys_efi="${out}/full-service-testkeys/BOOTAA64.EFI"
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_gate_hold.sh"
 if ! gh_quiet_check; then echo "NOT_RUN  ${gh_why}"; echo "${final_tag}: NOT_RUN (quiet flag held)"; exit 3; fi
-if ! gh_lock_take qemu_ck_lifecycle_test "${AIENOS_GATE_MINUTES:-40}"; then echo "NOT_RUN  ${gh_why}"; echo "${final_tag}: NOT_RUN (QEMU gate lock held)"; exit 3; fi
+if ! gh_lock_take qemu_ck_lifecycle_test "${AIENOS_GATE_MINUTES:-75}"; then echo "NOT_RUN  ${gh_why}"; echo "${final_tag}: NOT_RUN (QEMU gate lock held)"; exit 3; fi
 top="$(mktemp -d)"
 qemu_pid=""
 drain_pid=""
@@ -106,6 +125,9 @@ trap cleanup EXIT
 
 source "${repo_root}/scripts/lib_ck_m1_checks.sh"
 boot_timeout="${AIENOS_QEMU_TIMEOUT:-600}"
+boot_to="${boot_timeout}" # per boot; the inference boots raise it
+boot_mem=2048             # MiB; the inference boots need the model in RAM
+boot_extra=()             # extra QEMU arguments (the fw_cfg model channel)
 fail=0
 ok() { echo "ROW $1 PASS  $2"; }
 bad() { echo "ROW $1 FAIL  $2"; fail=1; }
@@ -137,8 +159,8 @@ boot() { # name efi driver [nvme.img to reuse]
     if [[ -n "${4:-}" ]]; then cp "$4" "${work}/nvme.img"; else "${gpt_tool}" create "${work}/nvme.img" 512 64 aienos-middle >/dev/null; fi
     mkfifo "${work}/ser.in" "${work}/ser.out"
     : >"${work}/serial.log"
-    timeout "${boot_timeout}" qemu-system-aarch64 \
-        -M virt,virtualization=on,gic-version=3,iommu=smmuv3 -accel tcg,thread=single -cpu max -smp 4 -m 2048 \
+    timeout "${boot_to}" qemu-system-aarch64 \
+        -M virt,virtualization=on,gic-version=3,iommu=smmuv3 -accel tcg,thread=single -cpu max -smp 4 -m "${boot_mem}" \
         -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
         -drive if=pflash,format=raw,file="${work}/vars.fd" \
         -drive if=none,id=esp,format=raw,file=fat:rw:"${work}/esp" \
@@ -146,12 +168,12 @@ boot() { # name efi driver [nvme.img to reuse]
         -drive if=none,id=nvme0,format=raw,file="${work}/nvme.img" \
         -device nvme,drive=nvme0,serial=aienos-lifecycle-test \
         -device ramfb -display none -nic none -monitor none \
-        -chardev pipe,id=ser,path="${work}/ser" -serial chardev:ser -no-reboot 2>"${work}/qemu.err" &
+        -chardev pipe,id=ser,path="${work}/ser" -serial chardev:ser -no-reboot "${boot_extra[@]}" 2>"${work}/qemu.err" &
     qemu_pid=$!
     cat "${work}/ser.out" >>"${work}/serial.log" &
     drain_pid=$!
     exec 4>"${work}/ser.in"
-    if wait_for "${boot_timeout}" '^lifecycle: ready state=' '^report_kind: (panic|fault|final)' && serial_has '^lifecycle: ready state='; then
+    if wait_for "${boot_to}" '^lifecycle: ready state=' '^report_kind: (panic|fault|final)' && serial_has '^lifecycle: ready state='; then
         sleep 1
         "$3"
     fi
@@ -190,6 +212,25 @@ drive_unlock() {
     ser_line evidence
     ser_line shutdown
 }
+# P06 cut 2: the resident model answers a prompt, the reply is approved and
+# committed, a second prompt is cancelled between steps, recall reads the disk.
+infer_wait="${AIENOS_QEMU_INFER_WAIT:-1800}"
+drive_infer() {
+    ser_line status
+    ser_line "prompt What is the capital of France?"
+    wait_for "${infer_wait}" '^lifecycle: (reply pending|generation cancelled|REFUSED verb=prompt)' '^report_kind: (panic|fault|final)' || true
+    ser_line approve; ser_wait '^lifecycle: (approve committed|REFUSED verb=approve)'
+    ser_line "prompt Say hello."
+    sleep 5
+    ser_line cancel
+    wait_for 900 '^lifecycle: (generation cancelled|reply pending|REFUSED verb=prompt)' '^report_kind: (panic|fault|final)' || true
+    ser_line evidence
+    ser_line recall
+    ser_line shutdown
+}
+drive_infer_recall() {
+    ser_line status; ser_line recall; ser_line evidence; ser_line shutdown
+}
 drive_relock() {
     ser_line "unlock ${secret_bad}"; ser_wait '^(lifecycle: unlock ok|lifecycle: REFUSED verb=unlock)'
     ser_line status
@@ -227,7 +268,7 @@ rcheck 161 "task refused while locked" '^lifecycle: REFUSED verb=task state=lock
 rcheck 161 "unlock refused, still locked" '^lifecycle: REFUSED verb=unlock state=locked reason="production key source refused: still locked"'
 rcheck 161 "unlock asked the production key source again" '^store: unlock REFUSED proof=keyed step="production Store key source" rc=-2002'
 rcheck 161 "status answered" '^lifecycle: state=locked store=locked pending=- requests='
-rcheck 161 "help answered" '^lifecycle: verbs: status unlock \[<64-hex recovery secret>\] task <text> approve deny cancel evidence help shutdown$'
+rcheck 161 "help answered" '^lifecycle: verbs: status unlock \[<64-hex recovery secret>\] task <text> prompt <text> approve deny cancel recall evidence help shutdown$'
 rcheck 161 "evidence answered" '^lifecycle: evidence requests=5 refused=2 invalid=0 tasks=0 approved=0'
 rcheck 162 "stop order with no Store" '^lifecycle: stop order store=was-locked nvme=released state=stop requests=6$'
 before 162 "locked lifecycle ready < NVMe revoke (revoke only at the stop order)" '^lifecycle: ready state=locked' '^dma_gate: nvme bus master revoked'
@@ -254,7 +295,7 @@ rcheck 165 "approve with nothing pending refused" '^lifecycle: REFUSED verb=appr
 rcheck 165 "deny drops" '^lifecycle: denied state=ready$'
 rcheck 165 "cancel drops" '^lifecycle: cancelled state=ready$'
 rcheck 166 "overlong line refused whole" '^lifecycle: REFUSED verb=invalid reason="line longer than 96 bytes"$'
-rcheck 166 "evidence counts" '^lifecycle: evidence requests=10 refused=2 invalid=0 tasks=3 approved=1 denied=1 cancelled=1 overlong=1 last_commit_gen=[0-9]+ last_id=[0-9a-f]{8}$'
+rcheck 166 "evidence counts" '^lifecycle: evidence requests=10 refused=2 invalid=0 tasks=3 approved=1 denied=1 cancelled=1 overlong=1 last_commit_gen=[0-9]+ last_id=[0-9a-f]{8} prompts=0 replies=0 gen_cancelled=0 gen_failed=0 recalls=0 inference=none$'
 rcheck 167 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=11$'
 before 167 "lifecycle ready < NVMe revoke (revoke only at the stop order)" '^lifecycle: ready state=ready' '^dma_gate: nvme bus master revoked'
 before 167 "NVMe revoke < stop order line" '^dma_gate: nvme bus master revoked' '^lifecycle: stop order store=closed'
@@ -321,8 +362,81 @@ m1 169
 rabsent 170 "secret hex never in the serial log (resume boot)" "${secret_ok}"
 rabsent 170 "wrong secret hex never in the serial log" "${secret_bad}"
 
+# --- boots 5 and 6: test-keys image with the resident inference session (P06 cut 2) ---
+infer_tag="AIENOS_CK_LIFECYCLE_INFER"
+infer_boots=""
+model="${AIENOS_MODEL:-${HOME}/models/aien-mail/Llama-3.2-1B-Instruct-Q4_K_M.gguf}"
+infer_notrun=""
+[[ -r "${model}" ]] || infer_notrun="model file ${model} missing"
+[[ -n "${infer_notrun}" ]] || command -v cargo >/dev/null || infer_notrun="cargo not installed"
+if [[ -z "${infer_notrun}" ]] && { ! rustc --print target-list 2>/dev/null | grep -qx aarch64-unknown-none \
+   || ! [[ -d "$(rustc --print sysroot)/lib/rustlib/aarch64-unknown-none/lib" ]]; }; then
+    infer_notrun="Rust target aarch64-unknown-none not installed (rustup target add aarch64-unknown-none)"
+fi
+[[ -z "${AIENOS_LIFECYCLE_SKIP_INFER:-}" ]] || infer_notrun="AIENOS_LIFECYCLE_SKIP_INFER set"
+if [[ -n "${infer_notrun}" ]]; then
+    echo "${infer_tag}: NOT_RUN (${infer_notrun})"
+else
+    fail_before_infer="${fail}"
+    lib="${repo_root}/target/infer-kernel/aarch64-unknown-none/release/libaienos_infer_kernel.a"
+    CARGO_TARGET_DIR="${repo_root}/target/infer-kernel" cargo build -q --release --target aarch64-unknown-none \
+        --manifest-path crates/aienos-infer-kernel/Cargo.toml
+    out_infer="${out}-lifecycle-infer" # own OUT: same FULL_NAME as the plain test-keys image
+    make -s -C native/kernel CROSS="${cross}" OUT="${out_infer}" AIENOS_COMMIT="${commit}" full CK_SERVICE=1 CK_SERVICE_TEST_KEYS=1 CK_INFER_LIB="${lib}" >/dev/null
+    infer_efi="${out_infer}/full-service-testkeys/BOOTAA64.EFI"
+    if grep -aqF "infer: resident open" "${infer_efi}" && ! grep -aqF "infer: resident open" "${testkeys_efi}"; then ok 174 "only the CK_INFER_LIB service image carries the resident session"; else bad 174 "resident session shape wrong (missing from the inference image, or present in the plain test-keys image)"; fi
+    re_open='^infer: resident open rc=0 tensors=147 vocab=128256 layers=16 kv_capacity=64 max_new=16 max_prompt_bytes=256 heap_reserve_kib=64 heap_used_kib=[0-9]+ open_us=[0-9]+$'
+    re_recall='^lifecycle: recall gen=[0-9]+ kind=reply id=[0-9a-f]{8} bytes=[0-9]+ text="aienos\.reply\.v1.prompt: What is the capital of France\?.reply: The capital of France is Paris\.'
+    frames_kept() { # row label: the unload line returned every frame (free after = free before)
+        local l b a; l="$(grep -E -m1 '^infer: unloaded ' "${work}/serial.txt" || true)"
+        b="$(sed -nE 's/.* frames_free_before=([0-9]+).*/\1/p' <<<"${l}")"; a="$(sed -nE 's/.* frames_free_after=([0-9]+).*/\1/p' <<<"${l}")"
+        if [[ -n "${b}" && "${b}" == "${a}" ]] && grep -qE '^infer: unloaded .* rc=0,0$' <<<"${l}"; then ok "$1" "$2 (${b} = ${a})"; else bad "$1" "$2 (before=${b:-none} after=${a:-none})"; fi; }
+    boot_to="${AIENOS_QEMU_INFER_TIMEOUT:-2700}"; boot_mem=4096; boot_extra=(-fw_cfg "name=opt/aienos/model,file=${model}")
+    boot infer "${infer_efi}" drive_infer
+    infer_boots="infer"
+    rcheck 174 "TEST-ONLY fw_cfg model source declared" '^infer_source_mode: TEST-ONLY QEMU fw_cfg model ingest'
+    rcheck 174 "resident session open with the declared limits" "${re_open}"
+    before 174 "resident open < lifecycle ready" '^infer: resident open rc=0' '^lifecycle: ready state=ready store=open'
+    rcheck 174 "TEST-ONLY banner" '^lifecycle: TEST-ONLY service image'
+    rcheck 174 "generating line" '^lifecycle: generating prompt="What is the capital of France\?" \(cancel stops it between steps\)$'
+    rcheck 174 "golden reply ids (17 prompt ids, 25 steps)" '^lifecycle: reply ids=791 6864 315 9822 374 12366 13 128009 tokens=8 prompt_ids=17 steps=25 us=[0-9]+$'
+    rcheck 174 "reply is the pending proposal" '^lifecycle: reply pending state=serve proposed="reply: The capital of France is Paris\.\??" \(approve \| deny \| cancel\)$'
+    rcheck 174 "approve committed the reply object" '^lifecycle: approve committed gen=[0-9]+ id=[0-9a-f]{8} state=ready$'
+    rcheck 175 "second prompt cancelled between steps (produced 0, nothing pending)" '^lifecycle: generation cancelled steps=[1-9][0-9]* prompt_ids=[0-9]+ produced=0 us=[0-9]+ state=ready$'
+    rabsent 175 "the cancel was not refused" '^lifecycle: REFUSED verb=cancel'
+    rabsent 175 "no prompt refused" '^lifecycle: REFUSED verb=prompt'
+    rcheck 175 "recall (same boot) reads the reply back through the sealed Store" "${re_recall}"
+    rcheck 176 "evidence counters" '^lifecycle: evidence requests=5 refused=0 invalid=0 tasks=0 approved=1 denied=0 cancelled=0 overlong=0 last_commit_gen=[0-9]+ last_id=[0-9a-f]{8} prompts=2 replies=1 gen_cancelled=1 gen_failed=0 recalls=0 inference=resident$'
+    rcheck 176 "resident close" '^infer: resident close rc=0 heap_used_kib=[0-9]+ heap_peak_kib=[0-9]+$'
+    frames_kept 176 "unload returned every frame"
+    before 176 "resident close < unload line" '^infer: resident close rc=0' '^infer: unloaded '
+    before 176 "unload line < stop order" '^infer: unloaded ' '^lifecycle: stop order store=closed'
+    rcheck 176 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=7$'
+    before 176 "stop order < stage result" '^lifecycle: stop order store=closed' '^stage lifecycle: ok rc=0$'
+    rabsent 176 "no panic or fault" '^report_kind: (panic|fault)'
+    if [[ "${qemu_status}" == 0 ]]; then ok 176 "QEMU exit 0"; else bad 176 "QEMU exit ${qemu_status}"; fi
+    m1 176
+    infer_img="${top}/infer/nvme.img"
+    # boot 6: same disk, cold boot; recall answers from the disk, nothing in memory
+    boot_to="${AIENOS_QEMU_INFER_TIMEOUT:-2700}"; boot_mem=4096
+    boot infer-recall "${infer_efi}" drive_infer_recall "${infer_img}"
+    infer_boots="infer infer-recall"
+    boot_to="${boot_timeout}"; boot_mem=2048; boot_extra=()
+    rcheck 175 "cold boot: resident session open again" "${re_open}"
+    rcheck 175 "cold boot: continuity RESUMED on the same disk" '^continuity: RESUMED agent=[0-9a-f]{64} incarnation=2 '
+    rabsent 175 "cold boot: no second genesis" '^continuity: PROVISIONED'
+    rcheck 175 "cold boot: recall returns the approved reply from the disk" "${re_recall}"
+    rcheck 175 "cold boot: evidence shows one recall, no prompt" '^lifecycle: evidence requests=3 refused=0 invalid=0 tasks=0 approved=0 denied=0 cancelled=0 overlong=0 last_commit_gen=0 last_id=00000000 prompts=0 replies=0 gen_cancelled=0 gen_failed=0 recalls=1 inference=resident$'
+    frames_kept 175 "cold boot: unload returned every frame"
+    rcheck 175 "cold boot: stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=4$'
+    rabsent 175 "cold boot: no panic or fault" '^report_kind: (panic|fault)'
+    if [[ "${qemu_status}" == 0 ]]; then ok 175 "cold boot: QEMU exit 0"; else bad 175 "cold boot: QEMU exit ${qemu_status}"; fi
+    m1 175
+    if [[ "${fail}" == "${fail_before_infer}" ]]; then echo "${infer_tag}: PASS (QEMU only; hardware NOT_RUN)"; else echo "${infer_tag}: FAIL"; fi
+fi
+
 if [[ "${fail}" != 0 || -n "${AIENOS_QEMU_VERBOSE:-}" ]]; then
-    for b in service testkeys unlock relock; do echo "---- ${b} serial (lifecycle lines) ----"; grep -E '^(lifecycle|store|continuity|allen|stage lifecycle|dma_gate|smmu: nvme|report_kind|mm_usage)' "${top}/${b}/serial.txt" | head -60 || true; done
+    for b in service testkeys unlock relock ${infer_boots}; do echo "---- ${b} serial (lifecycle lines) ----"; grep -E '^(lifecycle|store|continuity|allen|infer|stage lifecycle|dma_gate|smmu: nvme|report_kind|mm_usage)' "${top}/${b}/serial.txt" | head -80 || true; done
 fi
 if [[ "${fail}" == 0 ]]; then echo "${final_tag}: PASS (QEMU only; hardware NOT_RUN)"; exit 0; fi
 echo "${final_tag}: FAIL"; exit 1

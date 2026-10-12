@@ -39,6 +39,10 @@ enum ck_lc_verb ck_lc_decode(const char *line, size_t len, const char **arg, siz
         if (*arg_len == 0 || *arg_len > CK_LC_TASK_MAX) return CK_LC_V_INVALID;
         return CK_LC_V_TASK;
     }
+    if (word_is(w, n, "prompt")) {
+        if (*arg_len == 0 || *arg_len > CK_LC_TASK_MAX) return CK_LC_V_INVALID;
+        return CK_LC_V_PROMPT;
+    }
     /* unlock carries the optional recovery secret (the binding checks its
      * shape and never echoes it); every other verb takes no argument. */
     if (word_is(w, n, "unlock")) return CK_LC_V_UNLOCK;
@@ -48,6 +52,7 @@ enum ck_lc_verb ck_lc_decode(const char *line, size_t len, const char **arg, siz
     if (word_is(w, n, "approve")) return CK_LC_V_APPROVE;
     if (word_is(w, n, "deny")) return CK_LC_V_DENY;
     if (word_is(w, n, "cancel")) return CK_LC_V_CANCEL;
+    if (word_is(w, n, "recall")) return CK_LC_V_RECALL;
     if (word_is(w, n, "evidence")) return CK_LC_V_EVIDENCE;
     if (word_is(w, n, "shutdown")) return CK_LC_V_SHUTDOWN;
     return CK_LC_V_UNKNOWN;
@@ -68,6 +73,8 @@ const char *ck_lc_verb_name(enum ck_lc_verb v)
     case CK_LC_V_CANCEL: return "cancel";
     case CK_LC_V_EVIDENCE: return "evidence";
     case CK_LC_V_SHUTDOWN: return "shutdown";
+    case CK_LC_V_PROMPT: return "prompt";
+    case CK_LC_V_RECALL: return "recall";
     }
     return "?";
 }
@@ -110,7 +117,18 @@ static void drop_task(ck_lc *lc)
 {
     size_t i;
     for (i = 0; i < sizeof lc->task; i++) lc->task[i] = 0;
+    for (i = 0; i < sizeof lc->reply; i++) lc->reply[i] = 0;
     lc->task_len = 0;
+    lc->reply_len = 0;
+    lc->pending = CK_LC_PENDING_NONE;
+}
+
+static void set_task(ck_lc *lc, const char *arg, size_t arg_len)
+{
+    size_t i;
+    for (i = 0; i < arg_len; i++) lc->task[i] = arg[i];
+    lc->task[arg_len] = 0;
+    lc->task_len = arg_len;
 }
 
 enum ck_lc_result ck_lc_apply(ck_lc *lc, enum ck_lc_verb v, const char *arg, size_t arg_len)
@@ -136,15 +154,22 @@ enum ck_lc_result ck_lc_apply(ck_lc *lc, enum ck_lc_verb v, const char *arg, siz
         if (lc->state == CK_LC_LOCKED) return refuse(lc, "locked: no production Store");
         if (lc->state == CK_LC_SERVE) return refuse(lc, "a task is pending: approve, deny or cancel it first");
         if (arg_len == 0 || arg_len > CK_LC_TASK_MAX) return refuse(lc, "task text out of bounds");
-        {
-            size_t i;
-            for (i = 0; i < arg_len; i++) lc->task[i] = arg[i];
-            lc->task[arg_len] = 0;
-            lc->task_len = arg_len;
-        }
+        set_task(lc, arg, arg_len);
+        lc->pending = CK_LC_PENDING_NOTE;
         lc->tasks++;
         lc->state = CK_LC_SERVE;
         return CK_LC_R_OK;
+    case CK_LC_V_PROMPT:
+        if (lc->state == CK_LC_LOCKED) return refuse(lc, "locked: no production Store");
+        if (lc->state == CK_LC_SERVE) return refuse(lc, "a task is pending: approve, deny or cancel it first");
+        if (arg_len == 0 || arg_len > CK_LC_TASK_MAX) return refuse(lc, "prompt text out of bounds");
+        set_task(lc, arg, arg_len); /* the prompt; the reply arrives through ck_lc_generate_done */
+        lc->prompts++;
+        return CK_LC_R_GENERATE;
+    case CK_LC_V_RECALL:
+        if (lc->state == CK_LC_LOCKED) return refuse(lc, "locked: no production Store");
+        lc->recalls++;
+        return CK_LC_R_RECALL;
     case CK_LC_V_APPROVE:
         if (lc->state != CK_LC_SERVE) return refuse(lc, "nothing pending");
         return CK_LC_R_COMMIT;
@@ -194,4 +219,22 @@ void ck_lc_unlock_done(ck_lc *lc, int opened)
 void ck_lc_stopped(ck_lc *lc)
 {
     lc->state = CK_LC_STOP;
+}
+
+void ck_lc_generate_done(ck_lc *lc, enum ck_lc_gen outcome, const char *reply, size_t n)
+{
+    if (lc->state != CK_LC_READY || lc->task_len == 0) return; /* only a READY prompt generates */
+    if (outcome == CK_LC_GEN_REPLY && n > 0 && n <= CK_LC_REPLY_MAX) {
+        size_t i;
+        for (i = 0; i < n; i++) lc->reply[i] = reply[i];
+        lc->reply[n] = 0;
+        lc->reply_len = n;
+        lc->pending = CK_LC_PENDING_REPLY;
+        lc->replies++;
+        lc->state = CK_LC_SERVE;
+        return;
+    }
+    if (outcome == CK_LC_GEN_CANCELLED) lc->gen_cancelled++;
+    else lc->gen_failed++;
+    drop_task(lc);
 }

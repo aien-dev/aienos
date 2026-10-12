@@ -219,6 +219,31 @@ int ck_console_rx_ready(uint32_t *cr);
 int ck_console_rx_poll(void);
 unsigned ck_console_rx_errors(void);
 
+/* Resident inference (core/infer.c, native v1 P06): a CK_SERVICE image built
+ * with CK_INFER_LIB keeps the ingested model and one bounded session open
+ * from boot to the lifecycle stop order. ck_infer_resident: 1 when a session
+ * is open. ck_infer_prompt: chat-templates `text`, steps to the reply's end
+ * (EOT or max_new) calling cancel_poll() between steps (1 = abandon the
+ * request); 0 on a completed or cancelled request (r filled), negative on a
+ * refusal (session codes: -12 no session, -16 prompt over max_prompt_bytes,
+ * -8 longer than the cache, -15 heap reserve). ck_infer_resident_close:
+ * closes the session and returns every frame (prints the unloaded line).
+ * Images without the unit: resident 0, prompt -12, close a no-op. */
+#define CK_INFER_REPLY_IDS 16
+#define CK_INFER_REPLY_TEXT 256
+struct ck_infer_reply {
+    uint32_t ids[CK_INFER_REPLY_IDS];
+    uint32_t prompt_ids, produced, steps;
+    int cancelled;
+    int32_t rc;
+    uint64_t us;
+    uint8_t text[CK_INFER_REPLY_TEXT];
+    uint32_t text_len;
+};
+int ck_infer_resident(void);
+int ck_infer_prompt(const char *text, size_t len, int (*cancel_poll)(void), struct ck_infer_reply *r);
+void ck_infer_resident_close(void);
+
 /* Optional Store-stage hook: signed P2 artifact candidates read from the boot
  * disk Store (svc/artifact_store.c) during ck_stage_store, before the NVMe
  * release. The bytes are UNTRUSTED: the core loader verifies them exactly as

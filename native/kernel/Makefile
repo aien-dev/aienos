@@ -269,6 +269,12 @@ ifneq ($(strip $(CK_RUST_LIBS)),)
 $(error CK_INFER_LIB and CK_RUST_LIBS cannot be combined: two Rust staticlibs duplicate compiler_builtins)
 endif
 CK_EXTRA_CFLAGS += -DCK_INFER_PROBE=1
+# native v1 P06 cut 2: in a service image the model and one bounded session
+# stay resident for the lifecycle's `prompt` verb (core/lifecycle.c) instead
+# of running the one-shot probe. QEMU gate only (fw_cfg TEST-ONLY source).
+ifeq ($(strip $(CK_SERVICE)),1)
+CK_EXTRA_CFLAGS += -DCK_INFER_RESIDENT=1
+endif
 endif
 ifneq ($(strip $(CK_QEMU_UNSAFE_DMA)),)
 ifneq ($(strip $(CK_HARDWARE_STAGING)),)
