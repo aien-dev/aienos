@@ -9,8 +9,10 @@
  *       [--policy-generation N] [--min-rollback N] [--commit HEX40]
  *       [--provenance TEXT] [--timestamp N]       unsigned manifest (signature zero)
  *   ck_slot_tool show M                        print the manifest fields (structural check only)
- *   ck_slot_tool tbs M --out F                   the 448 to-be-signed bytes, for an
+ *   ck_slot_tool tbs M --pubkey HEX64 --out F    the 448 to-be-signed bytes, for an
  *       offline signer: openssl pkeyutl -sign -inkey owner_root.pem -rawin -in F -out SIG
+ *       (signer_id = SHA-256(pubkey) lies inside the signed bytes, so it is set
+ *       before the bytes are emitted; attach-sig checks the same bytes)
  *   ck_slot_tool attach-sig M --sig SIG --out M2 --pubkey HEX64
  *   ck_slot_tool sign-test M --out M2            RFC 8032 TEST 1 key. NEVER for hardware.
  *   ck_slot_tool verify M --image F (--keys FILE | --test-key) [--cap BYTES]
@@ -699,11 +701,20 @@ static int cmd_show(int argc, char **argv)
 static int cmd_tbs(int argc, char **argv)
 {
     struct ck_slot_manifest m;
-    const char *out = opt(argc, argv, "--out");
-    if (argc < 3 || !out)
-        return refuse("tbs M --out F");
+    const char *out = opt(argc, argv, "--out"), *pkh = opt(argc, argv, "--pubkey");
+    uint8_t pk[32];
+    if (argc < 3 || !out || !pkh)
+        return refuse("tbs M --pubkey HEX64 --out F");
     if (load_manifest(argv[2], &m) != 0)
         return 1;
+    if (parse_hex(pkh, pk, 32) != 0)
+        return refuse("--pubkey is not 64 hex characters");
+    if (is_test_key(pk))
+        return refuse("--pubkey is a known TEST key");
+    /* signer_id is inside the signed bytes [0, CK_SLOT_TBS_BYTES): attach-sig and
+     * the loader check the signature over the manifest with signer_id set, so the
+     * offline signer must sign those same bytes. */
+    sha256_hash(pk, 32, m.signer_id);
     if (write_file(out, &m, CK_SLOT_TBS_BYTES) != 0)
         return refuse("cannot write the to-be-signed bytes");
     printf("tbs: %u bytes written to %s\n", CK_SLOT_TBS_BYTES, out);
