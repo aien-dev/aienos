@@ -43,6 +43,10 @@ enum ck_lc_verb ck_lc_decode(const char *line, size_t len, const char **arg, siz
         if (*arg_len == 0 || *arg_len > CK_LC_TASK_MAX) return CK_LC_V_INVALID;
         return CK_LC_V_PROMPT;
     }
+    if (word_is(w, n, "remember")) {
+        if (*arg_len == 0 || *arg_len > CK_LC_TASK_MAX) return CK_LC_V_INVALID;
+        return CK_LC_V_REMEMBER;
+    }
     /* unlock carries the optional recovery secret (the binding checks its
      * shape and never echoes it); every other verb takes no argument. */
     if (word_is(w, n, "unlock")) return CK_LC_V_UNLOCK;
@@ -53,6 +57,7 @@ enum ck_lc_verb ck_lc_decode(const char *line, size_t len, const char **arg, siz
     if (word_is(w, n, "deny")) return CK_LC_V_DENY;
     if (word_is(w, n, "cancel")) return CK_LC_V_CANCEL;
     if (word_is(w, n, "recall")) return CK_LC_V_RECALL;
+    if (word_is(w, n, "facts")) return CK_LC_V_FACTS;
     if (word_is(w, n, "evidence")) return CK_LC_V_EVIDENCE;
     if (word_is(w, n, "shutdown")) return CK_LC_V_SHUTDOWN;
     return CK_LC_V_UNKNOWN;
@@ -75,6 +80,8 @@ const char *ck_lc_verb_name(enum ck_lc_verb v)
     case CK_LC_V_SHUTDOWN: return "shutdown";
     case CK_LC_V_PROMPT: return "prompt";
     case CK_LC_V_RECALL: return "recall";
+    case CK_LC_V_REMEMBER: return "remember";
+    case CK_LC_V_FACTS: return "facts";
     }
     return "?";
 }
@@ -170,6 +177,20 @@ enum ck_lc_result ck_lc_apply(ck_lc *lc, enum ck_lc_verb v, const char *arg, siz
         if (lc->state == CK_LC_LOCKED) return refuse(lc, "locked: no production Store");
         lc->recalls++;
         return CK_LC_R_RECALL;
+    case CK_LC_V_REMEMBER: {
+        size_t i;
+        if (lc->state == CK_LC_LOCKED) return refuse(lc, "locked: no production Store");
+        if (arg_len == 0 || arg_len > CK_LC_TASK_MAX) return refuse(lc, "fact text out of bounds");
+        for (i = 0; i < arg_len; i++) lc->fact[i] = arg[i];
+        lc->fact[arg_len] = 0;
+        lc->fact_len = arg_len; /* the pending task (if any) is untouched: remember never changes the state */
+        lc->remembers++;
+        return CK_LC_R_REMEMBER;
+    }
+    case CK_LC_V_FACTS:
+        if (lc->state == CK_LC_LOCKED) return refuse(lc, "locked: no production Store");
+        lc->facts++;
+        return CK_LC_R_FACTS;
     case CK_LC_V_APPROVE:
         if (lc->state != CK_LC_SERVE) return refuse(lc, "nothing pending");
         return CK_LC_R_COMMIT;

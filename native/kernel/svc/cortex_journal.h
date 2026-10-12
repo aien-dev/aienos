@@ -23,8 +23,8 @@
  * SS_MAX_PLAINTEXT bytes (larger: CX_ERR_IO, nothing written), replay reads
  * the whole journal into the Cortex heap, the heap is a bump allocator that
  * frees nothing until ck_cx_heap_init is called again (sized by the caller;
- * the kernel hands over CK_CX_HEAP_PAGES frames). Kernel use (the
- * lifecycle's remembered facts) is the next P06 cut. */
+ * the kernel hands over CK_CX_HEAP_PAGES frames). Kernel use: the
+ * lifecycle's `remember` and `facts` verbs (core/lifecycle.c, P06 cut 4). */
 #ifndef AIENOS_CORTEX_JOURNAL_H
 #define AIENOS_CORTEX_JOURNAL_H
 

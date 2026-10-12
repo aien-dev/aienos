@@ -24,20 +24,20 @@
         },
         {
           "digest": "88c4fc1ed3ed47dc767deb9c59923934ca9b73b66aabec84a2c3e19cebdf8283",
-          "last_commit": "453f41e",
+          "last_commit": "543c1fc",
           "name": "tests",
           "purpose": "Directory native/kernel/svc/tests. Purpose not yet described by a human."
         }
       ],
       "children_root": "sha256:c08ae620be123d4ae06a01d1830984c81570c3c44fc528987cee2ad37c3c2ca9",
-      "compiled_at": "2026-10-12T07:42:03Z",
+      "compiled_at": "2026-10-12T08:47:00Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:7d18df01ff7941ffed2ed82d18fed6ab5b635156333da8ae33d698756bf15e14",
+      "digest": "sha256:e303ca254129aec54d0055028a849d1e0b03d54a0b44c2b7f7f9d766ccf8819d",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 41,
-      "generated_at_commit": "453f41e7fca07a97ee52db3a125d106dfaf17ff5",
-      "source_tree": "sha256:f5ce71ef8038e16c2de685108d74a32c41ee82205eae65a77aa3b8301f3ada77"
+      "generated_at_commit": "638d78e94611546f909e559c035e640d06d2857f",
+      "source_tree": "sha256:38af02cb9fe0c5b69d636d71bbd312e91f5c152f0b7f422fa1ccbd77e7ff5db3"
     },
     "owner_lane": "",
     "provenance": {
