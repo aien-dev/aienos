@@ -377,6 +377,7 @@ rcheck 205 "resident close" '^infer: resident close rc=0 '
 frames_kept 205 "unload returned every frame"
 before 205 "unload < stop order" '^infer: unloaded ' '^lifecycle: stop order store=closed'
 rcheck 205 "stop order closed the Store" '^lifecycle: stop order store=closed nvme=released state=stop requests=[0-9]+$'
+rabsent 205 "operator input accepted (no console-input refusal)" '^lifecycle: REFUSED console input'
 rabsent 205 "no panic or fault" '^report_kind: (panic|fault)'
 if [[ "${qemu_status}" == 0 ]]; then ok 205 "QEMU exit 0"; else bad 205 "QEMU exit ${qemu_status}"; fi
 m1 205
