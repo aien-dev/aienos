@@ -201,6 +201,11 @@ __attribute__((weak)) void ck_stage_quiesce(void);
  * CK_CONSOLE_SESSION=1): the operator console session. kmain calls it after every
  * other boot step and before the final report; absent in every default image. */
 __attribute__((weak)) int ck_stage_console_session(void);
+/* Resident production lifecycle (core/lifecycle.c, only in a CK_SERVICE=1 image):
+ * serves bounded operator requests after every boot stage until its stop order,
+ * then returns 0 so kmain prints the final report and resets. Absent (weak) in
+ * every diagnostic image. */
+__attribute__((weak)) int ck_lifecycle_run(void);
 
 /* PL011 serial receive (core/console.c), polled. ck_console_rx_ready: 1 when the
  * console UART is a PL011 whose UARTCR has UARTEN and RXE set (*cr gets UARTCR);
