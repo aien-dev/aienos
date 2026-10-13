@@ -24,6 +24,7 @@
 #include "m5.h"
 #include "sha256.h"
 #include "store_boot.h"
+#include "../../core/unlock_req.h"
 
 #ifndef CK_PI5_UNLOCK
 #error "pi5_unlock_test.c must be built with -DCK_PI5_UNLOCK (the image's policy)"
@@ -207,6 +208,43 @@ int main(void)
     CHECK(r.boot_count_prev == 1 && r.boot_count_new == 2 && r.gen_open == g1 && r.gen_commit > g1);
     CHECK(strcmp(r.prev_commit, "pi5-unlock-test") == 0 && r.identity_class == M5_ID_PRODUCTION);
     CHECK(memcmp(store_boot_store()->uuid, test_uuid, 16) != 0);
+
+    /* 9. Card request file (cut 2) end to end: a malformed request gives no secret and the blank card
+     * stays blank; a well-formed one is taken once, formats on the first run and reopens on the second
+     * (each "run" has its own boot-time request, as pi5-run.sh places it). */
+    {
+        struct ck_unlock_req q;
+        uint8_t got[CK_SB_SECRET_LEN];
+        const char *why = 0;
+        CHECK(gw_write(g_path, 512, BLOCKS, gp, 2, 0) == 0);
+        memset(&q, 0, sizeof q);
+        memcpy(q.magic, CK_UNLOCK_REQ_MAGIC, 8);
+        q.version = CK_UNLOCK_REQ_VERSION;
+        memcpy(q.tag, "QUALIF-THROWAWAY", 16);
+        for (int i = 0; i < 32; i++) q.secret[i] = (uint8_t)(0x90 ^ (i * 5));
+        q.tag[0] = 'q'; /* not the tier tag: the stub refuses it, nothing is stored */
+        memset(&ck_unlock_req_boot, 0, sizeof ck_unlock_req_boot);
+        CHECK(ck_unlock_req_check(&q, &why) != 0);
+        b = slurp(&n0);
+        int have = ck_unlock_req_take(got) == 0;
+        rc = boot(BOOT_UNLOCK, have ? got : 0, &r);
+        a = slurp(&n1);
+        CHECK(!have && rc == CK_SB_E_BLOCKED_OPERATOR && same_bytes(b, n0, a, n1));
+        free(b);
+        free(a);
+        q.tag[0] = 'Q';
+        for (int run = 0; run < 2; run++) {
+            CHECK(ck_unlock_req_check(&q, &why) == 0);
+            ck_unlock_req_store(&q);
+            CHECK(ck_unlock_req_take(got) == 0);
+            rc = boot(BOOT_UNLOCK, got, &r);
+            CHECK(rc == 0 && r.verdict == CK_SB_COMMITTED && r.identity_class == M5_ID_PRODUCTION);
+            CHECK(r.formatted == (run == 0) && r.boot_count_new == (uint64_t)run + 1);
+            CHECK(ck_unlock_req_take(got) == -1); /* the request is single use per boot */
+        }
+        memset(&q, 0, sizeof q);
+        memset(got, 0, sizeof got);
+    }
 
     memset(S, 0, sizeof S);
     memset(W, 0, sizeof W);

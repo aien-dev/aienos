@@ -190,6 +190,23 @@ endif
 # ONLY through the ADR 0017 Slot 1 recovery-secret path (ck_store_unlock_boot, PRODUCTION-class keys).
 # ck_store_test_keys and ck_store_test_uuid are not compiled, so no TEST key or TEST uuid can reach it.
 # It is a separate image from CK_PI5_STORE (TEST keys) and cannot be combined with any other tier flag.
+# PI5-4 cut 2: CK_PI5_UNLOCK_CARD=1 (QUALIFICATION ONLY, "make pi5-unlock-card") adds one secret source to the
+# unlock image: a THROWAWAY recovery secret from \EFI\AIENOS\UNLOCK.REQ on the card (core/unlock_req.h). It
+# needs CK_PI5_UNLOCK=1 and is a separate image with its own OUT. CK_PI5_PRODUCTION is reserved for a future
+# production Pi image; it is not implemented and can never be combined with the card request source.
+CK_PI5_UNLOCK_CARD ?=
+CK_PI5_PRODUCTION ?=
+ifneq ($(strip $(CK_PI5_PRODUCTION)),)
+$(error CK_PI5_PRODUCTION is reserved and not implemented: there is no production Pi image yet)
+endif
+ifneq ($(strip $(CK_PI5_UNLOCK_CARD)),)
+ifneq ($(strip $(CK_PI5_UNLOCK_CARD)),1)
+$(error CK_PI5_UNLOCK_CARD must be empty or 1)
+endif
+ifeq ($(strip $(CK_PI5_UNLOCK)),)
+$(error CK_PI5_UNLOCK_CARD (card request file, throwaway secret, QUALIFICATION ONLY) needs CK_PI5_UNLOCK=1)
+endif
+endif
 CK_PI5_UNLOCK ?=
 ifneq ($(strip $(CK_PI5_UNLOCK)),)
 ifneq ($(strip $(CK_PI5_UNLOCK)),1)
@@ -202,8 +219,11 @@ ifneq ($(strip $(CK_SERVICE)$(CK_TEST_STORE_CRASH)$(CK_TEST_CONTINUITY)$(CK_HARD
 $(error CK_PI5_UNLOCK cannot be combined with CK_SERVICE, CK_SERVICE_TEST_KEYS, CK_TEST_STORE_CRASH, CK_TEST_CONTINUITY or CK_HARDWARE_STAGING)
 endif
 CK_PI5 := 1
-OUT ?= $(REPO)/target/native-kernel-pi5-unlock
+OUT ?= $(REPO)/target/native-kernel-pi5-unlock$(if $(strip $(CK_PI5_UNLOCK_CARD)),-card)
 CK_EXTRA_CFLAGS += -DCK_PI5_UNLOCK=1
+ifneq ($(strip $(CK_PI5_UNLOCK_CARD)),)
+CK_EXTRA_CFLAGS += -DCK_PI5_UNLOCK_CARD=1
+endif
 endif
 CK_PI5 ?=
 ifneq ($(strip $(CK_PI5)),)
@@ -726,6 +746,9 @@ endif
 ifeq ($(strip $(CK_PI5_PCIE)),1)
 CORE_C += $(KDIR)/dev/pi5_pcie.c $(KDIR)/dev/dma_window.c
 endif
+ifneq ($(strip $(CK_PI5_UNLOCK_CARD)),)
+CORE_C += $(BOOT)/efi_unlock.c $(KDIR)/core/unlock_req.c
+endif
 # P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
 # (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
 # the loader; the TEST-anchor qualification build is CK_SEED0B_TEST_ANCHOR=1.
@@ -840,7 +863,7 @@ endif
 # Pi path). core/pi5.c supplies ck_dev_boot_disk and ck_dev_nvme_release over the SD partition view.
 FULL_STAGE_SYMS := ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce ck_stage_disk_artifacts
 ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_UNLOCK)),)
-FULL_NAME := $(if $(strip $(CK_PI5_UNLOCK)),full-pi5-unlock,full-pi5-store)
+FULL_NAME := $(if $(strip $(CK_PI5_UNLOCK)),full-pi5-unlock$(if $(strip $(CK_PI5_UNLOCK_CARD)),-card),full-pi5-store)
 FULL_STAGE_SYMS := ck_stage_store ck_stage_disk_artifacts
 STAGE_SRCS := $(KDIR)/svc/store_boot.c $(KDIR)/svc/artifact_store.c $(KDIR)/svc/store_crash.c $(KDIR)/svc/ck_compat.c \
   $(foreach m,store/store_v1 store/store_engine store/store_disk store/store_sealed store/torn_slot m5/m5_keys m5/m5_envelope m5/m5_state crypto/aes crypto/polyval crypto/gcm_siv crypto/hmac crypto/ct argus/sha256,$(NATIVE)/$(m).c)
@@ -1137,10 +1160,10 @@ $(FULL_EFI): $(FULL_ELF)
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
 	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/acpi_dev.c $(KDIR)/core/lifecycle_fsm.c \
-	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c
+	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c $(KDIR)/core/unlock_req.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie
+	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_unlock_req
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -1879,6 +1902,9 @@ pi5-infer:
 pi5-unlock:
 	$(MAKE) CK_PI5_UNLOCK=1 full
 
+pi5-unlock-card:
+	$(MAKE) CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 full
+
 pi5:
 	$(MAKE) CK_PI5=1 all
 
@@ -1934,7 +1960,7 @@ $(OUT)/host-san/test_pi5_rng: $(KDIR)/tests/test_pi5_rng.c $(PI5_RNG_SRCS) $(KDI
 
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
-.PHONY: all full pi5 pi5-store pi5-infer pi5-unlock test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
 
 # AIENOS-PI5 step 3 marker + Pi card GPT test (hosted; a file stands in for the card, QEMU cannot model the Pi SD host).
 PI5_MARKER_SRCS := $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \

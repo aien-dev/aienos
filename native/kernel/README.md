@@ -165,6 +165,22 @@ this cut compiles in no source, so the Store stays closed
 `PI5-UNLOCK-QUALIFICATION`. Not a production image: no TPM, no operator
 ceremony.
 
+**Card unlock request (PI5-4 cut 2, `make pi5-unlock-card`, QUALIFICATION ONLY).**
+`CK_PI5_UNLOCK_CARD=1` (needs `CK_PI5_UNLOCK=1`, own OUT directory) adds the
+one secret source the Pi can have without a TPM or a serial reader: a
+THROWAWAY recovery secret in `\EFI\AIENOS\UNLOCK.REQ` on the card (`core/unlock_req.h`,
+512 bytes, tier tag `QUALIF-THROWAWAY`). The UEFI stub reads it before
+ExitBootServices (`boot/efi_unlock.c`, reads only), the Store stage takes the
+secret once and runs the Slot 1 path as if the operator had typed `unlock`
+(first-time setup on a blank Store). The boot log says
+`unlock_source: card request file (QUALIFICATION ONLY, throwaway secret)`; the
+secret is never printed. `pi5-run.sh UNLOCK_REQ=<file>` places the file and
+zeroes and deletes it from the card after the run, checking it is gone;
+`scripts/pi5_unlock_req.sh` writes a throwaway request (never inside a git
+checkout). `CK_PI5_PRODUCTION` is reserved for a future production Pi image: the
+Makefile refuses it, so the card source can never be combined with it. A
+production image must read its secret from the operator, never from the card.
+
 | Piece | What |
 | --- | --- |
 | `dev/pi5_wdt.c` | BCM2712 PM watchdog (Linux `bcm2835_wdt.c` registers), armed for `CK_PI5_WDT_S` (15 s) at start, petted at every `ck_set_stage`. A hang resets the board; on the hub the tryboot one-shot flag is already cleared, so it comes back on normal Linux. |

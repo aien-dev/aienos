@@ -30,6 +30,9 @@
 #include "disk.h"
 #include "disk_sdhci.h"
 #include "pi5_marker.h"
+#ifdef CK_PI5_UNLOCK_CARD
+#include "unlock_req.h"
+#endif
 #include "../dev/disk_part.h"
 
 #define PI5_SD_PHYS 0x1000fff000ull
@@ -229,11 +232,22 @@ void ck_dev_nvme_release(void) {}
 #endif
 
 #ifdef CK_PI5_UNLOCK
-/* The recovery secret source of the Pi unlock image. This image has no UART input and no TPM: with no
- * source compiled in, the Store stays closed (ck_store_pi5_unlock_run refuses before reading the disk). */
-int ck_pi5_unlock_secret(uint8_t out[32], const char **source) /* CK_SB_SECRET_LEN, svc/store_boot.h */
+/* The recovery secret source of the Pi unlock image (CK_SB_SECRET_LEN = 32, svc/store_boot.h). This
+ * image has no UART input and no TPM. Plain CK_PI5_UNLOCK compiles in no source: the Store stays
+ * closed (ck_store_pi5_unlock_run refuses before reading the disk). CK_PI5_UNLOCK_CARD (QUALIFICATION
+ * ONLY) adds the throwaway secret from the card request file the UEFI stub read (core/unlock_req.h);
+ * it is handed out once and wiped. The source string is printed loudly by the Store stage. */
+int ck_pi5_unlock_secret(uint8_t out[32], const char **source)
 {
+#ifdef CK_PI5_UNLOCK_CARD
+    if (ck_unlock_req_take(out) == 0) {
+        if (source)
+            *source = CK_UNLOCK_REQ_SOURCE;
+        return 0;
+    }
+#else
     (void)source;
+#endif
     for (unsigned i = 0; i < 32; i++)
         out[i] = 0;
     return -1;
