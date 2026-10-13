@@ -489,7 +489,22 @@ endif
 endif
 
 OUT ?= $(REPO)/target/native-kernel
-AIENOS_COMMIT ?= $(shell git -C $(REPO) rev-parse HEAD 2>/dev/null || echo unknown)
+# Pi builds only (CK_PI5=1: "make pi5" and anything built on it): when a tracked
+# file differs from HEAD the stamp ends in "-dirty", so the kernel's report
+# ("aienos_commit: <stamp>") and the EFI itself say the image is not the bare
+# commit. Pi hardware runs are cited as evidence; a bare hash on an image built
+# from an edited tree would name a commit that does not contain its source.
+# Untracked files are ignored (build output lives in untracked target/).
+# Non-Pi builds are untouched: the suffix stays empty and git status is not run
+# (the QEMU gates compare "aienos_commit: <HEAD>"). An AIENOS_COMMIT given on
+# the command line or in the environment is used as is, with no suffix.
+AIENOS_COMMIT_SUFFIX :=
+ifeq ($(strip $(CK_PI5)),1)
+ifneq ($(strip $(shell GIT_OPTIONAL_LOCKS=0 git -C $(REPO) status --porcelain --untracked-files=no 2>/dev/null)),)
+AIENOS_COMMIT_SUFFIX := -dirty
+endif
+endif
+AIENOS_COMMIT ?= $(shell git -C $(REPO) rev-parse HEAD 2>/dev/null || echo unknown)$(AIENOS_COMMIT_SUFFIX)
 
 CK_EXTRA_CFLAGS ?=
 # Build-time DMA policy for the full image (see dev/nvme_bind.c):

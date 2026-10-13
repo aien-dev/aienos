@@ -195,6 +195,11 @@ The image cannot boot in QEMU (the SD host and PM addresses are Pi 5 only). It
 runs on the hub Pi with the one-shot tryboot runner, which prepares the slot
 (one contiguous 2 MiB file, its raw card sector read back and compared before
 the map is written) and pulls the log back after the hub returns to Linux.
+The runner is `scripts/pi5/pi5-run.sh` (run from the Spark). A Pi build made from a
+tree with uncommitted changes to tracked files stamps `aienos_commit: <HEAD>-dirty`
+(the default image never does); the runner reads the stamp out of the EFI, logs it in
+`run.log`, and says "NOT commit-bound (dirty build)" for a `-dirty` image. Hardware
+receipts from earlier runs are in `evidence/pi5_hardware_runs_2026-10-13/`.
 
 ## Known hardware risk: disk footprint (CK gate DISK_LAYOUT: NOT_RUN)
 
