@@ -82,7 +82,8 @@ typedef struct {
     void *InstallConfigurationTable;
     void *LoadImage, *StartImage, *Exit, *UnloadImage;
     EFI_STATUS (*ExitBootServices)(EFI_HANDLE ImageHandle, uint64_t MapKey);
-    void *GetNextMonotonicCount, *Stall;
+    void *GetNextMonotonicCount;
+    EFI_STATUS (*Stall)(uint64_t Microseconds);
     EFI_STATUS (*SetWatchdogTimer)(uint64_t Timeout, uint64_t WatchdogCode,
                                    uint64_t DataSize, CHAR16 *WatchdogData);
     void *ConnectController, *DisconnectController;
@@ -153,14 +154,19 @@ _Static_assert(offsetof(EFI_LOADED_IMAGE_PROTOCOL, DeviceHandle) == 0x18, "Devic
 #define EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID_INIT \
     { 0x964e5b22, 0x6459, 0x11d2, { 0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b } }
 #define EFI_FILE_MODE_READ 0x0000000000000001ull
+#define EFI_FILE_MODE_WRITE 0x0000000000000002ull
+#define EFI_FILE_MODE_CREATE 0x8000000000000000ull
+#define EFI_FILE_DIRECTORY 0x0000000000000010ull
 typedef struct EFI_FILE_PROTOCOL {
     uint64_t Revision;
     EFI_STATUS (*Open)(struct EFI_FILE_PROTOCOL *This, struct EFI_FILE_PROTOCOL **NewHandle,
                        CHAR16 *FileName, uint64_t OpenMode, uint64_t Attributes);
     EFI_STATUS (*Close)(struct EFI_FILE_PROTOCOL *This);
-    void *Delete;
+    EFI_STATUS (*Delete)(struct EFI_FILE_PROTOCOL *This);
     EFI_STATUS (*Read)(struct EFI_FILE_PROTOCOL *This, uint64_t *BufferSize, void *Buffer);
-    void *Write, *GetPosition, *SetPosition, *GetInfo, *SetInfo, *Flush;
+    EFI_STATUS (*Write)(struct EFI_FILE_PROTOCOL *This, uint64_t *BufferSize, const void *Buffer);
+    void *GetPosition, *SetPosition, *GetInfo, *SetInfo;
+    EFI_STATUS (*Flush)(struct EFI_FILE_PROTOCOL *This);
     void *OpenEx, *ReadEx, *WriteEx, *FlushEx;
 } EFI_FILE_PROTOCOL;
 typedef struct EFI_SIMPLE_FILE_SYSTEM_PROTOCOL {
@@ -168,6 +174,9 @@ typedef struct EFI_SIMPLE_FILE_SYSTEM_PROTOCOL {
     EFI_STATUS (*OpenVolume)(struct EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *This, EFI_FILE_PROTOCOL **Root);
 } EFI_SIMPLE_FILE_SYSTEM_PROTOCOL;
 _Static_assert(offsetof(EFI_FILE_PROTOCOL, Read) == 0x20, "File.Read");
+_Static_assert(offsetof(EFI_FILE_PROTOCOL, Write) == 0x28, "File.Write");
+_Static_assert(offsetof(EFI_FILE_PROTOCOL, Flush) == 0x50, "File.Flush");
+_Static_assert(offsetof(EFI_BOOT_SERVICES, Stall) == 0xf8, "Stall");
 
 /* --- Block I/O (UEFI 2.10 section 13.9) --- */
 #define EFI_BLOCK_IO_PROTOCOL_GUID_INIT \

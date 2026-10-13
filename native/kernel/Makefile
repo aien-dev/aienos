@@ -1728,6 +1728,37 @@ slot-loader-check:
 	done
 	@echo "SLOT_LOADER_BUILD: PASS (TEST-key and owner-key loaders built; TEST key refused with hardware staging)"
 
+# ---- PI5DIAG.EFI: AIENOS-PI5-BOOT-0, the Raspberry Pi 5 firmware diagnostic ----
+# native/boot/diag_main.c: a UEFI application that reports what the firmware shows
+# (ConOut + \EFI\AIENOS\PI5BOOT0.TXT) and returns. Own object list, no kernel, no
+# ExitBootServices (checked). Copy to the card as EFI/BOOT/BOOTAA64.EFI.
+#   make pi5-diag     -> $(OUT)/PI5DIAG.EFI      QEMU test: scripts/qemu_ck_pi5_diag_test.sh
+PI5DIAG_DIR := $(OUT)/pi5diag
+PI5DIAG_ELF := $(PI5DIAG_DIR)/pi5diag.elf
+PI5DIAG_EFI := $(OUT)/PI5DIAG.EFI
+PI5DIAG_OBJS := $(PI5DIAG_DIR)/diag_main.o $(PI5DIAG_DIR)/efi_entry.o $(PI5DIAG_DIR)/fmt.o $(PI5DIAG_DIR)/libc_min.o
+$(PI5DIAG_DIR)/diag_main.o: $(BOOT)/diag_main.c $(BOOT)/efi.h $(KDIR)/core/fmt.h
+	@mkdir -p $(dir $@)
+	$(KCC) $(KCFLAGS) -c -o $@ $<
+$(PI5DIAG_DIR)/efi_entry.o: $(BOOT)/efi_entry.S
+	@mkdir -p $(dir $@)
+	$(KCC) $(KCFLAGS) -c -o $@ $<
+$(PI5DIAG_DIR)/fmt.o: $(KDIR)/core/fmt.c $(KDIR)/core/fmt.h
+	@mkdir -p $(dir $@)
+	$(KCC) $(KCFLAGS) -c -o $@ $<
+$(PI5DIAG_DIR)/libc_min.o: $(KDIR)/core/libc_min.c
+	@mkdir -p $(dir $@)
+	$(KCC) $(KCFLAGS) -c -o $@ $<
+$(PI5DIAG_ELF): $(PI5DIAG_OBJS) $(BOOT)/image.ld
+	@if grep -nE -- '->(ExitBootServices|RuntimeServices)' $(BOOT)/diag_main.c; then \
+	  echo "diag_main.c calls a service the diagnostic must never call"; exit 1; fi
+	$(call link_image,$@,$(PI5DIAG_OBJS))
+	@k=$$($(KNM) $@ | grep -E ' [TtDdBbRr] (ck_kernel_entry|kmain|ck_boot_model_load|ck_printf)$$' || true); \
+	if [ -n "$$k" ]; then echo "PI5DIAG links kernel objects: $$k"; rm -f $@; exit 1; fi
+$(PI5DIAG_EFI): $(PI5DIAG_ELF)
+	$(call pe_image,$<,$@)
+pi5-diag: $(PI5DIAG_EFI)
+
 # ---- host checker for the AIENOS_CK_SCREEN gate (scripts/qemu_ck_screen_test.sh) ----
 FB_CHECK_TOOL := $(OUT)/host/ck_fb_check
 $(FB_CHECK_TOOL): $(KDIR)/tools/ck_fb_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/fbcon.h $(KDIR)/core/font8x8.h
@@ -1764,5 +1795,5 @@ clean:
 	rm -rf $(OUT)
 
 FORCE:
-.PHONY: uefi-vars slot-loader slot-loader-check
+.PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
 .PHONY: all full test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
