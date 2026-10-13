@@ -14,8 +14,8 @@
 #   native/crypto      test sanitize mutants  this file
 #   native/m5          test sanitize mutants  this file
 #   native/disk        test sanitize mutants  this file
-#   native/disk/qemu   bare-metal NVMe payload under QEMU  this file (QEMU is an
-#                      emulator: PASS says nothing about a physical controller)
+#   native/disk/qemu   bare-metal NVMe and SDHCI payloads under QEMU  this file
+#                      (QEMU is an emulator: PASS says nothing about a physical controller)
 #   native/argus       test sanitize          this file
 #
 # SKIP list (declared, never green):
@@ -36,6 +36,7 @@ on:
       - "native/**"
       - ".github/workflows/native-suites.yml"
       - "scripts/qemu_native_nvme_test.sh"
+      - "scripts/qemu_native_sdhci_test.sh"
       - "scripts/lib_gate_hold.sh"
       - "scripts/cap_abi_isolation_test.sh"
       - "crates/aienos-capability/**"
@@ -145,7 +146,7 @@ jobs:
           grep -qx 'AIENOS_CAP_ABI_ISOLATION: PASS' abi.log
 
   disk-qemu:
-    name: native/disk qemu NVMe payload
+    name: native/disk qemu NVMe and SDHCI payloads
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -165,6 +166,15 @@ jobs:
           bash scripts/qemu_native_nvme_test.sh 2>&1 | tee qemu.log
           # The script exits 0 on NOT_RUN; only an explicit PASS counts.
           grep -qx 'AIENOS_STORE_NVME_QEMU: PASS' qemu.log
+
+      - name: Run QEMU SDHCI gate
+        env:
+          AIENOS_QUIET_FLAG: ${{ runner.temp }}/aienos-quiet-flag
+          AIENOS_GATE_LOCK: ${{ runner.temp }}/aienos-gate-lock
+        run: |
+          bash scripts/qemu_native_sdhci_test.sh 2>&1 | tee sdhci.log
+          # The script exits 0 on NOT_RUN; only an explicit PASS counts.
+          grep -qx 'AIENOS_DISK_SDHCI_QEMU: PASS' sdhci.log
 
   argus-mutants:
     name: "native/argus mutants (SKIP: no mutants target in argus Makefile)"

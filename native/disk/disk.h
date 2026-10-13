@@ -7,6 +7,8 @@
  *                into a freestanding image), with power-cut injection.
  *   disk_nvme.c  freestanding NVMe driver ported from the audited Rust path
  *                (crates/aienos-kernel/src/nvme*, docs/P3_NVME_*.md). No libc.
+ *   disk_sdhci.c freestanding polled PIO SD Host Controller driver (Pi 5
+ *                microSD). No libc, no DMA.
  *
  * Geometry. The interface sector is 512 bytes (DISK_SECTOR_BYTES). A backend
  * reports its logical block size (512 or 4096); lba and count are in logical
