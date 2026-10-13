@@ -11,7 +11,7 @@ use aienos_explain::{build_bundle, render, ExplanationRequest, Limits, Mode};
 use std::process::Command;
 
 const FIXTURE: &[u8] = include_bytes!("fixtures/rsi_kv_cycle.evidence.json");
-const FIXTURE_SHA256: &str = "0c04376ca36d95d677942d7e97c0a3eef3728ef72dc3cdf070494174e6a6cc31";
+const FIXTURE_SHA256: &str = "7e9f1c1e09210fb3158cd001ecb6207d4d5c3fbd30996448c35c61dc900fc07d";
 const TARGET: &str = "rsi:conclusion:cycle-kv-0001";
 
 fn hexs(b: &[u8]) -> String {
