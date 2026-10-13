@@ -74,7 +74,7 @@ static uint64_t spurious, unhandled;
 
 struct ck_frame *ck_irq_dispatch(struct ck_frame *f)
 {
-    uint32_t id = (uint32_t)ck_rd_s(ICC_IAR1_EL1) & 0xffffff;
+    uint32_t id = ck_gic_ack();
     if (id >= 1020) {
         spurious++;
         return f;
@@ -85,7 +85,7 @@ struct ck_frame *ck_irq_dispatch(struct ck_frame *f)
         irq_table[id].fn(irq_table[id].arg);
     else
         unhandled++;
-    ck_wr_s(ICC_EOIR1_EL1, id);
+    ck_gic_eoi(id);
     ck_isb();
     if (id == 30 && ck_tick_switch)
         return ck_tick_switch(f);

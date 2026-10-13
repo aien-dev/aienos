@@ -41,9 +41,15 @@ struct ck_madt_gic {
     uint32_t gicr_len;
     uint32_t gicc_count;  /* enabled or online-capable GICC entries */
     uint64_t gicc_gicr;   /* GICR base from the first GICC, if no 0x0E range */
+    uint64_t gicc_base;   /* GICv2 CPU interface (Physical Base Address) from the first GICC */
 };
 /* 0 on success, -1 on a malformed table (bad entry length, truncation). */
 int ck_madt_parse(const void *madt, struct ck_madt_gic *out);
+/* Which GIC the parsed MADT describes: 2 (GICv2, MMIO CPU interface at
+ * gicc_base), 3 (GICv3/v4, redistributors), 0 (unusable: GICv1, or v2 with no
+ * CPU interface). GICD version 0 ("discover") is GICv3 when a redistributor is
+ * named anywhere, else GICv2 when a GICC base is given. */
+int ck_madt_gic_kind(const struct ck_madt_gic *m);
 
 /* CPU topology from the MADT GICC entries (acpi.rs madt_cpu_topology): enabled
  * or online-capable cores, (efficiency class, count) pairs sorted by class,
