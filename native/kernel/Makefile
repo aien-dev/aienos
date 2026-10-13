@@ -829,7 +829,7 @@ ifeq ($(strip $(CK_PI5_PCIE)),1)
 CORE_C += $(KDIR)/dev/pi5_pcie.c $(KDIR)/dev/dma_window.c
 endif
 ifeq ($(strip $(CK_PI5_NET)),1)
-CORE_C += $(KDIR)/dev/pi5_pcie.c $(KDIR)/dev/dma_window.c $(KDIR)/dev/pi5_net.c
+CORE_C += $(KDIR)/dev/pi5_pcie.c $(KDIR)/dev/dma_window.c $(KDIR)/dev/pi5_net.c $(KDIR)/dev/pi5_gem.c
 endif
 ifneq ($(strip $(CK_PI5_UNLOCK_CARD)),)
 CORE_C += $(BOOT)/efi_unlock.c $(KDIR)/core/unlock_req.c
@@ -1269,7 +1269,7 @@ HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/
 	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c $(KDIR)/core/unlock_req.c $(KDIR)/core/agent_cmd.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_pi5_net test_unlock_req test_context test_agent_cmd
+	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_pi5_net test_pi5_gem test_unlock_req test_context test_agent_cmd
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -2199,3 +2199,24 @@ pi5-net-mutants:
 	  if $(OUT)/host/test_pi5_net_mut_$$m >/dev/null; then echo "MUTANT SURVIVED: $$m"; fail=1; else echo "mutant killed: $$m"; fi; \
 	done; test $$fail -eq 0
 .PHONY: test-pi5-net pi5-net-mutants pi5-net
+
+# AIENOS-PI5 network cut 3 (GEM descriptors, transfer order, bus-master window, PHY loopback) over a fake GEM that checks every DMA it makes.
+PI5GEM_SRCS := $(KDIR)/dev/pi5_gem.c $(KDIR)/dev/pi5_net.c $(KDIR)/dev/pi5_pcie.c $(KDIR)/dev/dma_window.c
+PI5GEM_DEPS := $(KDIR)/tests/test_pi5_gem.c $(PI5GEM_SRCS) $(KDIR)/tests/ck_test.h $(KDIR)/dev/pi5_gem.h $(KDIR)/dev/pi5_net.h $(KDIR)/dev/pi5_pcie.h $(KDIR)/dev/dma_window.h
+$(OUT)/host/test_pi5_gem: $(PI5GEM_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -I$(KDIR)/dev -o $@ $< $(PI5GEM_SRCS)
+$(OUT)/host-san/test_pi5_gem: $(PI5GEM_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -I$(KDIR)/dev -o $@ $< $(PI5GEM_SRCS)
+test-pi5-gem: $(OUT)/host/test_pi5_gem
+	$<
+# Each mutant removes one decision; the test must FAIL for every one.
+PI5GEM_MUTANTS := NO_VALIDATE BME_EARLY BME_LEFT_ON NO_QUIESCE_WAIT NO_RETE_OFF NO_BARRIER NO_TIEOFF NO_RXLEN_CHECK NO_TX_LAST NO_SENTINEL_USED NO_ADDR64 NO_HWWIN NOT_STICKY NO_FRAMECAP NO_SEQ NO_DIFF MDIO_OP PHYLB_BIT NO_WRAP NO_GBE NO_DRFCS NO_BME_VERIFY NO_LLB_CLEAR
+pi5-gem-mutants:
+	@mkdir -p $(OUT)/host
+	@fail=0; for m in $(PI5GEM_MUTANTS); do \
+	  $(HOSTCC) $(HCFLAGS) -DCK_GEM_MUTANT_$$m -I$(KDIR)/dev -o $(OUT)/host/test_pi5_gem_mut_$$m $(KDIR)/tests/test_pi5_gem.c $(PI5GEM_SRCS) || exit 1; \
+	  if $(OUT)/host/test_pi5_gem_mut_$$m >/dev/null; then echo "MUTANT SURVIVED: $$m"; fail=1; else echo "mutant killed: $$m"; fi; \
+	done; test $$fail -eq 0
+.PHONY: test-pi5-gem pi5-gem-mutants
