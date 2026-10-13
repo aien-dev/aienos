@@ -150,6 +150,25 @@ CK_PI5 := 1
 OUT ?= $(REPO)/target/native-kernel-pi5-store
 CK_EXTRA_CFLAGS += -DCK_PI5_STORE=1
 endif
+# Pi 5 inference image (CK_PI5_INFER=1, "make pi5-infer", PI5-6 cut 2): the plain Pi image plus
+# the Rust inference unit (CK_INFER_LIB) and core/infer.c as the one-shot boot-disk probe. Model
+# source is MODEL.MAP only (-DCK_INFER_DISK_ONLY=1): no fw_cfg code, and with no map the kernel
+# refuses. No Store stage, no service, no resident session. Own OUT; plain pi5 / pi5-store unchanged.
+CK_PI5_INFER ?=
+ifneq ($(strip $(CK_PI5_INFER)),)
+ifneq ($(strip $(CK_PI5_INFER)),1)
+$(error CK_PI5_INFER must be empty or 1)
+endif
+ifneq ($(strip $(CK_PI5_STORE)$(CK_SERVICE)$(CK_HARDWARE_STAGING)$(CK_TEST_FWCFG_ARTIFACTS)$(CK_RUST_LIBS)),)
+$(error CK_PI5_INFER is the one-shot Pi inference image: it cannot be combined with CK_PI5_STORE, CK_SERVICE, CK_HARDWARE_STAGING, CK_TEST_FWCFG_ARTIFACTS or CK_RUST_LIBS)
+endif
+ifeq ($(strip $(CK_INFER_LIB)),)
+$(error CK_PI5_INFER needs CK_INFER_LIB=<libaienos_infer_kernel.a> (use "make pi5-infer", which builds it))
+endif
+CK_PI5 := 1
+OUT ?= $(REPO)/target/native-kernel-pi5-infer
+CK_EXTRA_CFLAGS += -DCK_PI5_INFER=1 -DCK_INFER_DISK_ONLY=1
+endif
 CK_PI5 ?=
 ifneq ($(strip $(CK_PI5)),)
 ifneq ($(strip $(CK_PI5)),1)
@@ -648,7 +667,7 @@ $(error CK_FB_HOLD_S must be 0..9999 seconds)
 endif
 
 KINC := -I$(KDIR)/include -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/arch -I$(BOOT)
-MODULE_INC := -I$(NATIVE)/disk -I$(NATIVE)/store -I$(NATIVE)/m5 -I$(NATIVE)/crypto \
+MODULE_INC := -I$(NATIVE)/disk -I$(NATIVE)/store -I$(NATIVE)/m5 -I$(NATIVE)/cryptoif [ "$(strip $(CK_SERVICE))" = 1 ]; then $1 fi; \
 	-I$(NATIVE)/capability -I$(NATIVE)/argus -I$(NATIVE)/net
 KCFLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -nostdlib -fno-builtin \
 	-fno-stack-protector -fno-tree-loop-distribute-patterns -mstrict-align \
@@ -876,7 +895,7 @@ $(foreach s,$(STAGE_SRCS),$(eval $(call stage_rule,$(s))))
 # with inference (CK_INFER_LIB + CK_HARDWARE_STAGING, boot-disk only) must
 # carry the boot-disk source line, the resident session, and no fw_cfg code.
 define fwcfg_check
-	@if [ -n "$(strip $(CK_INFER_LIB))" ] && [ -z "$(strip $(CK_HARDWARE_STAGING))" ]; then \
+	@if [ -n "$(strip $(CK_INFER_LIB))" ] && [ -z "$(strip $(CK_HARDWARE_STAGING))" ] && [ -z "$(strip $(CK_PI5_INFER))" ]; then \
 	  grep -aqF "TEST-ONLY QEMU fw_cfg model ingest" $(1) || { echo "inference probe image lacks its TEST-ONLY fw_cfg announcement"; rm -f $(1); exit 1; }; \
 	elif [ "$(strip $(CK_TEST_FWCFG_ARTIFACTS))" = 1 ]; then \
 	  grep -aqF "TEST-ONLY QEMU fw_cfg side channel" $(1) || { echo "test fw_cfg image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
@@ -886,7 +905,7 @@ define fwcfg_check
 	  if [ -n "$$s$$y" ]; then echo "default image carries fw_cfg artifact code: $$s$$y"; rm -f $(1); exit 1; fi; \
 	  if [ -n "$(strip $(CK_INFER_LIB))" ]; then \
 	    grep -aqF "infer_source_mode: boot-disk model" $(1) || { echo "hardware inference image lacks the boot-disk model source"; rm -f $(1); exit 1; }; \
-	    grep -aqF "infer: resident open" $(1) || { echo "hardware inference image lacks the resident session"; rm -f $(1); exit 1; }; \
+	    if [ "$(strip $(CK_SERVICE))" = 1 ]; then grep -aqF "infer: resident open" $(1) || { echo "hardware inference image lacks the resident session"; rm -f $(1); exit 1; }; fi; \
 	    echo "hardware inference image: boot-disk model source only, no fw_cfg code in $(1)"; \
 	  fi; \
 	  echo "no fw_cfg artifact code in $(1)"; \
@@ -1814,6 +1833,11 @@ pi5-diag: $(PI5DIAG_EFI)
 pi5-store:
 	$(MAKE) CK_PI5_STORE=1 full
 
+PI5_INFER_LIB := $(REPO)/target/infer-kernel/aarch64-unknown-none/release/libaienos_infer_kernel.a
+pi5-infer:
+	CARGO_TARGET_DIR=$(REPO)/target/infer-kernel cargo build -q --release --target aarch64-unknown-none --manifest-path $(REPO)/crates/aienos-infer-kernel/Cargo.toml
+	$(MAKE) CK_PI5_INFER=1 CK_INFER_LIB=$(PI5_INFER_LIB) all
+
 pi5:
 	$(MAKE) CK_PI5=1 all
 
@@ -1865,7 +1889,7 @@ $(OUT)/host-san/test_pi5_rng: $(KDIR)/tests/test_pi5_rng.c $(PI5_RNG_SRCS) $(KDI
 
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
-.PHONY: all full pi5 pi5-store test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full pi5 pi5-store pi5-infer test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
 
 # AIENOS-PI5 step 3 marker + Pi card GPT test (hosted; a file stands in for the card, QEMU cannot model the Pi SD host).
 PI5_MARKER_SRCS := $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \

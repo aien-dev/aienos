@@ -37,8 +37,8 @@
 
 #ifdef CK_INFER_PROBE
 #include "sha256.h"
-#if defined(CK_INFER_DISK_ONLY) && !defined(CK_INFER_RESIDENT)
-#error "CK_INFER_DISK_ONLY is the hardware service image (CK_SERVICE=1 + CK_INFER_LIB + CK_HARDWARE_STAGING) only"
+#if defined(CK_INFER_DISK_ONLY) && !defined(CK_INFER_RESIDENT) && !defined(CK_PI5_INFER)
+#error "CK_INFER_DISK_ONLY is the hardware service image (CK_SERVICE=1 + CK_INFER_LIB + CK_HARDWARE_STAGING) or the Pi one-shot image (CK_PI5_INFER) only"
 #endif
 
 extern void aienos_infer_heap_init(uintptr_t base, uintptr_t len);
