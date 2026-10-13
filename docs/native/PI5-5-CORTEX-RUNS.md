@@ -44,10 +44,25 @@ malformed layout. Mutation proof (`make -f stage.mk pi5-fact-mutants`): `CK_FACT
 skipped, success still reported) and `CK_FACT_MUTANT_RECALL_BLIND` (recall never reads the journal) both make the
 test fail (mutants killed).
 
-## Pi runs (NOT_RUN)
+## Pi runs (PASS, 2026-10-13, Raspberry Pi 5, main dd99eda, `make pi5-fact`)
 
-F1 remember (boot 1, `FACT.REQ` placed, `UNLOCK.REQ` with secret S), F2 cold-boot recall (power-cycled by the
-run tool, `UNLOCK.REQ` with S, no `FACT.REQ`), F3 wrong secret W (no `FACT.REQ`): the fact is not recalled. The
-exact commands are in the PR description. Limits: the AIENOS partition holds a PRODUCTION-class Store from PI5-4;
-there is no TPM, the secret comes from the card; the anchor shares the disk, so a whole-disk rollback is not
-detectable (needs TPM NV or another external counter).
+Each run is one tryboot of the hub (`~/workspace/pi5/pi5-run-fact.sh`, KLOG=1): a soft reboot into AIENOS and back, NOT a power cut. The Store partition head was zeroed before F1 (the PI5-4 Store's throwaway secret no longer exists). Secrets S and W are throwaway QUALIFICATION ONLY request files, kept outside git and deleted from the card after each run.
+
+F1 remember (UNLOCK.REQ S, FACT.REQ "prefer short notes"):
+```
+store: opened generation=1 boot_count=0 prev_commit=none anchor=valid-resume
+store: committed generation=2 boot_count=1
+fact_stage: remembered id=1 t=1 store_gen=4 bytes=18 text="prefer short notes"
+fact_stage: readback id=1 t=1 store_gen=4 text="prefer short notes"
+```
+F2 recall on the next boot (UNLOCK.REQ S, no FACT.REQ):
+```
+store: opened generation=4 boot_count=1 prev_commit=dd99eda1ec2d3e6b097bfb71a9583b153e3face7 anchor=valid-resume
+fact_stage: recalled id=1 t=1 store_gen=4 text="prefer short notes"
+```
+F3 wrong secret W:
+```
+store: REFUSED proof=keyed step="recovery secret rejected (K_vol unwrap tag failed); disk not opened" rc=-2004 (RecoverySecretRejected); disk left as found, not reformatted
+fact_stage: NOTHING RECALLED: the Store is not open (recovery secret missing or rejected, or the disk was refused); no Cortex was read, nothing was written
+```
+Limits: tryboot reset, not a power cut (a power-cut recall run is owed, done by hand); secret from the card, no TPM; the anchor shares the disk, so a whole-disk rollback is not detectable; single runs.
