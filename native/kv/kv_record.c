@@ -128,6 +128,7 @@ int kv_compute_config_digest(const kv_compute_config *c, uint8_t out[32])
 static int check_geometry(const kv_namespace_fields *f)
 {
     if (f->block_size == 0 || f->chunk_tokens == 0 || f->num_layers == 0 || f->num_kv_heads == 0 || f->head_dim == 0) return KV_E_INVALID_GEOMETRY; /* GUARD:geometry-zero */
+    if (f->layout.block_stride == 0 || f->layout.element_bytes == 0) return KV_E_INVALID_GEOMETRY; /* GUARD:geometry-zero-byte-factor */
     if (f->chunk_tokens % f->block_size != 0) return KV_E_INVALID_GEOMETRY; /* GUARD:geometry-multiple */
     /* A host chunk is one segment per pool block and the digest table holds at
      * most 120 (ADR 2.1 item 3): chunk_blocks is capped at 120 there. */
