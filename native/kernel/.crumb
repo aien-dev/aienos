@@ -57,8 +57,8 @@
           "purpose": "Directory native/kernel/artifact. Purpose not yet described by a human."
         },
         {
-          "digest": "529a021d03c4e1cf694893510716289c757f84928a6c1af23a6ce42678a392ea",
-          "last_commit": "b46b6ba",
+          "digest": "59ed62d9cc65c8b4a4fd0a8abef018cc6fc05eba56ead699ad50ae25cbfd4e3a",
+          "last_commit": "d3fcbcd",
           "name": "core",
           "purpose": "Directory native/kernel/core. Purpose not yet described by a human."
         },
@@ -88,7 +88,7 @@
         },
         {
           "digest": "5af2f3acb130b4996f485e8ceeb838a3447ced577272c9d455861007537ce6e8",
-          "last_commit": "b46b6ba",
+          "last_commit": "65466db",
           "name": "tests",
           "purpose": "Directory native/kernel/tests. Purpose not yet described by a human."
         },
@@ -99,15 +99,15 @@
           "purpose": "Hosted (Linux-built) checkers for the native kernel, run by `make -C native/kernel test`; nothin"
         }
       ],
-      "children_root": "sha256:a806cc88ff806519c3baaf833e9bc4ae20a286adddec629d813c5269c8bfda17",
-      "compiled_at": "2026-10-13T13:46:16Z",
+      "children_root": "sha256:fe2c7cc24f5d8315fef2e2029545ed8f6589d0e7a0f9b7aac974cf91530f6ff5",
+      "compiled_at": "2026-10-13T14:40:44Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:cb707e08fd33858c86ee4ea866a2decfac90c6082a2cf28f058e9c8659b16325",
+      "digest": "sha256:d64a164129945f560d4500f05bf71145a6b289b4f2b03b51af3c03c36099a367",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 338,
-      "generated_at_commit": "b46b6ba4c5f031ff1d0d8cf3ea31b5093fbd2f4f",
-      "source_tree": "sha256:81addc4c127a5ceabc06bf9e8c07484b169adf3b9d4e9f7cb59665af521bfc78"
+      "generated_at_commit": "1fd895aef29f2163f075e7b35bb13fa2c9389192",
+      "source_tree": "sha256:caa23b6a8c570873c3295a5a811040423d277f34b2ebdd710b0a42b2a77b65b7"
     },
     "owner_lane": "",
     "provenance": {

@@ -112,6 +112,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential qemu-system-arm qemu-efi-aarch64 socat
+      - name: Install Rust toolchain (make pi5-infer links the aarch64-unknown-none inference crate)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-none
       - name: Vendored Omega Cortex store matches omega.lock (P06 cut 3; shallow fetch of the pinned omega commit)
         run: bash scripts/omega_lock_check.sh
       - name: "Stage sources compile freestanding (nm -u: ck.h services only)"
