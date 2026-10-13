@@ -100,6 +100,13 @@ extern void aienos_infer_heap_stats(uint64_t *used, uint64_t *peak);
 #define CPACR_FPEN_SHIFT 20
 #define PAGE 4096ull
 #define HEAP_BYTES (256ull << 20)    /* bump-allocator region for the Rust unit */
+#define PET_CHUNK (16ull << 20)       /* bytes hashed between two watchdog pets */
+/* Pet the Pi PM watchdog (core/pi5.c, 15 s) from a long loop; no-op where there is none. */
+static void pet(void)
+{
+    if (ck_pi5_stage)
+        ck_pi5_stage("infer");
+}
 #ifndef CK_INFER_DISK_ONLY
 #define DMA_CHUNK (64ull << 20)      /* fw_cfg DMA length is 32 bit; read in chunks */
 #define MODEL_FILE "opt/aienos/model"
@@ -285,6 +292,7 @@ static int session_request(unsigned which, const char *text, unsigned cancel_aft
         uint32_t t = 0;
         uint64_t us = 0;
         rc = aienos_infer_session_step(&t, &us);
+        pet();
         if (rc < 0 || rc == SESS_STEP_DONE) break;
         steps++;
         if (rc == SESS_STEP_PREFILL) { prefill++; pre_us += us; continue; }
@@ -599,7 +607,14 @@ void ck_infer_run(void)
     uint8_t dg[SHA256_DIGEST_SIZE];
     char dh[2 * SHA256_DIGEST_SIZE + 1];
     sha256_init(&ctx);
-    sha256_update(&ctx, (const uint8_t *)(uintptr_t)mpa, msize);
+    /* 16 MiB pieces, a watchdog pet between them: on the Pi the 15 s PM watchdog is petted only at boot
+     * stages (core/pi5.c), and hashing the whole model is longer than that. ck_pi5_stage is weak (absent
+     * on every other board). */
+    for (uint64_t o = 0; o < msize; o += PET_CHUNK) {
+        uint64_t n = msize - o < PET_CHUNK ? msize - o : PET_CHUNK;
+        sha256_update(&ctx, (const uint8_t *)(uintptr_t)(mpa + o), n);
+        pet();
+    }
     sha256_final(&ctx, dg);
     hex(dh, dg, SHA256_DIGEST_SIZE);
     ck_printf("infer: sha256=%s sha_us=%llu\n", dh, (unsigned long long)(ck_time_us() - t1));
@@ -620,6 +635,20 @@ void ck_infer_run(void)
     return;
 #endif
 
+#ifdef CK_PI5_INFER
+    /* Pi image: the one-shot probe is one call of many seconds with interrupts masked and cannot pet the
+     * 15 s PM watchdog (core/pi5.c). The session below runs the same golden prompt one step at a time
+     * with a pet per step, and is judged against the same llama.cpp token list (expect_gen). */
+    ck_puts("infer: one-shot probe skipped on the Pi image (watchdog); the session below runs the golden prompt step by step\n");
+    (void)expect_ids; /* judged by the one-shot probe only; the session checks the reply tokens */
+    {
+        uint64_t v = ck_rd(cpacr_el1);
+        v |= 3ull << CPACR_FPEN_SHIFT;
+        ck_wr(cpacr_el1, v);
+        ck_isb();
+    }
+    int f2 = ck_mm_frames_free(hpa, HEAP_BYTES / PAGE);
+#else
     /* FP/SIMD on, every exception masked for the Rust unit (see core/fpu.c).
      * The FP registers are left dirty afterwards (nothing else in the kernel
      * reads them; EL0 traps on FP). */
@@ -672,6 +701,7 @@ void ck_infer_run(void)
     aienos_infer_heap_init(0, 0);
     int f2 = ck_mm_frames_free(hpa, HEAP_BYTES / PAGE);
     ck_printf("AIENOS_CK_INFER: %s\n", ok ? "PASS" : "FAIL");
+#endif /* CK_PI5_INFER */
 
     /* Bounded session on the same model bytes, its own fresh heap region. */
     session_run(mpa, msize);

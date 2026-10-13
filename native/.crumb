@@ -56,7 +56,7 @@
         },
         {
           "digest": "929ed085c32fffd1530eb09cec90c2554c7bf0bb02ad70db53cf8cd94761e5f4",
-          "last_commit": "013dfa6",
+          "last_commit": "6f35eab",
           "name": "boot",
           "purpose": "Directory native/boot. Purpose not yet described by a human."
         },
@@ -79,8 +79,8 @@
           "purpose": "Directory native/disk. Purpose not yet described by a human."
         },
         {
-          "digest": "db24cfca50e9f5c96b8bec3858420bb97cc5ddaa4f2d4e2050b3b98ce0a0a660",
-          "last_commit": "013dfa6",
+          "digest": "6e575096cfcc2df4792bbae3821d3d77b414aa432bda02d3fcddc8a2ff913143",
+          "last_commit": "867c4ac",
           "name": "kernel",
           "purpose": "Directory native/kernel. Purpose not yet described by a human."
         },
@@ -109,15 +109,15 @@
           "purpose": "Directory native/store. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:3a49c1addd1c30a7734661248d997b9f01318df3f2845be392abe186fb1fd9ce",
-      "compiled_at": "2026-10-13T17:02:53Z",
+      "children_root": "sha256:eac95440257feb868df67082aa612e6ed39e4cc60160e6c0f3028e580bc9382b",
+      "compiled_at": "2026-10-13T17:23:51Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:f497c9f7a4854444dec6fb7a02af1acbcbc2b54f9b02421817271263a7b3cae0",
+      "digest": "sha256:443333b76192539859c8e501f18091153980e715c490920441f2c7e177f5fae1",
       "evidence_files": 4,
       "evidence_root": "sha256:e410b845507e00568e15b51a5797af32a97e0e4b8ab4e8487bb7c98e7e0cf335",
       "files": 535,
-      "generated_at_commit": "013dfa602cad3a9f4435359ccf01f9b61eecfaf5",
-      "source_tree": "sha256:317529d8c8851c09d980a1ba4e131bcded950d15c6e99cfa808b2a2be4ab4019"
+      "generated_at_commit": "298065e8f6711a85823fe4ff051738e7c30cbbd1",
+      "source_tree": "sha256:d33b4088ae75ab0cbecb1563d7148d737c275768835a929fb0b747a10be43c7f"
     },
     "owner_lane": "",
     "provenance": {
