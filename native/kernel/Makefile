@@ -653,7 +653,7 @@ CORE_C := $(BOOT)/efi_main.c $(BOOT)/efi_model.c $(BOOT)/efi_gop.c \
 	$(KDIR)/core/fpu.c $(KDIR)/core/infer.c $(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c $(KDIR)/core/smp.c \
 	$(KDIR)/mm/frames.c $(KDIR)/mm/heap.c $(KDIR)/mm/mmu.c $(KDIR)/mm/pt.c
 ifeq ($(strip $(CK_PI5)),1)
-CORE_C += $(BOOT)/efi_klog.c $(KDIR)/core/pi5.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c \
+CORE_C += $(BOOT)/efi_klog.c $(KDIR)/core/pi5.c $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c \
 	$(KDIR)/dev/pi5_wdt.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_sdhci.c
 endif
 # P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
@@ -804,6 +804,8 @@ $(ART_OBJS): $(ART_HDRS)
 
 # core/pi5.c drives the SD card through native/disk.
 $(KOBJ)/kernel/core/pi5.o: KCFLAGS += -I$(NATIVE)/disk
+$(KOBJ)/kernel/core/pi5_marker.o: KCFLAGS += -I$(NATIVE)/disk
+$(KOBJ)/kernel/dev/disk_part.o: KCFLAGS += -I$(NATIVE)/disk
 
 # core/infer.c uses the in-core SHA-256 (argus) to prove the ingested bytes.
 $(KOBJ)/kernel/core/infer.o: KCFLAGS += -I$(NATIVE)/argus
@@ -1056,7 +1058,7 @@ HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/
 	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5
+	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -1826,3 +1828,12 @@ clean:
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
 .PHONY: all full pi5 test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+
+# AIENOS-PI5 step 3 marker + Pi card GPT test (hosted; a file stands in for the card, QEMU cannot model the Pi SD host).
+PI5_MARKER_SRCS := $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \
+	$(KDIR)/tools/gpt_write.c
+$(OUT)/host/test_pi5_marker: $(KDIR)/tests/test_pi5_marker.c $(PI5_MARKER_SRCS) $(KDIR)/tests/ck_test.h $(KDIR)/core/pi5_marker.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -I$(KDIR)/dev -I$(KDIR)/tools -I$(NATIVE)/disk -o $@ $< $(PI5_MARKER_SRCS)
+test-pi5-marker: $(OUT)/host/test_pi5_marker
+	$<
