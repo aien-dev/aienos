@@ -9,7 +9,11 @@
 #include "arch.h"
 #include "ck_internal.h"
 #include "entropy.h"
+#ifdef CK_PI5
+#include "pi5_rng.h"
+#endif
 
+#ifndef CK_PI5
 static int hw_present(void *ctx)
 {
     (void)ctx;
@@ -27,11 +31,26 @@ static int hw_read(void *ctx, uint64_t *out)
 }
 
 static const struct ck_rng_ops hw_ops = { hw_present, hw_read, 0 };
+#endif /* !CK_PI5 */
 static struct ck_rng rng = { 0, CK_RNG_UNPROBED, 0, 0, 0 };
 
 int ck_entropy_init(void)
 {
+#ifdef CK_PI5
+    /* Pi 5: no FEAT_RNG; the only source is the BCM2712 RNG200 block (dev/pi5_rng.c). */
+    return ck_rng_probe(&rng, ck_pi5_rng_ops());
+#else
     return ck_rng_probe(&rng, &hw_ops);
+#endif
+}
+
+const char *ck_entropy_source(void)
+{
+#ifdef CK_PI5
+    return "rng200";
+#else
+    return "rndr";
+#endif
 }
 
 int ck_entropy_fill(void *buf, size_t len)

@@ -666,7 +666,7 @@ CORE_C := $(BOOT)/efi_main.c $(BOOT)/efi_model.c $(BOOT)/efi_gop.c \
 	$(KDIR)/mm/frames.c $(KDIR)/mm/heap.c $(KDIR)/mm/mmu.c $(KDIR)/mm/pt.c
 ifeq ($(strip $(CK_PI5)),1)
 CORE_C += $(BOOT)/efi_klog.c $(KDIR)/core/pi5.c $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c \
-	$(KDIR)/dev/pi5_wdt.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_sdhci.c
+	$(KDIR)/dev/pi5_wdt.c $(KDIR)/dev/pi5_rng.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_sdhci.c
 endif
 # P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
 # (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
@@ -828,6 +828,7 @@ $(ART_OBJS): $(ART_HDRS)
 # core/pi5.c drives the SD card through native/disk.
 $(KOBJ)/kernel/core/pi5.o: KCFLAGS += -I$(NATIVE)/disk
 $(KOBJ)/kernel/core/pi5_marker.o: KCFLAGS += -I$(NATIVE)/disk
+$(KOBJ)/kernel/arch/rndr.o: KCFLAGS += -I$(KDIR)/dev
 $(KOBJ)/kernel/dev/disk_part.o: KCFLAGS += -I$(NATIVE)/disk
 
 # core/infer.c uses the in-core SHA-256 (argus) to prove the ingested bytes.
@@ -1081,7 +1082,7 @@ HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/
 	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker
+	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -1850,6 +1851,17 @@ endif
 
 clean:
 	rm -rf $(OUT)
+
+# AIENOS-PI5 RNG200 hardware entropy source: driver logic over a mocked register block, real core/entropy.c rules.
+PI5_RNG_SRCS := $(KDIR)/dev/pi5_rng.c $(KDIR)/core/entropy.c
+$(OUT)/host/test_pi5_rng: $(KDIR)/tests/test_pi5_rng.c $(PI5_RNG_SRCS) $(KDIR)/tests/ck_test.h $(KDIR)/dev/pi5_rng.h $(KDIR)/core/entropy.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -DCK_RNG200_SPINS=1000 -I$(KDIR)/dev -o $@ $< $(PI5_RNG_SRCS)
+test-pi5-rng: $(OUT)/host/test_pi5_rng
+	$<
+$(OUT)/host-san/test_pi5_rng: $(KDIR)/tests/test_pi5_rng.c $(PI5_RNG_SRCS) $(KDIR)/tests/ck_test.h $(KDIR)/dev/pi5_rng.h $(KDIR)/core/entropy.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -DCK_RNG200_SPINS=1000 -I$(KDIR)/dev -o $@ $< $(PI5_RNG_SRCS)
 
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag

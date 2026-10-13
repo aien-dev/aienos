@@ -211,12 +211,21 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     ck_set_stage("entropy");
     int ent = ck_entropy_init();
     if (ent == CK_RNG_OK)
+#ifdef CK_PI5
+        ck_printf("entropy: source=%s probe_words=2 retries=%llu stuck_test=ok\n", ck_entropy_source(),
+                  (unsigned long long)ck_entropy_retries());
+#else
         ck_printf("entropy: rndr feat_rng=yes probe_words=2 retries=%llu stuck_test=ok\n",
                   (unsigned long long)ck_entropy_retries());
+#endif
     else
         ck_printf("entropy: unavailable reason=%s (%s); security consumers refuse, fail closed\n",
                   ck_entropy_reason(),
+#ifdef CK_PI5
+                  ent == CK_RNG_ABSENT ? "source=rng200 not present: block unmapped or not enabled"
+#else
                   ent == CK_RNG_ABSENT ? "ID_AA64ISAR0_EL1.RNDR=0, no FEAT_RNG"
+#endif
                   : ent == CK_RNG_FAILED ? "RNDR returned no number within the retry bound"
                   : ent == CK_RNG_STUCK ? "RNDR repeated a 64-bit word"
                                         : "probe error");

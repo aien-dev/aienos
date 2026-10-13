@@ -118,6 +118,7 @@ void ck_m3_run(void);
 /* arch/rndr.c: probe FEAT_RNG + two RNDR words once, before any consumer.
  * Returns CK_RNG_OK or the refusal (see core/entropy.h). */
 int ck_entropy_init(void);
+const char *ck_entropy_source(void); /* "rndr" (default) or "rng200" (CK_PI5) */
 uint64_t ck_entropy_retries(void);
 /* core/smp.c: secondary cores through PSCI CPU_ON, each on its own stack with
  * the MMU on the boot core's tables, checked in and parked in WFE. Prints
