@@ -12,7 +12,29 @@ pub struct MmioReg<T> {
 
 impl<T: Copy> MmioReg<T> {
     /// Create a new MMIO register accessor at the given physical/virtual address.
-    pub const fn new(addr: usize) -> Self {
+    ///
+    /// # Safety
+    /// `addr` must address a mapped device register (or other memory valid for
+    /// volatile reads and writes of `T`), aligned for `T`, for as long as the
+    /// returned accessor is used. `read` and `write` access it without further
+    /// checks.
+    ///
+    /// ```
+    /// use aienos_kernel::arch::aarch64::MmioReg;
+    /// let mut word = 0u32;
+    /// // SAFETY: `word` is a live, aligned u32 for as long as `reg` is used.
+    /// let reg = unsafe { MmioReg::<u32>::new(core::ptr::addr_of_mut!(word) as usize) };
+    /// reg.write(7);
+    /// assert_eq!(reg.read(), 7);
+    /// ```
+    ///
+    /// Safe code cannot construct one:
+    ///
+    /// ```compile_fail,E0133
+    /// use aienos_kernel::arch::aarch64::MmioReg;
+    /// let _ = MmioReg::<u32>::new(0x0900_0000);
+    /// ```
+    pub const unsafe fn new(addr: usize) -> Self {
         Self {
             addr,
             _marker: PhantomData,
@@ -21,11 +43,13 @@ impl<T: Copy> MmioReg<T> {
 
     /// Read volatile from MMIO register.
     pub fn read(&self) -> T {
+        // SAFETY: `new`'s contract makes `addr` valid for a volatile read of `T`.
         unsafe { read_volatile(self.addr as *const T) }
     }
 
     /// Write volatile to MMIO register.
     pub fn write(&self, value: T) {
+        // SAFETY: `new`'s contract makes `addr` valid for a volatile write of `T`.
         unsafe { write_volatile(self.addr as *mut T, value) }
     }
 }
@@ -448,7 +472,9 @@ impl EarlyUart {
 
     /// Read raw register.
     fn reg(&self, offset: usize) -> MmioReg<u32> {
-        MmioReg::new(self.base_addr + offset)
+        // SAFETY: `base_addr` is the UART register block this driver was created
+        // for, and every caller passes a `uart16550_regs` offset inside it.
+        unsafe { MmioReg::new(self.base_addr + offset) }
     }
 
     /// True once a transmit timed out; later writes are skipped.
@@ -544,7 +570,9 @@ mod tests {
         uart.write_byte(b'A');
         assert_eq!(registers[0], b'A' as u32);
         assert_eq!(uart.try_read_byte(), None);
-        MmioReg::new(registers.as_mut_ptr() as usize + uart16550_regs::LINE_STATUS)
+        // SAFETY: LINE_STATUS is inside the local `registers` array, which
+        // outlives this write.
+        unsafe { MmioReg::new(registers.as_mut_ptr() as usize + uart16550_regs::LINE_STATUS) }
             .write(uart16550_regs::TX_HOLDING_EMPTY | uart16550_regs::DATA_READY);
         assert_eq!(uart.try_read_byte(), Some(b'A'));
     }

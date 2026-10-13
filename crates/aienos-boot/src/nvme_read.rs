@@ -186,11 +186,14 @@ struct Ecam(EcamWindow);
 impl PciConfig for Ecam {
     fn read32(&mut self, bus: u8, device: u8, function: u8, offset: u16) -> Option<u32> {
         let addr = self.0.config_address(bus, device, function, offset)?;
-        Some(MmioReg::<u32>::new(addr as usize).read())
+        // SAFETY: `config_address` returned an address inside this ECAM window,
+        // which the kernel identity map covers as device memory.
+        Some(unsafe { MmioReg::<u32>::new(addr as usize) }.read())
     }
     fn write16(&mut self, bus: u8, device: u8, function: u8, offset: u16, value: u16) {
         if let Some(addr) = self.0.config_address(bus, device, function, offset) {
-            MmioReg::<u16>::new(addr as usize).write(value);
+            // SAFETY: as in `read32`.
+            unsafe { MmioReg::<u16>::new(addr as usize) }.write(value);
         }
     }
 }
@@ -267,10 +270,13 @@ struct NativeRegisters {
 
 impl Registers for NativeRegisters {
     fn read32(&mut self, offset: u32) -> u32 {
-        MmioReg::<u32>::new(self.base + offset as usize).read()
+        // SAFETY: `base` is the NVMe BAR the PCI takeover assigned, covered by
+        // the identity map, and the driver passes only NVMe register offsets.
+        unsafe { MmioReg::<u32>::new(self.base + offset as usize) }.read()
     }
     fn write32(&mut self, offset: u32, value: u32) {
-        MmioReg::<u32>::new(self.base + offset as usize).write(value);
+        // SAFETY: as in `read32`.
+        unsafe { MmioReg::<u32>::new(self.base + offset as usize) }.write(value);
     }
 }
 
@@ -760,7 +766,9 @@ fn report_smmu_fault(
     let Some(base) = smmu_base else {
         return;
     };
-    let reg = |offset| MmioReg::<u32>::new(base as usize + offset).read();
+    // SAFETY: `base` is the identity-mapped SMMUv3 register aperture from the
+    // IORT, and the fault report reads only register offsets inside it.
+    let reg = |offset| unsafe { MmioReg::<u32>::new(base as usize + offset) }.read();
     clean_invalidate_dcache_range(smmu_events as usize, core::mem::size_of::<[[u64; 4]; 16]>());
     let events = unsafe { core::ptr::read_volatile(smmu_events) };
     let mut fault = aienos_kernel::report::ReportBuf::<512>::new();

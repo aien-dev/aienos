@@ -45,7 +45,7 @@
     "generated": {
       "children": [
         {
-          "digest": "1d30ca7021c15e3a0b501caa9149ddf071899bd6cf5f1fe26df88d55f0ec776e",
+          "digest": "ad829eca65ef7878ec3f262d4ba17592c984c4f25e29b2012ea00fd6d3909260",
           "last_commit": "a2a0382",
           "name": "arch",
           "purpose": "Directory crates/aienos-kernel/src/arch. Purpose not yet described by a human."
@@ -64,7 +64,7 @@
         },
         {
           "digest": "aeb814fd7cfb0fdd7f62ddb86ecaea68bbb7c6a36baac72b3037db4db01de7d0",
-          "last_commit": "a06b2de",
+          "last_commit": "fbbfc9c",
           "name": "infer",
           "purpose": "Directory crates/aienos-kernel/src/infer. Purpose not yet described by a human."
         },
@@ -93,21 +93,21 @@
           "purpose": "Directory crates/aienos-kernel/src/sync. Purpose not yet described by a human."
         },
         {
-          "digest": "02676319a3e30b9cc2de9c8be9f2f9d13f6d3ca267fca47f2190a82faa9bf8c7",
+          "digest": "f51233705a5c33d1c72abca84575d077a80fd907e73c14ee95d9939a02c06eb0",
           "last_commit": "35b3086",
           "name": "usb",
           "purpose": "Directory crates/aienos-kernel/src/usb. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:01d3ce7715a9a4c69a10554e5b2d7eb14603d2979ca573147049d4938b8f36f2",
-      "compiled_at": "2026-10-04T20:01:05Z",
+      "children_root": "sha256:e84717f6b7c3368dbb75c1fe5496c2b6b70a63404a35a96dc89e2aa5dec251b2",
+      "compiled_at": "2026-10-13T02:27:54Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:dc58e3f2037a115f459c3f4c8aa3e20ff4d7d5bb553bd857aa2cd0a52b9e01a1",
+      "digest": "sha256:e29df0084abf67fb52332b236e7c2888d702decb0b9cadb78a372fd00f465a90",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 75,
-      "generated_at_commit": "79456d09c1e2aaf0c84f853f0e3d76b864475bb7",
-      "source_tree": "sha256:df276f2ec2990434f5d6ca9001a2178e64e62afbdf65120b76da02456c444410"
+      "generated_at_commit": "74f638c298bc04543b03d6851a83dac815d36645",
+      "source_tree": "sha256:c4c81471f2da936667a4c13311c072ac5829e542f07e2eb13dd59a6dd5a3ebd0"
     },
     "owner_lane": "",
     "provenance": {

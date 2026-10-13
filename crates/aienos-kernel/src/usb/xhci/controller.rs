@@ -149,8 +149,11 @@ impl Deadline {
 }
 
 fn write64(addr: usize, value: u64) {
-    MmioReg::<u32>::new(addr).write(value as u32);
-    MmioReg::<u32>::new(addr + 4).write((value >> 32) as u32);
+    // SAFETY: callers pass a 64-bit register inside the controller register
+    // block that `Keyboard::start`'s contract requires to be mapped.
+    unsafe { MmioReg::<u32>::new(addr) }.write(value as u32);
+    // SAFETY: the high half of the same 64-bit register.
+    unsafe { MmioReg::<u32>::new(addr + 4) }.write((value >> 32) as u32);
 }
 
 /// A running controller with one attached boot keyboard.
@@ -185,7 +188,9 @@ impl Keyboard {
     /// may run.
     pub unsafe fn start(mmio_base: u64, mem: *mut DmaMemory) -> Result<Self, Error> {
         let base = mmio_base as usize;
-        let cap = |offset: usize| MmioReg::<u32>::new(base + offset).read();
+        // SAFETY: the capability registers sit at the start of the register
+        // block that this function's contract requires to be mapped.
+        let cap = |offset: usize| unsafe { MmioReg::<u32>::new(base + offset) }.read();
         let caps = Capabilities::decode(cap(0), cap(4), cap(8), cap(0x10), cap(0x14), cap(0x18))
             .ok_or(Error::Absent)?;
         if caps.scratchpad_pages != 0 {
@@ -272,7 +277,9 @@ impl Keyboard {
     }
 
     fn op_reg(&self, offset: usize) -> MmioReg<u32> {
-        MmioReg::new(self.op + offset)
+        // SAFETY: `op` is the operational register base inside the register
+        // block `start` was given, and callers pass `op::` offsets.
+        unsafe { MmioReg::new(self.op + offset) }
     }
 
     fn run(&mut self) -> Result<(), Error> {
@@ -294,7 +301,8 @@ impl Keyboard {
         config.write(config.read() & !0xff | 1);
         write64(self.op + op::DCBAAP, dcbaa as u64);
         write64(self.op + op::CRCR, self.commands.dequeue_pointer());
-        MmioReg::<u32>::new(self.rt + rt::ERSTSZ).write(1);
+        // SAFETY: ERSTSZ is a runtime register inside the block `start` was given.
+        unsafe { MmioReg::<u32>::new(self.rt + rt::ERSTSZ) }.write(1);
         write64(self.rt + rt::ERDP, self.events.dequeue_pointer());
         write64(self.rt + rt::ERSTBA, segment_table as u64);
 
@@ -446,7 +454,9 @@ impl Keyboard {
     }
 
     fn doorbell(&self, target: u8, value: u8) {
-        MmioReg::<u32>::new(self.db + usize::from(target) * 4).write(u32::from(value));
+        // SAFETY: `db` is the doorbell array inside the register block `start`
+        // was given; `target` is the command ring (0) or this keyboard's slot.
+        unsafe { MmioReg::<u32>::new(self.db + usize::from(target) * 4) }.write(u32::from(value));
     }
 
     fn command(&mut self, trb: Trb, step: &'static str) -> Result<Trb, Error> {
@@ -465,7 +475,8 @@ impl Keyboard {
                     command_words,
                     dcbaap: unsafe { read_volatile((self.op + op::DCBAAP) as *const u64) },
                     erstba: unsafe { read_volatile((self.rt + rt::ERSTBA) as *const u64) },
-                    erstsz: MmioReg::<u32>::new(self.rt + rt::ERSTSZ).read(),
+                    // SAFETY: ERSTSZ is a runtime register inside the block `start` was given.
+                    erstsz: unsafe { MmioReg::<u32>::new(self.rt + rt::ERSTSZ) }.read(),
                     crcr: unsafe { read_volatile((self.op + op::CRCR) as *const u64) },
                     erdp: unsafe { read_volatile((self.rt + rt::ERDP) as *const u64) },
                     usbcmd: self.op_reg(op::USBCMD).read(),
@@ -643,8 +654,11 @@ fn wait(mut deadline: Deadline, mut done: impl FnMut() -> bool) -> Result<(), ()
 
 /// Stop the controller, reset it and wait until it is ready for setup.
 fn reset(op: usize) -> Result<(), Error> {
-    let usbcmd = MmioReg::<u32>::new(op + op::USBCMD);
-    let usbsts = MmioReg::<u32>::new(op + op::USBSTS);
+    // SAFETY: `start` passes the operational register base of the register
+    // block its contract requires to be mapped; USBCMD and USBSTS are inside it.
+    let usbcmd = unsafe { MmioReg::<u32>::new(op + op::USBCMD) };
+    // SAFETY: as above.
+    let usbsts = unsafe { MmioReg::<u32>::new(op + op::USBSTS) };
     if usbsts.read() == u32::MAX {
         return Err(Error::Absent);
     }

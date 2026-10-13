@@ -14,13 +14,17 @@ pub struct MmioGicRegisters {
 }
 impl GicRegisters for MmioGicRegisters {
     fn read32(&mut self, offset: usize) -> u32 {
-        crate::arch::MmioReg::<u32>::new(self.base + offset).read()
+        // SAFETY: `base` is the GIC register frame mapped at its MADT address,
+        // and the programming code passes only GICD/GICR offsets inside it.
+        unsafe { crate::arch::MmioReg::<u32>::new(self.base + offset) }.read()
     }
     fn write32(&mut self, offset: usize, value: u32) {
-        crate::arch::MmioReg::<u32>::new(self.base + offset).write(value);
+        // SAFETY: as in `read32`.
+        unsafe { crate::arch::MmioReg::<u32>::new(self.base + offset) }.write(value);
     }
     fn write64(&mut self, offset: usize, value: u64) {
-        crate::arch::MmioReg::<u64>::new(self.base + offset).write(value);
+        // SAFETY: as in `read32`.
+        unsafe { crate::arch::MmioReg::<u64>::new(self.base + offset) }.write(value);
     }
 }
 
