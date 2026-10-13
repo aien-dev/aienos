@@ -667,7 +667,7 @@ $(error CK_FB_HOLD_S must be 0..9999 seconds)
 endif
 
 KINC := -I$(KDIR)/include -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/arch -I$(BOOT)
-MODULE_INC := -I$(NATIVE)/disk -I$(NATIVE)/store -I$(NATIVE)/m5 -I$(NATIVE)/cryptoif [ "$(strip $(CK_SERVICE))" = 1 ]; then $1 fi; \
+MODULE_INC := -I$(NATIVE)/disk -I$(NATIVE)/store -I$(NATIVE)/m5 -I$(NATIVE)/crypto \
 	-I$(NATIVE)/capability -I$(NATIVE)/argus -I$(NATIVE)/net
 KCFLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -nostdlib -fno-builtin \
 	-fno-stack-protector -fno-tree-loop-distribute-patterns -mstrict-align \
@@ -905,7 +905,7 @@ define fwcfg_check
 	  if [ -n "$$s$$y" ]; then echo "default image carries fw_cfg artifact code: $$s$$y"; rm -f $(1); exit 1; fi; \
 	  if [ -n "$(strip $(CK_INFER_LIB))" ]; then \
 	    grep -aqF "infer_source_mode: boot-disk model" $(1) || { echo "hardware inference image lacks the boot-disk model source"; rm -f $(1); exit 1; }; \
-	    if [ "$(strip $(CK_SERVICE))" = 1 ]; then grep -aqF "infer: resident open" $(1) || { echo "hardware inference image lacks the resident session"; rm -f $(1); exit 1; }; fi; \
+	    if [ -z "$(strip $(CK_PI5_INFER))" ]; then grep -aqF "infer: resident open" $(1) || { echo "hardware inference image lacks the resident session"; rm -f $(1); exit 1; }; fi; \
 	    echo "hardware inference image: boot-disk model source only, no fw_cfg code in $(1)"; \
 	  fi; \
 	  echo "no fw_cfg artifact code in $(1)"; \
