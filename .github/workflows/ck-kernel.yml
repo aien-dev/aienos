@@ -115,6 +115,13 @@ jobs:
           sudo apt-get install -y mtools
           bash scripts/qemu_ck_pi5_diag_test.sh
 
+      - name: C kernel boot on a GICv2 machine (AIENOS-PI5 step 1, the Raspberry Pi 5 GIC-400 shape, QEMU gic-version=2)
+        env:
+          AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
+          AIENOS_GATE_LOCK: ${{ runner.temp }}/qemu-gate-lock
+          AIENOS_QEMU_GIC: "2"
+        run: bash scripts/qemu_ck_boot_test.sh
+
       - name: Check the host tests left the tree clean (the gate runner refuses a dirty tree)
         run: |
           git status --porcelain --untracked-files=normal

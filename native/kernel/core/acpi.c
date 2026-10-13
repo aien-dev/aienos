@@ -121,8 +121,10 @@ int ck_madt_parse(const void *madt, struct ck_madt_gic *out)
                 return -1;
             uint32_t flags = rd32(e + 12);
             if (flags & (1u | 8u)) {
-                if (!g.gicc_count)
+                if (!g.gicc_count) {
+                    g.gicc_base = rd64(e + 32);
                     g.gicc_gicr = rd64(e + 60);
+                }
                 g.gicc_count++;
             }
         } else if (type == 0x0c) { /* GICD */
@@ -146,6 +148,21 @@ int ck_madt_parse(const void *madt, struct ck_madt_gic *out)
     return 0;
 }
 
+
+int ck_madt_gic_kind(const struct ck_madt_gic *m)
+{
+    if (m->gic_version == 2)
+        return m->gicc_base ? 2 : 0;
+    if (m->gic_version >= 3)
+        return 3;
+    if (m->gic_version == 0) {
+        if (m->gicr || m->gicc_gicr)
+            return 3;
+        if (m->gicc_base)
+            return 2;
+    }
+    return 0;
+}
 
 int ck_madt_mpidrs(const void *madt, uint64_t *out, unsigned max, unsigned *n)
 {

@@ -98,11 +98,15 @@ void ck_artifact_final(void);
 /* ---- GIC and timer (arch/gic.c, arch/timer.c) ---- */
 struct ck_gic_report {
     uint64_t gicd, gicr;
+    uint64_t gicc;     /* GICv2 CPU interface base (0 on GICv3) */
+    uint32_t kind;     /* 2 = GICv2 MMIO CPU interface, 3 = GICv3 system registers */
     uint32_t arch_rev;
     uint64_t icc_sre;
     uint64_t rd_frame; /* this CPU's redistributor frame */
 };
 int ck_gic_init(const struct ck_madt_gic *madt, struct ck_gic_report *out);
+uint32_t ck_gic_ack(void);         /* IRQ entry: INTID, 1020-1023 = spurious */
+void ck_gic_eoi(uint32_t intid);
 struct ck_timer_window {
     uint64_t ticks, ms, freq_hz, min_interval, max_interval, span;
 };

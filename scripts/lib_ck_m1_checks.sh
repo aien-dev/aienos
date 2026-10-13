@@ -39,7 +39,13 @@ ck_m1_checks() {
     check "left firmware and entered the kernel" "kernel: alive"
     check "kernel entered EL1h" "kernel_el: EL1h"
     check "EL1 page tables and caches enabled" "mmu: enabled"
-    check "GICv3 enabled" "gic: v3"
+    # AIENOS_QEMU_GIC=2: QEMU gic-version=2, the Raspberry Pi 5 shape (GIC-400,
+    # memory-mapped CPU interface). Default 3: the GB10 shape.
+    if [[ "${AIENOS_QEMU_GIC:-3}" == 2 ]]; then
+        check "GICv2 enabled" "gic: v2"
+    else
+        check "GICv3 enabled" "gic: v3"
+    fi
     if grep -qE 'timer_irq: ([0-9]+) ticks' "${work}/serial.txt"; then
         ticks=$(grep -oE 'timer_irq: ([0-9]+) ticks' "${work}/serial.txt" | tail -1 | grep -oE '[0-9]+')
         [[ "${ticks}" -ge 5 ]] && echo "PASS  timer IRQ delivered at least five ticks" || { echo "FAIL  timer IRQ delivered fewer than five ticks"; failed=1; }
@@ -63,8 +69,15 @@ ck_m1_checks() {
         echo "FAIL  MMU switch from firmware tables reported"
         failed=1
     fi
-    check "GIC bases from the ACPI MADT, GICv3 architecture and ICC system registers" \
-        "gic_madt: gicd=0x[0-9a-f]* gicr=0x[0-9a-f]* arch_rev=3 icc_sre=1"
+    if [[ "${AIENOS_QEMU_GIC:-3}" == 2 ]]; then
+        check "GIC distributor from the ACPI MADT, GICv2 architecture, no ICC system registers" \
+            "gic_madt: gicd=0x[0-9a-f]* gicr=0x0 arch_rev=2 icc_sre=0"
+        check "GICv2 CPU interface from the MADT GICC base, memory-mapped" \
+            "gic_cpu_interface: mmio gicc=0x[0-9a-f]*[1-9a-f][0-9a-f]*"
+    else
+        check "GIC bases from the ACPI MADT, GICv3 architecture and ICC system registers" \
+            "gic_madt: gicd=0x[0-9a-f]* gicr=0x[0-9a-f]* arch_rev=3 icc_sre=1"
+    fi
     # Issue #28: tick statistics. The dispatcher re-arms the timer 10 ms after each
     # tick, so no interval may be shorter than half a period (a missing re-arm or a
     # missing EOI would show as an interrupt storm or no second tick).

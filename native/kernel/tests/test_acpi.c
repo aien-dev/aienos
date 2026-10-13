@@ -101,6 +101,7 @@ int main(void)
         e[0] = 0x0b;
         e[1] = 80;
         w32(e + 12, i == 0 ? 1 : 0);
+        w64(e + 32, 0x08010000 + i * 0x1000);
         w64(e + 60, 0x080a0000 + i * 0x20000);
         w64(e + 68, (uint64_t)i);
         at += 80;
@@ -152,6 +153,20 @@ int main(void)
     CHECK(ck_madt_parse(madt, &g) == 0);
     CHECK(g.gicd == 0x08000000 && g.gic_version == 3 && g.gicr == 0x080a0000 && g.gicr_len == 0xf60000);
     CHECK(g.gicc_count == 1 && g.gicc_gicr == 0x080a0000);
+    CHECK(g.gicc_base == 0x08010000 && ck_madt_gic_kind(&g) == 3);
+    { /* GICv2 MADT shapes (Pi 5 GIC-400, QEMU gic-version=2) */
+        struct ck_madt_gic v = { 0 };
+        v.gicd = 0x107fff9000ull; v.gicc_base = 0x107fffa000ull; v.gic_version = 2;
+        CHECK(ck_madt_gic_kind(&v) == 2);
+        v.gic_version = 0; /* discover: no redistributor anywhere, GICC base given */
+        CHECK(ck_madt_gic_kind(&v) == 2);
+        v.gicc_gicr = 0x080a0000; /* a redistributor named: GICv3 */
+        CHECK(ck_madt_gic_kind(&v) == 3);
+        v.gicc_gicr = 0; v.gicc_base = 0; v.gic_version = 2; /* v2 without a CPU interface */
+        CHECK(ck_madt_gic_kind(&v) == 0);
+        v.gic_version = 1; /* GICv1: unsupported */
+        CHECK(ck_madt_gic_kind(&v) == 0);
+    }
 
     struct ck_spcr s;
     CHECK(ck_spcr_parse(spcr, &s) == 0 && s.interface_type == 3 && s.space == 0 &&

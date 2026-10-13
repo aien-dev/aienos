@@ -26,6 +26,9 @@
 #  - AIENOS_QEMU_CPU overrides "-cpu max" for a manual negative run (e.g.
 #    neoverse-n1, which has no FEAT_RNG/RNDR: M1 must FAIL on the entropy
 #    row). scripts/ck_gates.sh unsets it, so receipts always use -cpu max.
+#  - AIENOS_QEMU_GIC=2 boots QEMU with gic-version=2 (the Raspberry Pi 5 GIC-400
+#    shape: GICv2, memory-mapped CPU interface) and the checks expect "gic: v2";
+#    default 3 (GB10 shape).
 # Needs qemu-system-aarch64 and AAVMF (Ubuntu: qemu-system-arm qemu-efi-aarch64).
 set -euo pipefail
 
@@ -73,7 +76,7 @@ qemu_cpu="${AIENOS_QEMU_CPU:-max}"
 started=$(date +%s)
 set +e
 timeout "${AIENOS_QEMU_TIMEOUT:-180}" qemu-system-aarch64 \
-    -M virt,virtualization=on,gic-version=3 "${qemu_accel[@]}" -cpu "${qemu_cpu}" -smp 4 -m 2048 \
+    -M virt,virtualization=on,gic-version="${AIENOS_QEMU_GIC:-3}" "${qemu_accel[@]}" -cpu "${qemu_cpu}" -smp 4 -m 2048 \
     -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
     -drive if=pflash,format=raw,file="${work}/vars.fd" \
     -drive if=none,id=esp,format=raw,file=fat:rw:"${work}/esp" \

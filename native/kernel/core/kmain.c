@@ -163,7 +163,7 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     else
         ck_printf("guard_page: FAIL %s\n", detail);
 
-    /* GICv3 from the MADT, then the EL1 physical timer window. */
+    /* GICv3 or GICv2 (arch/gic.c) from the MADT, then the EL1 physical timer window. */
     ck_set_stage("gic");
     const void *madt = ck_acpi_find("APIC");
     struct ck_madt_gic mg;
@@ -185,7 +185,10 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     ck_printf("gic_madt: gicd=0x%llx gicr=0x%llx arch_rev=%u icc_sre=%llu\n",
               (unsigned long long)gr.gicd, (unsigned long long)gr.gicr, gr.arch_rev,
               (unsigned long long)gr.icc_sre);
-    ck_printf("gic_redistributor: frame=0x%llx\n", (unsigned long long)gr.rd_frame);
+    if (gr.kind == 2)
+        ck_printf("gic_cpu_interface: mmio gicc=0x%llx\n", (unsigned long long)gr.gicc);
+    else
+        ck_printf("gic_redistributor: frame=0x%llx\n", (unsigned long long)gr.rd_frame);
     ck_printf("timer_stats: intid=30 freq_hz=%llu period_us=%llu min_us=%llu avg_us=%llu max_us=%llu\n",
               (unsigned long long)f, (unsigned long long)ck_counter_to_us(f / 100, f),
               (unsigned long long)ck_counter_to_us(tw.min_interval, f),
