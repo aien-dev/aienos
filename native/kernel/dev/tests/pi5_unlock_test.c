@@ -24,6 +24,7 @@
 #include "m5.h"
 #include "sha256.h"
 #include "store_boot.h"
+#include "../../tools/pi5_store_locate.h"
 #include "../../core/unlock_req.h"
 
 #ifndef CK_PI5_UNLOCK
@@ -123,7 +124,9 @@ int main(void)
     gw_part gp[2] = {{gw_esp_type, 2048, 4095, "AIENOSPI5-ESP", 0x5a}, {ck_aienos_part_type, PART_FIRST, PART_FIRST + PART_SECS - 1, "AIENOS", 0}};
     CHECK(gw_write(g_path, 512, BLOCKS, gp, 2, 0) == 0);
     uint8_t S[CK_SB_SECRET_LEN], W[CK_SB_SECRET_LEN];
+    uint8_t S0[CK_SB_SECRET_LEN];
     for (int i = 0; i < 32; i++) S[i] = (uint8_t)(i * 11 + 3);
+    memcpy(S0, S, 32);
     memcpy(W, S, 32);
     W[31] ^= 0x80;
     ck_store_report r;
@@ -246,6 +249,68 @@ int main(void)
         memset(got, 0, sizeof got);
     }
 
+    /* 10. Tamper rehearsal of the Pi runs C/D/E. Fresh card, secret S: genesis, then reopen. The locator
+     * (tools/pi5_store_locate.c) finds the KeySlotManifest on a copy of the partition exactly as the hub
+     * run does. One flipped byte of the wrapped K_vol, then of its tag: each is refused, nothing is
+     * written, no reformat; with the bytes restored the same secret reopens and the generation advances. */
+    {
+        CHECK(gw_write(g_path, 512, BLOCKS, gp, 2, 0) == 0);
+        rc = boot(BOOT_UNLOCK, S0, &r);
+        CHECK(rc == 0 && r.formatted == 1 && r.boot_count_new == 1);
+        rc = boot(BOOT_UNLOCK, S0, &r);
+        CHECK(rc == 0 && r.formatted == 0 && r.boot_count_new == 2);
+        uint64_t gclean = r.gen_commit;
+        size_t nc;
+        uint8_t *card = slurp(&nc);
+        char ppath[300];
+        snprintf(ppath, sizeof ppath, "%s.part", g_path);
+        FILE *pf = fopen(ppath, "wb");
+        CHECK(card && pf && fwrite(card + (size_t)PART_FIRST * 512u, 1, (size_t)PART_SECS * 512u, pf) == (size_t)PART_SECS * 512u);
+        if (pf) fclose(pf);
+        ck_pi5_ksm_loc loc;
+        char err[160] = "";
+        int lrc = ck_pi5_locate_keyslot(ppath, &loc, err, sizeof err);
+        CHECK(lrc == 0);
+        if (lrc) printf("  locate: %s\n", err);
+        CHECK(loc.keyslot_objects == 1 && loc.byte_length == 640);
+        CHECK(loc.wrapped_kvol_offset == loc.part_byte_offset + 312u && loc.wrap_tag_offset == loc.part_byte_offset + 344u);
+        unlink(ppath);
+        uint64_t targets[2] = {loc.wrapped_kvol_offset, loc.wrap_tag_offset};
+        for (int t = 0; t < 2 && lrc == 0; t++) {
+            size_t at = (size_t)PART_FIRST * 512u + (size_t)targets[t];
+            CHECK(at < nc);
+            FILE *fp = fopen(g_path, "r+b");
+            CHECK(fp != 0);
+            if (!fp) break;
+            uint8_t byte = card[at] ^ 0xFFu;
+            fseek(fp, (long)at, SEEK_SET);
+            CHECK(fwrite(&byte, 1, 1, fp) == 1);
+            fclose(fp);
+            b = slurp(&n0);
+            rc = boot(BOOT_UNLOCK, S0, &r);
+            a = slurp(&n1);
+            CHECK(rc != 0 && r.verdict == CK_SB_REFUSED && r.formatted == 0);
+            CHECK(same_bytes(b, n0, a, n1)); /* refused: not one byte written, no reformat */
+            printf("  tamper %s: refused rc=%d proof=%s step=\"%s\"\n", t ? "wrap tag" : "wrapped K_vol", rc,
+                   r.proof ? r.proof : "?", r.step ? r.step : "?");
+            free(b);
+            free(a);
+            fp = fopen(g_path, "r+b"); /* restore the original byte */
+            CHECK(fp != 0);
+            if (!fp) break;
+            fseek(fp, (long)at, SEEK_SET);
+            CHECK(fwrite(&card[at], 1, 1, fp) == 1);
+            fclose(fp);
+        }
+        uint8_t *rest = slurp(&n1);
+        CHECK(same_bytes(card, nc, rest, n1)); /* bytes restored: identical to the clean card */
+        free(rest);
+        rc = boot(BOOT_UNLOCK, S0, &r);
+        CHECK(rc == 0 && r.formatted == 0 && r.boot_count_new == 3 && r.gen_open == gclean && r.gen_commit > gclean);
+        free(card);
+    }
+
+    memset(S0, 0, sizeof S0);
     memset(S, 0, sizeof S);
     memset(W, 0, sizeof W);
     unlink(g_path);
