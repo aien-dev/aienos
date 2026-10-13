@@ -1101,7 +1101,7 @@ HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/
 	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat
+	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -1902,3 +1902,25 @@ test-pi5-marker: $(OUT)/host/test_pi5_marker
 $(OUT)/host-san/test_pi5_marker: $(KDIR)/tests/test_pi5_marker.c $(PI5_MARKER_SRCS) $(KDIR)/tests/ck_test.h $(KDIR)/core/pi5_marker.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -I$(KDIR)/dev -I$(KDIR)/tools -I$(NATIVE)/disk -o $@ $< $(PI5_MARKER_SRCS)
+
+# AIENOS-PI5 software-only DMA confinement (ADR 0020): host test only, not linked into any image.
+DMAW_SRCS := $(KDIR)/dev/dma_window.c
+DMAW_DEPS := $(KDIR)/tests/test_dma_window.c $(DMAW_SRCS) $(KDIR)/tests/ck_test.h $(KDIR)/dev/dma_window.h
+$(OUT)/host/test_dma_window: $(DMAW_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -I$(KDIR)/dev -o $@ $< $(DMAW_SRCS)
+$(OUT)/host-san/test_dma_window: $(DMAW_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -I$(KDIR)/dev -o $@ $< $(DMAW_SRCS)
+test-dma-window: $(OUT)/host/test_dma_window
+	$<
+# Each mutant removes one check; the test must FAIL for every one. (The explicit "addr below base" test is not a
+# mutant: with unsigned arithmetic the end check already refuses it, so it is kept as defence in depth.)
+DMAW_MUTANTS := NO_END WRAP NO_ZERO NO_LATCH NO_STALE NO_ALIGN NO_FRAMECAP NO_GOT NO_INDEX
+dma-window-mutants:
+	@mkdir -p $(OUT)/host
+	@fail=0; for m in $(DMAW_MUTANTS); do \
+	  $(HOSTCC) $(HCFLAGS) -DCK_DMAW_MUTANT_$$m -I$(KDIR)/dev -o $(OUT)/host/test_dma_window_mut_$$m $(KDIR)/tests/test_dma_window.c $(DMAW_SRCS) || exit 1; \
+	  if $(OUT)/host/test_dma_window_mut_$$m >/dev/null; then echo "MUTANT SURVIVED: $$m"; fail=1; else echo "mutant killed: $$m"; fi; \
+	done; test $$fail -eq 0
+.PHONY: test-dma-window dma-window-mutants
