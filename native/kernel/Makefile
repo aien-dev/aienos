@@ -1837,3 +1837,6 @@ $(OUT)/host/test_pi5_marker: $(KDIR)/tests/test_pi5_marker.c $(PI5_MARKER_SRCS) 
 	$(HOSTCC) $(HCFLAGS) -I$(KDIR)/dev -I$(KDIR)/tools -I$(NATIVE)/disk -o $@ $< $(PI5_MARKER_SRCS)
 test-pi5-marker: $(OUT)/host/test_pi5_marker
 	$<
+$(OUT)/host-san/test_pi5_marker: $(KDIR)/tests/test_pi5_marker.c $(PI5_MARKER_SRCS) $(KDIR)/tests/ck_test.h $(KDIR)/core/pi5_marker.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -I$(KDIR)/dev -I$(KDIR)/tools -I$(NATIVE)/disk -o $@ $< $(PI5_MARKER_SRCS)
