@@ -77,6 +77,9 @@
 #include "cortex_journal.h"
 #include "slot_service.h"
 #include "reply_obj.h"
+#ifdef CK_PI5_LIFECYCLE
+#include "agent_cmd.h"
+#endif
 
 #if !defined(CK_SERVICE)
 #error "lifecycle.c is only part of a CK_SERVICE=1 image"
@@ -87,6 +90,12 @@
 #endif
 #if defined(CK_SERVICE_TEST_KEYS) && defined(CK_HARDWARE_STAGING)
 #error "CK_SERVICE_TEST_KEYS (TEST keys) cannot be combined with CK_HARDWARE_STAGING"
+#endif
+#if defined(CK_PI5_LIFECYCLE) && (!defined(CK_PI5_UNLOCK_CARD) || defined(CK_SERVICE_TEST_KEYS) || defined(CK_HARDWARE_STAGING))
+#error "CK_PI5_LIFECYCLE (card command script, QUALIFICATION ONLY) needs the card-secret Pi image and no TEST keys or hardware staging"
+#endif
+#ifdef CK_PI5_LIFECYCLE
+_Static_assert(CK_AGENT_CMD_TEXT_MAX == CK_LC_TASK_MAX && CK_AGENT_CMD_LINE_MAX <= CK_LC_LINE_MAX, "script line bounds are the lifecycle bounds");
 #endif
 
 #define CK_LC_OBJ_KIND 0x4e31u   /* 'N1': v1 approved note, version 1 */
@@ -385,7 +394,12 @@ static void gen_refuse(enum ck_lc_verb v, const char *reason)
 }
 static int cancel_poll(void)
 {
+#ifdef CK_PI5_LIFECYCLE
+    (void)gen_refuse; /* the card script is never read while generating: no cancel, no refused lines */
+    return 0;
+#else
     return ck_line_rx_cancel_poll(&g_gen_rx, ck_console_rx_poll, gen_refuse);
+#endif
 }
 
 /* prompt accepted: the resident model generates a bounded reply, which
@@ -816,6 +830,7 @@ static void handle_line(const char *line, size_t len)
     }
 }
 
+#ifndef CK_PI5_LIFECYCLE
 /* 1 when the line so far is "unlock" or "rotate" followed by its argument:
  * those bytes are recovery secrets and are echoed as '*' so the serial log
  * never carries them. */
@@ -831,6 +846,7 @@ static int in_secret(const char *buf, size_t len)
 {
     return after_verb(buf, len, "unlock") || after_verb(buf, len, "rotate");
 }
+#endif /* !CK_PI5_LIFECYCLE */
 
 /* Bounded serial line editor over the POLLED console receive (no
  * interrupts): the rules are core/line_rx.c (printable bytes collected,
@@ -839,6 +855,7 @@ static int in_secret(const char *buf, size_t len)
  * only echoes. At most CK_LINE_RX_BURST bytes per call. Returns 1 when
  * g_rx.buf[0..g_rx.len) is a complete line. */
 static struct ck_line_rx g_rx;
+#ifndef CK_PI5_LIFECYCLE
 static int rx_line(void)
 {
     for (unsigned n = 0; n < CK_LINE_RX_BURST; n++) {
@@ -866,12 +883,41 @@ static int rx_line(void)
     }
     return 0;
 }
+#endif /* !CK_PI5_LIFECYCLE */
+
+#ifdef CK_PI5_LIFECYCLE
+/* PI5-7 cut 2 (QUALIFICATION ONLY): the operator input is the card command script \EFI\AIENOS\AGENT.CMD
+ * (core/agent_cmd.h), already parsed and bounded by the UEFI stub. Each line goes through the same
+ * handle_line the console path uses, so every reply is the one an operator would see; the line is echoed
+ * after "> " first. The parser lets no secret-carrying or control verb through (unlock, rotate, update,
+ * shutdown), and the stop order follows the last line (or an absent or refused script) in any case. */
+static void run_script(void)
+{
+    const struct ck_agent_cmd_boot *b = &ck_agent_cmd_boot;
+    uint32_t i;
+    ck_printf("lifecycle: ready state=%s store=%s (operator input: card command script AGENT.CMD, QUALIFICATION ONLY, no serial)\n",
+              ck_lc_state_name(g_lc.state), ck_store_service_ready() ? "open" : "locked");
+    if (b->state != CK_AGENT_CMD_FOUND) {
+        ck_printf("lifecycle: no command script (%s): nothing to run\n",
+                  b->state == CK_AGENT_CMD_REFUSED ? "refused" : "absent");
+    } else {
+        for (i = 0; i < b->cmd.nlines && g_lc.state != CK_LC_QUIESCE; i++) {
+            ck_printf("> %s\n", b->cmd.line[i]);
+            handle_line(b->cmd.line[i], b->cmd.len[i]);
+        }
+        ck_printf("lifecycle: command script done lines=%u\n", (unsigned)b->cmd.nlines);
+    }
+    if (g_lc.state != CK_LC_QUIESCE) handle_line("shutdown", 8);
+}
+#endif
 
 /* Returns 0 after an orderly stop (kmain then prints the final report and
  * resets). Never returns while serving. */
 int ck_lifecycle_run(void)
 {
+#ifndef CK_PI5_LIFECYCLE
     uint32_t cr = 0;
+#endif
     ck_lc_init(&g_lc);
     ck_line_rx_init(&g_rx);
     ck_line_rx_init(&g_gen_rx);
@@ -880,6 +926,10 @@ int ck_lifecycle_run(void)
 #endif
     ck_lc_start(&g_lc, ck_store_service_ready());
     ck_slot_service_start(slot_healthy());
+#ifdef CK_PI5_LIFECYCLE
+    const char *uname = "none (card command script)";
+    run_script();
+#else
     /* Operator input is the console UART the boot stub chose from the ACPI
      * SPCR (PL011/SBSA or 16550), POLLED: no interrupt is ever enabled. */
     const char *uname = ck_console_uart_name();
@@ -904,6 +954,7 @@ int ck_lifecycle_run(void)
             }
         }
     }
+#endif
     /* Stop order: Cortex journal closed (frames returned), inference session
      * closed (frames returned), Store closed, then NVMe released, then the
      * caller resets. */

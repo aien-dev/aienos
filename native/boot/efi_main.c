@@ -44,6 +44,9 @@ void ck_boot_unlock_req_find(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
 #ifdef CK_PI5_FACT
 void ck_boot_fact_req_find(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
 #endif
+#ifdef CK_PI5_LIFECYCLE
+void ck_boot_agent_cmd_find(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
+#endif
 #ifdef CK_KLOG
 void ck_boot_klog_find(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
 #endif
@@ -147,6 +150,10 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 #ifdef CK_PI5_FACT
     /* PI5-5 qualification image: the one-fact request file (efi_fact.c). */
     ck_boot_fact_req_find(image, st);
+#endif
+#ifdef CK_PI5_LIFECYCLE
+    /* PI5-7 cut 2 qualification image: the lifecycle command script (efi_agentcmd.c). */
+    ck_boot_agent_cmd_find(image, st);
 #endif
     ck_puts("kernel_impl: c (native/kernel, Lane 18)\n");
     vendor_print(st->FirmwareVendor);
