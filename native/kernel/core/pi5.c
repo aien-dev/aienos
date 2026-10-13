@@ -201,7 +201,10 @@ void ck_pi5_before_reset(void)
     ck_pi5_wdt_pet();
 }
 
-#ifdef CK_PI5_STORE
+#if defined(CK_PI5_STORE) || defined(CK_PI5_UNLOCK)
+#if defined(CK_PI5_STORE) && defined(CK_PI5_UNLOCK)
+#error "CK_PI5_STORE (TEST keys) and CK_PI5_UNLOCK (production class keys) are separate images"
+#endif
 /* Hand the card's AIENOS partition view to the sealed Store stage (svc/store_boot.c ck_stage_store), the
  * same stage the QEMU "full" image runs. Tier: SEED-0B-PI5, the Pi counterpart of SEED-0B-QEMU. The Store
  * keys are the labelled TEST keys (ck_store_test_keys); the production key source stays BLOCKED_OPERATOR
@@ -211,11 +214,28 @@ const disk_dev *ck_dev_boot_disk(void)
 {
     static int said;
     if (!said++)
+#ifdef CK_PI5_UNLOCK
+        ck_puts("pi5_unlock_tier: PI5-4 recovery-secret unlock: Store keys derive from K_vol (ADR 0017 Slot 1), "
+                "PRODUCTION class; no TEST keys and no TEST uuid exist in this image\n");
+#else
         ck_puts("pi5_store_tier: SEED-0B-PI5 qualification only: Store keys are the public TEST keys, "
                 "Store uuid is the TEST uuid, no production keys, not a production Store\n");
+#endif
     return sd_up && store_part.valid ? &store_part.dev : 0;
 }
 
 /* The SD card has no bus master or SMMU stream to revoke: nothing to release. */
 void ck_dev_nvme_release(void) {}
+#endif
+
+#ifdef CK_PI5_UNLOCK
+/* The recovery secret source of the Pi unlock image. This image has no UART input and no TPM: with no
+ * source compiled in, the Store stays closed (ck_store_pi5_unlock_run refuses before reading the disk). */
+int ck_pi5_unlock_secret(uint8_t out[32], const char **source) /* CK_SB_SECRET_LEN, svc/store_boot.h */
+{
+    (void)source;
+    for (unsigned i = 0; i < 32; i++)
+        out[i] = 0;
+    return -1;
+}
 #endif

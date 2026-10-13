@@ -67,4 +67,25 @@ done
 if grep -q "software-only DMA confinement (Pi 5, weaker than the Spark)" <<<"$(strings -a "${ppc}")"; then echo "PASS pi5-pcie image carries the ADR 0020 label"; else echo "FAIL pi5-pcie image lacks the ADR 0020 label"; fail=1; fi
 test -s "${root}/target/native-kernel-pi5-pcie/BOOTAA64.EFI" || { echo "FAIL no pi5-pcie BOOTAA64.EFI"; fail=1; }
 
+# PI5-4 cut 1: the Pi unlock image opens the Store only through the Slot 1 recovery-secret path.
+make -C "${root}/native/kernel" pi5-unlock >/dev/null
+uo="${root}/target/native-kernel-pi5-unlock/full-pi5-unlock/aienos-ck.elf"
+for s in ck_stage_store ck_dev_boot_disk ck_store_unlock_boot ck_store_pi5_unlock_run ck_pi5_unlock_secret; do
+    if defined "${uo}" "${s}"; then echo "PASS pi5-unlock image defines ${s}"; else echo "FAIL pi5-unlock image lacks ${s}"; fail=1; fi
+done
+for s in ck_store_test_keys ck_store_test_uuid; do
+    if defined "${uo}" "${s}"; then echo "FAIL pi5-unlock image defines ${s}"; fail=1; else echo "PASS pi5-unlock image has no ${s}"; fi
+done
+uo_strings="$(strings -a "${uo}")"
+if grep -q "AIEN-TEST-BOOT" <<<"${uo_strings}" || grep -q "LANE18-TEST-KVOL" <<<"${uo_strings}" || grep -q "SEED-0B-PI5" <<<"${uo_strings}" || grep -q "SEED-0B-QEMU" <<<"${uo_strings}"; then
+    echo "FAIL pi5-unlock image carries a TEST uuid, TEST key label or TEST tier label"; fail=1
+else
+    echo "PASS pi5-unlock image carries no TEST uuid, TEST key label or TEST tier label"
+fi
+if defined "${ps}" ck_pi5_unlock_secret; then echo "FAIL pi5-store image defines ck_pi5_unlock_secret"; fail=1; else echo "PASS pi5-store image has no unlock secret source"; fi
+# The tier flags are mutually exclusive: the Makefile must refuse each combination.
+for combo in CK_PI5_STORE=1 CK_SERVICE=1 CK_HARDWARE_STAGING=1 CK_TEST_STORE_CRASH=1 CK_SERVICE_TEST_KEYS=1; do
+    if make -n -C "${root}/native/kernel" CK_PI5_UNLOCK=1 "${combo}" full >/dev/null 2>&1; then echo "FAIL Makefile accepts CK_PI5_UNLOCK=1 with ${combo}"; fail=1; else echo "PASS Makefile refuses CK_PI5_UNLOCK=1 with ${combo}"; fi
+done
+test -s "${root}/target/native-kernel-pi5-unlock/full-pi5-unlock/BOOTAA64.EFI" || { echo "FAIL no pi5-unlock BOOTAA64.EFI"; fail=1; }
 if [[ ${fail} == 0 ]]; then echo "CK_PI5_BUILD: PASS"; else echo "CK_PI5_BUILD: FAIL"; exit 1; fi

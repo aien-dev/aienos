@@ -175,3 +175,20 @@ pi5-store-sanitize: $(STAGE_OUT)/pi5_store_test_san
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 $<
 stage-test: pi5-store-test
 stage-sanitize: pi5-store-sanitize
+
+# ---- AIENOS PI5-4 cut 1: the Pi unlock image's Store policy (dev/tests/pi5_unlock_test.c) ----
+# store_boot.c is compiled with -DCK_PI5_UNLOCK, as "make pi5-unlock" builds it: no TEST keys, no TEST uuid.
+PI5_UNLOCK_TEST_SRCS := $(filter-out %/disk_part_test.c,$(DISK_PART_TEST_SRCS)) $(STAGE_CONT_SRCS) $(STAGE_DIR)/core/pi5_marker.c $(STAGE_DIR)/dev/tests/pi5_unlock_test.c
+$(STAGE_OUT)/pi5_unlock_test: $(PI5_UNLOCK_TEST_SRCS) $(DISK_PART_TEST_DEPS) $(STAGE_DIR)/core/pi5_marker.h
+	@mkdir -p $(@D)
+	$(STAGE_CC) $(STAGE_HOST_FLAGS) -DCK_PI5_UNLOCK=1 $(DISK_PART_INC) -o $@ $(PI5_UNLOCK_TEST_SRCS)
+$(STAGE_OUT)/pi5_unlock_test_san: $(PI5_UNLOCK_TEST_SRCS) $(DISK_PART_TEST_DEPS) $(STAGE_DIR)/core/pi5_marker.h
+	@mkdir -p $(@D)
+	$(STAGE_CC) $(STAGE_HOST_FLAGS) $(STAGE_SAN_FLAGS) -DCK_PI5_UNLOCK=1 $(DISK_PART_INC) -o $@ $(PI5_UNLOCK_TEST_SRCS)
+.PHONY: pi5-unlock-test pi5-unlock-sanitize
+pi5-unlock-test: $(STAGE_OUT)/pi5_unlock_test
+	$<
+pi5-unlock-sanitize: $(STAGE_OUT)/pi5_unlock_test_san
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 $<
+stage-test: pi5-unlock-test
+stage-sanitize: pi5-unlock-sanitize

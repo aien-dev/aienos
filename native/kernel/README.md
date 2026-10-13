@@ -149,6 +149,22 @@ The Pi image is the default core image plus board glue (`core/pi5.c`). The
 default and QEMU images link none of it: the hooks in `include/ck.h` are weak
 and absent, and `scripts/ck_pi5_build_check.sh` checks both images.
 
+**Pi unlock image (PI5-4 cut 1, `make pi5-unlock`, `CK_PI5_UNLOCK=1`).** A
+separate image from `pi5-store`: the Store opens only through the ADR 0017
+Slot 1 recovery-secret path (`ck_store_pi5_unlock_run` calls
+`ck_store_unlock_boot` with the hardware policy). `ck_store_test_keys` and
+`ck_store_test_uuid` are not compiled, a TEST-identity key is refused before
+any disk access, a Store without a KeySlotManifest (for example a TEST-tier
+Store) is refused, a wrong secret fails the K_vol unwrap tag, and every refusal
+writes nothing. The secret source is `ck_pi5_unlock_secret` in `core/pi5.c`;
+this cut compiles in no source, so the Store stays closed
+(`unlock_source: none`). The Makefile refuses the flag with `CK_PI5_STORE`,
+`CK_SERVICE`, `CK_HARDWARE_STAGING` and the test flags. Host test:
+`make pi5-unlock-test` (`dev/tests/pi5_unlock_test.c`); image checks:
+`scripts/ck_pi5_build_check.sh`. Tier label in receipts:
+`PI5-UNLOCK-QUALIFICATION`. Not a production image: no TPM, no operator
+ceremony.
+
 | Piece | What |
 | --- | --- |
 | `dev/pi5_wdt.c` | BCM2712 PM watchdog (Linux `bcm2835_wdt.c` registers), armed for `CK_PI5_WDT_S` (15 s) at start, petted at every `ck_set_stage`. A hang resets the board; on the hub the tryboot one-shot flag is already cleared, so it comes back on normal Linux. |

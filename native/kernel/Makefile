@@ -159,8 +159,8 @@ ifneq ($(strip $(CK_PI5_INFER)),)
 ifneq ($(strip $(CK_PI5_INFER)),1)
 $(error CK_PI5_INFER must be empty or 1)
 endif
-ifneq ($(strip $(CK_PI5_STORE)$(CK_SERVICE)$(CK_HARDWARE_STAGING)$(CK_TEST_FWCFG_ARTIFACTS)$(CK_RUST_LIBS)),)
-$(error CK_PI5_INFER is the one-shot Pi inference image: it cannot be combined with CK_PI5_STORE, CK_SERVICE, CK_HARDWARE_STAGING, CK_TEST_FWCFG_ARTIFACTS or CK_RUST_LIBS)
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_UNLOCK)$(CK_SERVICE)$(CK_HARDWARE_STAGING)$(CK_TEST_FWCFG_ARTIFACTS)$(CK_RUST_LIBS)),)
+$(error CK_PI5_INFER is the one-shot Pi inference image: it cannot be combined with CK_PI5_STORE, CK_PI5_UNLOCK, CK_SERVICE, CK_HARDWARE_STAGING, CK_TEST_FWCFG_ARTIFACTS or CK_RUST_LIBS)
 endif
 ifeq ($(strip $(CK_INFER_LIB)),)
 $(error CK_PI5_INFER needs CK_INFER_LIB=<libaienos_infer_kernel.a> (use "make pi5-infer", which builds it))
@@ -178,12 +178,32 @@ ifneq ($(strip $(CK_PI5_PCIE)),)
 ifneq ($(strip $(CK_PI5_PCIE)),1)
 $(error CK_PI5_PCIE must be empty or 1)
 endif
-ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_SERVICE)$(CK_HARDWARE_STAGING)),)
-$(error CK_PI5_PCIE is the Pi PCIe/RP1 enumerator image: it cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_SERVICE or CK_HARDWARE_STAGING)
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_UNLOCK)$(CK_SERVICE)$(CK_HARDWARE_STAGING)),)
+$(error CK_PI5_PCIE is the Pi PCIe/RP1 enumerator image: it cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_UNLOCK, CK_SERVICE or CK_HARDWARE_STAGING)
 endif
 CK_PI5 := 1
 OUT ?= $(REPO)/target/native-kernel-pi5-pcie
 CK_EXTRA_CFLAGS += -DCK_PI5_PCIE=1
+endif
+
+# Pi unlock image (CK_PI5_UNLOCK=1, "make pi5-unlock", PI5-4 cut 1): the same Store stage, but the Store opens
+# ONLY through the ADR 0017 Slot 1 recovery-secret path (ck_store_unlock_boot, PRODUCTION-class keys).
+# ck_store_test_keys and ck_store_test_uuid are not compiled, so no TEST key or TEST uuid can reach it.
+# It is a separate image from CK_PI5_STORE (TEST keys) and cannot be combined with any other tier flag.
+CK_PI5_UNLOCK ?=
+ifneq ($(strip $(CK_PI5_UNLOCK)),)
+ifneq ($(strip $(CK_PI5_UNLOCK)),1)
+$(error CK_PI5_UNLOCK must be empty or 1)
+endif
+ifneq ($(strip $(CK_PI5_STORE)),)
+$(error CK_PI5_UNLOCK (production-class keys from the recovery secret) cannot be combined with CK_PI5_STORE (public TEST keys))
+endif
+ifneq ($(strip $(CK_SERVICE)$(CK_TEST_STORE_CRASH)$(CK_TEST_CONTINUITY)$(CK_HARDWARE_STAGING)$(CK_SERVICE_TEST_KEYS)),)
+$(error CK_PI5_UNLOCK cannot be combined with CK_SERVICE, CK_SERVICE_TEST_KEYS, CK_TEST_STORE_CRASH, CK_TEST_CONTINUITY or CK_HARDWARE_STAGING)
+endif
+CK_PI5 := 1
+OUT ?= $(REPO)/target/native-kernel-pi5-unlock
+CK_EXTRA_CFLAGS += -DCK_PI5_UNLOCK=1
 endif
 CK_PI5 ?=
 ifneq ($(strip $(CK_PI5)),)
@@ -819,8 +839,8 @@ endif
 # are linked: no PCI, NVMe, USB, virtio, SMMU or security stage (none of that hardware is on the
 # Pi path). core/pi5.c supplies ck_dev_boot_disk and ck_dev_nvme_release over the SD partition view.
 FULL_STAGE_SYMS := ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce ck_stage_disk_artifacts
-ifeq ($(strip $(CK_PI5_STORE)),1)
-FULL_NAME := full-pi5-store
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_UNLOCK)),)
+FULL_NAME := $(if $(strip $(CK_PI5_UNLOCK)),full-pi5-unlock,full-pi5-store)
 FULL_STAGE_SYMS := ck_stage_store ck_stage_disk_artifacts
 STAGE_SRCS := $(KDIR)/svc/store_boot.c $(KDIR)/svc/artifact_store.c $(KDIR)/svc/store_crash.c $(KDIR)/svc/ck_compat.c \
   $(foreach m,store/store_v1 store/store_engine store/store_disk store/store_sealed store/torn_slot m5/m5_keys m5/m5_envelope m5/m5_state crypto/aes crypto/polyval crypto/gcm_siv crypto/hmac crypto/ct argus/sha256,$(NATIVE)/$(m).c)
@@ -1856,6 +1876,8 @@ PI5_INFER_LIB := $(REPO)/target/infer-kernel/aarch64-unknown-none/release/libaie
 pi5-infer:
 	CARGO_TARGET_DIR=$(REPO)/target/infer-kernel cargo build -q --release --target aarch64-unknown-none --manifest-path $(REPO)/crates/aienos-infer-kernel/Cargo.toml
 	$(MAKE) CK_PI5_INFER=1 CK_INFER_LIB=$(PI5_INFER_LIB) all
+pi5-unlock:
+	$(MAKE) CK_PI5_UNLOCK=1 full
 
 pi5:
 	$(MAKE) CK_PI5=1 all
@@ -1912,7 +1934,7 @@ $(OUT)/host-san/test_pi5_rng: $(KDIR)/tests/test_pi5_rng.c $(PI5_RNG_SRCS) $(KDI
 
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
-.PHONY: all full pi5 pi5-store pi5-infer test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full pi5 pi5-store pi5-infer pi5-unlock test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
 
 # AIENOS-PI5 step 3 marker + Pi card GPT test (hosted; a file stands in for the card, QEMU cannot model the Pi SD host).
 PI5_MARKER_SRCS := $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \

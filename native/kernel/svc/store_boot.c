@@ -24,6 +24,18 @@
 #if defined(CK_STORE_TEST_KEYS)
 #error "CK_STORE_TEST_KEYS (TEST Store keys, TEST uuid) cannot be combined with CK_HARDWARE_STAGING"
 #endif
+#if defined(CK_PI5_UNLOCK)
+#error "CK_PI5_UNLOCK cannot be combined with CK_HARDWARE_STAGING"
+#endif
+#define CK_SB_HW 1
+#elif defined(CK_PI5_UNLOCK)
+/* Pi unlock image (CK_PI5_UNLOCK): the Store opens only through the Slot 1 recovery-secret path
+ * (ck_store_pi5_unlock_run). No TEST keys, no TEST uuid are compiled, and the policy is the
+ * hardware one: TEST-identity keys are refused before any disk access. It needs no owner
+ * provisioning header (the store uuid is drawn at genesis or read from the manifest). */
+#if defined(CK_STORE_TEST_KEYS) || defined(CK_PI5_STORE) || defined(CK_TEST_STORE_CRASH) || defined(CK_SERVICE)
+#error "CK_PI5_UNLOCK cannot be combined with TEST keys, CK_PI5_STORE, CK_TEST_STORE_CRASH or CK_SERVICE"
+#endif
 #define CK_SB_HW 1
 #else
 #define CK_STORE_TEST_KEYS 1
@@ -703,6 +715,26 @@ static int service_continuity(void)
 }
 #endif
 
+#ifdef CK_PI5_UNLOCK
+/* Pi unlock image policy (ck_stage_store calls this, the host test pi5_unlock_test drives it).
+ * secret NULL (no source gave one): refused before the disk is read, nothing written. Otherwise the
+ * Slot 1 recovery path with the hardware policy: a wrong secret fails the K_vol unwrap tag before the
+ * disk is opened; a disk with no KeySlotManifest (for example a TEST-tier Store) is refused; a blank
+ * disk is formatted with a PRODUCTION-class Store under a freshly drawn uuid. */
+int ck_store_pi5_unlock_run(const disk_dev *d, const uint8_t *secret, const char *commit, ck_store_report *r)
+{
+    if (!secret) {
+        bz(r, sizeof *r);
+        bcp(r->prev_commit, "none", 5);
+        r->identity_class = M5_ID_PRODUCTION;
+        r->key_source = "recovery-keyslot";
+        return fail(r, "keyed", "no recovery secret source in this image; disk not read, not formatted",
+                    CK_SB_E_BLOCKED_OPERATOR);
+    }
+    return ck_store_unlock_boot(d, secret, 0, commit ? commit : "unknown", CK_SB_HW, r);
+}
+#endif
+
 /* Kernel stage. ck_dev_boot_disk comes from dev/devices.c. */
 const disk_dev *ck_dev_boot_disk(void);
 void ck_dev_nvme_release(void);
@@ -781,8 +813,21 @@ int ck_stage_store(void)
     (void)commit;
     return rc;
 #else
+#if defined(CK_PI5_UNLOCK)
+    {
+        uint8_t secret[CK_SB_SECRET_LEN];
+        const char *src = 0;
+        int have = ck_pi5_unlock_secret(secret, &src) == 0;
+        if (have) ck_printf("unlock_source: %s\n", src ? src : "unknown");
+        else ck_puts("unlock_source: none (no recovery secret given); Store not opened\n");
+        rc = ck_store_pi5_unlock_run(d, have ? secret : 0, commit, &r);
+        bz(secret, sizeof secret);
+        bz(&keys, sizeof keys);
+    }
+#else
     ck_store_test_keys(&keys);
     rc = store_boot_run(d, &keys, ck_store_test_uuid, commit ? commit : "unknown", &r);
+#endif
 #endif
 #endif
     bz(&keys, sizeof keys);

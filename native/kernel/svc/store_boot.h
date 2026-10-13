@@ -153,6 +153,14 @@ int ck_store_unlock_boot(const disk_dev *d, const uint8_t secret[CK_SB_SECRET_LE
  * nothing. Prints nothing. */
 int ck_store_rotate_recovery(const disk_dev *d, const uint8_t current[CK_SB_SECRET_LEN],
                              const uint8_t next[CK_SB_SECRET_LEN], ck_store_report *r);
+#ifdef CK_PI5_UNLOCK
+/* Pi unlock image only. The board glue (core/pi5.c) supplies the recovery secret source: returns 0 and
+ * fills out with the 32-byte secret, naming the source in *source (printed by the Store stage, never the
+ * secret); nonzero = no secret. ck_store_pi5_unlock_run: NULL secret refuses before any disk read; else the
+ * Slot 1 path with the hardware policy (TEST keys and TEST uuid do not exist in this image). Prints nothing. */
+int ck_pi5_unlock_secret(uint8_t out[CK_SB_SECRET_LEN], const char **source);
+int ck_store_pi5_unlock_run(const disk_dev *d, const uint8_t *secret, const char *commit, ck_store_report *r);
+#endif
 /* Print the report lines (also used by the host test). */
 void store_boot_print(const ck_store_report *r);
 /* The open Store of the last store_boot_run (valid only after it returned 0;
