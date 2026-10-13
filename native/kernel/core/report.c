@@ -14,7 +14,12 @@ static int in_fatal;
 
 const char *ck_commit(void) { return AIENOS_COMMIT; }
 uint32_t ck_boot_count_hint(void) { return 0; }
-void ck_set_stage(const char *name) { stage = name; }
+void ck_set_stage(const char *name)
+{
+    stage = name;
+    if (ck_pi5_stage)
+        ck_pi5_stage(name);
+}
 const char *ck_stage_name(void) { return stage; }
 
 void ck_report_header(const char *kind)
@@ -66,6 +71,8 @@ void ck_reset(void)
         quiescing = 1; /* a panic inside the hook resets without it */
         ck_stage_quiesce();
     }
+    if (ck_pi5_before_reset)
+        ck_pi5_before_reset();
     ck_console_fb_hold();
     ck_mb();
     psci_call(0x84000009u); /* PSCI SYSTEM_RESET */

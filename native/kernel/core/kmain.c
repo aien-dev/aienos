@@ -122,6 +122,8 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     ck_mm_el1_ready();
     const struct ck_mm_report *mm = ck_mm_report();
     screen_start(h, mm);
+    if (ck_pi5_start)
+        ck_pi5_start();
 
     ck_puts("\n");
     ck_report_header("kernel");
