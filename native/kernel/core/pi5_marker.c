@@ -1,6 +1,7 @@
 /* pi5_marker.c -- see pi5_marker.h. */
 #include "pi5_marker.h"
 #include "../dev/disk_part.h"
+#include "../dev/disk_layout.h"
 
 #define MAGIC "AIENPI5M"
 #define HDR_CRC_BYTES 40u
@@ -124,4 +125,17 @@ const char *ck_pi5_marker_strerror(int rc)
     case CK_PI5_MARKER_ESIZE: return "partition view too small or not 512-byte blocks";
     default: return "unknown";
     }
+}
+
+int ck_pi5_store_view(const ck_part *full, ck_part *out)
+{
+    const uint64_t bpu = CK_LAYOUT_UNIT / DISK_SECTOR_BYTES;
+    if (!full || !out || !full->valid || full->dev.block_size != DISK_SECTOR_BYTES ||
+        full->blocks < CK_PI5_MARKER_SECS + bpu)
+        return CK_PI5_MARKER_ESIZE;
+    *out = *full;
+    out->blocks = (full->blocks - CK_PI5_MARKER_SECS) / bpu * bpu;
+    out->dev.ctx = out;
+    out->dev.block_count = out->blocks;
+    return 0;
 }

@@ -22,6 +22,7 @@
 #define AIENOS_CK_PI5_MARKER_H
 #include <stdint.h>
 #include "disk.h"
+#include "../dev/disk_part.h"
 
 #define CK_PI5_MARKER_SECS 64u /* 32 KiB: one header sector + 63 payload sectors */
 #define CK_PI5_MARKER_BUF_BYTES (CK_PI5_MARKER_SECS * DISK_SECTOR_BYTES)
@@ -41,4 +42,13 @@ enum {
  * *generation is set on success. */
 int ck_pi5_marker_run(const disk_dev *d, uint8_t *buf, uint64_t *generation);
 const char *ck_pi5_marker_strerror(int rc);
+
+/* The sealed Store's view of the AIENOS partition on the Pi card: the same
+ * partition with the marker region reserved. *out ends before the last
+ * CK_PI5_MARKER_SECS sectors, rounded down to whole CK_LAYOUT_UNIT units, so
+ * the Store's units 4..U-2 and its probe unit U-1 (dev/disk_layout.h) never
+ * touch a marker sector, and the marker never touches the Store. Every image
+ * that writes either one uses this split. CK_PI5_MARKER_ESIZE when full is
+ * invalid, not 512-byte blocks, or too small for one unit plus the marker. */
+int ck_pi5_store_view(const ck_part *full, ck_part *out);
 #endif

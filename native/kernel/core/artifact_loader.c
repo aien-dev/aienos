@@ -1064,6 +1064,14 @@ static void print_receipt(const char *name, const struct report *r)
  * candidate. A test-only QEMU fw_cfg side channel exists only in images built
  * with CK_TEST_FWCFG_ARTIFACTS=1 and is compiled out of every default image. */
 
+/* Qualification tier label printed in every receipt header. A Pi 5 image is never
+ * the QEMU tier and never production: the label names the board. */
+#ifdef CK_PI5
+#define CK_RECEIPT_TIER "SEED-0B-PI5"
+#else
+#define CK_RECEIPT_TIER "SEED-0B-QEMU"
+#endif
+
 static struct report rep;
 static unsigned run_admitted, run_rejected, run_seen;
 
@@ -1075,9 +1083,9 @@ static void source_preamble(uint32_t count)
     hex(vh, verifier_id, 32);
     hex(ph, pd, 32);
     ck_printf("artifact_candidates: %u\n", count);
-    ck_printf("artifact_receipt_tier: SEED-0B-QEMU\nartifact_verifier_identity: %s\n"
+    ck_printf("artifact_receipt_tier: %s\nartifact_verifier_identity: %s\n"
               "artifact_policy_digest: %s\n",
-              vh, ph);
+              CK_RECEIPT_TIER, vh, ph);
     ck_printf("artifact_frames_free_before: %llu\n", (unsigned long long)free_frames());
 }
 

@@ -6,6 +6,12 @@
  *   ck_pi5_before_reset  write the RAM console log (core/klog.c) into the
  *                        card's log slot (core/klog_slot.h), then reset
  *
+ * Limit: the card log is written only on the orderly reset path. A watchdog
+ * expiry (a hang) resets the board without running ck_pi5_before_reset, so
+ * that boot's RAM log is lost and the slot keeps the previous run's header;
+ * pi5-run.sh's per-run nonce makes such a run read as "no report", never as
+ * a pass. Periodic flushes at stage boundaries are not implemented.
+ *
  * The SD host address is fixed for this board: the firmware's ACPI DSDT
  * (\_SB.SDC0, dumped by AIENOS-PI5-ACPI-0, 2026-10-13) computes its _CRS in a
  * method the kernel's static scanner does not run, and gives the same range
@@ -32,6 +38,8 @@
 static volatile uint8_t *sd_regs;
 static sdhci_card sd;
 static int sd_up;
+static ck_part part;       /* the AIENOS partition view, once found (the marker uses its reserved tail) */
+static ck_part store_part; /* the same partition minus the marker region: the sealed Store's view */
 
 static uint32_t sd_r32(void *c, uint32_t o) { (void)c; return *(volatile uint32_t *)(sd_regs + o); }
 static void sd_w32(void *c, uint32_t o, uint32_t v) { (void)c; *(volatile uint32_t *)(sd_regs + o) = v; }
@@ -71,7 +79,6 @@ void ck_pi5_start(void)
               rc == 0 && s0[510] == 0x55 && s0[511] == 0xaa ? "MBR ok" : "no MBR signature");
     /* Step 3: the AIENOS partition through the same GPT partition view the NVMe path uses (dev/disk_part.c),
      * then the scratch marker at its end (core/pi5_marker.c): formatted on a blank card, reopened after a reboot. */
-    static ck_part part;
     ck_gpt_info gi;
     rc = ck_gpt_find_aienos(&sd.dev, &part, &gi);
     if (rc) {
@@ -81,6 +88,15 @@ void ck_pi5_start(void)
     ck_printf("pi5_part: AIENOS partition first_lba=%llu blocks=%llu (%llu MiB) entries_used=%u index=%u via GPT (CRC32 primary+backup ok)\n",
               (unsigned long long)part.first_lba, (unsigned long long)part.blocks,
               (unsigned long long)(part.blocks / 2048u), gi.used, gi.part_index);
+    /* The Store's view ends before the marker region (core/pi5_marker.h ck_pi5_store_view), in every image,
+     * so the marker and the Store's units and probe unit never share a sector. */
+    rc = ck_pi5_store_view(&part, &store_part);
+    if (rc)
+        ck_printf("pi5_store_view: FAIL rc=%d (%s)\n", rc, ck_pi5_marker_strerror(rc));
+    else
+        ck_printf("pi5_store_view: lba 0..%llu (%llu units) for the Store; marker reserved at %llu..%llu\n",
+                  (unsigned long long)(store_part.blocks - 1u), (unsigned long long)(store_part.blocks / 8u),
+                  (unsigned long long)(part.blocks - CK_PI5_MARKER_SECS), (unsigned long long)(part.blocks - 1u));
     static uint8_t mbuf[CK_PI5_MARKER_BUF_BYTES] __attribute__((aligned(64)));
     uint64_t gen = 0;
     rc = ck_pi5_marker_run(&part.dev, mbuf, &gen);
@@ -150,6 +166,16 @@ static int klog_write(void)
         return -1;
     if (disk_flush(&sd.dev) != DISK_OK)
         return -1;
+    /* Payload read back and compared before the header that vouches for it is written. */
+    static uint8_t chk[8u * 512u] __attribute__((aligned(64)));
+    for (uint32_t s0 = 0; s0 < secs; s0 += 8u) {
+        uint32_t c = secs - s0 < 8u ? secs - s0 : 8u;
+        if (disk_read(&sd.dev, m->lba + 1u + s0, c, chk) != DISK_OK)
+            return -1;
+        for (uint32_t i = 0; i < c * 512u; i++)
+            if (chk[i] != (uint8_t)text[(size_t)s0 * 512u + i])
+                return -1;
+    }
     ck_klog_hdr_written(&hdr, m, n, ck_klog_total(), commit_prefix(), ck_stage_name());
     if (disk_write(&sd.dev, m->lba, 1, (const uint8_t *)&hdr) != DISK_OK || disk_flush(&sd.dev) != DISK_OK)
         return -1;
@@ -174,3 +200,22 @@ void ck_pi5_before_reset(void)
     ck_printf("klog_card: %s\n", rc == 0 ? "written and read back" : rc > 0 ? "not written" : "FAILED");
     ck_pi5_wdt_pet();
 }
+
+#ifdef CK_PI5_STORE
+/* Hand the card's AIENOS partition view to the sealed Store stage (svc/store_boot.c ck_stage_store), the
+ * same stage the QEMU "full" image runs. Tier: SEED-0B-PI5, the Pi counterpart of SEED-0B-QEMU. The Store
+ * keys are the labelled TEST keys (ck_store_test_keys); the production key source stays BLOCKED_OPERATOR
+ * and is not touched here. CK_HARDWARE_STAGING and CK_PI5 cannot be combined (Makefile), so no hardware
+ * staging image can ever carry this. */
+const disk_dev *ck_dev_boot_disk(void)
+{
+    static int said;
+    if (!said++)
+        ck_puts("pi5_store_tier: SEED-0B-PI5 qualification only: Store keys are the public TEST keys, "
+                "Store uuid is the TEST uuid, no production keys, not a production Store\n");
+    return sd_up && store_part.valid ? &store_part.dev : 0;
+}
+
+/* The SD card has no bus master or SMMU stream to revoke: nothing to release. */
+void ck_dev_nvme_release(void) {}
+#endif
