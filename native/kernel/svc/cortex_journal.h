@@ -38,6 +38,8 @@
 #define CK_CJ_MAX_CHUNKS 64u     /* 1 MiB of journal */
 #define CK_CJ_MAX_RECORD (SS_MAX_OBJECTS * SS_MAX_PLAINTEXT) /* 128 KiB per append */
 #define CK_CX_HEAP_PAGES 1024u   /* 4 MiB: the whole journal plus its replay */
+#define CK_CX_SUBJECTS 2u        /* subject 0: the owner (facts); 1: reserved for ALLEN */
+#define CK_CX_FACT_SUBJECT 0u    /* remembered facts: lifecycle `remember` and the Pi fact stage */
 
 typedef struct {
     uint8_t sid[32];

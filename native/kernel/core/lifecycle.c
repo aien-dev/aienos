@@ -90,8 +90,6 @@ static uint64_t g_last_gen;
 static unsigned g_overlong;
 
 /* The Cortex store over the sealed Store (P06 cuts 3 and 4). */
-#define CK_CX_SUBJECTS 2u        /* subject 0: the owner (facts); 1: reserved for ALLEN */
-#define CK_CX_FACT_SUBJECT 0u
 #define CK_CX_FACTS_SHOWN 16u    /* `facts` lists at most the newest 16 */
 #define CK_CX_HEAP_BYTES (CK_CX_HEAP_PAGES * 4096u)
 static ck_cj g_cj;

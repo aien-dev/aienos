@@ -160,6 +160,11 @@ int ck_store_rotate_recovery(const disk_dev *d, const uint8_t current[CK_SB_SECR
  * Slot 1 path with the hardware policy (TEST keys and TEST uuid do not exist in this image). Prints nothing. */
 int ck_pi5_unlock_secret(uint8_t out[CK_SB_SECRET_LEN], const char **source);
 int ck_store_pi5_unlock_run(const disk_dev *d, const uint8_t *secret, const char *commit, ck_store_report *r);
+#ifdef CK_PI5_FACT
+/* PI5-5 (QUALIFICATION ONLY): the Cortex fact stage after the Store stage. r: the report of the Store boot. The
+ * Store is passed on only when it committed; a refused Store (wrong secret) recalls nothing. */
+int ck_store_pi5_fact_stage(const ck_store_report *r);
+#endif
 #endif
 /* Print the report lines (also used by the host test). */
 void store_boot_print(const ck_store_report *r);
