@@ -77,8 +77,28 @@ model vanished, too many tokens) commit nothing; no reply and no model is NOMODE
 Mutation proof (each TEST-ONLY mutant must make the test fail; all six killed): NO_COMMIT (commit skipped, success reported), RECOVER_BLIND (recovery never reads the Store), NO_GOLDEN_CHECK, NO_PROMPT_CHECK, RECOVER_NO_CHECK, MODEL_FIRST (model touched before the Store check).
 Regressions: `make -C native/kernel test`; `scripts/ck_pi5_build_check.sh`; the QEMU infer gate (`scripts/qemu_ck_infer_test.sh`, PASS, includes the restored prompt-head check) and the QEMU lifecycle gate (`scripts/qemu_ck_lifecycle_test.sh`, the reply object path).
 
-## Pi runs (NOT_RUN)
+## Pi runs (PASS, 2026-10-13, Raspberry Pi 5, main 5429602, `make pi5-agent`)
 
-G1 generate and commit (boot 1: UNLOCK.REQ with secret S, MODEL.MAP placed). G2 cold-boot recovery (the run tool power-cycles the board; UNLOCK.REQ with S, no MODEL.MAP, no generation). G3 negative control (wrong secret W, MODEL.MAP placed so a
-leak into the model path would show): nothing recovered, no `infer: sha256=` line, the AIENOS partition's sha256 identical before and after. The exact commands are in the PR description.
-Limits: PRODUCTION-class Store from PI5-4 but the secret comes from the card, there is no TPM; the anchor shares the disk, so a whole-disk rollback is not detectable; one golden prompt only; speed 1.20 tok/s; single runs.
+Each run is one tryboot of the hub (`~/workspace/pi5/pi5-run.sh`, KLOG=1): a soft reboot, NOT a power cut. Same card and secret S as the PI5-5 runs (Store generation continues). MODEL.MAP was placed for G1 and G3 and removed from the ESP after each (every image's stub reads it).
+
+G1 generate, check golden, commit:
+```
+store: opened generation=5 boot_count=2 prev_commit=dd99eda1ec2d3e6b097bfb71a9583b153e3face7 anchor=valid-resume
+agent: generated tokens=8 prompt_ids=17 steps=25 us=16946950 prompt_head=128000,128006,882,128007
+agent: reply store_gen=7 object_sha256=07d15b3d26726090494b0d033f6a955d88e4b9a1ae4322130459297db952989c model_sha256=3f5a22426976ab26cfe84dba63c1d08391717abb1af893e10f1b2968d862dcc1 tokens=8 ids=791 6864 315 9822 374 12366 13 128009 text="The capital of France is Paris."
+agent: committed store_gen=7
+AIENOS_PI5_AGENT: GENERATED PASS
+```
+G2 recover on the next boot (no MODEL.MAP; no `model:` or `infer:` line in the log):
+```
+store: opened generation=7 boot_count=3 prev_commit=5429602193cfc5ab79b05c0111b0cbad36e74fed anchor=valid-resume
+agent: reply store_gen=7 object_sha256=07d15b3d26726090494b0d033f6a955d88e4b9a1ae4322130459297db952989c model_sha256=3f5a22426976ab26cfe84dba63c1d08391717abb1af893e10f1b2968d862dcc1 tokens=8 ids=791 6864 315 9822 374 12366 13 128009 text="The capital of France is Paris."
+AIENOS_PI5_AGENT: RECOVERED PASS
+```
+G3 wrong secret W (MODEL.MAP placed; the UEFI stub still read the model bytes before the kernel ran, the kernel never hashed or used them: no `infer: sha256=` line):
+```
+store: REFUSED proof=keyed step="recovery secret rejected (K_vol unwrap tag failed); disk not opened" rc=-2004 (RecoverySecretRejected); disk left as found, not reformatted
+agent: NOTHING RECOVERED: the Store is not open (recovery secret missing or rejected, or the disk was refused); the model was not read or hashed, nothing was generated, nothing was written
+AIENOS_PI5_AGENT: NOSTORE
+```
+Limits: tryboot reset, not a power cut; the AIENOS partition was not hashed around G3 (PI5-4 run C proved the same refusal path leaves the partition byte-identical); one golden prompt; 1.20 tok/s; single runs; secret from the card, no TPM.
