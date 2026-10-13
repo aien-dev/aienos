@@ -227,3 +227,30 @@ pi5-fact-mutants:
 	done; exit $$fail
 stage-test: pi5-fact-test
 stage-sanitize: pi5-fact-sanitize
+
+# ---- AIENOS PI5-6 final cut: the Pi agent stage (dev/tests/pi5_agent_test.c) ----
+# store_boot.c is compiled with -DCK_PI5_UNLOCK -DCK_PI5_UNLOCK_CARD -DCK_PI5_AGENT, as "make pi5-agent" builds it. The inference unit
+# is a stub in the test (a 770 MiB model cannot run on the host); the stage's policy is the real svc/pi5_agent.c.
+PI5_AGENT_TEST_SRCS := $(filter-out %/pi5_unlock_test.c,$(PI5_UNLOCK_TEST_SRCS)) $(STAGE_DIR)/svc/pi5_agent.c $(STAGE_DIR)/dev/tests/pi5_agent_test.c
+PI5_AGENT_DEPS := $(PI5_AGENT_TEST_SRCS) $(DISK_PART_TEST_DEPS) $(STAGE_DIR)/svc/pi5_agent.h $(STAGE_DIR)/core/reply_obj.h
+PI5_AGENT_FLAGS := -DCK_PI5_UNLOCK=1 -DCK_PI5_UNLOCK_CARD=1 -DCK_PI5_AGENT=1
+$(STAGE_OUT)/pi5_agent_test: $(PI5_AGENT_DEPS)
+	@mkdir -p $(@D)
+	$(STAGE_CC) $(STAGE_HOST_FLAGS) $(PI5_AGENT_FLAGS) $(DISK_PART_INC) -o $@ $(PI5_AGENT_TEST_SRCS)
+$(STAGE_OUT)/pi5_agent_test_san: $(PI5_AGENT_DEPS)
+	@mkdir -p $(@D)
+	$(STAGE_CC) $(STAGE_HOST_FLAGS) $(STAGE_SAN_FLAGS) $(PI5_AGENT_FLAGS) $(DISK_PART_INC) -o $@ $(PI5_AGENT_TEST_SRCS)
+.PHONY: pi5-agent-test pi5-agent-sanitize pi5-agent-mutants
+pi5-agent-test: $(STAGE_OUT)/pi5_agent_test
+	$<
+pi5-agent-sanitize: $(STAGE_OUT)/pi5_agent_test_san
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 $<
+# Mutation proof: each TEST-ONLY mutant of the agent stage must make the host test FAIL.
+pi5-agent-mutants:
+	@mkdir -p $(STAGE_OUT); fail=0; \
+	for m in NO_COMMIT RECOVER_BLIND NO_GOLDEN_CHECK NO_PROMPT_CHECK RECOVER_NO_CHECK MODEL_FIRST; do \
+	  $(STAGE_CC) $(STAGE_HOST_FLAGS) $(PI5_AGENT_FLAGS) -DCK_AGENT_MUTANT_$$m=1 $(DISK_PART_INC) -o $(STAGE_OUT)/pi5_agent_test_mut_$$m $(PI5_AGENT_TEST_SRCS) || exit 1; \
+	  if $(STAGE_OUT)/pi5_agent_test_mut_$$m >/dev/null; then echo "MUTANT SURVIVED: $$m"; fail=1; else echo "mutant killed: $$m"; fi; \
+	done; exit $$fail
+stage-test: pi5-agent-test
+stage-sanitize: pi5-agent-sanitize

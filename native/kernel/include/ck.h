@@ -256,10 +256,14 @@ struct ck_infer_reply {
     uint64_t us;
     uint8_t text[CK_INFER_REPLY_TEXT];
     uint32_t text_len;
+    uint32_t prompt_head[4]; /* first four prompt token ids (the chat template), filled when the prompt was accepted */
 };
 int ck_infer_resident(void);
 int ck_infer_prompt(const char *text, size_t len, int (*cancel_poll)(void), struct ck_infer_reply *r);
 void ck_infer_resident_close(void);
+/* SHA-256 of the resident model bytes (32 bytes) after a successful ck_infer_run ingest of a boot-disk model,
+ * else NULL (no resident session, or an image without the unit). */
+const uint8_t *ck_infer_model_sha256(void);
 
 /* Optional Store-stage hook: signed P2 artifact candidates read from the boot
  * disk Store (svc/artifact_store.c) during ck_stage_store, before the NVMe

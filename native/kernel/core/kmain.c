@@ -282,9 +282,11 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
      * stage: its default candidate source is the boot disk Store, read by that
      * stage before the NVMe DMA revoke. No stage registers an IRQ. */
     ck_artifact_run();
-#ifdef CK_INFER_RESIDENT
+#if defined(CK_INFER_RESIDENT) && !defined(CK_PI5_AGENT)
     /* Resident inference session for the lifecycle (core/infer.c): model
-     * ingest and session open after the store stage, before the lifecycle. */
+     * ingest and session open after the store stage, before the lifecycle.
+     * Not in the Pi agent image: its stage (svc/pi5_agent.c) opens the session itself, inside the
+     * store stage and only after the Store opened, and closes it before committing. */
     ck_infer_run();
 #endif
     struct ck_mm_usage mu;

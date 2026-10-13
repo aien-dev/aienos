@@ -56,6 +56,7 @@
 #include "continuity_service.h"
 #include "cortex_journal.h"
 #include "slot_service.h"
+#include "reply_obj.h"
 
 #if !defined(CK_SERVICE)
 #error "lifecycle.c is only part of a CK_SERVICE=1 image"
@@ -69,7 +70,7 @@
 #endif
 
 #define CK_LC_OBJ_KIND 0x4e31u   /* 'N1': v1 approved note, version 1 */
-#define CK_LC_REPLY_KIND 0x5231u /* 'R1': v1 approved reply (prompt + generated text), version 1 */
+#define CK_LC_REPLY_KIND CK_REPLY_OBJ_KIND /* 0x5231 'R1': v1 approved reply (prompt + generated text), version 1 */
 
 void ck_dev_nvme_release(void);
 int ck_store_service_ready(void);
@@ -146,7 +147,7 @@ static void put(uint8_t *buf, size_t *n, const char *s, size_t len)
 #define CK_LC_REPLY_OBJ_MAX (16 + 8 + CK_LC_TASK_MAX + 8 + CK_LC_REPLY_MAX + 1)
 static int commit_task(void)
 {
-    static const char note_hdr[] = "aienos.note.v1\n", reply_hdr[] = "aienos.reply.v1\nprompt: ", reply_sep[] = "\nreply: ";
+    static const char note_hdr[] = "aienos.note.v1\n";
     uint8_t buf[CK_LC_REPLY_OBJ_MAX];
     size_t n = 0, i;
     uint16_t kind = CK_LC_OBJ_KIND;
@@ -155,11 +156,7 @@ static int commit_task(void)
     if (!ck_cont_service_writable()) return CK_SB_E_CONTINUITY; /* degraded mount: read-only */
     if (g_lc.pending == CK_LC_PENDING_REPLY) {
         kind = CK_LC_REPLY_KIND;
-        put(buf, &n, reply_hdr, sizeof reply_hdr - 1);
-        put(buf, &n, g_lc.task, g_lc.task_len);
-        put(buf, &n, reply_sep, sizeof reply_sep - 1);
-        put(buf, &n, g_lc.reply, g_lc.reply_len);
-        put(buf, &n, "\n", 1);
+        n = ck_reply_obj_build(buf, g_lc.task, g_lc.task_len, (const uint8_t *)g_lc.reply, g_lc.reply_len, 0, 0, 0);
     } else {
         put(buf, &n, note_hdr, sizeof note_hdr - 1);
         put(buf, &n, g_lc.task, g_lc.task_len);

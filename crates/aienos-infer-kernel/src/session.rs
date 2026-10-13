@@ -270,6 +270,29 @@ pub unsafe extern "C" fn aienos_infer_session_step(token: *mut u32, us: *mut u64
     rc
 }
 
+/// Copy the token ids of the current request's prompt (chat template included) into `out[..cap]`.
+/// Returns the number of prompt ids (which may exceed `cap`; only `cap` are copied), 0 when no prompt
+/// is pending, or `E_STATE` without a session. The kernel uses the first four ids to check the chat
+/// template the tokenizer built (PI5-6 agent: restores the one-shot probe's expect_ids check).
+///
+/// # Safety
+/// `out` must point to `cap` writable u32s (or be null with `cap` 0). Same execution contract as open.
+#[no_mangle]
+pub unsafe extern "C" fn aienos_infer_session_prompt_ids(out: *mut u32, cap: u32) -> i32 {
+    let s = match slot() {
+        Some(s) => s,
+        None => return E_STATE,
+    };
+    if out.is_null() && cap != 0 {
+        return E_ARG;
+    }
+    let n = s.prompt.len().min(cap as usize);
+    if n > 0 {
+        core::ptr::copy_nonoverlapping(s.prompt.as_ptr(), out, n);
+    }
+    s.prompt.len() as i32
+}
+
 /// Abandon the current request: the cache is forgotten and no further step
 /// does work. Returns the number of tokens produced before the cancel, or
 /// `E_STATE` without a session. Idempotent.

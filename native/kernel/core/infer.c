@@ -87,6 +87,7 @@ extern int32_t aienos_infer_session_prompt(const uint8_t *text, uint32_t len);
 extern int32_t aienos_infer_session_step(uint32_t *token, uint64_t *us);
 extern int32_t aienos_infer_session_cancel(void);
 extern int32_t aienos_infer_session_tokens(uint32_t *out, uint32_t cap);
+extern int32_t aienos_infer_session_prompt_ids(uint32_t *out, uint32_t cap);
 extern int32_t aienos_infer_session_text(const uint32_t *ids, uint32_t n, uint8_t *out, uint32_t cap);
 extern int32_t aienos_infer_session_close(void);
 extern void aienos_infer_heap_stats(uint64_t *used, uint64_t *peak);
@@ -277,7 +278,7 @@ static void hex(char *out, const uint8_t *b, unsigned n)
  * behaved (count of produced tokens as expected, no error), 0 otherwise.
  * `expect`/`nexpect`: the exact token list a complete reply must equal. */
 static int session_request(unsigned which, const char *text, unsigned cancel_after, const uint32_t *expect,
-                           unsigned nexpect)
+                           unsigned nexpect, const uint32_t *expect_head)
 {
     uint64_t t0 = ck_time_us(), used = 0, peak = 0, pre_us = 0, tok_us_sum = 0;
     unsigned steps = 0, prefill = 0, produced = 0, last = 0;
@@ -285,6 +286,17 @@ static int session_request(unsigned which, const char *text, unsigned cancel_aft
     if (ids < 0) {
         ck_printf("infer: session prompt=%u REFUSED rc=%d\n", which, ids);
         return 0;
+    }
+    /* The chat template the tokenizer built: the first four prompt ids must be the golden ones (the one-shot
+     * probe checked the same four, expect_ids; the Pi image skips the probe, so the session path checks them). */
+    int head_ok = 1;
+    if (expect_head) {
+        uint32_t head[4] = {0, 0, 0, 0};
+        int32_t hn = aienos_infer_session_prompt_ids(head, 4);
+        head_ok = hn >= 4;
+        for (unsigned i = 0; head_ok && i < 4; i++) head_ok = head[i] == expect_head[i];
+        ck_printf("infer: session prompt=%u prompt_head=%u,%u,%u,%u expect=%s\n", which, head[0], head[1], head[2], head[3],
+                  head_ok ? "match" : "MISMATCH");
     }
     int32_t rc = 0;
     for (;;) {
@@ -314,6 +326,7 @@ static int session_request(unsigned which, const char *text, unsigned cancel_aft
                   which, ids, cancel_after, steps, prefill, produced, "done", (unsigned long long)(used / 1024), rc);
         return ok;
     }
+    ok = ok && head_ok;
     ok = ok && last && (unsigned)ids == prefill && produced == nexpect;
     for (unsigned i = 0; ok && i < nexpect; i++) ok = ok && toks[i] == expect[i];
     int32_t tl = aienos_infer_session_text(toks, (uint32_t)produced, text_out, INFER_TEXT_BYTES);
@@ -365,10 +378,10 @@ static void session_run(uint64_t mpa, uint64_t msize)
         ck_printf("infer: session refusals open_twice=%d prompt_bytes=%d step_idle=%d\n", r_open, r_bytes, r_idle);
         ok = ok && r_open == SESS_E_STATE && r_bytes == SESS_E_PROMPT_BYTES && r_idle == SESS_STEP_DONE;
 
-        ok = session_request(1, "Say hello.", 3, 0, 0) && ok;
+        ok = session_request(1, "Say hello.", 3, 0, 0, 0) && ok;
         ok = session_request(2, "What is the capital of France?", 0, expect_gen,
-                             sizeof expect_gen / sizeof expect_gen[0]) && ok;
-        ok = session_request(3, "Say hello.", 1, 0, 0) && ok;
+                             sizeof expect_gen / sizeof expect_gen[0], expect_ids) && ok;
+        ok = session_request(3, "Say hello.", 1, 0, 0, 0) && ok;
     }
     uint64_t used = 0, peak = 0;
     aienos_infer_heap_stats(&used, &peak);
@@ -393,6 +406,10 @@ static struct {
     int open;
     uint64_t mpa, msize, mpages, hpa, frames_before;
 } g_res;
+
+static uint8_t g_model_sha[SHA256_DIGEST_SIZE]; /* digest of the ingested model, set by ck_infer_run before resident_open */
+
+const uint8_t *ck_infer_model_sha256(void) { return g_res.open ? g_model_sha : 0; }
 
 int ck_infer_resident(void) { return g_res.open; }
 
@@ -437,6 +454,11 @@ int ck_infer_prompt(const char *text, size_t len, int (*cancel_poll)(void), stru
     ck_wr(daif, daif);
     if (ids < 0) return ids;
     r->prompt_ids = (uint32_t)ids;
+    {
+        __asm__ volatile("msr daifset, #0xf" ::: "memory");
+        (void)aienos_infer_session_prompt_ids(r->prompt_head, 4);
+        ck_wr(daif, daif);
+    }
     int32_t rc = 0;
     for (;;) {
         uint32_t t = 0;
@@ -444,6 +466,7 @@ int ck_infer_prompt(const char *text, size_t len, int (*cancel_poll)(void), stru
         __asm__ volatile("msr daifset, #0xf" ::: "memory");
         rc = aienos_infer_session_step(&t, &us);
         ck_wr(daif, daif);
+        pet(); /* the Pi PM watchdog (15 s) is petted per step; no-op on every other board */
         if (rc < 0 || rc == SESS_STEP_DONE) break;
         r->steps++;
         if (rc != SESS_STEP_PREFILL) r->produced++;
@@ -631,6 +654,7 @@ void ck_infer_run(void)
     /* Service image: the model stays resident for the lifecycle's prompt verb
      * (core/lifecycle.c); the one-shot probe and session_run below are the
      * QEMU probe image's regression, not the service's job. */
+    memcpy(g_model_sha, dg, sizeof dg);
     resident_open(mpa, msize, mpages, hpa, frames_before);
     return;
 #endif
@@ -640,7 +664,6 @@ void ck_infer_run(void)
      * 15 s PM watchdog (core/pi5.c). The session below runs the same golden prompt one step at a time
      * with a pet per step, and is judged against the same llama.cpp token list (expect_gen). */
     ck_puts("infer: one-shot probe skipped on the Pi image (watchdog); the session below runs the golden prompt step by step\n");
-    (void)expect_ids; /* judged by the one-shot probe only; the session checks the reply tokens */
     {
         uint64_t v = ck_rd(cpacr_el1);
         v |= 3ull << CPACR_FPEN_SHIFT;
@@ -733,4 +756,5 @@ int ck_infer_prompt(const char *text, size_t len, int (*cancel_poll)(void), stru
     return -12; /* no session in this image */
 }
 void ck_infer_resident_close(void) {}
+const uint8_t *ck_infer_model_sha256(void) { return 0; }
 #endif
