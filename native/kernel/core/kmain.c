@@ -14,6 +14,9 @@
 #include "cpufeat.h"
 #include "handoff_check.h"
 #include "frames.h"
+#ifdef CK_PI5_PCIE
+#include "../dev/pi5_pcie.h"
+#endif
 
 #define TTBR_BADDR_MASK 0x0000fffffffffffeull
 
@@ -239,6 +242,12 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
                   : ent == CK_RNG_FAILED ? "RNDR returned no number within the retry bound"
                   : ent == CK_RNG_STUCK ? "RNDR repeated a 64-bit word"
                                         : "probe error");
+
+#ifdef CK_PI5_PCIE
+    /* Pi 5 PCIe2 root complex / RP1 enumerator (dev/pi5_pcie.c): read-only boot report, CK_PI5_PCIE image only. */
+    ck_set_stage("pi5_pcie");
+    ck_pi5pcie_report();
+#endif
 
 #ifdef CK_B7B_PROBE
     /* B7b preparation probe (core/smmu_svc.c), probe build only. */

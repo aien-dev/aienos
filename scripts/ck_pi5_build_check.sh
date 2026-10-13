@@ -54,4 +54,17 @@ if grep -qE "opt/aienos/model|TEST-ONLY QEMU fw_cfg|fw_cfg" <<<"${pinf_strings}"
 if defined "${pinf}" ck_stage_store; then echo "FAIL pi5-infer image defines ck_stage_store"; fail=1; else echo "PASS pi5-infer image has no Store stage"; fi
 test -s "${root}/target/native-kernel-pi5-infer/BOOTAA64.EFI" || { echo "FAIL no pi5-infer BOOTAA64.EFI"; fail=1; }
 
+# AIENOS-PI5 network lane step 1: the Pi image with the PCIe2 / RP1 enumerator (make pi5-pcie). Read-only boot
+# report; the plain pi5, pi5-store, pi5-infer and default images must carry none of it.
+make -C "${root}/native/kernel" pi5-pcie >/dev/null
+ppc="${root}/target/native-kernel-pi5-pcie/aienos-ck.elf"
+for s in ck_pi5pcie_report ck_pi5pcie_cfg_read32 ck_pi5pcie_ib_verdict ck_dmaw_init ck_pi5_start; do
+    if defined "${ppc}" "${s}"; then echo "PASS pi5-pcie image defines ${s}"; else echo "FAIL pi5-pcie image lacks ${s}"; fail=1; fi
+done
+for s in ck_pi5pcie_report ck_pi5pcie_cfg_read32 ck_pi5pcie_ib_verdict ck_dmaw_init; do
+    if defined "${pi5}" "${s}" || defined "${ps}" "${s}" || defined "${pinf}" "${s}" || defined "${def}" "${s}"; then echo "FAIL a non-pcie image defines ${s}"; fail=1; else echo "PASS plain pi5, pi5-store, pi5-infer and default images have no ${s}"; fi
+done
+if grep -q "software-only DMA confinement (Pi 5, weaker than the Spark)" <<<"$(strings -a "${ppc}")"; then echo "PASS pi5-pcie image carries the ADR 0020 label"; else echo "FAIL pi5-pcie image lacks the ADR 0020 label"; fail=1; fi
+test -s "${root}/target/native-kernel-pi5-pcie/BOOTAA64.EFI" || { echo "FAIL no pi5-pcie BOOTAA64.EFI"; fail=1; }
+
 if [[ ${fail} == 0 ]]; then echo "CK_PI5_BUILD: PASS"; else echo "CK_PI5_BUILD: FAIL"; exit 1; fi
