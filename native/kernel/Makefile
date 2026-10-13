@@ -873,6 +873,8 @@ FULL_NAME := full-service$(if $(strip $(CK_HARDWARE_STAGING)),-hardware-staging,
 STAGE_DMA_FLAGS += -DCK_SERVICE=1
 endif
 STAGE_SRCS += $(KDIR)/core/lifecycle.c $(KDIR)/core/lifecycle_fsm.c $(KDIR)/core/line_rx.c
+# N3 (aienos#329): context assembly and the exact approval binding (pure C, host-tested by test_context).
+STAGE_SRCS += $(KDIR)/core/context.c $(KDIR)/core/context_proposal.c
 # P06 cut 3: the canonical Omega Cortex store over the sealed Store (svc/cortex_journal.c).
 STAGE_SRCS += $(STAGE_CORTEX_SRCS)
 # P05 cut 1: production continuity on the service lifecycle (svc/continuity_service.c):
@@ -1213,7 +1215,7 @@ HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/
 	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c $(KDIR)/core/unlock_req.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_unlock_req
+	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_unlock_req test_context
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -1245,6 +1247,27 @@ $(OUT)/host/test_osh_op_mutant: $(KDIR)/tests/test_osh_op.c $(OSH_OP_SRCS) $(KDI
 osh-op-mutant: $(OUT)/host/test_osh_op_mutant
 	@if $< > $<.log 2>&1; then cat $<.log; echo "test_osh_op mutant (permission check always OK): PASSED, test does not catch it"; exit 1; \
 	else grep -F "test_osh_op: FAIL" $<.log && echo "test_osh_op mutant (permission check always OK): FAILS as required"; fi
+
+# N3 context assembly + approval binding (core/context.c, core/context_proposal.c, aienos#329): pure logic over
+# the argus SHA-256. Own rule (needs sha256.c). The mutant skips the foreign-binding check: test_context must
+# FAIL against it (red before green); "make test" fails if the test stops catching it. Host only (context.c
+# refuses the flag outside CK_CTX_HOST_TEST).
+CONTEXT_SRCS := $(KDIR)/core/context.c $(KDIR)/core/context_proposal.c $(NATIVE)/argus/sha256.c
+$(OUT)/host/test_context: $(KDIR)/tests/test_context.c $(CONTEXT_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -DCK_CTX_HOST_TEST -o $@ $< $(CONTEXT_SRCS)
+
+$(OUT)/host-san/test_context: $(KDIR)/tests/test_context.c $(CONTEXT_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -DCK_CTX_HOST_TEST -o $@ $< $(CONTEXT_SRCS)
+
+$(OUT)/host/test_context_mutant: $(KDIR)/tests/test_context.c $(CONTEXT_SRCS) $(KDIR)/tests/ck_test.h $(HDRS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -DCK_CTX_HOST_TEST -DCK_CTX_MUTANT_SKIP_BINDING -o $@ $< $(CONTEXT_SRCS)
+
+context-mutant: $(OUT)/host/test_context_mutant
+	@if $< > $<.log 2>&1; then cat $<.log; echo "test_context mutant (foreign binding check skipped): PASSED, test does not catch it"; exit 1; \
+	else grep -F "test_context: FAIL" $<.log && echo "test_context mutant (foreign binding check skipped): FAILS as required"; fi
 
 # TEST-ONLY mutant of core/handoff_check.c (reserved0 check removed): the
 # handoff test must FAIL against it, so "make test" fails if the test stops
@@ -1324,8 +1347,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -1676,6 +1699,17 @@ $(STORE_IMG_TOOL): $(STORE_IMG_SRCS) $(STAGE_HDRS)
 	$(HOSTCC) $(STAGE_HOST_FLAGS) $(STAGE_INC) -o $@ $(STORE_IMG_SRCS)
 store-image: $(STORE_IMG_TOOL)
 
+# N3 memory gate tool (scripts/qemu_ck_memory_test.sh, aienos#329): appends a
+# foreign-bound or a corrupted record to the Cortex journal of a provisioned
+# TEST-keys disk image. Hosted; never part of an image.
+CORTEX_IMG_TOOL := $(OUT)/host/ck_cortex_image
+CORTEX_IMG_SRCS := $(STAGE_OWN_SRCS) $(KDIR)/core/ipc.c $(STAGE_NATIVE_SRCS) $(NATIVE)/disk/disk_file.c \
+	$(KDIR)/svc/tests/ck_host.c $(STAGE_CORTEX_SRCS) $(KDIR)/core/context.c $(KDIR)/tools/ck_cortex_image.c
+$(CORTEX_IMG_TOOL): $(CORTEX_IMG_SRCS) $(STAGE_HDRS) $(KDIR)/core/context.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(STAGE_HOST_FLAGS) $(STAGE_INC) -o $@ $(CORTEX_IMG_SRCS)
+cortex-image: $(CORTEX_IMG_TOOL)
+
 # Continuity / Recovery Core QEMU gate tool (scripts/qemu_ck_continuity_test.sh,
 # scripts/qemu_ck_recovery_test.sh): operator response, degraded-peer injection,
 # AgentRoot corruption on a boot-disk image. Hosted; never part of an image.
@@ -2017,7 +2051,7 @@ $(OUT)/host-san/test_pi5_rng: $(KDIR)/tests/test_pi5_rng.c $(PI5_RNG_SRCS) $(KDI
 
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
-.PHONY: all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact pi5-agent test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact pi5-agent test sanitize context-mutant cortex-image handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
 
 # AIENOS-PI5 step 3 marker + Pi card GPT test (hosted; a file stands in for the card, QEMU cannot model the Pi SD host).
 PI5_MARKER_SRCS := $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \

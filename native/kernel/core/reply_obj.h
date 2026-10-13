@@ -5,7 +5,8 @@
  * Bytes: "aienos.reply.v1\nprompt: " + prompt + "\nreply: " + reply + "\n"
  * and, only when the caller passes a trailer (the Pi agent does, the lifecycle does not):
  * "model: " + 64 lowercase hex + "\nids: " + decimal token ids separated by single spaces + "\n".
- * With no trailer the output is byte for byte what lifecycle.c wrote before this header existed
+ * With no trailer the output is byte for byte what lifecycle.c wrote before this header existed (N3: lifecycle.c now
+ * appends one "context: sha256=<64 hex> memory=<n>\n" line after this object; the Pi agent does not, its bytes are unchanged)
  * (dev/tests/pi5_agent_test.c pins it against a literal). */
 #ifndef AIENOS_CK_REPLY_OBJ_H
 #define AIENOS_CK_REPLY_OBJ_H

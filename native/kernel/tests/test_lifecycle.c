@@ -191,5 +191,32 @@ int main(void)
     }
     CHECK(req(&lc, "shutdown") == CK_LC_R_STOP && req(&lc, "remember z") == CK_LC_R_REFUSED && req(&lc, "facts") == CK_LC_R_REFUSED);
     CHECK(lc.requests == 9 && lc.remembers == 2 && lc.facts == 2 && lc.refused == 2 && lc.invalid == 1);
+
+    /* N3 (aienos#329): prefer hands the text to the binding like remember;
+     * an approval the binding refuses (stale / changed) keeps SERVE; a replay
+     * drops the proposal to READY with nothing written. */
+    CHECK(dec("prefer Address me as Captain Drake.", &a, &al) == CK_LC_V_PREFER && al == 28);
+    CHECK(dec("prefer", &a, &al) == CK_LC_V_INVALID);
+    CHECK(strcmp(ck_lc_verb_name(CK_LC_V_PREFER), "prefer") == 0);
+    ck_lc_init(&lc);
+    ck_lc_start(&lc, 0);
+    CHECK(req(&lc, "prefer x") == CK_LC_R_REFUSED && lc.prefers == 0 && strstr(lc.reason, "locked"));
+    ck_lc_init(&lc);
+    ck_lc_start(&lc, 1);
+    CHECK(req(&lc, "prefer approve") == CK_LC_R_PREFER && lc.prefers == 1 && lc.state == CK_LC_READY);
+    CHECK(strcmp(lc.fact, "approve") == 0 && lc.fact_len == 7 && lc.approved == 0 && lc.pending == CK_LC_PENDING_NONE);
+    CHECK(req(&lc, "task n") == CK_LC_R_OK && lc.state == CK_LC_SERVE);
+    CHECK(req(&lc, "prefer y") == CK_LC_R_PREFER && lc.state == CK_LC_SERVE && strcmp(lc.task, "n") == 0);
+    CHECK(req(&lc, "approve") == CK_LC_R_COMMIT && lc.state == CK_LC_SERVE);
+    ck_lc_commit_refused(&lc, "stale");
+    CHECK(lc.state == CK_LC_SERVE && lc.bind_refused == 1 && lc.refused == 1 && strcmp(lc.reason, "stale") == 0);
+    CHECK(lc.pending == CK_LC_PENDING_NOTE && lc.approved == 0);
+    CHECK(req(&lc, "approve") == CK_LC_R_COMMIT);
+    ck_lc_commit_replay(&lc);
+    CHECK(lc.state == CK_LC_READY && lc.replays == 1 && lc.refused == 2 && lc.approved == 0 && lc.task_len == 0 &&
+          lc.pending == CK_LC_PENDING_NONE && strstr(lc.reason, "replay"));
+    ck_lc_commit_replay(&lc);              /* ignored outside SERVE */
+    ck_lc_commit_refused(&lc, "ignored");  /* likewise */
+    CHECK(lc.replays == 1 && lc.bind_refused == 1 && lc.refused == 2);
     return ck_t_verdict("CK_LIFECYCLE");
 }

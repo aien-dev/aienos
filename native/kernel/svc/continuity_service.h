@@ -54,5 +54,6 @@ int ck_cont_service_writable(void); /* 1 after PROVISIONED or RESUMED */
 /* "continuity=<word> agent=<8 hex> incarnation=<n> subject_seq=<n>" (NUL-terminated). */
 void ck_cont_service_status(char *out, size_t cap);
 const uint8_t *ck_cont_service_agent(void); /* 32 bytes, or NULL before a successful start */
+uint64_t ck_cont_service_incarnation(void); /* durable incarnation of this boot, 0 before a successful start */
 void ck_cont_service_stop(void);            /* forget the view (the Store keys are gone) */
 #endif

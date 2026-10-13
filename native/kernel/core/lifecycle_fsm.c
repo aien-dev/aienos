@@ -47,6 +47,10 @@ enum ck_lc_verb ck_lc_decode(const char *line, size_t len, const char **arg, siz
         if (*arg_len == 0 || *arg_len > CK_LC_TASK_MAX) return CK_LC_V_INVALID;
         return CK_LC_V_REMEMBER;
     }
+    if (word_is(w, n, "prefer")) {
+        if (*arg_len == 0 || *arg_len > CK_LC_TASK_MAX) return CK_LC_V_INVALID;
+        return CK_LC_V_PREFER;
+    }
     /* unlock carries the optional recovery secret (the binding checks its
      * shape and never echoes it); every other verb takes no argument. */
     if (word_is(w, n, "unlock")) return CK_LC_V_UNLOCK;
@@ -88,6 +92,7 @@ const char *ck_lc_verb_name(enum ck_lc_verb v)
     case CK_LC_V_FACTS: return "facts";
     case CK_LC_V_ROTATE: return "rotate";
     case CK_LC_V_UPDATE: return "update";
+    case CK_LC_V_PREFER: return "prefer";
     }
     return "?";
 }
@@ -203,6 +208,16 @@ enum ck_lc_result ck_lc_apply(ck_lc *lc, enum ck_lc_verb v, const char *arg, siz
         lc->remembers++;
         return CK_LC_R_REMEMBER;
     }
+    case CK_LC_V_PREFER: {
+        size_t i;
+        if (lc->state == CK_LC_LOCKED) return refuse(lc, "locked: no production Store");
+        if (arg_len == 0 || arg_len > CK_LC_TASK_MAX) return refuse(lc, "preference text out of bounds");
+        for (i = 0; i < arg_len; i++) lc->fact[i] = arg[i];
+        lc->fact[arg_len] = 0;
+        lc->fact_len = arg_len; /* like remember: never changes the state or the pending task */
+        lc->prefers++;
+        return CK_LC_R_PREFER;
+    }
     case CK_LC_V_FACTS:
         if (lc->state == CK_LC_LOCKED) return refuse(lc, "locked: no production Store");
         lc->facts++;
@@ -241,6 +256,24 @@ void ck_lc_commit_done(ck_lc *lc, int rc)
         lc->refused++;
         lc->reason = "commit failed: task still pending (approve again or cancel)";
     }
+}
+
+void ck_lc_commit_replay(ck_lc *lc)
+{
+    if (lc->state != CK_LC_SERVE) return;
+    lc->replays++;
+    lc->refused++;
+    lc->reason = "replay: this request is already committed (nothing written)";
+    drop_task(lc);
+    lc->state = CK_LC_READY;
+}
+
+void ck_lc_commit_refused(ck_lc *lc, const char *why)
+{
+    if (lc->state != CK_LC_SERVE) return;
+    lc->bind_refused++;
+    lc->refused++;
+    lc->reason = why;
 }
 
 void ck_lc_rotate_done(ck_lc *lc, int ok)

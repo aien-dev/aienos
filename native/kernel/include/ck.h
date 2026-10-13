@@ -246,8 +246,17 @@ unsigned ck_console_rx_overruns(void);
  * -8 longer than the cache, -15 heap reserve). ck_infer_resident_close:
  * closes the session and returns every frame (prints the unloaded line).
  * Images without the unit: resident 0, prompt -12, close a no-op. */
-#define CK_INFER_REPLY_IDS 16
-#define CK_INFER_REPLY_TEXT 256
+/* Resident session limits (N3, aienos#329; frozen for a useful task, see
+ * core/context.h): KV positions, generated tokens per prompt, prompt bytes
+ * (= CK_CTX_PROMPT_MAX), heap reserve. 1024 positions x 64 KiB of f32 K+V
+ * (16 layers x 512 kv dims x 2 x 4 B, Llama 3.2 1B) = 64 MiB of the 256 MiB
+ * session heap (the model needed 22.9 MiB at 64 positions). */
+#define CK_INFER_RES_KV 1024u
+#define CK_INFER_RES_MAX_NEW 256u
+#define CK_INFER_RES_PROMPT_BYTES 752u
+#define CK_INFER_RES_RESERVE (64u << 10)
+#define CK_INFER_REPLY_IDS 256 /* = CK_INFER_RES_MAX_NEW */
+#define CK_INFER_REPLY_TEXT 1536 /* = CK_LC_REPLY_MAX */
 struct ck_infer_reply {
     uint32_t ids[CK_INFER_REPLY_IDS];
     uint32_t prompt_ids, produced, steps;

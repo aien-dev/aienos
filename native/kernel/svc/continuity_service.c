@@ -209,6 +209,11 @@ const uint8_t *ck_cont_service_agent(void)
     return g.state > 0 && g.v ? g.v->root.agent_id : 0;
 }
 
+uint64_t ck_cont_service_incarnation(void)
+{
+    return g.state > 0 && g.v ? g.v->manifest.incarnation : 0;
+}
+
 void ck_cont_service_stop(void)
 {
     g.state = CK_CONT_NONE;
