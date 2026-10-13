@@ -676,6 +676,7 @@ int ck_phy_find(const struct ck_rp1_io *io, uint32_t addr, uint32_t tries, uint3
 #ifdef CK_PI5_NET
 #include "ck.h"
 #include "dma_window.h"
+#include "pi5_gem.h"
 
 static volatile uint8_t *rc;
 static volatile uint8_t *rp1;
@@ -725,14 +726,17 @@ static uint32_t unmodelled_windows(void)
     return u;
 }
 
-static void print_verdict(const char *tag, const struct ck_pi5pcie_ibwin *win, uint32_t unmod, uint64_t b_phys,
+static int print_verdict(const char *tag, const struct ck_pi5pcie_ibwin *win, uint32_t unmod, uint64_t b_phys,
                           uint64_t b_size, const struct ck_pi5net_ibprog *plan)
 {
     struct ck_pi5pcie_dmav dv;
+    int label;
     ck_pi5pcie_ib_verdict(win, CK_PI5PCIE_IB_WINDOWS, unmod, b_phys, b_size, &dv);
+    label = ck_pi5net_confine_label(&dv, plan);
     ck_printf("pi5_dma: hw_window %s=%s [%s] reach=0x%llx inside=0x%llx outside=0x%llx\n", tag,
-              ck_pi5net_confine_name(ck_pi5net_confine_label(&dv, plan)), ck_pi5pcie_verdict_name(dv.verdict), (unsigned long long)dv.reach_bytes,
+              ck_pi5net_confine_name(label), ck_pi5pcie_verdict_name(dv.verdict), (unsigned long long)dv.reach_bytes,
               (unsigned long long)dv.inside_bytes, (unsigned long long)dv.outside_bytes);
+    return label;
 }
 
 static void print_clk_rates(const char *tag, const struct ck_rp1_clk_regs *r)
@@ -760,10 +764,10 @@ void ck_pi5net_run(void)
     uint64_t b_phys = 0, bar1_cpu;
     uint32_t unmod, ndis = 0, attempts = 0;
     uint16_t cmd_saved = 0;
-    int rrc, rrp1, ver, rc2, scan_hit = -1;
+    int rrc, rrp1, ver, rc2, scan_hit = -1, confined = 0;
     void *bounce;
 
-    ck_printf("pi5_net: cut 2: hardware DMA confinement + RP1 Ethernet up to the PHY; no frames, no DMA descriptors\n");
+    ck_printf("pi5_net: cut 3: hardware DMA confinement, RP1 Ethernet up to the PHY, then one frame through the GEM (descriptors inside the bounce window only)\n");
     ck_printf("pi5_net: software-only DMA confinement (Pi 5, weaker than the Spark) plus the root-complex window below\n");
     rc = (volatile uint8_t *)ck_mmio_try_map(CK_PI5PCIE_RC2_PHYS, CK_PI5PCIE_RC_BYTES);
     if (!rc) {
@@ -818,7 +822,7 @@ void ck_pi5net_run(void)
             }
             unmod = unmodelled_windows();
             print_wins("after", &io, win);
-            print_verdict("after", win, unmod, b_phys, dw.size, &plan);
+            confined = print_verdict("after", win, unmod, b_phys, dw.size, &plan) == CK_PI5NET_CONF_CONFINED && rc2 == 0;
             ck_printf("pi5_dma: rp1 bus-master is LEFT OFF (cmd=0x%08x); the GEM driver turns it on when it needs it\n",
                       cmd_dword(&io));
         }
@@ -898,6 +902,13 @@ void ck_pi5net_run(void)
                   ck_phy_class_name(pid.cls), attempts);
     else
         ck_printf("pi5_net: phy addr=1 NOT FOUND rc=%d attempts=%u scan_lowest_answering=%d\n", rc2, attempts, scan_hit);
-    ck_printf("pi5_net: done: no frames sent; GEM tx/rx not enabled; rp1 bus-master left off\n");
+    if (rc2 == 0 && pid.cls == CK_PHY_BCM54213PE) {
+        struct ck_pi5gem_ctx gc = {&io, &rio, &dw, bounce, b_phys, confined, 1, ck_rp1_clk_sys_hz(&cr)};
+        ck_printf("pi5_net: phy found; handing over to the GEM frame test (hw window confined=%d)\n", confined);
+        ck_pi5gem_run(&gc);
+    } else {
+        ck_printf("pi5_net: no BCM54213PE at addr 1; GEM frame test not run\n");
+    }
+    ck_printf("pi5_net: done: rp1 bus-master off unless the line above says otherwise\n");
 }
 #endif

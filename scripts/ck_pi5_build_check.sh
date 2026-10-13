@@ -79,6 +79,11 @@ for s in ck_pi5net_run ck_pi5net_ib_plan ck_pi5net_ib_apply ck_rp1_phy_reset ck_
 done
 if grep -q "pi5_dma: hw_window %s=%s" <<<"$(strings -a "${pnet}")"; then echo "PASS pi5-net image carries the verdict line"; else echo "FAIL pi5-net image lacks the verdict line"; fail=1; fi
 test -s "${root}/target/native-kernel-pi5-net/BOOTAA64.EFI" || { echo "FAIL no pi5-net BOOTAA64.EFI"; fail=1; }
+# Cut 3: the GEM frame test (ck_gem_xfer, ck_pi5gem_run) lives only in the pi5-net image.
+for s in ck_gem_xfer ck_pi5gem_run ck_pi5gem_bme_set; do
+    if defined "${pnet}" "${s}"; then echo "PASS pi5-net image defines ${s}"; else echo "FAIL pi5-net image lacks ${s}"; fail=1; fi
+    if defined "${pi5}" "${s}" || defined "${ps}" "${s}" || defined "${pinf}" "${s}" || defined "${def}" "${s}" || defined "${ppc}" "${s}"; then echo "FAIL a non-net image defines ${s}"; fail=1; else echo "PASS no other image defines ${s}"; fi
+done
 for other in CK_PI5_STORE=1 CK_PI5_INFER=1 CK_PI5_PCIE=1 CK_PI5_UNLOCK=1 CK_PI5_AGENT=1 CK_PI5_FACT=1 CK_SERVICE=1 CK_HARDWARE_STAGING=1 CK_PI5_NET=2; do
     if make -n -C "${root}/native/kernel" CK_PI5_NET=1 ${other} full >/dev/null 2>&1; then echo "FAIL Makefile accepts CK_PI5_NET=1 with ${other}"; fail=1; else echo "PASS Makefile refuses CK_PI5_NET=1 with ${other}"; fi
 done
