@@ -62,9 +62,19 @@ permissions:
 jobs:
   ck:
     name: C kernel host tests and QEMU gates (ARM64)
-    runs-on: ubuntu-24.04-arm
+    # Spark self-hosted pool for pushes and same-repo PRs; fork PRs always use GitHub's hosted runner
+    # (a stranger's code never reaches the Spark). Set the repo variable CK_USE_SPARK to 'false' to fall back to GitHub for everything.
+    runs-on: ${{ (vars.CK_USE_SPARK != 'false' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","spark","ARM64"]') || 'ubuntu-24.04-arm' }}
     timeout-minutes: 60
     steps:
+      - name: TEMP spark isolation proof (removed before merge)
+        run: |
+          echo "host=$(hostname) cpus=$(nproc)"
+          ls -d /home/drakestapleton 2>&1 | head -1
+          ls -l /var/run/docker.sock 2>&1 | head -1
+          ls /dev/kvm 2>&1 | head -1
+          echo "marker:"; ls /tmp/spark-marker 2>&1 | head -1; touch /tmp/spark-marker
+          id -un; cat /proc/self/status | grep -E 'CapEff|Seccomp:'
       - name: Checkout repository
         uses: actions/checkout@v4
 
