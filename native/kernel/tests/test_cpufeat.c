@@ -14,6 +14,8 @@ static struct ck_cpu_features dec(uint64_t a, uint64_t b, uint64_t p)
 
 int main(void)
 {
+    /* Boot record: all zero until kmain records the decode; nothing assumed. */
+    CHECK(!ck_cpufeat_boot()->dotprod && !ck_cpufeat_boot()->i8mm);
     struct ck_cpu_features f = dec(0, 0, 0);
     CHECK(!f.dotprod && !f.i8mm && !f.bf16 && !f.fhm && !f.sve && !f.rndr);
     CHECK(!f.fp16); /* FP=0 AdvSIMD=0: implemented, no half precision */
@@ -45,5 +47,12 @@ int main(void)
     char small[8];
     ck_cpufeat_format(&f, small, sizeof small);
     CHECK(strlen(small) == 7);
+    /* The recorded boot decode is what core/infer.c hands the Rust unit. */
+    f = dec(1ull << 44, 0, 0);
+    ck_cpufeat_set_boot(&f);
+    CHECK(ck_cpufeat_boot()->dotprod == 1 && ck_cpufeat_boot()->i8mm == 0);
+    f = dec(0, 0, 0);
+    ck_cpufeat_set_boot(&f);
+    CHECK(ck_cpufeat_boot()->dotprod == 0);
     return ck_t_verdict("test_cpufeat");
 }

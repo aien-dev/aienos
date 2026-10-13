@@ -8,7 +8,7 @@
 //! model file (`AIENOS_MODEL`, default `~/models/aien-mail/
 //! Llama-3.2-1B-Instruct-Q4_K_M.gguf`) and print SKIPPED when it is absent.
 
-use aienos_infer::{argmax, DecodeState, Gguf, Model, Tokenizer};
+use aienos_infer::{argmax, DecodeState, DotProd, Gguf, Model, Tokenizer};
 use std::time::Instant;
 
 fn model_bytes() -> Option<Vec<u8>> {
@@ -91,7 +91,12 @@ fn decode_round_trips_text() {
     }
 }
 
-fn check(q8k: bool, max_logit_diff: f32) {
+fn check(q8k: bool, dot: bool, max_logit_diff: f32) {
+    let dp = if dot { host_dotprod() } else { None };
+    if dot && dp.is_none() {
+        eprintln!("SKIPPED: this CPU has no dotprod");
+        return;
+    }
     let Some(bytes) = model_bytes() else { return };
     let g = Gguf::parse(&bytes).unwrap();
     let m = Model::new(&g).unwrap();
@@ -104,6 +109,7 @@ fn check(q8k: bool, max_logit_diff: f32) {
         // (c) free-running greedy
         let mut st = DecodeState::new(&m, 256);
         st.emulate_q8k = q8k;
+        st.dotprod = dp;
         let t0 = Instant::now();
         st.prefill(&m, &ids).unwrap();
         if name == "cow" {
@@ -177,6 +183,7 @@ fn check(q8k: bool, max_logit_diff: f32) {
         // teacher-forced top-1 match rate
         let mut st = DecodeState::new(&m, 256);
         st.emulate_q8k = q8k;
+        st.dotprod = dp;
         st.prefill(&m, &ids).unwrap();
         let mut hit = 0;
         for (i, &(t, gap)) in r.steps.iter().enumerate() {
@@ -202,12 +209,31 @@ fn check(q8k: bool, max_logit_diff: f32) {
 /// small, bounded logit difference is expected).
 #[test]
 fn forward_matches_llama_cpp_f32_activations() {
-    check(false, 1.0);
+    check(false, false, 1.0);
+}
+
+/// Runtime dotprod detection on the host (the kernel uses its own decode).
+fn host_dotprod() -> Option<DotProd> {
+    #[cfg(target_arch = "aarch64")]
+    {
+        DotProd::new(std::arch::is_aarch64_feature_detected!("dotprod"))
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        None
+    }
+}
+
+/// SDOT path: int8 Q8_K activations, integer dots (aienos#34 PI5-6). Same
+/// bounds as the f32 and Q8_K-emulation tests.
+#[test]
+fn forward_matches_llama_cpp_dotprod() {
+    check(false, true, 1.0);
 }
 
 /// Activations rounded to ggml's Q8_K grid before every quantized dot.
 #[test]
 #[ignore = "slow; run with --ignored"]
 fn forward_matches_llama_cpp_q8k_emulation() {
-    check(true, 1.0);
+    check(true, false, 1.0);
 }

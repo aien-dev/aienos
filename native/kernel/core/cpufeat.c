@@ -30,3 +30,18 @@ int ck_cpufeat_format(const struct ck_cpu_features *f, char *buf, size_t n)
     return ck_snprintf(buf, n, "cpu_features: dotprod=%u i8mm=%u bf16=%u fhm=%u fp16=%u sve=%u rndr=%u", f->dotprod,
                        f->i8mm, f->bf16, f->fhm, f->fp16, f->sve, f->rndr);
 }
+
+/* The boot core's decode, kept for consumers that select code by feature
+ * (core/infer.c passes dotprod to the Rust inference unit). All zero until
+ * kmain records it, so nothing is ever assumed present. */
+static struct ck_cpu_features g_boot_features;
+
+void ck_cpufeat_set_boot(const struct ck_cpu_features *f)
+{
+    g_boot_features = *f;
+}
+
+const struct ck_cpu_features *ck_cpufeat_boot(void)
+{
+    return &g_boot_features;
+}
