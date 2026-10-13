@@ -169,6 +169,22 @@ CK_PI5 := 1
 OUT ?= $(REPO)/target/native-kernel-pi5-infer
 CK_EXTRA_CFLAGS += -DCK_PI5_INFER=1 -DCK_INFER_DISK_ONLY=1
 endif
+# Pi 5 PCIe/RP1 enumerator image (CK_PI5_PCIE=1, "make pi5-pcie", AIENOS-PI5 network lane step 1): the plain Pi
+# image plus dev/pi5_pcie.c (read-only look at the BCM2712 PCIe2 root complex, RP1's config space and BARs, and
+# the inbound DMA window judged against the ADR 0020 bounce region) and dev/dma_window.c. Own OUT; the plain
+# pi5, pi5-store and pi5-infer images and the default image carry none of this code.
+CK_PI5_PCIE ?=
+ifneq ($(strip $(CK_PI5_PCIE)),)
+ifneq ($(strip $(CK_PI5_PCIE)),1)
+$(error CK_PI5_PCIE must be empty or 1)
+endif
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_SERVICE)$(CK_HARDWARE_STAGING)),)
+$(error CK_PI5_PCIE is the Pi PCIe/RP1 enumerator image: it cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_SERVICE or CK_HARDWARE_STAGING)
+endif
+CK_PI5 := 1
+OUT ?= $(REPO)/target/native-kernel-pi5-pcie
+CK_EXTRA_CFLAGS += -DCK_PI5_PCIE=1
+endif
 CK_PI5 ?=
 ifneq ($(strip $(CK_PI5)),)
 ifneq ($(strip $(CK_PI5)),1)
@@ -687,6 +703,9 @@ ifeq ($(strip $(CK_PI5)),1)
 CORE_C += $(BOOT)/efi_klog.c $(KDIR)/core/pi5.c $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c \
 	$(KDIR)/dev/pi5_wdt.c $(KDIR)/dev/pi5_rng.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_sdhci.c
 endif
+ifeq ($(strip $(CK_PI5_PCIE)),1)
+CORE_C += $(KDIR)/dev/pi5_pcie.c $(KDIR)/dev/dma_window.c
+endif
 # P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
 # (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
 # the loader; the TEST-anchor qualification build is CK_SEED0B_TEST_ANCHOR=1.
@@ -1101,7 +1120,7 @@ HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/
 	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window
+	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -1841,6 +1860,10 @@ pi5-infer:
 pi5:
 	$(MAKE) CK_PI5=1 all
 
+# Raspberry Pi 5 PCIe/RP1 enumerator image (see CK_PI5_PCIE above): target/native-kernel-pi5-pcie/BOOTAA64.EFI
+pi5-pcie:
+	$(MAKE) CK_PI5_PCIE=1 all
+
 # ---- host checker for the AIENOS_CK_SCREEN gate (scripts/qemu_ck_screen_test.sh) ----
 FB_CHECK_TOOL := $(OUT)/host/ck_fb_check
 $(FB_CHECK_TOOL): $(KDIR)/tools/ck_fb_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/fbcon.h $(KDIR)/core/font8x8.h
@@ -1924,3 +1947,24 @@ dma-window-mutants:
 	  if $(OUT)/host/test_dma_window_mut_$$m >/dev/null; then echo "MUTANT SURVIVED: $$m"; fail=1; else echo "mutant killed: $$m"; fi; \
 	done; test $$fail -eq 0
 .PHONY: test-dma-window dma-window-mutants
+
+# AIENOS-PI5 PCIe root complex / RP1 enumerator logic over a fake register file. Not the hardware.
+PI5PCIE_SRCS := $(KDIR)/dev/pi5_pcie.c
+PI5PCIE_DEPS := $(KDIR)/tests/test_pi5_pcie.c $(PI5PCIE_SRCS) $(KDIR)/tests/ck_test.h $(KDIR)/dev/pi5_pcie.h
+$(OUT)/host/test_pi5_pcie: $(PI5PCIE_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -I$(KDIR)/dev -o $@ $< $(PI5PCIE_SRCS)
+$(OUT)/host-san/test_pi5_pcie: $(PI5PCIE_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -I$(KDIR)/dev -o $@ $< $(PI5PCIE_SRCS)
+test-pi5-pcie: $(OUT)/host/test_pi5_pcie
+	$<
+# Each mutant removes one decision; the test must FAIL for every one.
+PI5PCIE_MUTANTS := NO_OUTSIDE NO_FULLCOVER NO_REMAP NO_INDEX NO_ALIGN NO_MERGE
+pi5-pcie-mutants:
+	@mkdir -p $(OUT)/host
+	@fail=0; for m in $(PI5PCIE_MUTANTS); do \
+	  $(HOSTCC) $(HCFLAGS) -DCK_PCIE_MUTANT_$$m -I$(KDIR)/dev -o $(OUT)/host/test_pi5_pcie_mut_$$m $(KDIR)/tests/test_pi5_pcie.c $(PI5PCIE_SRCS) || exit 1; \
+	  if $(OUT)/host/test_pi5_pcie_mut_$$m >/dev/null; then echo "MUTANT SURVIVED: $$m"; fail=1; else echo "mutant killed: $$m"; fi; \
+	done; test $$fail -eq 0
+.PHONY: test-pi5-pcie pi5-pcie-mutants pi5-pcie
