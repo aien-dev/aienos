@@ -451,6 +451,7 @@ mod tests {
     use super::*;
     use crate::decode::q8k_round;
     use crate::quant::{dequant_q4k_block, dequant_q6k_block, dot_row};
+    #[cfg(target_arch = "aarch64")]
     use std::eprintln;
     use std::vec::Vec;
 
@@ -649,6 +650,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_arch = "aarch64")]
     fn sdot_accumulations_are_bit_exact_vs_portable_q4k() {
         let Some(t) = token() else {
             eprintln!("SKIP: no dotprod on this CPU or not aarch64");
@@ -675,6 +677,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_arch = "aarch64")]
     fn sdot_accumulations_are_bit_exact_vs_portable_q6k() {
         let Some(t) = token() else {
             eprintln!("SKIP: no dotprod on this CPU or not aarch64");
