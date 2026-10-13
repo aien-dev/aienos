@@ -604,6 +604,15 @@ static void namespace_refuses_oversized_or_inconsistent_fields(void)
     f.model_digest_kind_len = 255;
     CHECK_RC(kv_namespace_id(&f, id), KV_OK);
 
+    static char huge[65537];
+    memset(huge, 'y', sizeof huge);
+    f = sample();
+    f.model_id = huge;
+    f.model_id_len = 65536;
+    CHECK_RC(kv_namespace_id(&f, id), KV_E_FIELD_TOO_LONG);
+    f.model_id_len = 65535;
+    CHECK_RC(kv_namespace_id(&f, id), KV_OK);
+
     f = sample();
     f.chunk_tokens = 250; /* not a multiple of block_size 16 */
     CHECK_RC(kv_namespace_id(&f, id), KV_E_INVALID_GEOMETRY);
@@ -936,6 +945,15 @@ static void segments_follow_the_backend_format(void)
     CHECK(n == 1);
     CHECK_RC(kv_ns_segment_count(&f, 0, &n), KV_E_TOKEN_COUNT_OUT_OF_RANGE);
     CHECK_RC(kv_ns_segment_count(&f, 257, &n), KV_E_TOKEN_COUNT_OUT_OF_RANGE);
+    uint64_t plen;
+    CHECK_RC(kv_expected_payload_len(&f, 0, &plen), KV_E_TOKEN_COUNT_OUT_OF_RANGE);
+    CHECK_RC(kv_expected_payload_len(&f, 257, &plen), KV_E_TOKEN_COUNT_OUT_OF_RANGE);
+    {
+        uint8_t ns_[32] = {1}, key_[32] = {2};
+        kv_chunk_header hb;
+        CHECK_RC(kv_chunk_header_build(&f, ns_, key_, NULL, 100, 256, 0, &hb), KV_E_POSITION_MISMATCH);
+        CHECK_RC(kv_chunk_header_build(&f, ns_, key_, NULL, 256, 256, 0, &hb), KV_OK);
+    }
     kv_namespace_fields nat = sample();
     nat.backend_format = KV_BACKEND_NATIVE_F32_DECODE_STATE_V1;
     nat.dtype = KV_DTYPE_FP32;
