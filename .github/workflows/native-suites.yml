@@ -16,6 +16,7 @@
 #   native/disk        test sanitize mutants  this file
 #   native/disk/qemu   bare-metal NVMe and SDHCI payloads under QEMU  this file
 #                      (QEMU is an emulator: PASS says nothing about a physical controller)
+#   native/kv          test sanitize mutants freestanding  this file (host emulation over memory, no disk)
 #   native/argus       test sanitize          this file
 #
 # SKIP list (declared, never green):
@@ -60,6 +61,7 @@ jobs:
           - { suite: m5, targets: "test sanitize mutants" }
           - { suite: disk, targets: "test sanitize mutants" }
           - { suite: argus, targets: "test sanitize" }
+          - { suite: kv, targets: "test sanitize mutants freestanding" }
           - { suite: capability, targets: "mutants" }
     steps:
       - name: Checkout repository
@@ -86,6 +88,7 @@ jobs:
             crypto) req='AIENOS_CRYPTO_NATIVE: PASS|AIENOS_CRYPTO_MUTANTS: PASS' ;;
             m5)     req='M5_NATIVE: PASS|M5_NATIVE_MUTANTS: PASS' ;;
             disk)   req='AIENOS_DISK_NATIVE: PASS|AIENOS_DISK_SANITIZE: PASS|AIENOS_DISK_MUTANTS: PASS' ;;
+            kv)     req='AIENOS_KV_RECORD_NATIVE: PASS|AIENOS_KV_SANITIZE: PASS|AIENOS_KV_MUTANTS: PASS|AIENOS_KV_FREESTANDING: PASS' ;;
             argus)  req='GATE CONTAIN_TEST PASS|GATE CONTAIN_DETERMINISM PASS' ;;
             capability) req='AIENOS_CAP_MUTANTS: PASS' ;;
           esac

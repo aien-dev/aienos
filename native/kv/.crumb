@@ -1,0 +1,19 @@
+{
+  "extensions": {
+    "generated": {
+      "children": [],
+      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiled_at": "2026-10-13T21:11:44Z",
+      "compiler": "crumb-compile/1",
+      "digest": "sha256:b058cba6134b8c3b94945321515a10e7c08e52975e3f41f7c57f50ef17c67bd1",
+      "evidence_files": 0,
+      "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files": 9,
+      "generated_at_commit": "107261cb65443b5216cd3e0a99b5251cc509ca7e",
+      "source_tree": "sha256:834ad344dee6345c40087f5843e2b907da3e2160015e8f0f206a40c5d6b6c7b5"
+    }
+  },
+  "name": "kv",
+  "purpose": "Persistent-KV record codec in C: 256-byte header, 4096-byte header region, native slot header unit, pinned to sovereign-core ADR 0003 golden vectors (aienos#367 cut N1)",
+  "schema_version": "1.0.0"
+}
