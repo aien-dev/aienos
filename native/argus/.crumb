@@ -33,20 +33,20 @@
           "purpose": "Directory native/argus/docs. Purpose not yet described by a human."
         },
         {
-          "digest": "9da71b144b276a79663b8240d09f6ee8ec187a336b45c48dc47adeca8012a11c",
+          "digest": "f4101fed3f77dc6060ab404591a2e60232039f292660347d2cd5d985d8cfdb27",
           "last_commit": "130aa20",
           "name": "tests",
           "purpose": "Directory native/argus/tests. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:28a1567c49aba8617588991d7384e2718eb7f339e6129fa5b0e585d6a245923f",
-      "compiled_at": "2026-10-04T13:47:18Z",
+      "children_root": "sha256:9e730da4d8d3d6282de2495a0cd123af14549e34fb8d0b0462171c08c01144e7",
+      "compiled_at": "2026-10-13T21:44:13Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:7a5972d5e7135c13af527ba7bc91f6532fcebc206df0686e742e98c1050c6c29",
+      "digest": "sha256:691d3ffb009b011efaa0537ac83864f19f0f4263779075adf2ab8c06255b00e7",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 47,
-      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "generated_at_commit": "33ed5d06f47ef5e277ba48042311d0c6a131eef3",
       "source_tree": "sha256:72e4467af37f510ea67b093b8b6c5b713cfd841b3725d1eddcce9ea1c71ad930"
     },
     "owner_lane": "",

@@ -85,10 +85,10 @@
           "purpose": "Directory native/kernel. Purpose not yet described by a human."
         },
         {
-          "digest": "b058cba6134b8c3b94945321515a10e7c08e52975e3f41f7c57f50ef17c67bd1",
-          "last_commit": "107261c",
+          "digest": "6f8854caf6723c4cc124c33fc4065999a25cc4e1a9c159a3e32f58dda55c228b",
+          "last_commit": "33ed5d0",
           "name": "kv",
-          "purpose": "Persistent-KV record codec in C: 256-byte header, 4096-byte header region, native slot header un"
+          "purpose": "Persistent-KV record codec and native slab store in C: 256-byte header, 4096-byte header region,"
         },
         {
           "digest": "3883ad91cdafdb9158b14c4d8b11d4dcbfe1205ad8071c988b8f7c4b959a4004",
@@ -115,15 +115,15 @@
           "purpose": "Directory native/store. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:6b207914c1f8ae7ab118ac8d88e71033815384f6eee933ddfec7bbe5f125e3e8",
-      "compiled_at": "2026-10-13T21:11:44Z",
+      "children_root": "sha256:0a433c08cbd265ee25b3204ce1a28c750de465fac0cb13da9136d16a8cf644f4",
+      "compiled_at": "2026-10-13T21:44:13Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:2166ad396cf1016bf70bfce21454baa16cb1d9ebb1aa821f629619f4f2931ff1",
+      "digest": "sha256:1199958fe56bc07ef455006eec232d8da8a45c6d59cdc8b9550817dc2af4d4b3",
       "evidence_files": 4,
       "evidence_root": "sha256:e410b845507e00568e15b51a5797af32a97e0e4b8ab4e8487bb7c98e7e0cf335",
-      "files": 548,
-      "generated_at_commit": "107261cb65443b5216cd3e0a99b5251cc509ca7e",
-      "source_tree": "sha256:128b173afcf68765f01a3af4e5b9594eccc4764a64bdab71248c9795045de5ac"
+      "files": 552,
+      "generated_at_commit": "33ed5d06f47ef5e277ba48042311d0c6a131eef3",
+      "source_tree": "sha256:28a3e3f8e4af49bc50ecce78bb0ae077a1d3f25a0f2f483f678c4bd887b9f1d1"
     },
     "owner_lane": "",
     "provenance": {

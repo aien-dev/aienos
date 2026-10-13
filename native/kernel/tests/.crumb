@@ -5,15 +5,22 @@
   },
   "extensions": {
     "generated": {
-      "children": [],
-      "children_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "compiled_at": "2026-10-13T16:35:24Z",
+      "children": [
+        {
+          "digest": "60edbebffefe31a8e0bafc12c9fd5cb402a7bb8b7af4407e35a952bca394480a",
+          "last_commit": "3b26ea9",
+          "name": "fixtures/osh",
+          "purpose": "OSH-AIENOS-0 fixtures: compiled shell-core units, Linux step traces and scripts, pinned omega la"
+        }
+      ],
+      "children_root": "sha256:c228b87f7c1d4d681b8d3ee86e7bb1e80fa45ed1f2565041ef71959b674dd2c7",
+      "compiled_at": "2026-10-13T21:44:13Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:9e5198a69ae2ce95ae1ab8a0f0c770806678dfd5098c03d1f58eced3f4e2e5e9",
+      "digest": "sha256:dd0af27c98d29793707adee628c1c084cb5be7aea34cb789dddf72f8a6ab9ef6",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 160,
-      "generated_at_commit": "217b81531a2b482c136354325bb06a237ee81577",
+      "generated_at_commit": "33ed5d06f47ef5e277ba48042311d0c6a131eef3",
       "source_tree": "sha256:d5433acecd9bb7345d6c6aed9cda74939cf714bd46754b06e1ed957f799b1481"
     },
     "owner_lane": "",

@@ -17,20 +17,32 @@
     "generated": {
       "children": [
         {
+          "digest": "31145588e22426c6766a2386e5616395ed12f603f12e9c84c23ba703cf374bf6",
+          "last_commit": "3a6174a",
+          "name": "fixtures/p2_5",
+          "purpose": "Directory crates/aienos-artifact-tool/fixtures/p2_5. Purpose not yet described by a human."
+        },
+        {
+          "digest": "2811606d395a9d99516bd97b845fd673bfed3f04b5f592c795868c3f8abe5727",
+          "last_commit": "5ad82b3",
+          "name": "fixtures/p2_6",
+          "purpose": "Directory crates/aienos-artifact-tool/fixtures/p2_6. Purpose not yet described by a human."
+        },
+        {
           "digest": "2e9b452905c551e57f1e70075f5bac994cefa497181800f3bf145a9c6ceb36df",
           "last_commit": "2276906",
           "name": "src",
           "purpose": "Directory crates/aienos-artifact-tool/src. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:9e74efbe992bdf8537913d0945f0b28487e757732babf47a95707d1203682e7b",
-      "compiled_at": "2026-10-04T13:47:18Z",
+      "children_root": "sha256:05ed8b92b8bc9f5335a109f63f2cd4e330f51c3df98d3c755ce608b218ac5674",
+      "compiled_at": "2026-10-13T21:44:13Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:d7f3206903444c2cd06fe35beef52579a9df03838ea60149e710d3d3efc415a8",
+      "digest": "sha256:0df118e70cc41914f4f9edf0ce7435603b8f1fe6f6d38dbe913637865831d47a",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 25,
-      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
+      "generated_at_commit": "33ed5d06f47ef5e277ba48042311d0c6a131eef3",
       "source_tree": "sha256:3696f713812307854f90c24af2fb37daeae67a11dea85a601a25b14998724303"
     },
     "owner_lane": "",
