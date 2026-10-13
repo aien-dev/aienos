@@ -178,12 +178,28 @@ ifneq ($(strip $(CK_PI5_PCIE)),)
 ifneq ($(strip $(CK_PI5_PCIE)),1)
 $(error CK_PI5_PCIE must be empty or 1)
 endif
-ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_UNLOCK)$(CK_PI5_AGENT)$(CK_SERVICE)$(CK_HARDWARE_STAGING)),)
-$(error CK_PI5_PCIE is the Pi PCIe/RP1 enumerator image: it cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_UNLOCK, CK_PI5_AGENT, CK_SERVICE or CK_HARDWARE_STAGING)
+ifneq ($(strip $(CK_PI5_NET)$(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_UNLOCK)$(CK_PI5_AGENT)$(CK_SERVICE)$(CK_HARDWARE_STAGING)),)
+$(error CK_PI5_PCIE is the Pi PCIe/RP1 enumerator image: it cannot be combined with CK_PI5_NET, CK_PI5_STORE, CK_PI5_INFER, CK_PI5_UNLOCK, CK_PI5_AGENT, CK_SERVICE or CK_HARDWARE_STAGING)
 endif
 CK_PI5 := 1
 OUT ?= $(REPO)/target/native-kernel-pi5-pcie
 CK_EXTRA_CFLAGS += -DCK_PI5_PCIE=1
+endif
+
+# Pi 5 network bring-up image (CK_PI5_NET=1, "make pi5-net", AIENOS-PI5 network lane cut 2): the plain Pi image plus
+# dev/pi5_net.c (narrows the BCM2712 PCIe2 inbound DMA window to the ADR 0020 bounce region, then brings RP1's
+# Ethernet up to the PHY and reads the PHY ID; no frames). Own OUT; no other image carries this code.
+CK_PI5_NET ?=
+ifneq ($(strip $(CK_PI5_NET)),)
+ifneq ($(strip $(CK_PI5_NET)),1)
+$(error CK_PI5_NET must be empty or 1)
+endif
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_UNLOCK)$(CK_PI5_AGENT)$(CK_PI5_FACT)$(CK_PI5_PCIE)$(CK_SERVICE)$(CK_HARDWARE_STAGING)),)
+$(error CK_PI5_NET is the Pi network bring-up image: it cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_UNLOCK, CK_PI5_AGENT, CK_PI5_FACT, CK_PI5_PCIE, CK_SERVICE or CK_HARDWARE_STAGING)
+endif
+CK_PI5 := 1
+OUT ?= $(REPO)/target/native-kernel-pi5-net
+CK_EXTRA_CFLAGS += -DCK_PI5_NET=1
 endif
 
 # Pi unlock image (CK_PI5_UNLOCK=1, "make pi5-unlock", PI5-4 cut 1): the same Store stage, but the Store opens
@@ -239,8 +255,8 @@ endif
 ifneq ($(strip $(CK_PI5_UNLOCK))$(strip $(CK_PI5_UNLOCK_CARD)),11)
 $(error CK_PI5_FACT (Cortex fact stage, QUALIFICATION ONLY) needs CK_PI5_UNLOCK=1 and CK_PI5_UNLOCK_CARD=1)
 endif
-ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)$(CK_PI5_AGENT)),)
-$(error CK_PI5_FACT cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_PCIE or CK_PI5_AGENT)
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)$(CK_PI5_NET)$(CK_PI5_AGENT)),)
+$(error CK_PI5_FACT cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_PCIE, CK_PI5_NET or CK_PI5_AGENT)
 endif
 CK_EXTRA_CFLAGS += -DCK_PI5_FACT=1
 endif
@@ -258,8 +274,8 @@ endif
 ifneq ($(strip $(CK_PI5_UNLOCK))$(strip $(CK_PI5_UNLOCK_CARD)),11)
 $(error CK_PI5_AGENT (Store plus inference, QUALIFICATION ONLY) needs CK_PI5_UNLOCK=1 and CK_PI5_UNLOCK_CARD=1)
 endif
-ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)$(CK_PI5_FACT)$(CK_SERVICE)$(CK_HARDWARE_STAGING)$(CK_TEST_FWCFG_ARTIFACTS)),)
-$(error CK_PI5_AGENT cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_PCIE, CK_PI5_FACT, CK_SERVICE, CK_HARDWARE_STAGING or CK_TEST_FWCFG_ARTIFACTS)
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)$(CK_PI5_NET)$(CK_PI5_FACT)$(CK_SERVICE)$(CK_HARDWARE_STAGING)$(CK_TEST_FWCFG_ARTIFACTS)),)
+$(error CK_PI5_AGENT cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_PCIE, CK_PI5_NET, CK_PI5_FACT, CK_SERVICE, CK_HARDWARE_STAGING or CK_TEST_FWCFG_ARTIFACTS)
 endif
 ifeq ($(strip $(CK_INFER_LIB)),)
 $(error CK_PI5_AGENT needs CK_INFER_LIB=<libaienos_infer_kernel.a> (use "make pi5-agent", which builds it))
@@ -787,6 +803,9 @@ endif
 ifeq ($(strip $(CK_PI5_PCIE)),1)
 CORE_C += $(KDIR)/dev/pi5_pcie.c $(KDIR)/dev/dma_window.c
 endif
+ifeq ($(strip $(CK_PI5_NET)),1)
+CORE_C += $(KDIR)/dev/pi5_pcie.c $(KDIR)/dev/dma_window.c $(KDIR)/dev/pi5_net.c
+endif
 ifneq ($(strip $(CK_PI5_UNLOCK_CARD)),)
 CORE_C += $(BOOT)/efi_unlock.c $(KDIR)/core/unlock_req.c
 endif
@@ -1215,7 +1234,7 @@ HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/
 	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c $(KDIR)/core/unlock_req.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_unlock_req test_context
+	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_pi5_net test_unlock_req test_context
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -2000,6 +2019,9 @@ pi5:
 	$(MAKE) CK_PI5=1 all
 
 # Raspberry Pi 5 PCIe/RP1 enumerator image (see CK_PI5_PCIE above): target/native-kernel-pi5-pcie/BOOTAA64.EFI
+pi5-net:
+	$(MAKE) CK_PI5_NET=1 all
+
 pi5-pcie:
 	$(MAKE) CK_PI5_PCIE=1 all
 
@@ -2107,3 +2129,24 @@ pi5-pcie-mutants:
 	  if $(OUT)/host/test_pi5_pcie_mut_$$m >/dev/null; then echo "MUTANT SURVIVED: $$m"; fail=1; else echo "mutant killed: $$m"; fi; \
 	done; test $$fail -eq 0
 .PHONY: test-pi5-pcie pi5-pcie-mutants pi5-pcie
+
+# AIENOS-PI5 network cut 2 (inbound window plan, RP1 quiesce, clocks, PHY reset, MDIO, PHY ID) over fake registers.
+PI5NET_SRCS := $(KDIR)/dev/pi5_net.c $(KDIR)/dev/pi5_pcie.c
+PI5NET_DEPS := $(KDIR)/tests/test_pi5_net.c $(PI5NET_SRCS) $(KDIR)/tests/ck_test.h $(KDIR)/dev/pi5_net.h $(KDIR)/dev/pi5_pcie.h
+$(OUT)/host/test_pi5_net: $(PI5NET_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -I$(KDIR)/dev -o $@ $< $(PI5NET_SRCS)
+$(OUT)/host-san/test_pi5_net: $(PI5NET_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -I$(KDIR)/dev -o $@ $< $(PI5NET_SRCS)
+test-pi5-net: $(OUT)/host/test_pi5_net
+	$<
+# Each mutant removes one decision; the test must FAIL for every one.
+PI5NET_MUTANTS := NO_STRADDLE NO_REMAP_EN NO_DISABLE_FIRST NO_READBACK NO_RESTORE NO_OTHERS NO_STATUS_MASK NO_QUIESCE_CHECK OB_NO_LIMIT NO_ASSERT NO_HOLD NO_RELEASE NO_HIGH_FIRST NO_IDLE_AFTER NO_MPE TOUCH_ON_CLOCK NO_EXACT_DIV NO_CLK_VERIFY OUI_ORDER BAD_CLASS NO_BOUNDS NO_MDC_DIV PARTIAL_ANY
+pi5-net-mutants:
+	@mkdir -p $(OUT)/host
+	@fail=0; for m in $(PI5NET_MUTANTS); do \
+	  $(HOSTCC) $(HCFLAGS) -DCK_NET_MUTANT_$$m -I$(KDIR)/dev -o $(OUT)/host/test_pi5_net_mut_$$m $(KDIR)/tests/test_pi5_net.c $(PI5NET_SRCS) || exit 1; \
+	  if $(OUT)/host/test_pi5_net_mut_$$m >/dev/null; then echo "MUTANT SURVIVED: $$m"; fail=1; else echo "mutant killed: $$m"; fi; \
+	done; test $$fail -eq 0
+.PHONY: test-pi5-net pi5-net-mutants pi5-net

@@ -14,6 +14,9 @@
 #include "cpufeat.h"
 #include "handoff_check.h"
 #include "frames.h"
+#ifdef CK_PI5_NET
+#include "../dev/pi5_net.h"
+#endif
 #ifdef CK_PI5_PCIE
 #include "../dev/pi5_pcie.h"
 #endif
@@ -247,6 +250,11 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
     /* Pi 5 PCIe2 root complex / RP1 enumerator (dev/pi5_pcie.c): read-only boot report, CK_PI5_PCIE image only. */
     ck_set_stage("pi5_pcie");
     ck_pi5pcie_report();
+#endif
+#ifdef CK_PI5_NET
+    /* Pi 5 network cut 2 (dev/pi5_net.c): narrow the PCIe inbound DMA window, bring RP1 Ethernet up to the PHY. CK_PI5_NET image only. */
+    ck_set_stage("pi5_net");
+    ck_pi5net_run();
 #endif
 
 #ifdef CK_B7B_PROBE
