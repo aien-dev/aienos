@@ -22,38 +22,38 @@
       "children": [
         {
           "digest": "ba157598d0766ef2f9e7fbc3b0333b3fd84fcfc9799497a70d2aa6dd0ea9afb3",
-          "last_commit": "bbf4428",
+          "last_commit": "5429602",
           "name": "crates",
           "purpose": "Directory crates. Purpose not yet described by a human."
         },
         {
-          "digest": "8b4247e1025c916ebcb329bb04e14d48822093b477cc5660d282ee3e5e87ce25",
-          "last_commit": "bbf4428",
+          "digest": "b623dcff39819d5cee38a02dcca6bf81b8808a5113b4b5115d9efabde1f7cea8",
+          "last_commit": "e039083",
           "name": "docs",
           "purpose": "Directory docs. Purpose not yet described by a human."
         },
         {
           "digest": "594ccac341112632f0c0264e2e9ac1dbe7e1a1b5f39db1a1997ae3755355f3f2",
-          "last_commit": "bbf4428",
+          "last_commit": "5429602",
           "name": "native",
           "purpose": "Directory native. Purpose not yet described by a human."
         },
         {
           "digest": "553278293606dd1b57c8dbdb1167c88ae7b877912a26b060fd1cd62acc4e52b7",
-          "last_commit": "bbf4428",
+          "last_commit": "5429602",
           "name": "scripts",
           "purpose": "Directory scripts. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:1a0529f7237503dfcd760caddd67ecf96998eccf528ef6a21c7301fee897bc3b",
-      "compiled_at": "2026-10-13T18:08:10Z",
+      "children_root": "sha256:d6a0cd12d4b1085c762464cf86d81a263f20d62741df3dceccbdee0b57f0ce59",
+      "compiled_at": "2026-10-13T21:03:58Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:49a5ea2a1ce21ed4d7f80e2105ab6f141665c45175226a5cfc5e35cb644cb4c7",
+      "digest": "sha256:096bd5562cb685fea5e60b23ece9d029778fd9762b351b1128da47ad08bdbe86",
       "evidence_files": 156,
       "evidence_root": "sha256:cd53ab119be9de6ce28c4f5949b106c9622f1fe105611de3de21c3bce7932694",
       "files": 3181,
-      "generated_at_commit": "bbf44285da08d70877d4b5d35ec805544bf70f3d",
-      "source_tree": "sha256:60f6b9cfd30953a52ed0eb35dfad743677b3ba68cdb0db7c77055f0ef68c3e8d"
+      "generated_at_commit": "e0390838eacf984a66dfdf4fdf9e8d5dc88bdd70",
+      "source_tree": "sha256:68727e70ea1ec093ed63c1943b94c7d874cededc9bdf0b27624b063eb8d00262"
     },
     "owner_lane": "",
     "provenance": {
