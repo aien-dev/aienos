@@ -34,6 +34,7 @@
 
 #include "arch.h"
 #include "ck_internal.h"
+#include "cpufeat.h"
 
 #ifdef CK_INFER_PROBE
 #include "sha256.h"
@@ -42,6 +43,20 @@
 #endif
 
 extern void aienos_infer_heap_init(uintptr_t base, uintptr_t len);
+/* crates/aienos-infer-kernel: record the CPU's dotprod feature (from the boot decode,
+ * core/cpufeat.c) and report whether the SDOT matvec path is then selected. */
+extern void aienos_infer_set_cpu_features(uint32_t dotprod);
+extern uint32_t aienos_infer_dot_path(void);
+
+/* Open the heap and tell the Rust unit what the CPU has. The feature comes from
+ * the kernel's own ID-register decode; the unit assumes nothing. */
+static void infer_heap_open(uintptr_t base, uintptr_t len)
+{
+    aienos_infer_set_cpu_features(ck_cpufeat_boot()->dotprod);
+    aienos_infer_heap_init(base, len);
+    ck_printf("infer: dot_path=%s cpu_dotprod=%u\n", aienos_infer_dot_path() ? "sdot" : "scalar_f32",
+              ck_cpufeat_boot()->dotprod);
+}
 /* Mirror of crates/aienos-infer-kernel/src/lib.rs `InferResult` (#[repr(C)]). */
 #define INFER_MAX_NEW 16
 #define INFER_TEXT_BYTES 256
@@ -318,7 +333,7 @@ static void session_run(uint64_t mpa, uint64_t msize)
         ck_printf("infer: session FAIL (no frames for the heap)\nAIENOS_CK_INFER_SESSION: FAIL\n");
         return;
     }
-    aienos_infer_heap_init((uintptr_t)hpa, HEAP_BYTES);
+    infer_heap_open((uintptr_t)hpa, HEAP_BYTES);
     uint64_t daif = ck_rd(daif);
     __asm__ volatile("msr daifset, #0xf" ::: "memory");
 
@@ -379,7 +394,7 @@ static void resident_open(uint64_t mpa, uint64_t msize, uint64_t mpages, uint64_
     v |= 3ull << CPACR_FPEN_SHIFT;
     ck_wr(cpacr_el1, v);
     ck_isb();
-    aienos_infer_heap_init((uintptr_t)hpa, HEAP_BYTES);
+    infer_heap_open((uintptr_t)hpa, HEAP_BYTES);
     struct infer_limits lim = { SESS_KV, SESS_MAX_NEW, SESS_PROMPT_BYTES, SESS_RESERVE };
     struct infer_info info = { 0, 0, 0, 0 };
     uint64_t t0 = ck_time_us(), daif = ck_rd(daif);
@@ -614,7 +629,7 @@ void ck_infer_run(void)
     v |= 3ull << CPACR_FPEN_SHIFT;
     ck_wr(cpacr_el1, v);
     ck_isb();
-    aienos_infer_heap_init((uintptr_t)hpa, HEAP_BYTES);
+    infer_heap_open((uintptr_t)hpa, HEAP_BYTES);
     uint64_t daif = ck_rd(daif);
     __asm__ volatile("msr daifset, #0xf" ::: "memory");
     uint64_t t2 = ck_time_us();

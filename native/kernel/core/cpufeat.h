@@ -23,5 +23,8 @@ struct ck_cpu_features {
 void ck_cpufeat_decode(uint64_t isar0, uint64_t isar1, uint64_t pfr0, struct ck_cpu_features *out);
 /* "cpu_features: dotprod=1 i8mm=0 bf16=0 fhm=1 fp16=1 sve=0 rndr=0" (no newline). */
 int ck_cpufeat_format(const struct ck_cpu_features *f, char *buf, size_t n);
+/* Record / read the boot core's decode (all zero until recorded). */
+void ck_cpufeat_set_boot(const struct ck_cpu_features *f);
+const struct ck_cpu_features *ck_cpufeat_boot(void);
 
 #endif

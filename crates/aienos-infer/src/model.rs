@@ -9,6 +9,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use crate::dotprod::{self, DotProd, Q8Act};
 use crate::gguf::{plain_to_f32, GgmlType, Gguf, GgufError, LlamaParams};
 use crate::quant::{self, QuantError};
 
@@ -116,6 +117,24 @@ impl<'a> Weight<'a> {
                     s.iter().zip(x).map(|(a, b)| a * b).sum()
                 }
             };
+        }
+        Ok(())
+    }
+
+    /// True for the K-quant types the SDOT path handles.
+    pub fn is_kquant(&self) -> bool {
+        matches!(self.ty, GgmlType::Q4K | GgmlType::Q6K)
+    }
+
+    /// `out[r] = row_r . x` on int8 activations with SDOT (K-quant weights
+    /// only; `q8` holds the quantized `x`). The capability token proves the
+    /// CPU has dotprod.
+    pub fn matvec_q8(&self, t: DotProd, q8: &Q8Act, out: &mut [f32]) -> Result<(), InferError> {
+        if !self.is_kquant() || out.len() != self.rows || q8.blocks() * 256 != self.cols {
+            return Err(InferError::BadParams("matvec_q8 shape"));
+        }
+        for (r, o) in out.iter_mut().enumerate() {
+            *o = dotprod::dot_row_q8(t, self.ty, self.row(r), q8)?;
         }
         Ok(())
     }

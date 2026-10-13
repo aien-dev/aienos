@@ -6,11 +6,12 @@
 //! golden reply; Part B keeps decoding (ignoring end-of-turn) to N tokens and
 //! times each `forward` call in microseconds.
 //!
-//! Env: AIENOS_MODEL (default $HOME/models/aien-mail/Llama-3.2-1B-Instruct-Q4_K_M.gguf),
+//! Env: AIENOS_DOT (`sdot` = dotprod int8 path if present, default f32 scalar),
+//! AIENOS_MODEL (default $HOME/models/aien-mail/Llama-3.2-1B-Instruct-Q4_K_M.gguf),
 //! AIENOS_N (default 64), AIENOS_COMMIT (printed as `commit`).
 //! Output: one `key: value` line per fact. Exit 0 ok, 1 parity FAIL, 2 wrong model.
 
-use aienos_infer::{argmax, DecodeState, Gguf, Model, Tokenizer};
+use aienos_infer::{argmax, DecodeState, DotProd, Gguf, Model, Tokenizer};
 use std::time::Instant;
 
 const PROMPT: &str = "What is the capital of France?";
@@ -133,6 +134,20 @@ fn main() {
     println!("threads: 1");
 
     let mut st = DecodeState::new(&m, ids.len() + n + 8);
+    // AIENOS_DOT=sdot uses the dotprod int8 path when the CPU reports it (runtime
+    // detection here; the kernel passes its own decode); f32 (default) is the scalar path.
+    let want_sdot = std::env::var("AIENOS_DOT")
+        .map(|v| v == "sdot")
+        .unwrap_or(false);
+    st.dotprod = None;
+    if want_sdot {
+        #[cfg(target_arch = "aarch64")]
+        {
+            st.dotprod = DotProd::new(std::arch::is_aarch64_feature_detected!("dotprod"));
+        }
+    }
+    let _: Option<DotProd> = st.dotprod;
+    println!("dot: {}", if st.dotprod.is_some() { "sdot" } else { "f32" });
     let t0 = Instant::now();
     st.prefill(&m, &ids).expect("prefill");
     let prefill_us = t0.elapsed().as_micros() as u64;

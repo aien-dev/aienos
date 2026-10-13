@@ -313,3 +313,19 @@ pub unsafe extern "C" fn aienos_infer_run(
     r.words[8] = (*HEAP.peak.get() / 1024) as u32;
     rc
 }
+
+/// Record the CPU's dot product feature (`ck_cpu_features.dotprod`, decoded by
+/// the kernel from `ID_AA64ISAR0_EL1.DP`; native/kernel/core/cpufeat.c). Call
+/// before opening a model: new decode states take the SDOT int8-activation
+/// matvec path only when this is nonzero, otherwise the scalar f32 path runs
+/// unchanged. Nothing in this crate detects features itself.
+#[no_mangle]
+pub extern "C" fn aienos_infer_set_cpu_features(dotprod: u32) {
+    aienos_infer::set_cpu_dotprod(dotprod != 0);
+}
+
+/// 1 when a decode state created now would use the SDOT path, else 0.
+#[no_mangle]
+pub extern "C" fn aienos_infer_dot_path() -> u32 {
+    aienos_infer::cpu_dotprod().is_some() as u32
+}

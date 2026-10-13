@@ -1,5 +1,5 @@
 #![no_std]
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 // Block loops mirror ggml index arithmetic; as_chunks/is_multiple_of are too
 // new for this workspace to rely on.
 #![allow(
@@ -21,6 +21,8 @@ extern crate alloc;
 extern crate std;
 
 pub mod decode;
+#[allow(unsafe_code)] // the only unsafe in this crate: SDOT intrinsics behind a capability token
+pub mod dotprod;
 pub mod gguf;
 pub mod half;
 pub mod math;
@@ -29,6 +31,7 @@ pub mod quant;
 pub mod tokenizer;
 
 pub use decode::{argmax, generate_greedy, DecodeState};
+pub use dotprod::{cpu_dotprod, set_cpu_dotprod, DotProd, Q8Act};
 pub use gguf::{ArrayView, GgmlType, Gguf, GgufError, TensorInfo, Value, ValueType};
 pub use model::{InferError, Model};
 pub use tokenizer::Tokenizer;

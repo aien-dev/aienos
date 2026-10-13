@@ -211,6 +211,7 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
         struct ck_cpu_features cf;
         char cfl[96];
         ck_cpufeat_decode(ck_rd(id_aa64isar0_el1), ck_rd(id_aa64isar1_el1), ck_rd(id_aa64pfr0_el1), &cf);
+        ck_cpufeat_set_boot(&cf);
         ck_cpufeat_format(&cf, cfl, sizeof cfl);
         ck_printf("%s\n", cfl); /* boot core only; see core/cpufeat.h */
     }
