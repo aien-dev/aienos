@@ -9,6 +9,9 @@
 #include "fbcon.h"
 #include "arch.h"
 #include "uart_rx.h"
+#ifdef CK_KLOG
+#include "klog.h"
+#endif
 
 #ifndef CK_FB_HOLD_S
 #define CK_FB_HOLD_S 0
@@ -74,6 +77,9 @@ static void uart_putc(char c)
 
 static void write_n(const char *s, size_t n)
 {
+#ifdef CK_KLOG
+    ck_klog_put(s, n); /* RAM copy for the card (Pi 5 build: core/klog_slot.c) */
+#endif
     if (efi_write) {
         efi_write(s, n);
         return;

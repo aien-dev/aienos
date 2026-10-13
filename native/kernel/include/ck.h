@@ -212,6 +212,12 @@ __attribute__((weak)) void ck_slot_boot_capture(const struct ck_handoff *h);
  * then returns 0 so kmain prints the final report and resets. Absent (weak) in
  * every diagnostic image. */
 __attribute__((weak)) int ck_lifecycle_run(void);
+/* Raspberry Pi 5 board glue (core/pi5.c, CK_PI5 build only): watchdog arm and
+ * SD bring-up, the watchdog pet at every stage, and the console log written
+ * to the card before the reset. Absent (weak) in every other image. */
+__attribute__((weak)) void ck_pi5_start(void);
+__attribute__((weak)) void ck_pi5_stage(const char *name);
+__attribute__((weak)) void ck_pi5_before_reset(void);
 
 /* Console serial receive (core/console.c + core/uart_rx.h), POLLED, no
  * interrupts. It uses the UART the transmit side chose from the ACPI SPCR:

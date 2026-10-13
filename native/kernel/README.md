@@ -140,6 +140,28 @@ of them:
   host tools) are still present as data in every image, including hardware
   staging; the ordinary loader trusts no anchor.
 
+## Raspberry Pi 5 image (AIENOS-PI5 step 1)
+
+    make -C native/kernel pi5            # target/native-kernel-pi5/BOOTAA64.EFI (-DCK_PI5=1 -DCK_KLOG=1)
+    scripts/ck_pi5_build_check.sh        # build only, ends CK_PI5_BUILD: PASS
+
+The Pi image is the default core image plus board glue (`core/pi5.c`). The
+default and QEMU images link none of it: the hooks in `include/ck.h` are weak
+and absent, and `scripts/ck_pi5_build_check.sh` checks both images.
+
+| Piece | What |
+| --- | --- |
+| `dev/pi5_wdt.c` | BCM2712 PM watchdog (Linux `bcm2835_wdt.c` registers), armed for `CK_PI5_WDT_S` (15 s) at start, petted at every `ck_set_stage`. A hang resets the board; on the hub the tryboot one-shot flag is already cleared, so it comes back on normal Linux. |
+| `core/pi5.c` | Brings up the microSD host with `native/disk/disk_sdhci.c` at a fixed address (the DSDT computes `\_SB.SDC0` `_CRS` in a method the static ACPI scanner does not run; same range as Linux `bcm2712.dtsi` sdio1), clock 200 MHz (`clk_emmc2`), PIO only, so the missing SMMU does not matter. Reads sector 0 and checks the MBR signature. |
+| `core/klog.c` | RAM copy of everything printed: the first 192 KiB plus the last 64 KiB. |
+| `core/klog_slot.h`, `../boot/efi_klog.c` | The card log slot. Before ExitBootServices the UEFI stub reads `\EFI\AIENOS\KLOG.MAP` (absolute first sector, sector count, nonce) and keeps it only if it checks and exactly one whole disk holds a matching empty slot header there. |
+| `ck_pi5_before_reset` | Runs inside `ck_reset` (the normal end and every panic). It re-reads the slot header with the kernel's own SD driver, refuses on any mismatch or if the card size differs from what the firmware saw, writes the log text after the header, flushes, then writes the WRITTEN header last and reads it back. One try only. |
+
+The image cannot boot in QEMU (the SD host and PM addresses are Pi 5 only). It
+runs on the hub Pi with the one-shot tryboot runner, which prepares the slot
+(one contiguous 2 MiB file, its raw card sector read back and compared before
+the map is written) and pulls the log back after the hub returns to Linux.
+
 ## Known hardware risk: disk footprint (CK gate DISK_LAYOUT: NOT_RUN)
 
 **Do not boot the C kernel on a disk holding data until CK gate `DISK_LAYOUT`

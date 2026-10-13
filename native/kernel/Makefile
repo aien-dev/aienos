@@ -132,6 +132,24 @@ KNM := $(CROSS)nm
 KREADELF := $(CROSS)readelf
 HOSTCC ?= cc
 
+# Raspberry Pi 5 board image (CK_PI5=1, "make pi5"): the core image plus
+# core/pi5.c (PM watchdog, microSD bring-up, console log written to the
+# card), core/klog*.c, dev/pi5_wdt.c, the PIO SD driver (native/disk) and the
+# UEFI stub's KLOG.MAP reader (native/boot/efi_klog.c). Own OUT, so it never
+# replaces a default image. Not for the Spark or QEMU: pi5_wdt.c and pi5.c
+# touch BCM2712-only addresses and refuse to build without CK_PI5.
+CK_PI5 ?=
+ifneq ($(strip $(CK_PI5)),)
+ifneq ($(strip $(CK_PI5)),1)
+$(error CK_PI5 must be empty or 1)
+endif
+ifneq ($(strip $(CK_HARDWARE_STAGING)),)
+$(error CK_PI5 cannot be combined with CK_HARDWARE_STAGING)
+endif
+OUT ?= $(REPO)/target/native-kernel-pi5
+CK_EXTRA_CFLAGS += -DCK_PI5=1 -DCK_KLOG=1
+endif
+
 # TEST-ONLY artifact source: CK_TEST_FWCFG_ARTIFACTS=1 compiles the QEMU fw_cfg
 # side channel (opt/aienos/artifacts) into the loader instead of the boot disk
 # Store. Every image built without it is checked to contain no fw_cfg artifact
@@ -634,6 +652,10 @@ CORE_C := $(BOOT)/efi_main.c $(BOOT)/efi_model.c $(BOOT)/efi_gop.c \
 	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c \
 	$(KDIR)/core/fpu.c $(KDIR)/core/infer.c $(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c $(KDIR)/core/smp.c \
 	$(KDIR)/mm/frames.c $(KDIR)/mm/heap.c $(KDIR)/mm/mmu.c $(KDIR)/mm/pt.c
+ifeq ($(strip $(CK_PI5)),1)
+CORE_C += $(BOOT)/efi_klog.c $(KDIR)/core/pi5.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c \
+	$(KDIR)/dev/pi5_wdt.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_sdhci.c
+endif
 # P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
 # (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
 # the loader; the TEST-anchor qualification build is CK_SEED0B_TEST_ANCHOR=1.
@@ -779,6 +801,9 @@ ART_OBJS := $(patsubst $(NATIVE)/%.c,$(KOBJ)/%.o,$(ART_C))
 ART_HDRS := $(wildcard $(NATIVE)/sig/*.h $(NATIVE)/argus/sha256.h $(KDIR)/svc/compat/*.h)
 $(ART_OBJS): KCFLAGS += $(ART_INC)
 $(ART_OBJS): $(ART_HDRS)
+
+# core/pi5.c drives the SD card through native/disk.
+$(KOBJ)/kernel/core/pi5.o: KCFLAGS += -I$(NATIVE)/disk
 
 # core/infer.c uses the in-core SHA-256 (argus) to prove the ingested bytes.
 $(KOBJ)/kernel/core/infer.o: KCFLAGS += -I$(NATIVE)/argus
@@ -1028,10 +1053,10 @@ $(FULL_EFI): $(FULL_ELF)
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
 	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/acpi_dev.c $(KDIR)/core/lifecycle_fsm.c \
-	$(KDIR)/core/line_rx.c
+	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx
+	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -1759,6 +1784,10 @@ $(PI5DIAG_EFI): $(PI5DIAG_ELF)
 	$(call pe_image,$<,$@)
 pi5-diag: $(PI5DIAG_EFI)
 
+# Raspberry Pi 5 board image (see CK_PI5 above): target/native-kernel-pi5/BOOTAA64.EFI
+pi5:
+	$(MAKE) CK_PI5=1 all
+
 # ---- host checker for the AIENOS_CK_SCREEN gate (scripts/qemu_ck_screen_test.sh) ----
 FB_CHECK_TOOL := $(OUT)/host/ck_fb_check
 $(FB_CHECK_TOOL): $(KDIR)/tools/ck_fb_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/fbcon.h $(KDIR)/core/font8x8.h
@@ -1796,4 +1825,4 @@ clean:
 
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
-.PHONY: all full test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full pi5 test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
