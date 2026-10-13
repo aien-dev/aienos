@@ -1066,7 +1066,9 @@ static void print_receipt(const char *name, const struct report *r)
 
 /* Qualification tier label printed in every receipt header. A Pi 5 image is never
  * the QEMU tier and never production: the label names the board. */
-#ifdef CK_PI5
+#if defined(CK_PI5_UNLOCK)
+#define CK_RECEIPT_TIER "PI5-UNLOCK-QUALIFICATION"
+#elif defined(CK_PI5)
 #define CK_RECEIPT_TIER "SEED-0B-PI5"
 #else
 #define CK_RECEIPT_TIER "SEED-0B-QEMU"
