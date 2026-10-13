@@ -138,6 +138,18 @@ HOSTCC ?= cc
 # UEFI stub's KLOG.MAP reader (native/boot/efi_klog.c). Own OUT, so it never
 # replaces a default image. Not for the Spark or QEMU: pi5_wdt.c and pi5.c
 # touch BCM2712-only addresses and refuse to build without CK_PI5.
+CK_PI5_STORE ?=
+ifneq ($(strip $(CK_PI5_STORE)),)
+ifneq ($(strip $(CK_PI5_STORE)),1)
+$(error CK_PI5_STORE must be empty or 1)
+endif
+ifneq ($(strip $(CK_SERVICE)$(CK_TEST_STORE_CRASH)$(CK_TEST_CONTINUITY)$(CK_HARDWARE_STAGING)),)
+$(error CK_PI5_STORE is the TEST-key qualification tier (SEED-0B-PI5): it cannot be combined with CK_SERVICE, CK_TEST_STORE_CRASH, CK_TEST_CONTINUITY or CK_HARDWARE_STAGING)
+endif
+CK_PI5 := 1
+OUT ?= $(REPO)/target/native-kernel-pi5-store
+CK_EXTRA_CFLAGS += -DCK_PI5_STORE=1
+endif
 CK_PI5 ?=
 ifneq ($(strip $(CK_PI5)),)
 ifneq ($(strip $(CK_PI5)),1)
@@ -764,6 +776,17 @@ ifeq ($(strip $(CK_TEST_DISK_XLATE_BYPASS)),1)
 FULL_NAME := $(FULL_NAME)-test-xlate-bypass
 STAGE_DMA_FLAGS += -DCK_TEST_DISK_XLATE_BYPASS=1
 endif
+# AIENOS-PI5 step 3b: the sealed Store stage on the Pi card, in the TEST-key qualification tier
+# (SEED-0B-PI5, the Pi counterpart of the QEMU full image). Only the Store stage and what it needs
+# are linked: no PCI, NVMe, USB, virtio, SMMU or security stage (none of that hardware is on the
+# Pi path). core/pi5.c supplies ck_dev_boot_disk and ck_dev_nvme_release over the SD partition view.
+FULL_STAGE_SYMS := ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce ck_stage_disk_artifacts
+ifeq ($(strip $(CK_PI5_STORE)),1)
+FULL_NAME := full-pi5-store
+FULL_STAGE_SYMS := ck_stage_store ck_stage_disk_artifacts
+STAGE_SRCS := $(KDIR)/svc/store_boot.c $(KDIR)/svc/artifact_store.c $(KDIR)/svc/store_crash.c $(KDIR)/svc/ck_compat.c \
+  $(foreach m,store/store_v1 store/store_engine store/store_disk store/store_sealed store/torn_slot m5/m5_keys m5/m5_envelope m5/m5_state crypto/aes crypto/polyval crypto/gcm_siv crypto/hmac crypto/ct argus/sha256,$(NATIVE)/$(m).c)
+endif
 FULL_OUT := $(OUT)/$(FULL_NAME)
 STAGE_KOBJ := $(OUT)/obj/stage-$(FULL_NAME)
 STAGE_HDRS := $(HDRS) $(wildcard $(NATIVE)/*/*.h $(NATIVE)/argus/bridge/*.h $(KDIR)/svc/compat/*.h)
@@ -1033,7 +1056,7 @@ $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
 $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
 	$(call link_image,$@,$(CORE_OBJS) $(STAGE_LINK) $(CK_RUST_LIBS) $(CK_INFER_LIB))
 	$(call rollback_check,$@)
-	@for s in ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce ck_stage_disk_artifacts; do \
+	@for s in $(FULL_STAGE_SYMS); do \
 	  $(KNM) $@ | grep -qE " [TW] $$s$$" || { echo "full image lacks $$s"; rm -f $@; exit 1; }; done
 	$(call fwcfg_check,$@)
 	$(call owner_check,$@)
@@ -1787,6 +1810,9 @@ $(PI5DIAG_EFI): $(PI5DIAG_ELF)
 pi5-diag: $(PI5DIAG_EFI)
 
 # Raspberry Pi 5 board image (see CK_PI5 above): target/native-kernel-pi5/BOOTAA64.EFI
+pi5-store:
+	$(MAKE) CK_PI5_STORE=1 full
+
 pi5:
 	$(MAKE) CK_PI5=1 all
 
@@ -1827,7 +1853,7 @@ clean:
 
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
-.PHONY: all full pi5 test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full pi5 pi5-store test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
 
 # AIENOS-PI5 step 3 marker + Pi card GPT test (hosted; a file stands in for the card, QEMU cannot model the Pi SD host).
 PI5_MARKER_SRCS := $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \

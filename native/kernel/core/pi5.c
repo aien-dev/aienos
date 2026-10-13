@@ -32,6 +32,7 @@
 static volatile uint8_t *sd_regs;
 static sdhci_card sd;
 static int sd_up;
+static ck_part part; /* the AIENOS partition view, once found (the Store stage and the marker use it) */
 
 static uint32_t sd_r32(void *c, uint32_t o) { (void)c; return *(volatile uint32_t *)(sd_regs + o); }
 static void sd_w32(void *c, uint32_t o, uint32_t v) { (void)c; *(volatile uint32_t *)(sd_regs + o) = v; }
@@ -71,7 +72,6 @@ void ck_pi5_start(void)
               rc == 0 && s0[510] == 0x55 && s0[511] == 0xaa ? "MBR ok" : "no MBR signature");
     /* Step 3: the AIENOS partition through the same GPT partition view the NVMe path uses (dev/disk_part.c),
      * then the scratch marker at its end (core/pi5_marker.c): formatted on a blank card, reopened after a reboot. */
-    static ck_part part;
     ck_gpt_info gi;
     rc = ck_gpt_find_aienos(&sd.dev, &part, &gi);
     if (rc) {
@@ -81,6 +81,11 @@ void ck_pi5_start(void)
     ck_printf("pi5_part: AIENOS partition first_lba=%llu blocks=%llu (%llu MiB) entries_used=%u index=%u via GPT (CRC32 primary+backup ok)\n",
               (unsigned long long)part.first_lba, (unsigned long long)part.blocks,
               (unsigned long long)(part.blocks / 2048u), gi.used, gi.part_index);
+#ifdef CK_PI5_STORE
+    /* The sealed Store owns this partition (units 4..U-2 and the probe unit U-1): the scratch marker, which
+     * lives in the same tail units, is not written. */
+    ck_puts("pi5_store_layer: marker skipped (CK_PI5_STORE: the sealed Store stage owns the partition)\n");
+#else
     static uint8_t mbuf[CK_PI5_MARKER_BUF_BYTES] __attribute__((aligned(64)));
     uint64_t gen = 0;
     rc = ck_pi5_marker_run(&part.dev, mbuf, &gen);
@@ -90,6 +95,7 @@ void ck_pi5_start(void)
                   (unsigned long long)(part.blocks - CK_PI5_MARKER_SECS));
     else
         ck_printf("pi5_store_layer: FAIL rc=%d (%s)\n", rc, ck_pi5_marker_strerror(rc));
+#endif
 }
 
 void ck_pi5_stage(const char *name)
@@ -174,3 +180,22 @@ void ck_pi5_before_reset(void)
     ck_printf("klog_card: %s\n", rc == 0 ? "written and read back" : rc > 0 ? "not written" : "FAILED");
     ck_pi5_wdt_pet();
 }
+
+#ifdef CK_PI5_STORE
+/* Hand the card's AIENOS partition view to the sealed Store stage (svc/store_boot.c ck_stage_store), the
+ * same stage the QEMU "full" image runs. Tier: SEED-0B-PI5, the Pi counterpart of SEED-0B-QEMU. The Store
+ * keys are the labelled TEST keys (ck_store_test_keys); the production key source stays BLOCKED_OPERATOR
+ * and is not touched here. CK_HARDWARE_STAGING and CK_PI5 cannot be combined (Makefile), so no hardware
+ * staging image can ever carry this. */
+const disk_dev *ck_dev_boot_disk(void)
+{
+    static int said;
+    if (!said++)
+        ck_puts("pi5_store_tier: SEED-0B-PI5 qualification only: Store keys are the public TEST keys, "
+                "Store uuid is the TEST uuid, no production keys, not a production Store\n");
+    return sd_up && part.valid ? &part.dev : 0;
+}
+
+/* The SD card has no bus master or SMMU stream to revoke: nothing to release. */
+void ck_dev_nvme_release(void) {}
+#endif
