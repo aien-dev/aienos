@@ -460,8 +460,8 @@ static void test_power_cut_at_every_unit_boundary_never_exposes_partial_record(v
             continue;
         }
 
-        /* Sweep A: every block boundary cut = 0..w_r1 when writing R1 into empty slot 0. */
-        for (uint64_t cut = 0; cut <= w_r1; cut++) {
+        /* Sweep A: every block boundary cut = 0..w_r1+1 when writing R1 into empty slot 0. */
+        for (uint64_t cut = 0; cut <= w_r1 + 1u; cut++) {
             CHECK_RC(file_save_bytes(path, snap_empty, sizeof snap_empty), 0);
             CHECK_RC(disk_file_open(&df, &d, path, bs, (uint64_t)IMG_UNITS * bpu, 0), 0);
             CHECK_RC(kv_disk_bind(&kd, &d, 12u * bpu, (uint64_t)N_SLOTS * SLOT_UNITS, store, anchor), KV_OK);
@@ -472,7 +472,7 @@ static void test_power_cut_at_every_unit_boundary_never_exposes_partial_record(v
             int wrc = kv_slab_write_slot(&slab, 0u, &hdr_r1, body_r1, slen_r1);
             disk_file_disarm(&df);
 
-            if (cut < w_r1) {
+            if (cut <= w_r1) {
                 CHECK_RC(wrc, KV_E_IO);
             } else {
                 CHECK_RC(wrc, KV_OK);
@@ -511,7 +511,7 @@ static void test_power_cut_at_every_unit_boundary_never_exposes_partial_record(v
 
         /* Sweep B: overwriting valid R1 in slot 0 with R2 across every block boundary. */
         uint64_t w_r2 = (uint64_t)(1u + hdr_r2.sealed_units + 1u) * bpu;
-        for (uint64_t cut = 0; cut <= w_r2; cut++) {
+        for (uint64_t cut = 0; cut <= w_r2 + 1u; cut++) {
             CHECK_RC(file_save_bytes(path, snap_r1, sizeof snap_r1), 0);
             CHECK_RC(disk_file_open(&df, &d, path, bs, (uint64_t)IMG_UNITS * bpu, 0), 0);
             CHECK_RC(kv_disk_bind(&kd, &d, 12u * bpu, (uint64_t)N_SLOTS * SLOT_UNITS, store, anchor), KV_OK);
@@ -522,7 +522,7 @@ static void test_power_cut_at_every_unit_boundary_never_exposes_partial_record(v
             int wrc = kv_slab_write_slot(&slab, 0u, &hdr_r2, body_r2, slen_r2);
             disk_file_disarm(&df);
 
-            if (cut < w_r2) {
+            if (cut <= w_r2) {
                 CHECK_RC(wrc, KV_E_IO);
             } else {
                 CHECK_RC(wrc, KV_OK);
@@ -744,7 +744,10 @@ static void test_used_bytes_counts_foreign_namespace_slots(void)
     CHECK(slot == 0u);
     CHECK_RC(kv_slab_lookup(&rec, h2.rec.chunk.chunk_key, &slot), KV_OK);
     CHECK(slot == 2u);
-    /* Foreign-namespace keys are never returned by lookup. */
+    /* Foreign-namespace keys and all-zero keys in empty slots are never returned by lookup. */
+    uint8_t zero_key[32];
+    memset(zero_key, 0, sizeof zero_key);
+    CHECK_RC(kv_slab_lookup(&rec, zero_key, &slot), KV_E_EMPTY_SLOT);
     CHECK_RC(kv_slab_lookup(&rec, h1.rec.chunk.chunk_key, &slot), KV_E_EMPTY_SLOT);
     CHECK_RC(kv_slab_lookup(&rec, h3.rec.chunk.chunk_key, &slot), KV_E_EMPTY_SLOT);
 
@@ -973,7 +976,9 @@ static void test_io_and_flush_failures_fail_stop_slab(void)
         CHECK(slab.fail_stop == 1u);
 
         spy.fail_flush_call = -1;
-        /* Subsequent writes are refused while fail_stop is active until recover/format. */
+        /* Subsequent writes are refused at begin while fail_stop is active until recover/format. */
+        kv_slot_writer w_fs;
+        CHECK_RC(kv_slot_write_begin(&w_fs, &slab, 0u, &hdr, body, slen), KV_E_IO);
         CHECK_RC(kv_slab_write_slot(&slab, 0u, &hdr, body, slen), KV_E_IO);
 
         CHECK_RC(kv_slab_recover(&slab), KV_OK);

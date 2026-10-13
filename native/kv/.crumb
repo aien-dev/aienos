@@ -14,6 +14,6 @@
     }
   },
   "name": "kv",
-  "purpose": "Persistent-KV record codec in C: 256-byte header, 4096-byte header region, native slot header unit, pinned to sovereign-core ADR 0003 golden vectors (aienos#367 cut N1)",
+  "purpose": "Persistent-KV record codec and native slab store in C: 256-byte header, 4096-byte header region, native slot header unit, LBA-disjoint slab bind/format/recovery, and header-last slot writer (aienos#367 cuts N1 and N2)",
   "schema_version": "1.0.0"
 }
