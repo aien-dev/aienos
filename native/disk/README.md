@@ -9,21 +9,30 @@
   `crates/aienos-kernel/src/nvme*.rs` and `docs/P3_NVME_*.md`. It does not use
   libc or a heap. Platform access goes through `nvme_ops`, and DMA goes
   through one caller region carved into fixed pages plus a bounce buffer.
-- `qemu/`: bare-metal AArch64 payload that runs the driver against QEMU's
-  emulated NVMe (`scripts/qemu_native_nvme_test.sh`). `STORE_OBJS=` links
+- `disk_sdhci.h` / `disk_sdhci.c`: freestanding polled SD Host Controller
+  driver for the Raspberry Pi 5 microSD slot (BCM2712 `brcm,bcm2712-sdhci`,
+  a standard SDHCI). PIO only: no DMA, no heap, no libc, aligned 32-bit
+  register access only. SD 2.0+ cards (SDSC and SDHC/SDXC), 3.3 V, 25 MHz
+  default speed, 1- or 4-bit bus.
+- `qemu/`: bare-metal AArch64 payloads that run the NVMe driver against
+  QEMU's emulated NVMe (`scripts/qemu_native_nvme_test.sh`) and the SD
+  driver against QEMU's `sdhci-pci` + `sd-card`
+  (`scripts/qemu_native_sdhci_test.sh`: spec 2.00 with a 64 MiB SDSC card,
+  spec 3.00 with a 4 GiB SDHC card). `STORE_OBJS=` links
   extra objects (for example native/store) later.
 
 ```
-make              # out/libaienos_disk.a (disk.c, disk_nvme.c) + out/disk_file.o
+make              # out/libaienos_disk.a (disk.c, disk_nvme.c, disk_sdhci.c) + out/disk_file.o
 make test         # last line: AIENOS_DISK_NATIVE: PASS
 make freestanding # nm -u of the linked library objects must be empty
 make sanitize     # ASan + UBSan
 make mutants      # each GUARD line deleted in turn; AIENOS_DISK_MUTANTS: PASS
 ```
 
-Host tests run against a software NVMe controller model written in
-`tests/nvme_test.c`. QEMU runs against QEMU's NVMe model. Neither one
-qualifies any physical controller.
+Host tests run against software NVMe and SDHCI + SD card models written in
+`tests/nvme_test.c` and `tests/sdhci_test.c`. QEMU runs against QEMU's
+models. None of them qualifies any physical controller; the Pi 5 run is
+separate evidence.
 
 ## Unsafe assumptions: what is now checked
 
@@ -65,3 +74,32 @@ queue stays usable.
   test_atomicity covers that case.
 - The Rust readiness loop sleeps one more step than CAP.TO allows. The C port
   stops at exactly TO x 500 ms.
+
+## SD host driver: what is checked
+
+Each check below is a GUARD line that `make mutants` deletes; a test in
+`tests/sdhci_test.c` fails for every one. The software model also flags any
+command issued while CMD/DATA inhibit is set, any data command while the card
+is still programming, a wrong response type, a wrong address mode (byte for
+SDSC, block for SDHC), and any unaligned or out-of-window register access.
+
+| Check (mutant) | Error |
+|---|---|
+| any error bit in INT_STATUS ends the wait (sdhci-err-int) | SDHCI_ECMD / SDHCI_EDATA |
+| command line (and data line for data/busy commands) idle before issue (sdhci-inhibit) | SDHCI_ETIMEOUT |
+| R1 card-status error bits 0xfdf98008 (sdhci-r1) | SDHCI_ESTATUS |
+| HOST_VERSION spec 2.00 or later (sdhci-ver) | SDHCI_EVER |
+| software reset clears within 100 ms (sdhci-reset) | SDHCI_ERESET |
+| controller supports 3.3 V (sdhci-volt) | SDHCI_EVOLT |
+| a base clock, from CAPABILITIES or the caller (sdhci-clock0) | SDHCI_ECLOCK |
+| card present (sdhci-nocard) | SDHCI_ENOCARD |
+| CMD8 echo 0x1aa: SD 2.0+ cards only (sdhci-cmd8) | SDHCI_ECARD |
+| ACMD41 power-up bounded to 100 polls (sdhci-acmd41-bound) | SDHCI_ETIMEOUT |
+| CSD capacity non-zero (sdhci-csd-zero) | SDHCI_ECSD |
+| no I/O after a failure until init runs again (sdhci-ready, sdhci-failstop) | DISK_ESTATE |
+| lba/count inside the card, refused before any command (sdhci-range) | DISK_ERANGE |
+| after a write, CMD13 until the card is back in transfer state (sdhci-tran) | SDHCI_ETIMEOUT |
+
+Not done yet: high-speed (50 MHz) and UHS modes, 1.8 V signalling, ADMA, card
+removal while running, and the Pi 5 binding (base address and base clock come
+from the ACPI tables dumped by AIENOS-PI5-ACPI-0).
