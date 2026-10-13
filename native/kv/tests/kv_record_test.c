@@ -625,6 +625,12 @@ static void namespace_refuses_oversized_or_inconsistent_fields(void)
     f = sample();
     f.num_layers = 0;
     CHECK_RC(kv_namespace_id(&f, id), KV_E_INVALID_GEOMETRY);
+    f = sample();
+    f.layout.block_stride = 0; /* zero byte factor (Rust d690b6e) */
+    CHECK_RC(kv_namespace_id(&f, id), KV_E_INVALID_GEOMETRY);
+    f = sample();
+    f.layout.element_bytes = 0;
+    CHECK_RC(kv_namespace_id(&f, id), KV_E_INVALID_GEOMETRY);
 
     /* C only: values the Rust types cannot hold, and NULL */
     f = sample();
