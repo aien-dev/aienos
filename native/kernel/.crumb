@@ -57,14 +57,14 @@
           "purpose": "Directory native/kernel/artifact. Purpose not yet described by a human."
         },
         {
-          "digest": "7d244641327a07e507217ef39fafe416f7d0b970dd1c8121a73c77034703be16",
-          "last_commit": "013dfa6",
+          "digest": "7916404f955114d22a806f1726b7a2b8cf79f56076af9ee702019143feb8e0a8",
+          "last_commit": "867c4ac",
           "name": "core",
           "purpose": "Directory native/kernel/core. Purpose not yet described by a human."
         },
         {
           "digest": "a80356e38bcc9fc135fffc058dc782bc2fc4f56869f6e06caaf0c2e169338212",
-          "last_commit": "013dfa6",
+          "last_commit": "6f35eab",
           "name": "dev",
           "purpose": "Directory native/kernel/dev. Purpose not yet described by a human."
         },
@@ -82,7 +82,7 @@
         },
         {
           "digest": "11e19f80d8332984392eda3141fe2a5b50b9032fbb4d1ace6aabf29e445cf9ab",
-          "last_commit": "013dfa6",
+          "last_commit": "6f35eab",
           "name": "svc",
           "purpose": "Directory native/kernel/svc. Purpose not yet described by a human."
         },
@@ -99,15 +99,15 @@
           "purpose": "Hosted (Linux-built) checkers for the native kernel, run by `make -C native/kernel test`; nothin"
         }
       ],
-      "children_root": "sha256:295cee93e4b0844f124c3fc8d605f23e81116d11348d211f13cc3d9d19fec303",
-      "compiled_at": "2026-10-13T17:02:53Z",
+      "children_root": "sha256:15688dcd8360057fd3d4d6b0f7978f09ec0f81e5e8323bb75d707d70cd55e453",
+      "compiled_at": "2026-10-13T17:23:51Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:db24cfca50e9f5c96b8bec3858420bb97cc5ddaa4f2d4e2050b3b98ce0a0a660",
+      "digest": "sha256:6e575096cfcc2df4792bbae3821d3d77b414aa432bda02d3fcddc8a2ff913143",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 356,
-      "generated_at_commit": "013dfa602cad3a9f4435359ccf01f9b61eecfaf5",
-      "source_tree": "sha256:61283ac374ac07b5b45578895c16005cd00bd3e187c7234ea63c086221ecf736"
+      "generated_at_commit": "298065e8f6711a85823fe4ff051738e7c30cbbd1",
+      "source_tree": "sha256:3907ec2526bc6cb7207438ec3799fc07856f36855f8545a7f308057e454b42d5"
     },
     "owner_lane": "",
     "provenance": {
