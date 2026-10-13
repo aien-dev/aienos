@@ -36,8 +36,14 @@ kernel-free UEFI application for the first Raspberry Pi 5 firmware boot. It
 prints the firmware vendor and revisions, the exception level, a memory map
 summary and every ConfigurationTable GUID (ACPI 1.0/2.0, SMBIOS, SMBIOS3, Device
 Tree b1b621d5-f19c-41a5-830b-d9152c69aae0, per edk2 `Guid/Fdt.h`) to ConOut, writes
-the same text to `\EFI\AIENOS\PI5BOOT0.TXT` on the volume it was loaded from,
-waits about 10 s and returns `EFI_SUCCESS`. It never calls `ExitBootServices`.
+the same text to `\EFI\AIENOS\PI5BOOT0.TXT` on the volume it was loaded from.
+AIENOS-PI5-ACPI-0 added: every table the XSDT names, plus the DSDT from the FADT,
+is copied byte for byte to `\EFI\AIENOS\ACPI\<SIG>[n].BIN` (the k-th repeat of a
+signature gets the suffix k) with one `acpi_table:` report line each (length,
+address, checksum). It arms a 180 s firmware watchdog, waits about 5 s at the end
+and cold-resets through `ResetSystem`, the only runtime service it calls, so a
+one-shot tryboot run on the Pi falls back to the normal OS by itself. It never
+calls `ExitBootServices`.
 Build: `make -C native/kernel pi5-diag` (output `PI5DIAG.EFI`, copy to the card as
 `EFI/BOOT/BOOTAA64.EFI`); QEMU test: `scripts/qemu_ck_pi5_diag_test.sh`
 (`AIENOS_PI5_DIAG`; an emulator, nothing about a Pi 5 is qualified by it).
