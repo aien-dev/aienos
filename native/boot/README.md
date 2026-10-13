@@ -31,6 +31,17 @@ touches UEFI variables, runtime services or `ExitBootServices`. Build:
 `scripts/qemu_ck_slot_loader_test.sh`; `docs/NATIVE_IMAGE_SLOTS.md`. This stub
 itself still has no slot logic, so the paragraph below stays true for it.
 
+**AIENOS-PI5-BOOT-0 diagnostic, `diag_main.c` -> `PI5DIAG.EFI`:** a separate,
+kernel-free UEFI application for the first Raspberry Pi 5 firmware boot. It
+prints the firmware vendor and revisions, the exception level, a memory map
+summary and every ConfigurationTable GUID (ACPI 1.0/2.0, SMBIOS, SMBIOS3, Device
+Tree b1b621d5-f19c-41a5-830b-d9152c69aae0, per edk2 `Guid/Fdt.h`) to ConOut, writes
+the same text to `\EFI\AIENOS\PI5BOOT0.TXT` on the volume it was loaded from,
+waits about 10 s and returns `EFI_SUCCESS`. It never calls `ExitBootServices`.
+Build: `make -C native/kernel pi5-diag` (output `PI5DIAG.EFI`, copy to the card as
+`EFI/BOOT/BOOTAA64.EFI`); QEMU test: `scripts/qemu_ck_pi5_diag_test.sh`
+(`AIENOS_PI5_DIAG`; an emulator, nothing about a Pi 5 is qualified by it).
+
 **Parked, not here:** signature checks, BootNext staging, rollback and the
 boot-report file. The Rust `aienos-boot` crate has BootNext staging and a QEMU
 rollback test but no A/B slot selection (ADR 0024 Q3); it is frozen and
