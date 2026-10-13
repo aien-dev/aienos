@@ -11,6 +11,7 @@
 #include "arch.h"
 #include "ck_internal.h"
 #include "entropy.h"
+#include "cpufeat.h"
 #include "handoff_check.h"
 #include "frames.h"
 
@@ -205,6 +206,14 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
 #if defined(CK_TEST_ROLLBACK_CPU_FAULT) || defined(CK_TEST_ROLLBACK_HANG)
     rollback_test_end();
 #endif
+
+    {
+        struct ck_cpu_features cf;
+        char cfl[96];
+        ck_cpufeat_decode(ck_rd(id_aa64isar0_el1), ck_rd(id_aa64isar1_el1), ck_rd(id_aa64pfr0_el1), &cf);
+        ck_cpufeat_format(&cf, cfl, sizeof cfl);
+        ck_printf("%s\n", cfl); /* boot core only; see core/cpufeat.h */
+    }
 
     /* Kernel entropy (arch/rndr.c): RNDR or a latched refusal, no fallback.
      * Probed once here, before the artifact loader and the stages. */

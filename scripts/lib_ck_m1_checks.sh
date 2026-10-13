@@ -98,6 +98,8 @@ ck_m1_checks() {
     # Added for the C kernel (the Rust kernel has no such test): every guard page
     # faulted and the fault was contained.
     check "guard pages fault and the fault is contained (C kernel addition)" "guard_page: ok fault=contained"
+    check "CPU feature line printed (ID_AA64ISAR0/ISAR1/PFR0 decode, C kernel addition)" \
+        "^cpu_features: dotprod=[01] i8mm=[01] bf16=[01] fhm=[01] fp16=[01] sve=[01] rndr=[01]$"
     if [[ "${ck_m1_entropy}" == absent ]]; then
         check "kernel entropy refused without FEAT_RNG (negative boot, C kernel addition)" \
             "^entropy: unavailable reason=absent (ID_AA64ISAR0_EL1.RNDR=0, no FEAT_RNG); security consumers refuse, fail closed$"
