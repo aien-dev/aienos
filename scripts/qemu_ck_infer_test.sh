@@ -216,6 +216,18 @@ infer_check_log() {
             || bad "session reply: ids $(g 1), steps $(g 2), prefill $(g 3), produced $(g 4), last $(g 5), mean_tok_us $(g 7)"
         grep -qF -- "${want_text}" <<<"$(g 9)" && ok "session reply text contains '${want_text}': $(g 9)" || bad "session reply text lacks '${want_text}': $(g 9)"
     fi
+    # PI5-6 agent: the chat template the tokenizer built is checked in the session path too (the first four prompt ids
+    # of the golden prompt; the one-shot probe checks the same four, and the Pi image has no one-shot probe).
+    local re_sh='^infer: session prompt=2 prompt_head=([0-9]+),([0-9]+),([0-9]+),([0-9]+) expect=(match|MISMATCH)$'
+    if [[ "$(grep -cE "${re_sh}" "${f}" || true)" != 1 ]]; then
+        bad "exactly one well-formed infer: session prompt=2 prompt_head line"
+    else
+        line="$(grep -E "${re_sh}" "${f}")"; [[ "${line}" =~ ${re_sh} ]]; m=("${BASH_REMATCH[@]}")
+        local want_head; want_head="$(awk '{print $1,$2,$3,$4}' <<<"${want_ids}")"
+        [[ "$(g 1) $(g 2) $(g 3) $(g 4)" == "${want_head}" && "$(g 5)" == match ]] \
+            && ok "session prompt head $(g 1),$(g 2),$(g 3),$(g 4) = the golden chat-template head" \
+            || bad "session prompt head $(g 1),$(g 2),$(g 3),$(g 4) (${want_head} expected), kernel said $(g 5)"
+    fi
     if [[ "$(grep -cE "${re_sx}" "${f}" || true)" != 1 ]]; then
         bad "exactly one well-formed infer: session close line"
     else
@@ -254,7 +266,7 @@ if [[ "${1:-}" == --self-test ]]; then
     [[ "${gen}" == "791 6864 315 9822 374 12366 13 128009" ]] \
         && echo "PASS  reference step tokens parsed (${gen})" || { echo "FAIL  reference step tokens '${gen}'"; echo "AIENOS_CK_INFER_SELF_TEST: FAIL"; exit 1; }
     sz=807694368
-    good() { printf 'kernel: alive\ninfer: fw_cfg base=0x9020000 dma=yes file=opt/aienos/model size=%s\ninfer: ingest bytes=%s dma_us=42340\ninfer: sha256=%s sha_us=8568801\ninfer: probe rc=0 tensors=147 vocab=128256 ids=128000,128006,882,128007 prompt_len=17 layers=16 heap_peak_kib=24695 probe_us=1116277\ninfer: prefill_us=400000000 prompt_len=17\ninfer: tokens=791 6864 315 9822 374 12366 13 128009\ninfer: tok_us=23000000,23000000,23000000,23000000,23000000,23000000,23000000\ninfer: decode_tokens=7 mean_tok_us=23000000\ninfer: text=The capital of France is Paris.\nAIENOS_CK_INFER: PASS\ninfer: session open rc=0 tensors=147 vocab=128256 layers=16 kv_capacity=64 max_new=16 max_prompt_bytes=256 heap_reserve_kib=64 heap_used_kib=20000 open_us=1000000\ninfer: session refusals open_twice=-12 prompt_bytes=-16 step_idle=0\ninfer: session prompt=1 ids=14 cancel_after_steps=3 steps=3 prefill=3 produced=0 idle_step=done heap_used_kib=20010 rc=1\ninfer: session prompt=2 ids=17 steps=25 prefill=17 produced=8 last=yes prefill_us=400000000 mean_tok_us=23000000 tokens=791 6864 315 9822 374 12366 13 128009 text=The capital of France is Paris. heap_used_kib=20020 request_us=600000000 rc=3\ninfer: session prompt=3 ids=14 cancel_after_steps=1 steps=1 prefill=1 produced=0 idle_step=done heap_used_kib=20030 rc=1\ninfer: session close rc=0 heap_used_kib=20030 heap_peak_kib=24695 frames_free_before=900000 frames_free_after=900000 rc=0\nAIENOS_CK_INFER_SESSION: PASS\ninfer: unloaded heap_live_kib=1234 frames_free_before=900000 frames_free_after=900000 frames_returned=262705 rc=0,0\nreport_kind: final\n' "${sz}" "${sz}" "${pinned_sha}"; }
+    good() { printf 'kernel: alive\ninfer: fw_cfg base=0x9020000 dma=yes file=opt/aienos/model size=%s\ninfer: ingest bytes=%s dma_us=42340\ninfer: sha256=%s sha_us=8568801\ninfer: probe rc=0 tensors=147 vocab=128256 ids=128000,128006,882,128007 prompt_len=17 layers=16 heap_peak_kib=24695 probe_us=1116277\ninfer: prefill_us=400000000 prompt_len=17\ninfer: tokens=791 6864 315 9822 374 12366 13 128009\ninfer: tok_us=23000000,23000000,23000000,23000000,23000000,23000000,23000000\ninfer: decode_tokens=7 mean_tok_us=23000000\ninfer: text=The capital of France is Paris.\nAIENOS_CK_INFER: PASS\ninfer: session open rc=0 tensors=147 vocab=128256 layers=16 kv_capacity=64 max_new=16 max_prompt_bytes=256 heap_reserve_kib=64 heap_used_kib=20000 open_us=1000000\ninfer: session refusals open_twice=-12 prompt_bytes=-16 step_idle=0\ninfer: session prompt=1 ids=14 cancel_after_steps=3 steps=3 prefill=3 produced=0 idle_step=done heap_used_kib=20010 rc=1\ninfer: session prompt=2 prompt_head=128000,128006,882,128007 expect=match\ninfer: session prompt=2 ids=17 steps=25 prefill=17 produced=8 last=yes prefill_us=400000000 mean_tok_us=23000000 tokens=791 6864 315 9822 374 12366 13 128009 text=The capital of France is Paris. heap_used_kib=20020 request_us=600000000 rc=3\ninfer: session prompt=3 ids=14 cancel_after_steps=1 steps=1 prefill=1 produced=0 idle_step=done heap_used_kib=20030 rc=1\ninfer: session close rc=0 heap_used_kib=20030 heap_peak_kib=24695 frames_free_before=900000 frames_free_after=900000 rc=0\nAIENOS_CK_INFER_SESSION: PASS\ninfer: unloaded heap_live_kib=1234 frames_free_before=900000 frames_free_after=900000 frames_returned=262705 rc=0,0\nreport_kind: final\n' "${sz}" "${sz}" "${pinned_sha}"; }
     st=0
     chk() { infer_failed=0; out="$(infer_check_log "$3" "${sz}" "${pinned_sha}" "${ids}" 1 "${gen}")"; grep -q '^FAIL' <<<"${out}" && infer_failed=1
         if [[ "$2" == pass && ${infer_failed} == 0 ]] || [[ "$2" == fail && ${infer_failed} == 1 && -n "$4" ]] && { [[ "$2" == pass ]] || grep -q "^FAIL.*$4" <<<"${out}"; }; then echo "PASS  self-test $1"; else echo "FAIL  self-test $1"; st=1; fi; }
@@ -307,6 +319,9 @@ if [[ "${1:-}" == --self-test ]]; then
     sed 's/session prompt=2 ids=17 steps=25 prefill=17 produced=8 last=yes/session prompt=2 ids=17 steps=24 prefill=17 produced=7 last=no/' "${tmp}/g" >"${tmp}/s8"; chk session-reply-unfinished fail "${tmp}/s8" "session reply"
     sed 's/128009 text=The capital/128010 text=The capital/' "${tmp}/g" >"${tmp}/s9"; chk session-wrong-token fail "${tmp}/s9" "session reply ids"
     sed 's/Paris\. heap_used_kib/Lyon. heap_used_kib/' "${tmp}/g" >"${tmp}/s10"; chk session-missing-paris fail "${tmp}/s10" "session reply text lacks"
+    sed 's/prompt_head=128000,128006,882,128007 expect=match/prompt_head=128000,128006,883,128007 expect=match/' "${tmp}/g" >"${tmp}/s15"; chk session-wrong-prompt-head fail "${tmp}/s15" "session prompt head"
+    sed 's/expect=match/expect=MISMATCH/' "${tmp}/g" >"${tmp}/s16"; chk session-head-mismatch-flag fail "${tmp}/s16" "session prompt head"
+    grep -v 'session prompt=2 prompt_head=' "${tmp}/g" >"${tmp}/s17"; chk session-no-head-line fail "${tmp}/s17" "prompt_head line"
     sed 's/session close rc=0 heap_used_kib=20030 heap_peak_kib=24695 frames_free_before=900000 frames_free_after=900000/session close rc=0 heap_used_kib=20030 heap_peak_kib=24695 frames_free_before=900000 frames_free_after=899999/' "${tmp}/g" >"${tmp}/s11"; chk session-frames-leaked fail "${tmp}/s11" "session close"
     sed 's/session close rc=0/session close rc=-12/' "${tmp}/g" >"${tmp}/s12"; chk session-close-refused fail "${tmp}/s12" "session close"
     { grep -v '^AIENOS_CK_INFER: PASS' "${tmp}/g"; } >"${tmp}/s13"; chk no-oneshot-verdict-still fail "${tmp}/s13" "kernel did not report AIENOS_CK_INFER: PASS"

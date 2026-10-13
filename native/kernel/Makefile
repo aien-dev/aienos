@@ -159,8 +159,8 @@ ifneq ($(strip $(CK_PI5_INFER)),)
 ifneq ($(strip $(CK_PI5_INFER)),1)
 $(error CK_PI5_INFER must be empty or 1)
 endif
-ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_UNLOCK)$(CK_SERVICE)$(CK_HARDWARE_STAGING)$(CK_TEST_FWCFG_ARTIFACTS)$(CK_RUST_LIBS)),)
-$(error CK_PI5_INFER is the one-shot Pi inference image: it cannot be combined with CK_PI5_STORE, CK_PI5_UNLOCK, CK_SERVICE, CK_HARDWARE_STAGING, CK_TEST_FWCFG_ARTIFACTS or CK_RUST_LIBS)
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_UNLOCK)$(CK_PI5_AGENT)$(CK_SERVICE)$(CK_HARDWARE_STAGING)$(CK_TEST_FWCFG_ARTIFACTS)$(CK_RUST_LIBS)),)
+$(error CK_PI5_INFER is the one-shot Pi inference image: it cannot be combined with CK_PI5_STORE, CK_PI5_UNLOCK, CK_PI5_AGENT, CK_SERVICE, CK_HARDWARE_STAGING, CK_TEST_FWCFG_ARTIFACTS or CK_RUST_LIBS)
 endif
 ifeq ($(strip $(CK_INFER_LIB)),)
 $(error CK_PI5_INFER needs CK_INFER_LIB=<libaienos_infer_kernel.a> (use "make pi5-infer", which builds it))
@@ -178,8 +178,8 @@ ifneq ($(strip $(CK_PI5_PCIE)),)
 ifneq ($(strip $(CK_PI5_PCIE)),1)
 $(error CK_PI5_PCIE must be empty or 1)
 endif
-ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_UNLOCK)$(CK_SERVICE)$(CK_HARDWARE_STAGING)),)
-$(error CK_PI5_PCIE is the Pi PCIe/RP1 enumerator image: it cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_UNLOCK, CK_SERVICE or CK_HARDWARE_STAGING)
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_UNLOCK)$(CK_PI5_AGENT)$(CK_SERVICE)$(CK_HARDWARE_STAGING)),)
+$(error CK_PI5_PCIE is the Pi PCIe/RP1 enumerator image: it cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_UNLOCK, CK_PI5_AGENT, CK_SERVICE or CK_HARDWARE_STAGING)
 endif
 CK_PI5 := 1
 OUT ?= $(REPO)/target/native-kernel-pi5-pcie
@@ -219,7 +219,7 @@ ifneq ($(strip $(CK_SERVICE)$(CK_TEST_STORE_CRASH)$(CK_TEST_CONTINUITY)$(CK_HARD
 $(error CK_PI5_UNLOCK cannot be combined with CK_SERVICE, CK_SERVICE_TEST_KEYS, CK_TEST_STORE_CRASH, CK_TEST_CONTINUITY or CK_HARDWARE_STAGING)
 endif
 CK_PI5 := 1
-OUT ?= $(REPO)/target/native-kernel-pi5-unlock$(if $(strip $(CK_PI5_UNLOCK_CARD)),-card)$(if $(strip $(CK_PI5_FACT)),-fact)
+OUT ?= $(REPO)/target/native-kernel-pi5-unlock$(if $(strip $(CK_PI5_UNLOCK_CARD)),-card)$(if $(strip $(CK_PI5_FACT)),-fact)$(if $(strip $(CK_PI5_AGENT)),-agent)
 CK_EXTRA_CFLAGS += -DCK_PI5_UNLOCK=1
 ifneq ($(strip $(CK_PI5_UNLOCK_CARD)),)
 CK_EXTRA_CFLAGS += -DCK_PI5_UNLOCK_CARD=1
@@ -239,10 +239,32 @@ endif
 ifneq ($(strip $(CK_PI5_UNLOCK))$(strip $(CK_PI5_UNLOCK_CARD)),11)
 $(error CK_PI5_FACT (Cortex fact stage, QUALIFICATION ONLY) needs CK_PI5_UNLOCK=1 and CK_PI5_UNLOCK_CARD=1)
 endif
-ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)),)
-$(error CK_PI5_FACT cannot be combined with CK_PI5_STORE, CK_PI5_INFER or CK_PI5_PCIE)
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)$(CK_PI5_AGENT)),)
+$(error CK_PI5_FACT cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_PCIE or CK_PI5_AGENT)
 endif
 CK_EXTRA_CFLAGS += -DCK_PI5_FACT=1
+endif
+
+# Pi agent image (CK_PI5_AGENT=1, "make pi5-agent", PI5-6 final cut, QUALIFICATION ONLY while the secret comes from the card request
+# file): the Pi unlock-card image (production-class Store opened by the Slot 1 recovery secret) plus the resident inference unit
+# (CK_INFER_LIB, model from MODEL.MAP only) plus the agent stage (svc/pi5_agent.c): after the Store opened it recovers the persisted
+# reply, or (no reply yet) generates a bounded reply and commits it as a sealed R1 object. It needs CK_PI5_UNLOCK=1, CK_PI5_UNLOCK_CARD=1
+# and CK_INFER_LIB, refuses every other tier flag (CK_PI5_INFER and CK_PI5_FACT included) and has its own OUT.
+CK_PI5_AGENT ?=
+ifneq ($(strip $(CK_PI5_AGENT)),)
+ifneq ($(strip $(CK_PI5_AGENT)),1)
+$(error CK_PI5_AGENT must be empty or 1)
+endif
+ifneq ($(strip $(CK_PI5_UNLOCK))$(strip $(CK_PI5_UNLOCK_CARD)),11)
+$(error CK_PI5_AGENT (Store plus inference, QUALIFICATION ONLY) needs CK_PI5_UNLOCK=1 and CK_PI5_UNLOCK_CARD=1)
+endif
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)$(CK_PI5_FACT)$(CK_SERVICE)$(CK_HARDWARE_STAGING)$(CK_TEST_FWCFG_ARTIFACTS)),)
+$(error CK_PI5_AGENT cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_PCIE, CK_PI5_FACT, CK_SERVICE, CK_HARDWARE_STAGING or CK_TEST_FWCFG_ARTIFACTS)
+endif
+ifeq ($(strip $(CK_INFER_LIB)),)
+$(error CK_PI5_AGENT needs CK_INFER_LIB=<libaienos_infer_kernel.a> (use "make pi5-agent", which builds it))
+endif
+CK_EXTRA_CFLAGS += -DCK_PI5_AGENT=1 -DCK_INFER_DISK_ONLY=1 -DCK_INFER_RESIDENT=1
 endif
 CK_PI5 ?=
 ifneq ($(strip $(CK_PI5)),)
@@ -885,12 +907,15 @@ endif
 # Pi path). core/pi5.c supplies ck_dev_boot_disk and ck_dev_nvme_release over the SD partition view.
 FULL_STAGE_SYMS := ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce ck_stage_disk_artifacts
 ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_UNLOCK)),)
-FULL_NAME := $(if $(strip $(CK_PI5_UNLOCK)),full-pi5-unlock$(if $(strip $(CK_PI5_UNLOCK_CARD)),-card)$(if $(strip $(CK_PI5_FACT)),-fact),full-pi5-store)
+FULL_NAME := $(if $(strip $(CK_PI5_UNLOCK)),full-pi5-unlock$(if $(strip $(CK_PI5_UNLOCK_CARD)),-card)$(if $(strip $(CK_PI5_FACT)),-fact)$(if $(strip $(CK_PI5_AGENT)),-agent),full-pi5-store)
 FULL_STAGE_SYMS := ck_stage_store ck_stage_disk_artifacts
 STAGE_SRCS := $(KDIR)/svc/store_boot.c $(KDIR)/svc/artifact_store.c $(KDIR)/svc/store_crash.c $(KDIR)/svc/ck_compat.c \
   $(foreach m,store/store_v1 store/store_engine store/store_disk store/store_sealed store/torn_slot m5/m5_keys m5/m5_envelope m5/m5_state crypto/aes crypto/polyval crypto/gcm_siv crypto/hmac crypto/ct argus/sha256,$(NATIVE)/$(m).c)
 ifneq ($(strip $(CK_PI5_FACT)),)
 STAGE_SRCS += $(KDIR)/svc/pi5_fact.c $(STAGE_CORTEX_SRCS)
+endif
+ifneq ($(strip $(CK_PI5_AGENT)),)
+STAGE_SRCS += $(KDIR)/svc/pi5_agent.c
 endif
 endif
 FULL_OUT := $(OUT)/$(FULL_NAME)
@@ -982,7 +1007,7 @@ $(foreach s,$(STAGE_SRCS),$(eval $(call stage_rule,$(s))))
 # with inference (CK_INFER_LIB + CK_HARDWARE_STAGING, boot-disk only) must
 # carry the boot-disk source line, the resident session, and no fw_cfg code.
 define fwcfg_check
-	@if [ -n "$(strip $(CK_INFER_LIB))" ] && [ -z "$(strip $(CK_HARDWARE_STAGING))" ] && [ -z "$(strip $(CK_PI5_INFER))" ]; then \
+	@if [ -n "$(strip $(CK_INFER_LIB))" ] && [ -z "$(strip $(CK_HARDWARE_STAGING))" ] && [ -z "$(strip $(CK_PI5_INFER))" ] && [ -z "$(strip $(CK_PI5_AGENT))" ]; then \
 	  grep -aqF "TEST-ONLY QEMU fw_cfg model ingest" $(1) || { echo "inference probe image lacks its TEST-ONLY fw_cfg announcement"; rm -f $(1); exit 1; }; \
 	elif [ "$(strip $(CK_TEST_FWCFG_ARTIFACTS))" = 1 ]; then \
 	  grep -aqF "TEST-ONLY QEMU fw_cfg side channel" $(1) || { echo "test fw_cfg image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
@@ -1933,6 +1958,10 @@ pi5-unlock-card:
 pi5-fact:
 	$(MAKE) CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_FACT=1 full
 
+pi5-agent:
+	CARGO_TARGET_DIR=$(REPO)/target/infer-kernel cargo build -q --release --target aarch64-unknown-none --manifest-path $(REPO)/crates/aienos-infer-kernel/Cargo.toml
+	$(MAKE) CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_AGENT=1 CK_INFER_LIB=$(PI5_INFER_LIB) full
+
 pi5:
 	$(MAKE) CK_PI5=1 all
 
@@ -1988,7 +2017,7 @@ $(OUT)/host-san/test_pi5_rng: $(KDIR)/tests/test_pi5_rng.c $(PI5_RNG_SRCS) $(KDI
 
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
-.PHONY: all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact pi5-agent test sanitize handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
 
 # AIENOS-PI5 step 3 marker + Pi card GPT test (hosted; a file stands in for the card, QEMU cannot model the Pi SD host).
 PI5_MARKER_SRCS := $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \

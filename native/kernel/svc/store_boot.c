@@ -12,6 +12,9 @@
 #ifdef CK_PI5_FACT
 #include "pi5_fact.h"
 #endif
+#ifdef CK_PI5_AGENT
+#include "pi5_agent.h"
+#endif
 #ifdef CK_SERVICE
 #include "continuity_service.h"
 #endif
@@ -751,6 +754,17 @@ int ck_store_pi5_fact_stage(const ck_store_report *r)
 }
 #endif
 
+#ifdef CK_PI5_AGENT
+#if !defined(CK_PI5_UNLOCK) || !defined(CK_PI5_UNLOCK_CARD)
+#error "CK_PI5_AGENT needs CK_PI5_UNLOCK and CK_PI5_UNLOCK_CARD (production-class Store, card request source)"
+#endif
+int ck_store_pi5_agent_stage(const ck_store_report *r)
+{
+    struct ck_agent_result ar;
+    return ck_pi5_agent_run(r->verdict == CK_SB_COMMITTED ? g_ss : 0, &ar);
+}
+#endif
+
 /* Kernel stage. ck_dev_boot_disk comes from dev/devices.c. */
 const disk_dev *ck_dev_boot_disk(void);
 void ck_dev_nvme_release(void);
@@ -855,6 +869,12 @@ int ck_stage_store(void)
     {
         int frc = ck_store_pi5_fact_stage(&r);
         if (frc && rc == 0) rc = frc;
+    }
+#endif
+#ifdef CK_PI5_AGENT
+    {
+        int arc = ck_store_pi5_agent_stage(&r);
+        if (arc && rc == 0) rc = arc;
     }
 #endif
 #ifdef CK_SERVICE

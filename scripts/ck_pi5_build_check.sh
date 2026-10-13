@@ -138,4 +138,39 @@ for combo in CK_PI5_FACT=1; do
     done
 done
 test -s "${root}/target/native-kernel-pi5-unlock-card-fact/full-pi5-unlock-card-fact/BOOTAA64.EFI" || { echo "FAIL no pi5-fact BOOTAA64.EFI"; fail=1; }
+# PI5-6 final cut: the agent stage (Store plus resident inference plus the persisted reply) exists only in the pi5-agent image.
+make -C "${root}/native/kernel" pi5-agent >/dev/null
+ua="${root}/target/native-kernel-pi5-unlock-card-agent/full-pi5-unlock-card-agent/aienos-ck.elf"
+for s in ck_pi5_agent_run ck_store_pi5_agent_stage ck_infer_prompt ck_infer_resident_close ck_infer_model_sha256 ck_store_pi5_unlock_run ck_boot_unlock_req_find; do
+    if defined "${ua}" "${s}"; then echo "PASS pi5-agent image defines ${s}"; else echo "FAIL pi5-agent image lacks ${s}"; fail=1; fi
+done
+for s in ck_pi5_agent_run ck_store_pi5_agent_stage; do
+    for other in "${uf}" "${uc}" "${uo}" "${ps}" "${pi5}" "${pinf}" "${def}"; do
+        if defined "${other}" "${s}"; then echo "FAIL ${other} defines ${s}"; fail=1; fi
+    done
+done
+echo "PASS no other image (pi5-fact, pi5-unlock-card, pi5-unlock, pi5-store, pi5, pi5-infer, default) defines the agent stage"
+for s in ck_store_test_keys ck_store_test_uuid ck_pi5_fact_run ck_boot_fact_req_find fw_dma_read fwcfg_from_dsdt; do
+    if defined "${ua}" "${s}"; then echo "FAIL pi5-agent image defines ${s}"; fail=1; else echo "PASS pi5-agent image has no ${s}"; fi
+done
+ua_strings="$(strings -a "${ua}")"
+if grep -q "AIEN-TEST-BOOT\|LANE18-TEST-KVOL\|SEED-0B-" <<<"${ua_strings}"; then echo "FAIL pi5-agent image carries a TEST label"; fail=1; else echo "PASS pi5-agent image carries no TEST label (production-class Store)"; fi
+if grep -q "infer_source_mode: boot-disk model" <<<"${ua_strings}" && ! grep -q "opt/aienos/model\|TEST-ONLY QEMU fw_cfg" <<<"${ua_strings}"; then echo "PASS pi5-agent image reads the model from the boot disk only (no fw_cfg source)"; else echo "FAIL pi5-agent image model source"; fail=1; fi
+if grep -q "QUALIFICATION ONLY, throwaway secret" <<<"${ua_strings}"; then echo "PASS the loud unlock_source label is in the pi5-agent image"; else echo "FAIL pi5-agent image lacks the unlock_source label"; fail=1; fi
+# the positive control: the flag set the image is built with is accepted (a dry run), so the refusals below are the flag under test.
+if make -n -C "${root}/native/kernel" CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_AGENT=1 CK_INFER_LIB=/nonexistent/lib.a full >/dev/null 2>&1; then echo "PASS Makefile accepts CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_AGENT=1 CK_INFER_LIB=<lib>"; else echo "FAIL Makefile refuses the pi5-agent flag set"; fail=1; fi
+for combo in "CK_PI5_AGENT=1" "CK_PI5_UNLOCK=1 CK_PI5_AGENT=1 CK_INFER_LIB=/x/l.a" "CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_AGENT=1" "CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_AGENT=2 CK_INFER_LIB=/x/l.a" "CK_PI5_UNLOCK_CARD=1 CK_PI5_AGENT=1 CK_INFER_LIB=/x/l.a"; do
+    # shellcheck disable=SC2086
+    if make -n -C "${root}/native/kernel" ${combo} full >/dev/null 2>&1; then echo "FAIL Makefile accepts ${combo}"; fail=1; else echo "PASS Makefile refuses ${combo}"; fi
+done
+for other in CK_PI5_STORE=1 CK_PI5_INFER=1 CK_PI5_PCIE=1 CK_PI5_FACT=1 CK_SERVICE=1 CK_HARDWARE_STAGING=1 CK_TEST_FWCFG_ARTIFACTS=1; do
+    # shellcheck disable=SC2086
+    if make -n -C "${root}/native/kernel" ${other} CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_AGENT=1 CK_INFER_LIB=/x/l.a full >/dev/null 2>&1; then echo "FAIL Makefile accepts ${other} with CK_PI5_AGENT=1"; fail=1; else echo "PASS Makefile refuses ${other} with CK_PI5_AGENT=1"; fi
+done
+# the other direction: the older Pi tiers refuse the agent flag too.
+for tier in CK_PI5_INFER=1 CK_PI5_PCIE=1 CK_PI5_FACT=1; do
+    # shellcheck disable=SC2086
+    if make -n -C "${root}/native/kernel" ${tier} CK_PI5_AGENT=1 CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_INFER_LIB=/x/l.a full >/dev/null 2>&1; then echo "FAIL Makefile accepts ${tier} with CK_PI5_AGENT=1"; fail=1; fi
+done
+test -s "${root}/target/native-kernel-pi5-unlock-card-agent/full-pi5-unlock-card-agent/BOOTAA64.EFI" || { echo "FAIL no pi5-agent BOOTAA64.EFI"; fail=1; }
 if [[ ${fail} == 0 ]]; then echo "CK_PI5_BUILD: PASS"; else echo "CK_PI5_BUILD: FAIL"; exit 1; fi

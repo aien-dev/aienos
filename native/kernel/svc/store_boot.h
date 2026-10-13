@@ -165,6 +165,12 @@ int ck_store_pi5_unlock_run(const disk_dev *d, const uint8_t *secret, const char
  * Store is passed on only when it committed; a refused Store (wrong secret) recalls nothing. */
 int ck_store_pi5_fact_stage(const ck_store_report *r);
 #endif
+#ifdef CK_PI5_AGENT
+/* PI5-6 (QUALIFICATION ONLY): the agent stage after the Store stage: recover the persisted reply, or generate and commit it.
+ * Same rule as the fact stage: the Store is passed on only when it committed, so a refused Store (wrong secret) never reaches the
+ * model. */
+int ck_store_pi5_agent_stage(const ck_store_report *r);
+#endif
 #endif
 /* Print the report lines (also used by the host test). */
 void store_boot_print(const ck_store_report *r);
