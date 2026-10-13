@@ -1,0 +1,15 @@
+{
+  "entry_offset": 0,
+  "capabilities": [],
+  "resources": {
+    "code_pages": 1,
+    "data_pages": 1,
+    "stack_pages": 1,
+    "max_capabilities": 0,
+    "ipc_messages": 0,
+    "ipc_bytes": 0,
+    "cpu_ticks": 100000000,
+    "elapsed_ticks": 100000000,
+    "syscall_count": 4
+  }
+}
