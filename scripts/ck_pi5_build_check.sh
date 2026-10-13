@@ -22,6 +22,11 @@ for s in ${syms}; do
 done
 test -s "${root}/target/native-kernel-pi5/BOOTAA64.EFI" || { echo "FAIL no Pi BOOTAA64.EFI"; fail=1; }
 
+# CPU feature printout (PI5-6 cut 1) is on every arm64 image, not Pi only.
+for img in "${def}" "${pi5}"; do
+    if defined "${img}" ck_cpufeat_decode; then echo "PASS ${img##*/../} defines ck_cpufeat_decode"; else echo "FAIL ${img} lacks ck_cpufeat_decode"; fail=1; fi
+done
+
 # Step 3b: the Pi image with the sealed Store stage in the TEST-key tier (SEED-0B-PI5).
 make -C "${root}/native/kernel" pi5-store >/dev/null
 ps="${root}/target/native-kernel-pi5-store/full-pi5-store/aienos-ck.elf"
