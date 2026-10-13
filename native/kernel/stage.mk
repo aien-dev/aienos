@@ -161,11 +161,11 @@ stage-sanitize: disk-part-sanitize
 
 # ---- AIENOS-PI5 step 3b: sealed Store over the Pi card layout (dev/tests/pi5_store_test.c) ----
 # Same sources as disk_part_test; the image build of this stage is "make pi5-store".
-PI5_STORE_TEST_SRCS := $(filter-out %/disk_part_test.c,$(DISK_PART_TEST_SRCS)) $(STAGE_DIR)/dev/tests/pi5_store_test.c
-$(STAGE_OUT)/pi5_store_test: $(PI5_STORE_TEST_SRCS) $(DISK_PART_TEST_DEPS) $(STAGE_DIR)/dev/tests/pi5_store_test.c
+PI5_STORE_TEST_SRCS := $(filter-out %/disk_part_test.c,$(DISK_PART_TEST_SRCS)) $(STAGE_DIR)/core/pi5_marker.c $(STAGE_DIR)/dev/tests/pi5_store_test.c
+$(STAGE_OUT)/pi5_store_test: $(PI5_STORE_TEST_SRCS) $(DISK_PART_TEST_DEPS) $(STAGE_DIR)/core/pi5_marker.c $(STAGE_DIR)/core/pi5_marker.h $(STAGE_DIR)/dev/tests/pi5_store_test.c
 	@mkdir -p $(@D)
 	$(STAGE_CC) $(STAGE_HOST_FLAGS) $(DISK_PART_INC) -o $@ $(PI5_STORE_TEST_SRCS)
-$(STAGE_OUT)/pi5_store_test_san: $(PI5_STORE_TEST_SRCS) $(DISK_PART_TEST_DEPS) $(STAGE_DIR)/dev/tests/pi5_store_test.c
+$(STAGE_OUT)/pi5_store_test_san: $(PI5_STORE_TEST_SRCS) $(DISK_PART_TEST_DEPS) $(STAGE_DIR)/core/pi5_marker.c $(STAGE_DIR)/core/pi5_marker.h $(STAGE_DIR)/dev/tests/pi5_store_test.c
 	@mkdir -p $(@D)
 	$(STAGE_CC) $(STAGE_HOST_FLAGS) $(STAGE_SAN_FLAGS) $(DISK_PART_INC) -o $@ $(PI5_STORE_TEST_SRCS)
 .PHONY: pi5-store-test pi5-store-sanitize
