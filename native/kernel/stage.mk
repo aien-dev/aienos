@@ -201,3 +201,29 @@ $(STAGE_OUT)/ck_pi5_store_locate: $(PI5_LOCATE_TOOL_SRCS) $(STAGE_DIR)/tools/ck_
 	$(STAGE_CC) $(STAGE_HOST_FLAGS) -DCK_PI5_UNLOCK=1 $(DISK_PART_INC) -o $@ $(PI5_LOCATE_TOOL_SRCS) $(STAGE_DIR)/tools/ck_pi5_store_locate.c
 .PHONY: pi5-store-locate
 pi5-store-locate: $(STAGE_OUT)/ck_pi5_store_locate
+
+# ---- AIENOS PI5-5: the Pi Cortex fact stage (dev/tests/pi5_fact_test.c) ----
+# store_boot.c is compiled with -DCK_PI5_UNLOCK -DCK_PI5_UNLOCK_CARD -DCK_PI5_FACT, as "make pi5-fact" builds it.
+PI5_FACT_TEST_SRCS := $(filter-out %/pi5_unlock_test.c,$(PI5_UNLOCK_TEST_SRCS)) $(STAGE_CORTEX_SRCS) $(STAGE_DIR)/svc/pi5_fact.c $(STAGE_DIR)/core/fact_req.c $(STAGE_DIR)/dev/tests/pi5_fact_test.c
+PI5_FACT_DEPS := $(PI5_FACT_TEST_SRCS) $(DISK_PART_TEST_DEPS) $(STAGE_DIR)/core/fact_req.h $(STAGE_DIR)/svc/pi5_fact.h
+PI5_FACT_FLAGS := -DCK_PI5_UNLOCK=1 -DCK_PI5_UNLOCK_CARD=1 -DCK_PI5_FACT=1
+$(STAGE_OUT)/pi5_fact_test: $(PI5_FACT_DEPS)
+	@mkdir -p $(@D)
+	$(STAGE_CC) $(STAGE_HOST_FLAGS) $(PI5_FACT_FLAGS) $(DISK_PART_INC) -o $@ $(PI5_FACT_TEST_SRCS)
+$(STAGE_OUT)/pi5_fact_test_san: $(PI5_FACT_DEPS)
+	@mkdir -p $(@D)
+	$(STAGE_CC) $(STAGE_HOST_FLAGS) $(STAGE_SAN_FLAGS) $(PI5_FACT_FLAGS) $(DISK_PART_INC) -o $@ $(PI5_FACT_TEST_SRCS)
+.PHONY: pi5-fact-test pi5-fact-sanitize pi5-fact-mutants
+pi5-fact-test: $(STAGE_OUT)/pi5_fact_test
+	$<
+pi5-fact-sanitize: $(STAGE_OUT)/pi5_fact_test_san
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 $<
+# Mutation proof: each TEST-ONLY mutant of the fact stage must make the host test FAIL.
+pi5-fact-mutants:
+	@mkdir -p $(STAGE_OUT); fail=0; \
+	for m in NO_APPEND RECALL_BLIND; do \
+	  $(STAGE_CC) $(STAGE_HOST_FLAGS) $(PI5_FACT_FLAGS) -DCK_FACT_MUTANT_$$m=1 $(DISK_PART_INC) -o $(STAGE_OUT)/pi5_fact_test_mut_$$m $(PI5_FACT_TEST_SRCS) || exit 1; \
+	  if $(STAGE_OUT)/pi5_fact_test_mut_$$m >/dev/null; then echo "MUTANT SURVIVED: $$m"; fail=1; else echo "mutant killed: $$m"; fi; \
+	done; exit $$fail
+stage-test: pi5-fact-test
+stage-sanitize: pi5-fact-sanitize

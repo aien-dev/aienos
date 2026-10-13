@@ -9,6 +9,9 @@
 #include "store_v1.h"
 #include "store_crash.h"
 #include "continuity_boot.h"
+#ifdef CK_PI5_FACT
+#include "pi5_fact.h"
+#endif
 #ifdef CK_SERVICE
 #include "continuity_service.h"
 #endif
@@ -735,6 +738,19 @@ int ck_store_pi5_unlock_run(const disk_dev *d, const uint8_t *secret, const char
 }
 #endif
 
+#ifdef CK_PI5_FACT
+#if !defined(CK_PI5_UNLOCK) || !defined(CK_PI5_UNLOCK_CARD)
+#error "CK_PI5_FACT needs CK_PI5_UNLOCK and CK_PI5_UNLOCK_CARD (production-class Store, card request source)"
+#endif
+int ck_store_pi5_fact_stage(const ck_store_report *r)
+{
+    struct ck_fact_result fr;
+    int rc = ck_pi5_fact_run(r->verdict == CK_SB_COMMITTED ? g_ss : 0, &ck_fact_req_boot, &fr);
+    ck_fact_req_clear();
+    return rc;
+}
+#endif
+
 /* Kernel stage. ck_dev_boot_disk comes from dev/devices.c. */
 const disk_dev *ck_dev_boot_disk(void);
 void ck_dev_nvme_release(void);
@@ -835,6 +851,12 @@ int ck_stage_store(void)
     /* Signed artifact candidates live in this Store: read them while the disk
      * is still bound (the loader verifies them later, as untrusted bytes). */
     ck_art_stage_load(r.verdict == CK_SB_COMMITTED ? g_ss : 0, r.step);
+#ifdef CK_PI5_FACT
+    {
+        int frc = ck_store_pi5_fact_stage(&r);
+        if (frc && rc == 0) rc = frc;
+    }
+#endif
 #ifdef CK_SERVICE
     /* Service lifetime (core/lifecycle.c): an open Store keeps the NVMe bound
      * until the lifecycle stop order releases it, in that order. A refused

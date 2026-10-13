@@ -110,4 +110,32 @@ for combo in "CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_PRODUCTION=1" "CK_PI5_
     if make -n -C "${root}/native/kernel" ${combo} full >/dev/null 2>&1; then echo "FAIL Makefile accepts ${combo}"; fail=1; else echo "PASS Makefile refuses ${combo}"; fi
 done
 test -s "${root}/target/native-kernel-pi5-unlock-card/full-pi5-unlock-card/BOOTAA64.EFI" || { echo "FAIL no pi5-unlock-card BOOTAA64.EFI"; fail=1; }
+# PI5-5: the Cortex fact stage and the FACT.REQ reader exist only in the pi5-fact image.
+make -C "${root}/native/kernel" pi5-fact >/dev/null
+uf="${root}/target/native-kernel-pi5-unlock-card-fact/full-pi5-unlock-card-fact/aienos-ck.elf"
+for s in ck_pi5_fact_run ck_store_pi5_fact_stage ck_boot_fact_req_find ck_fact_req_check ck_store_pi5_unlock_run cx_open_with; do
+    if defined "${uf}" "${s}"; then echo "PASS pi5-fact image defines ${s}"; else echo "FAIL pi5-fact image lacks ${s}"; fail=1; fi
+done
+for s in ck_pi5_fact_run ck_store_pi5_fact_stage ck_boot_fact_req_find ck_fact_req_check cx_open_with; do
+    for other in "${uc}" "${uo}" "${ps}" "${pi5}" "${def}"; do
+        if defined "${other}" "${s}"; then echo "FAIL ${other} defines ${s}"; fail=1; fi
+    done
+done
+echo "PASS no other image (pi5-unlock-card, pi5-unlock, pi5-store, pi5, default) defines the fact stage or its request reader"
+for s in ck_store_test_keys ck_store_test_uuid; do
+    if defined "${uf}" "${s}"; then echo "FAIL pi5-fact image defines ${s}"; fail=1; else echo "PASS pi5-fact image has no ${s}"; fi
+done
+uf_strings="$(strings -a "${uf}")"
+if grep -q "AIEN-TEST-BOOT\|LANE18-TEST-KVOL\|SEED-0B-" <<<"${uf_strings}"; then echo "FAIL pi5-fact image carries a TEST label"; fail=1; else echo "PASS pi5-fact image carries no TEST label (production-class Store)"; fi
+for combo in "CK_PI5_FACT=1" "CK_PI5_UNLOCK=1 CK_PI5_FACT=1" "CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_FACT=1 CK_PI5_STORE=1" "CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_FACT=1 CK_PI5_INFER=1" "CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_FACT=1 CK_PI5_PCIE=1" "CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_FACT=2"; do
+    # shellcheck disable=SC2086
+    if make -n -C "${root}/native/kernel" ${combo} full >/dev/null 2>&1; then echo "FAIL Makefile accepts ${combo}"; fail=1; else echo "PASS Makefile refuses ${combo}"; fi
+done
+for combo in CK_PI5_FACT=1; do
+    for other in CK_PI5_STORE=1 CK_PI5_INFER=1 CK_PI5_PCIE=1; do
+        # shellcheck disable=SC2086
+        if make -n -C "${root}/native/kernel" ${other} ${combo} full >/dev/null 2>&1; then echo "FAIL Makefile accepts ${other} ${combo}"; fail=1; else echo "PASS Makefile refuses ${other} ${combo}"; fi
+    done
+done
+test -s "${root}/target/native-kernel-pi5-unlock-card-fact/full-pi5-unlock-card-fact/BOOTAA64.EFI" || { echo "FAIL no pi5-fact BOOTAA64.EFI"; fail=1; }
 if [[ ${fail} == 0 ]]; then echo "CK_PI5_BUILD: PASS"; else echo "CK_PI5_BUILD: FAIL"; exit 1; fi
