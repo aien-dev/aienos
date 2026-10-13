@@ -1,7 +1,11 @@
 # AIENOS C kernel ("CK") CI: host tests and the QEMU TCG gates.
 #
-# Runs on a GitHub-hosted ARM64 runner (ubuntu-24.04-arm), so the kernel is
+# Runs on ARM64 runners (the runs-on of each job), so the kernel is
 # built natively with the distribution gcc/binutils (no cross toolchain).
+# The work is split into parallel jobs: host (4 make targets), light checks,
+# qemu_checks (3), gates (one job per gate child script, ck_gates.sh --only),
+# and the final job ck, which fails unless all of them succeeded and
+# scripts/ck_shards_verify.sh finds every gate reported exactly once.
 #   1. host unit tests: make test, make sanitize (ASan + UBSan)
 #   2. stage host tests: make stage-test, make stage-sanitize
 #   3. the gate runner's own self-test: scripts/ck_gates.sh --self-test
@@ -41,6 +45,7 @@ on:
       - 'scripts/lib_ck_m1_checks.sh'
       - 'scripts/lib_gate_hold.sh'
       - 'scripts/gate_hold_selftest.sh'
+      - 'scripts/ck_shards_verify.sh'
       - '.github/workflows/ck-kernel.yml'
   pull_request:
     branches: [main]
@@ -54,134 +59,225 @@ on:
       - 'scripts/lib_ck_m1_checks.sh'
       - 'scripts/lib_gate_hold.sh'
       - 'scripts/gate_hold_selftest.sh'
+      - 'scripts/ck_shards_verify.sh'
       - '.github/workflows/ck-kernel.yml'
 
 permissions:
   contents: read
 
+# A newer push to the same pull request cancels the older, still-running run.
+# Pushes to main are never cancelled (each one is a record).
+concurrency:
+  group: ck-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Everything below runs in parallel; the last job (ck) is the single result.
+# The matrix has no max-parallel cap: it starts as many jobs as runners allow.
 jobs:
-  ck:
-    name: C kernel host tests and QEMU gates (ARM64)
+  # Host unit tests, one job per independent make target (make -j; the targets
+  # write only under their own output directory, checked by running twice).
+  host:
+    name: "Host tests (${{ matrix.name }})"
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: plain, targets: "test" }
+          - { name: ASan + UBSan, targets: "sanitize" }
+          - { name: stage plain, targets: "stage-test" }
+          - { name: stage ASan + UBSan, targets: "stage-sanitize" }
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install toolchain, QEMU and AAVMF firmware
+      - uses: actions/checkout@v4
+      - name: Install toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential qemu-system-arm qemu-efi-aarch64 socat
-          uname -m
-          gcc --version | head -1
-          qemu-system-aarch64 --version | head -1
-          ls -l /usr/share/AAVMF/AAVMF_CODE.no-secboot.fd /usr/share/AAVMF/AAVMF_VARS.fd
-
-      - name: Install Rust toolchain (the M0_ROLLBACK stager and Default are the Rust aienos-rollback-mock)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-unknown-uefi
-
-      - name: Host unit tests (plain and ASan + UBSan)
-        run: make -C native/kernel test sanitize
-
-      - name: Stage host tests (plain and ASan + UBSan)
-        run: make -C native/kernel stage-test stage-sanitize
-
-      - name: Vendored Omega Cortex store matches omega.lock (P06 cut 3; shallow fetch of the pinned omega commit)
-        run: bash scripts/omega_lock_check.sh
-
-      - name: "Stage sources compile freestanding (nm -u: ck.h services only)"
-        run: make -C native/kernel stage-free
-
-      - name: Gate runner self-test
-        run: bash scripts/ck_gates.sh --self-test
-
-      - name: Gate hold self-test (quiet flag read only, QEMU gate lock in quietlock record format, aienos#278)
-        run: bash scripts/gate_hold_selftest.sh
-
-      - name: Hardware staging image refuses TEST keys (build only)
-        env:
-          AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
-          AIENOS_GATE_LOCK: ${{ runner.temp }}/qemu-gate-lock
-        run: bash scripts/ck_owner_keys_check.sh
-
-      - name: Hardware inference service image make refusals and the supported line (build only, aienos#34 gate N3)
-        run: bash scripts/qemu_ck_service_disk_test.sh --build-only
-
-      - name: PI5DIAG.EFI QEMU test (AIENOS-PI5-BOOT-0, firmware diagnostic report read back from the image)
-        env:
-          AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
-          AIENOS_GATE_LOCK: ${{ runner.temp }}/qemu-gate-lock
-        run: |
-          sudo apt-get install -y mtools
-          bash scripts/qemu_ck_pi5_diag_test.sh
-
-      - name: C kernel boot on a GICv2 machine (AIENOS-PI5 step 1, the Raspberry Pi 5 GIC-400 shape, QEMU gic-version=2)
-        env:
-          AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
-          AIENOS_GATE_LOCK: ${{ runner.temp }}/qemu-gate-lock
-          AIENOS_QEMU_GIC: "2"
-        run: bash scripts/qemu_ck_boot_test.sh
-
-      - name: Raspberry Pi 5 kernel image builds, and the default image carries none of its board glue (AIENOS-PI5 step 1, build only)
-        run: bash scripts/ck_pi5_build_check.sh
-
+          sudo apt-get install -y build-essential
+      - name: Build and run (make -j)
+        run: make -j"$(nproc)" -C native/kernel ${{ matrix.targets }}
       - name: Check the host tests left the tree clean (the gate runner refuses a dirty tree)
         run: |
           git status --porcelain --untracked-files=normal
           test -z "$(git status --porcelain --untracked-files=normal)"
 
-      - name: QEMU TCG gates
+  # Cheap checks that need no QEMU gate: self-tests, builds, refusals.
+  light:
+    name: Light checks
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential qemu-system-arm qemu-efi-aarch64 socat
+      - name: Vendored Omega Cortex store matches omega.lock (P06 cut 3; shallow fetch of the pinned omega commit)
+        run: bash scripts/omega_lock_check.sh
+      - name: "Stage sources compile freestanding (nm -u: ck.h services only)"
+        run: make -C native/kernel stage-free
+      - name: Gate runner self-test (includes the --only selector)
+        run: bash scripts/ck_gates.sh --self-test
+      - name: Shard verifier self-test
+        run: bash scripts/ck_shards_verify.sh --self-test
+      - name: Gate hold self-test (quiet flag read only, QEMU gate lock in quietlock record format, aienos#278)
+        run: bash scripts/gate_hold_selftest.sh
+      - name: Hardware staging image refuses TEST keys (build only)
+        env:
+          AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
+          AIENOS_GATE_LOCK: ${{ runner.temp }}/qemu-gate-lock
+        run: bash scripts/ck_owner_keys_check.sh
+      - name: Hardware inference service image make refusals and the supported line (build only, aienos#34 gate N3)
+        run: bash scripts/qemu_ck_service_disk_test.sh --build-only
+      - name: Raspberry Pi 5 kernel image builds, and the default image carries none of its board glue (AIENOS-PI5 step 1, build only)
+        run: bash scripts/ck_pi5_build_check.sh
+
+  # The three QEMU checks that are not table gates, one job each.
+  qemu_checks:
+    name: "QEMU check (${{ matrix.name }})"
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: PI5DIAG.EFI
+            run: |
+              sudo apt-get install -y mtools
+              bash scripts/qemu_ck_pi5_diag_test.sh
+          - name: GICv2 boot
+            gic: "2"
+            run: bash scripts/qemu_ck_boot_test.sh
+          - name: B7b probe
+            run: |
+              bash scripts/qemu_ck_b7b_probe_test.sh --self-test
+              bash scripts/qemu_ck_b7b_probe_test.sh
+              bash scripts/qemu_ck_b7b_probe_test.sh --positive
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain, QEMU and AAVMF firmware
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential qemu-system-arm qemu-efi-aarch64 socat
+      - name: Run
+        env:
+          AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
+          AIENOS_GATE_LOCK: ${{ runner.temp }}/qemu-gate-lock
+          AIENOS_QEMU_GIC: ${{ matrix.gic }}
+        run: ${{ matrix.run }}
+
+  # The QEMU TCG gates, one job per child script (a child script can print
+  # several gates, so its gates stay together: running it once is the point).
+  # Each job runs ck_gates.sh --only <its gates>; every other gate prints
+  # NOT_SELECTED. The final job proves every gate was reported exactly once.
+  gates:
+    name: "Gates (${{ matrix.name }})"
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: crash,       gates: "M4_STORE_CRASH" }
+          - { name: slots,       gates: "SLOT_LOADER" }
+          - { name: console,     gates: "CONSOLE" }
+          - { name: allen,       gates: "M4_ALLEN" }
+          - { name: continuity,  gates: "M4_CONTINUITY" }
+          - { name: rollback,    gates: "M0_ROLLBACK", rust: true }
+          - { name: recovery,    gates: "M4_RECOVERY" }
+          - { name: store,       gates: "SMMU,NVME_SHUTDOWN,M4_NVME,M4_STORE,ARGUS1_REVOKE" }
+          - { name: disk,        gates: "DISK_LAYOUT" }
+          - { name: artifact,    gates: "P2_ARTIFACT" }
+          - { name: keyboard,    gates: "KEYBOARD" }
+          - { name: osh_core,    gates: "OSH_CORE" }
+          - { name: net,         gates: "NET" }
+          - { name: screen,      gates: "SCREEN" }
+          - { name: osh_op,      gates: "OSH_OP" }
+          - { name: osc_launch,  gates: "OSC_LAUNCH" }
+          - { name: osc_unit,    gates: "OSC_UNIT" }
+          - { name: boot,        gates: "M1,M3" }
+          - { name: smp,         gates: "SMP" }
+          - { name: fpu_infer,   gates: "FPU,INFER" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain, QEMU and AAVMF firmware
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential qemu-system-arm qemu-efi-aarch64 socat
+      - name: Install Rust toolchain (the M0_ROLLBACK stager and Default are the Rust aienos-rollback-mock)
+        if: matrix.rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-uefi
+      - name: QEMU TCG gates (${{ matrix.gates }})
         env:
           AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
           # Every child takes the QEMU gate lock (scripts/lib_gate_hold.sh); keep it
           # in runner temp rather than ~/workspace.
           AIENOS_GATE_LOCK: ${{ runner.temp }}/qemu-gate-lock
         run: |
-          mkdir -p "${RUNNER_TEMP}/ck-receipt"
+          mkdir -p "${RUNNER_TEMP}/ck-receipt" "${RUNNER_TEMP}/out"
           set +e
-          bash scripts/ck_gates.sh --out "${RUNNER_TEMP}/ck-receipt" | tee "${RUNNER_TEMP}/ck-gates.txt"
+          bash scripts/ck_gates.sh --only "${{ matrix.gates }}" --out "${RUNNER_TEMP}/ck-receipt" \
+              2>"${RUNNER_TEMP}/out/${{ matrix.name }}.log" | tee "${RUNNER_TEMP}/out/${{ matrix.name }}.txt"
           rc=${PIPESTATUS[0]}
           set -e
+          cat "${RUNNER_TEMP}/out/${{ matrix.name }}.log"
           echo "ck_gates.sh exit ${rc}"
           mkdir -p "${RUNNER_TEMP}/ck-receipt/logs"
           cp -r /tmp/ck-gates-work.*/logs/* "${RUNNER_TEMP}/ck-receipt/logs/" 2>/dev/null || true
           [ "${rc}" = 0 ] || exit 1
-          # FPU and INFER are not required: they need the Rust target aarch64-unknown-none (and INFER the 800 MB model file), which this
-          # runner image is not known to have, so it prints NOT_RUN there (aienos#34 lanes 0, 4 and 5; INFER now also
-          # requires the exact llama.cpp token sequence, "Paris" in the decoded text and a clean unload).
-          # SCREEN is required: it needs only QEMU (ramfb), AAVMF and socat (installed above) for the QMP screendump.
-          # Every gate with a C implementation (source != missing in the
-          # ck_gates.sh table) must be PASS.
-          required=$(sed -n "/^CK_GATE_TABLE='/,/^'/p" scripts/ck_gates.sh | awk -F'|' 'NF==3 && $2!="missing" && $1!="FPU" && $1!="INFER" {print $1}')
-          [ -n "${required}" ] || { echo "could not read the gate table"; exit 1; }
+          # Each gate this job selected must be PASS, except FPU and INFER: they need the Rust target
+          # aarch64-unknown-none (and INFER the 800 MB model file), which the runner image is not
+          # known to have, so they print NOT_RUN there (aienos#34 lanes 0, 4 and 5).
           fail=0
-          for g in ${required}; do
-            if grep -q "^AIENOS_CK_${g}: PASS" "${RUNNER_TEMP}/ck-gates.txt"; then
+          for g in $(echo "${{ matrix.gates }}" | tr ',' ' '); do
+            case "${g}" in FPU|INFER) continue ;; esac
+            if grep -q "^AIENOS_CK_${g}: PASS" "${RUNNER_TEMP}/out/${{ matrix.name }}.txt"; then
               echo "required gate ${g}: PASS"
             else
               echo "required gate ${g}: not PASS"; fail=1
             fi
           done
           exit ${fail}
-
-      - name: B7b preparation probe (self-test, Spark-target image refuses on QEMU, TEST-ONLY segment-0 positive path; aienos#286)
-        env:
-          AIENOS_QUIET_FLAG: ${{ runner.temp }}/spark-quiet
-          AIENOS_GATE_LOCK: ${{ runner.temp }}/qemu-gate-lock
-        run: |
-          bash scripts/qemu_ck_b7b_probe_test.sh --self-test
-          bash scripts/qemu_ck_b7b_probe_test.sh
-          bash scripts/qemu_ck_b7b_probe_test.sh --positive
-
+      - name: Upload this job's gate lines
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ck-shard-${{ matrix.name }}
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: warn
       - name: Upload the receipt and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ck-gates-receipt
+          name: ck-gates-receipt-${{ matrix.name }}
           path: |
             ${{ runner.temp }}/ck-receipt/
-            ${{ runner.temp }}/ck-gates.txt
             /tmp/ck-gates-work.*/logs/
           if-no-files-found: warn
+
+  # The single result. Its name is the one the merge process looks for. It
+  # runs even when a job above failed (if: always()) and then fails itself.
+  ck:
+    name: C kernel host tests and QEMU gates (ARM64)
+    needs: [host, light, qemu_checks, gates]
+    if: always()
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every job succeeded
+        env:
+          RESULTS: "host=${{ needs.host.result }} light=${{ needs.light.result }} qemu_checks=${{ needs.qemu_checks.result }} gates=${{ needs.gates.result }}"
+        run: |
+          echo "${RESULTS}"
+          case " ${RESULTS} " in *=failure*|*=cancelled*|*=skipped*) exit 1 ;; esac
+          for r in ${RESULTS}; do [ "${r#*=}" = success ] || exit 1; done
+      - name: Download every gate job's lines
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ck-shard-*
+          path: ${{ runner.temp }}/shards
+      - name: Every gate reported exactly once across the gate jobs
+        run: bash scripts/ck_shards_verify.sh 20 "${RUNNER_TEMP}/shards"

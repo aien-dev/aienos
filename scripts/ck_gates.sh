@@ -32,12 +32,18 @@
 # (~/workspace/.spark-quiet) is held, which every child only reads (no agent
 # raises the quiet flag without Drake's approval). This script takes neither.
 #
-# Usage: bash scripts/ck_gates.sh [--out DIR]
+# Usage: bash scripts/ck_gates.sh [--out DIR] [--only GATE[,GATE...]]
 #        bash scripts/ck_gates.sh --self-test
 #   --out DIR    where the receipt goes (default: evidence/). The receipt
 #                evidence/ck_gates_<sha256 of its content>.json is the only
 #                file a run adds to the tree; an existing receipt is never
 #                overwritten. Child logs stay in a temp folder outside the tree.
+#   --only LIST  run only the listed gates (commas or spaces; env AIENOS_CK_ONLY is the
+#                same). Only the child scripts those gates need run. Every other gate
+#                prints AIENOS_CK_<gate>: NOT_SELECTED (never PASS, never dropped); an
+#                unknown name is refused, exit 2. A selected run never reports
+#                ALL_GATES_PASS; it ends SELECTED_GATES_PASS_QEMU_ONLY or
+#                SELECTED_GATES_NOT_ALL_PASS. No --only: unchanged behavior.
 #   --self-test  checks the verdict parsing with canned child outputs (PASS,
 #                FAIL, NOT_RUN, missing marker, missing script), the receipt
 #                naming and the dirty-tree refusal. Runs no QEMU.
@@ -100,6 +106,10 @@ CONSOLE|console|-
 SLOT_LOADER|slots|-
 '
 CHILDREN=(boot store net artifact smp crash disk cont recov allen kbd fpu infer screen console rollback osc osc_launch osh_core osh_op slots)
+# Gate selection (--only): empty selection means every gate (the default).
+selection_active=0
+declare -A sel_gate=()
+declare -A src_wanted=()
 # ===========================================================================
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -114,6 +124,29 @@ M4_NVME_PASS_NOTE="SMMU-confined NVMe DMA in QEMU (iommu=smmuv3, default build);
 NET_PASS_NOTE="QEMU user networking (slirp), virtio-net with ACCESS_PLATFORM required behind the smmuv3 vIOMMU; this PASS covers: attach, UDP TX seen by the host helper, UDP reply RX parsed by M6-A, an out-of-window device DMA refused (F_TRANSLATION, page intact) and recovery by reset, as checked by this run only; QEMU, not hardware"
 
 die() { echo "ck_gates: $*" >&2; exit 2; }
+
+# parse_selection LIST: LIST is gate names separated by commas or spaces. An
+# unknown name is refused (exit 2); an empty list is refused. Selected-out
+# gates are reported NOT_SELECTED, never PASS and never dropped.
+parse_selection() {
+    local -a names=(); local g
+    read -ra names <<<"${1//,/ }"
+    [[ ${#names[@]} -gt 0 ]] || die "--only needs at least one gate name"
+    for g in "${names[@]}"; do
+        awk -F'|' -v g="${g}" '$1==g {f=1} END {exit !f}' <<<"${CK_GATE_TABLE}" || die "unknown gate in --only: ${g}"
+        sel_gate[${g}]=1
+    done
+    selection_active=1
+}
+# want_sources: which child sources the selected gates need.
+want_sources() {
+    local gate src why
+    src_wanted=()
+    while IFS='|' read -r gate src why; do
+        [[ -n "${gate}" && -n "${sel_gate[${gate}]:-}" ]] && src_wanted[${src}]=1
+    done <<<"${CK_GATE_TABLE}"
+    return 0
+}
 json_str() {
     local s="$1"
     s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//$'\t'/\\t}"; s="${s//$'\r'/}"; s="${s//$'\n'/\\n}"
@@ -169,6 +202,12 @@ run_children() {
         script="${child_script[${c}]}"
         log="${work_dir}/logs/${c}.log"
         child_log[${c}]="${log}"
+        if [[ ${selection_active} == 1 && -z "${src_wanted[${c}]:-}" ]]; then
+            child_present[${c}]=0; child_rc[${c}]=-; child_secs[${c}]=0
+            child_log_sha[${c}]=-; child_lines[${c}]=0; child_script_sha[${c}]=-
+            echo "--- [${c}] not selected: skipped" >&2
+            continue
+        fi
         if [[ ! -f "${script}" ]]; then
             child_present[${c}]=0; child_rc[${c}]=-; child_secs[${c}]=0
             child_log_sha[${c}]=-; child_lines[${c}]=0; child_script_sha[${c}]=-
@@ -255,6 +294,11 @@ evaluate_table() {
     gate_rows=()
     while IFS='|' read -r gate src why; do
         [[ -n "${gate}" ]] || continue
+        if [[ ${selection_active} == 1 && -z "${sel_gate[${gate}]:-}" ]]; then
+            gate_rows+=("${gate}|${src}|NOT_SELECTED|not in this run's --only list")
+            echo "AIENOS_CK_${gate}: NOT_SELECTED (not in this run's --only list)"
+            continue
+        fi
         out="$(classify_gate "${gate}" "${src}" "${why}")"
         v="${out%%|*}"; r="${out#*|}"
         # M4_NVME PASS means the SMMU-confined mode: say so.
@@ -272,7 +316,7 @@ evaluate_table() {
 }
 
 count_rows() {
-    n_pass=0; n_fail=0; n_notrun=0; n_total=0
+    n_pass=0; n_fail=0; n_notrun=0; n_total=0; n_notsel=0
     local row v
     for row in "${gate_rows[@]}"; do
         IFS='|' read -r _ _ v _ <<<"${row}"
@@ -280,10 +324,15 @@ count_rows() {
         case "${v}" in
             PASS) n_pass=$((n_pass + 1)) ;;
             NOT_RUN) n_notrun=$((n_notrun + 1)) ;;
+            NOT_SELECTED) n_notsel=$((n_notsel + 1)) ;;
             *) n_fail=$((n_fail + 1)) ;;
         esac
     done
     if [[ ${n_total} -gt 0 && ${n_pass} == "${n_total}" ]]; then overall=ALL_GATES_PASS_QEMU_ONLY; else overall=NOT_ALL_GATES_PASS; fi
+    if [[ ${selection_active} == 1 ]]; then
+        # A selected run never claims the whole set passed.
+        if [[ ${n_fail} == 0 && ${n_notrun} == 0 && $((n_pass + n_notsel)) == "${n_total}" ]]; then overall=SELECTED_GATES_PASS_QEMU_ONLY; else overall=SELECTED_GATES_NOT_ALL_PASS; fi
+    fi
 }
 
 # --------------------------------------------------------------- receipt
@@ -319,6 +368,7 @@ write_receipt() {
         echo "  \"qemu\": {\"binary\": $(json_str "${q_path}"), \"version\": $(json_str "${q_version}")},"
         echo "  \"firmware\": {\"aavmf_code\": $(json_str "${AAVMF_CODE_FD}"), \"aavmf_code_sha256\": $(json_str "${fw_code_sha}"), \"aavmf_vars\": $(json_str "${AAVMF_VARS_FD}"), \"aavmf_vars_sha256\": $(json_str "${fw_vars_sha}")},"
         echo "  \"nvme_dma_mode\": $(json_str "${dma_mode}"),"
+        if [[ ${selection_active} == 1 ]]; then echo "  \"selection\": $(json_str "$(printf "%s\n" "${!sel_gate[@]}" | sort | paste -sd, -)"),"; fi
         echo "  \"children\": ["
         first=1
         for c in "${CHILDREN[@]}"; do
@@ -340,7 +390,11 @@ write_receipt() {
             [[ $i -lt $((${#gate_rows[@]} - 1)) ]] && echo "," || echo ""
         done
         echo "  ],"
-        echo "  \"counts\": {\"total\": ${n_total}, \"pass\": ${n_pass}, \"fail\": ${n_fail}, \"not_run\": ${n_notrun}},"
+        if [[ ${selection_active} == 1 ]]; then
+            echo "  \"counts\": {\"total\": ${n_total}, \"pass\": ${n_pass}, \"fail\": ${n_fail}, \"not_run\": ${n_notrun}, \"not_selected\": ${n_notsel}},"
+        else
+            echo "  \"counts\": {\"total\": ${n_total}, \"pass\": ${n_pass}, \"fail\": ${n_fail}, \"not_run\": ${n_notrun}},"
+        fi
         echo "  \"verdict\": $(json_str "${overall}"),"
         echo "  \"parity\": \"native/kernel/GATES.md\","
         echo "  \"physical\": \"NOT_RUN\","
@@ -570,6 +624,51 @@ self_test() {
     expect OSH_CORE FAIL
     unset osh_core_kid
 
+    # SEL: gate selection (--only). Selected-out gates are NOT_SELECTED, their
+    # child scripts do not run, and a selection never reads as ALL_GATES_PASS.
+    sel_gate=(); sel_gate[M1]=1; sel_gate[M3]=1; selection_active=1; want_sources
+    scenario SEL1 "$(fake bootS1 0 'AIENOS_CK_M1: PASS' 'AIENOS_CK_M3: PASS')" \
+        "$(fake storeS1 0 'AIENOS_CK_SMMU: PASS' 'AIENOS_CK_M4_NVME: PASS')"
+    expect M1 PASS; expect M3 PASS; expect SMMU NOT_SELECTED; expect M4_NVME NOT_SELECTED; expect SMP NOT_SELECTED
+    [[ "${child_present[store]}" == 0 && "${child_rc[store]}" == - && "${child_present[boot]}" == 1 ]] \
+        && ok "SEL1: the store child was not run, the boot child was" || bad "SEL1: child selection wrong"
+    grep -qxF "AIENOS_CK_SMMU: NOT_SELECTED (not in this run's --only list)" "${tmp}/SEL1.out" \
+        && ok "SEL1: selected-out gate prints an explicit NOT_SELECTED line" || bad "SEL1: no NOT_SELECTED line"
+    [[ "$(grep -c '^AIENOS_CK_' "${tmp}/SEL1.out")" == 26 ]] && ok "SEL1: all 26 gates still reported (none dropped)" || bad "SEL1: gate lines dropped"
+    count_rows
+    [[ "${n_pass}/${n_fail}/${n_notrun}/${n_notsel}/${n_total}" == "2/0/0/24/26" && ${overall} == SELECTED_GATES_PASS_QEMU_ONLY ]] \
+        && ok "SEL1: counts 2 pass, 24 not selected, never ALL_GATES_PASS" || bad "SEL1: counts ${n_pass}/${n_fail}/${n_notrun}/${n_notsel}/${n_total} ${overall}"
+    # SEL2: a selected gate that FAILs fails the run; a selected gate with no
+    # verdict is FAIL, not dropped.
+    scenario SEL2 "$(fake bootS2 1 'AIENOS_CK_M1: FAIL' 'AIENOS_CK_M3: PASS')" "$(fake storeS2 0 'AIENOS_CK_SMMU: PASS')"
+    expect M1 FAIL; expect M3 PASS; count_rows
+    [[ ${n_fail} == 1 && ${overall} == SELECTED_GATES_NOT_ALL_PASS ]] && ok "SEL2: a selected FAIL counts as FAIL" || bad "SEL2: ${n_fail} ${overall}"
+    # SEL3: the complementary selection; the two together report every gate exactly once.
+    sel_gate=(); selection_active=1
+    local gx sx wx
+    while IFS='|' read -r gx sx wx; do [[ -n "${gx}" && "${gx}" != M1 && "${gx}" != M3 ]] && sel_gate[${gx}]=1; done <<<"${CK_GATE_TABLE}"
+    want_sources
+    scenario SEL3 "$(fake bootS3 0 'AIENOS_CK_M1: PASS')" "$(fake storeS3 0 'AIENOS_CK_SMMU: PASS')"
+    expect M1 NOT_SELECTED; expect SMMU PASS
+    local once=1 nsel
+    while IFS='|' read -r gx sx wx; do
+        [[ -n "${gx}" ]] || continue
+        nsel=$(cat "${tmp}/SEL1.out" "${tmp}/SEL3.out" | grep -c "^AIENOS_CK_${gx}: \(PASS\|FAIL\|NOT_RUN\)")
+        [[ "${nsel}" == 1 ]] || { once=0; echo "      ${gx} reported ${nsel} times"; }
+    done <<<"${CK_GATE_TABLE}"
+    [[ ${once} == 1 ]] && ok "SEL3: two complementary selections report every gate exactly once" || bad "SEL3: a gate was dropped or doubled"
+    # Negative control: an unknown gate name is refused (exit 2), an empty list too.
+    sel_gate=(); selection_active=0
+    ( parse_selection "M1,NO_SUCH_GATE" ) >/dev/null 2>&1; rc=$?
+    [[ ${rc} == 2 ]] && ok "negative control: unknown gate name refused, exit 2" || bad "unknown gate name gave exit ${rc}"
+    ( parse_selection "  " ) >/dev/null 2>&1; rc=$?
+    [[ ${rc} == 2 ]] && ok "negative control: empty gate list refused, exit 2" || bad "empty list gave exit ${rc}"
+    bash "${BASH_SOURCE[0]}" --only "M1,m3" >/dev/null 2>&1; rc=$?
+    [[ ${rc} == 2 ]] && ok "negative control: --only with a wrong-case name refused end to end, exit 2" || bad "--only wrong case gave exit ${rc}"
+    bash "${BASH_SOURCE[0]}" --only "" >/dev/null 2>&1; rc=$?
+    [[ ${rc} == 2 ]] && ok "negative control: --only with an empty value refused end to end, exit 2" || bad "--only '' gave exit ${rc}"
+    sel_gate=(); src_wanted=(); selection_active=0
+
     # Receipt: named by its content hash, valid JSON, physical NOT_RUN, never overwritten.
     scenario R "$(fake bootR 0 'AIENOS_CK_M1: PASS')" "$(fake storeR 0 'AIENOS_CK_M4_NVME: PASS')"
     count_rows
@@ -647,17 +746,20 @@ self_test() {
 
 # ---------------------------------------------------------------------- main
 main() {
-    local out_arg="" mode=full
+    local out_arg="" mode=full only_arg=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --out) [[ $# -ge 2 ]] || die "--out needs a directory"; out_arg="$2"; shift ;;
             --self-test) mode=self ;;
-            -h|--help) sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+            --only) [[ $# -ge 2 && -n "$2" ]] || die "--only needs a gate list"; only_arg="$2"; shift ;;
+            -h|--help) sed -n '2,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
             *) die "unknown argument: $1" ;;
         esac
         shift
     done
     if [[ ${mode} == self ]]; then self_test; fi
+    [[ -n "${only_arg}" || -z "${AIENOS_CK_ONLY:-}" ]] || only_arg="${AIENOS_CK_ONLY}"
+    if [[ -n "${only_arg}" ]]; then parse_selection "${only_arg}"; want_sources; fi
 
     refuse_if_dirty "${repo_root}"
     local before; before="$(tree_state "${repo_root}")"
@@ -694,7 +796,11 @@ main() {
     echo "NVMe DMA mode: ${dma_mode}"
     echo "Child logs: ${work_dir}/logs"
     echo "Receipt: ${receipt_path}"
-    echo "AIENOS_CK_GATES: ${overall} (pass=${n_pass} fail=${n_fail} not_run=${n_notrun} of ${n_total}; physical NOT_RUN)"
+    if [[ ${selection_active} == 1 ]]; then
+        echo "AIENOS_CK_GATES: ${overall} (pass=${n_pass} fail=${n_fail} not_run=${n_notrun} not_selected=${n_notsel} of ${n_total}; physical NOT_RUN)"
+    else
+        echo "AIENOS_CK_GATES: ${overall} (pass=${n_pass} fail=${n_fail} not_run=${n_notrun} of ${n_total}; physical NOT_RUN)"
+    fi
     [[ ${n_fail} == 0 && ${tree_clean_after} == true ]] && exit 0 || exit 1
 }
 
