@@ -23,6 +23,8 @@
 #include "../dev/pi5_wdt.h"
 #include "disk.h"
 #include "disk_sdhci.h"
+#include "pi5_marker.h"
+#include "../dev/disk_part.h"
 
 #define PI5_SD_PHYS 0x1000fff000ull
 #define PI5_SD_CLOCK_HZ 200000000u
@@ -67,6 +69,27 @@ void ck_pi5_start(void)
     rc = disk_read(&sd.dev, 0, 1, s0);
     ck_printf("pi5_sd: read sector 0 rc=%d signature=%02x%02x (%s)\n", rc, s0[510], s0[511],
               rc == 0 && s0[510] == 0x55 && s0[511] == 0xaa ? "MBR ok" : "no MBR signature");
+    /* Step 3: the AIENOS partition through the same GPT partition view the NVMe path uses (dev/disk_part.c),
+     * then the scratch marker at its end (core/pi5_marker.c): formatted on a blank card, reopened after a reboot. */
+    static ck_part part;
+    ck_gpt_info gi;
+    rc = ck_gpt_find_aienos(&sd.dev, &part, &gi);
+    if (rc) {
+        ck_printf("pi5_part: no AIENOS partition, refusing writes (%s, rc=%d)\n", ck_gpt_strerror(rc), rc);
+        return;
+    }
+    ck_printf("pi5_part: AIENOS partition first_lba=%llu blocks=%llu (%llu MiB) entries_used=%u index=%u via GPT (CRC32 primary+backup ok)\n",
+              (unsigned long long)part.first_lba, (unsigned long long)part.blocks,
+              (unsigned long long)(part.blocks / 2048u), gi.used, gi.part_index);
+    static uint8_t mbuf[CK_PI5_MARKER_BUF_BYTES] __attribute__((aligned(64)));
+    uint64_t gen = 0;
+    rc = ck_pi5_marker_run(&part.dev, mbuf, &gen);
+    if (rc > 0)
+        ck_printf("pi5_store_layer: %s generation=%llu region=%u sectors at partition block %llu\n",
+                  ck_pi5_marker_strerror(rc), (unsigned long long)gen, CK_PI5_MARKER_SECS,
+                  (unsigned long long)(part.blocks - CK_PI5_MARKER_SECS));
+    else
+        ck_printf("pi5_store_layer: FAIL rc=%d (%s)\n", rc, ck_pi5_marker_strerror(rc));
 }
 
 void ck_pi5_stage(const char *name)
