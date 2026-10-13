@@ -235,7 +235,7 @@ ifneq ($(strip $(CK_SERVICE)$(CK_TEST_STORE_CRASH)$(CK_TEST_CONTINUITY)$(CK_HARD
 $(error CK_PI5_UNLOCK cannot be combined with CK_SERVICE, CK_SERVICE_TEST_KEYS, CK_TEST_STORE_CRASH, CK_TEST_CONTINUITY or CK_HARDWARE_STAGING)
 endif
 CK_PI5 := 1
-OUT ?= $(REPO)/target/native-kernel-pi5-unlock$(if $(strip $(CK_PI5_UNLOCK_CARD)),-card)$(if $(strip $(CK_PI5_FACT)),-fact)$(if $(strip $(CK_PI5_AGENT)),-agent)
+OUT ?= $(REPO)/target/native-kernel-pi5-unlock$(if $(strip $(CK_PI5_UNLOCK_CARD)),-card)$(if $(strip $(CK_PI5_FACT)),-fact)$(if $(strip $(CK_PI5_AGENT)),-agent)$(if $(strip $(CK_PI5_LIFECYCLE)),-lifecycle)
 CK_EXTRA_CFLAGS += -DCK_PI5_UNLOCK=1
 ifneq ($(strip $(CK_PI5_UNLOCK_CARD)),)
 CK_EXTRA_CFLAGS += -DCK_PI5_UNLOCK_CARD=1
@@ -255,8 +255,8 @@ endif
 ifneq ($(strip $(CK_PI5_UNLOCK))$(strip $(CK_PI5_UNLOCK_CARD)),11)
 $(error CK_PI5_FACT (Cortex fact stage, QUALIFICATION ONLY) needs CK_PI5_UNLOCK=1 and CK_PI5_UNLOCK_CARD=1)
 endif
-ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)$(CK_PI5_NET)$(CK_PI5_AGENT)),)
-$(error CK_PI5_FACT cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_PCIE, CK_PI5_NET or CK_PI5_AGENT)
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)$(CK_PI5_NET)$(CK_PI5_AGENT)$(CK_PI5_LIFECYCLE)),)
+$(error CK_PI5_FACT cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_PCIE, CK_PI5_NET, CK_PI5_AGENT or CK_PI5_LIFECYCLE)
 endif
 CK_EXTRA_CFLAGS += -DCK_PI5_FACT=1
 endif
@@ -274,13 +274,38 @@ endif
 ifneq ($(strip $(CK_PI5_UNLOCK))$(strip $(CK_PI5_UNLOCK_CARD)),11)
 $(error CK_PI5_AGENT (Store plus inference, QUALIFICATION ONLY) needs CK_PI5_UNLOCK=1 and CK_PI5_UNLOCK_CARD=1)
 endif
-ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)$(CK_PI5_NET)$(CK_PI5_FACT)$(CK_SERVICE)$(CK_HARDWARE_STAGING)$(CK_TEST_FWCFG_ARTIFACTS)),)
-$(error CK_PI5_AGENT cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_PCIE, CK_PI5_NET, CK_PI5_FACT, CK_SERVICE, CK_HARDWARE_STAGING or CK_TEST_FWCFG_ARTIFACTS)
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)$(CK_PI5_NET)$(CK_PI5_FACT)$(CK_PI5_LIFECYCLE)$(CK_SERVICE)$(CK_HARDWARE_STAGING)$(CK_TEST_FWCFG_ARTIFACTS)),)
+$(error CK_PI5_AGENT cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_PCIE, CK_PI5_NET, CK_PI5_FACT, CK_PI5_LIFECYCLE, CK_SERVICE, CK_HARDWARE_STAGING or CK_TEST_FWCFG_ARTIFACTS)
 endif
 ifeq ($(strip $(CK_INFER_LIB)),)
 $(error CK_PI5_AGENT needs CK_INFER_LIB=<libaienos_infer_kernel.a> (use "make pi5-agent", which builds it))
 endif
 CK_EXTRA_CFLAGS += -DCK_PI5_AGENT=1 -DCK_INFER_DISK_ONLY=1 -DCK_INFER_RESIDENT=1
+endif
+
+# Pi resident-lifecycle image (CK_PI5_LIFECYCLE=1, "make pi5-lifecycle", PI5-7 cut 2, QUALIFICATION ONLY while the secret comes from the
+# card request file): the Pi unlock-card image (production-class Store opened by the Slot 1 recovery secret) plus the resident
+# production lifecycle (core/lifecycle.c: remember, prefer, update, recall, approve, status, help, N3 context assembly) plus the resident
+# inference unit (CK_INFER_LIB, model from MODEL.MAP only). Nothing reads the Pi's serial port, so the lifecycle takes its lines from the
+# card command script \EFI\AIENOS\AGENT.CMD (core/agent_cmd.h) instead of the console and then runs its stop order. The lifecycle sources
+# are the CK_SERVICE ones (-DCK_SERVICE=1 reaches only the stage sources, see the service block below); the secret still comes from the
+# card (unlock and rotate are not script verbs). Needs CK_PI5_UNLOCK=1, CK_PI5_UNLOCK_CARD=1 and CK_INFER_LIB, refuses every other tier
+# flag and has its own OUT.
+CK_PI5_LIFECYCLE ?=
+ifneq ($(strip $(CK_PI5_LIFECYCLE)),)
+ifneq ($(strip $(CK_PI5_LIFECYCLE)),1)
+$(error CK_PI5_LIFECYCLE must be empty or 1)
+endif
+ifneq ($(strip $(CK_PI5_UNLOCK))$(strip $(CK_PI5_UNLOCK_CARD)),11)
+$(error CK_PI5_LIFECYCLE (resident lifecycle, QUALIFICATION ONLY) needs CK_PI5_UNLOCK=1 and CK_PI5_UNLOCK_CARD=1)
+endif
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)$(CK_PI5_NET)$(CK_PI5_FACT)$(CK_PI5_AGENT)$(CK_SERVICE)$(CK_SERVICE_TEST_KEYS)$(CK_HARDWARE_STAGING)$(CK_TEST_FWCFG_ARTIFACTS)),)
+$(error CK_PI5_LIFECYCLE cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_PCIE, CK_PI5_NET, CK_PI5_FACT, CK_PI5_AGENT, CK_SERVICE, CK_SERVICE_TEST_KEYS, CK_HARDWARE_STAGING or CK_TEST_FWCFG_ARTIFACTS)
+endif
+ifeq ($(strip $(CK_INFER_LIB)),)
+$(error CK_PI5_LIFECYCLE needs CK_INFER_LIB=<libaienos_infer_kernel.a> (use "make pi5-lifecycle", which builds it))
+endif
+CK_EXTRA_CFLAGS += -DCK_PI5_LIFECYCLE=1 -DCK_INFER_DISK_ONLY=1 -DCK_INFER_RESIDENT=1
 endif
 CK_PI5 ?=
 ifneq ($(strip $(CK_PI5)),)
@@ -812,6 +837,9 @@ endif
 ifneq ($(strip $(CK_PI5_FACT)),)
 CORE_C += $(BOOT)/efi_fact.c $(KDIR)/core/fact_req.c
 endif
+ifneq ($(strip $(CK_PI5_LIFECYCLE)),)
+CORE_C += $(BOOT)/efi_agentcmd.c $(KDIR)/core/agent_cmd.c
+endif
 # P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
 # (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
 # the loader; the TEST-anchor qualification build is CK_SEED0B_TEST_ANCHOR=1.
@@ -882,7 +910,8 @@ STAGE_SRCS += $(KDIR)/svc/continuity_codec.c $(KDIR)/svc/continuity_resolve.c \
 	$(KDIR)/svc/continuity_resolve_sealed.c $(KDIR)/svc/continuity_commit.c $(KDIR)/svc/continuity_recovery.c \
 	$(KDIR)/svc/continuity_boot.c $(KDIR)/svc/continuity_subject.c $(KDIR)/svc/continuity_subject_provision.c
 endif
-ifeq ($(strip $(CK_SERVICE)),1)
+ifneq ($(strip $(CK_SERVICE)$(CK_PI5_LIFECYCLE)),)
+SVC_STAGE_BASE := $(STAGE_SRCS)
 # Own OUT subdirectory: service objects never mix with a diagnostic image.
 ifeq ($(strip $(CK_SERVICE_TEST_KEYS)),1)
 FULL_NAME := full-service-testkeys
@@ -917,6 +946,8 @@ SVC_SLOT_KEYS_C := $(OUT)/gen-$(FULL_NAME)/svc_slot_keys.c
 STAGE_SRCS += $(SVC_SLOT_KEYS_C)
 STAGE_DMA_FLAGS += -DCK_SLOT_UPDATE_KEYS=1
 endif
+# The sources this block added: the Pi block below restarts STAGE_SRCS, the lifecycle image takes them over.
+SVC_STAGE_ADDED := $(filter-out $(SVC_STAGE_BASE),$(STAGE_SRCS))
 endif
 ifeq ($(strip $(CK_TEST_DISK_XLATE_BYPASS)),1)
 FULL_NAME := $(FULL_NAME)-test-xlate-bypass
@@ -928,7 +959,7 @@ endif
 # Pi path). core/pi5.c supplies ck_dev_boot_disk and ck_dev_nvme_release over the SD partition view.
 FULL_STAGE_SYMS := ck_stage_devices ck_stage_security ck_stage_store ck_stage_quiesce ck_stage_disk_artifacts
 ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_UNLOCK)),)
-FULL_NAME := $(if $(strip $(CK_PI5_UNLOCK)),full-pi5-unlock$(if $(strip $(CK_PI5_UNLOCK_CARD)),-card)$(if $(strip $(CK_PI5_FACT)),-fact)$(if $(strip $(CK_PI5_AGENT)),-agent),full-pi5-store)
+FULL_NAME := $(if $(strip $(CK_PI5_UNLOCK)),full-pi5-unlock$(if $(strip $(CK_PI5_UNLOCK_CARD)),-card)$(if $(strip $(CK_PI5_FACT)),-fact)$(if $(strip $(CK_PI5_AGENT)),-agent)$(if $(strip $(CK_PI5_LIFECYCLE)),-lifecycle),full-pi5-store)
 FULL_STAGE_SYMS := ck_stage_store ck_stage_disk_artifacts
 STAGE_SRCS := $(KDIR)/svc/store_boot.c $(KDIR)/svc/artifact_store.c $(KDIR)/svc/store_crash.c $(KDIR)/svc/ck_compat.c \
   $(foreach m,store/store_v1 store/store_engine store/store_disk store/store_sealed store/torn_slot m5/m5_keys m5/m5_envelope m5/m5_state crypto/aes crypto/polyval crypto/gcm_siv crypto/hmac crypto/ct argus/sha256,$(NATIVE)/$(m).c)
@@ -937,6 +968,10 @@ STAGE_SRCS += $(KDIR)/svc/pi5_fact.c $(STAGE_CORTEX_SRCS)
 endif
 ifneq ($(strip $(CK_PI5_AGENT)),)
 STAGE_SRCS += $(KDIR)/svc/pi5_agent.c
+endif
+ifneq ($(strip $(CK_PI5_LIFECYCLE)),)
+# The NVMe image-slot service is not part of the Pi image: its four hooks are answered by svc/slot_service_pi5.c.
+STAGE_SRCS += $(filter-out $(KDIR)/svc/slot_service.c $(BOOT)/slot_select.c $(BOOT)/slot_control.c $(BOOT)/slot_update.c,$(SVC_STAGE_ADDED)) $(KDIR)/svc/slot_service_pi5.c
 endif
 endif
 FULL_OUT := $(OUT)/$(FULL_NAME)
@@ -1028,7 +1063,7 @@ $(foreach s,$(STAGE_SRCS),$(eval $(call stage_rule,$(s))))
 # with inference (CK_INFER_LIB + CK_HARDWARE_STAGING, boot-disk only) must
 # carry the boot-disk source line, the resident session, and no fw_cfg code.
 define fwcfg_check
-	@if [ -n "$(strip $(CK_INFER_LIB))" ] && [ -z "$(strip $(CK_HARDWARE_STAGING))" ] && [ -z "$(strip $(CK_PI5_INFER))" ] && [ -z "$(strip $(CK_PI5_AGENT))" ]; then \
+	@if [ -n "$(strip $(CK_INFER_LIB))" ] && [ -z "$(strip $(CK_HARDWARE_STAGING))" ] && [ -z "$(strip $(CK_PI5_INFER))" ] && [ -z "$(strip $(CK_PI5_AGENT))" ] && [ -z "$(strip $(CK_PI5_LIFECYCLE))" ]; then \
 	  grep -aqF "TEST-ONLY QEMU fw_cfg model ingest" $(1) || { echo "inference probe image lacks its TEST-ONLY fw_cfg announcement"; rm -f $(1); exit 1; }; \
 	elif [ "$(strip $(CK_TEST_FWCFG_ARTIFACTS))" = 1 ]; then \
 	  grep -aqF "TEST-ONLY QEMU fw_cfg side channel" $(1) || { echo "test fw_cfg image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
@@ -1064,7 +1099,7 @@ endef
 # service_check(elf): only a CK_SERVICE image may carry the resident lifecycle;
 # only a CK_SERVICE_TEST_KEYS image its TEST-ONLY banner.
 define service_check
-	@if [ "$(strip $(CK_SERVICE))" = 1 ]; then \
+	@if [ "$(strip $(CK_SERVICE))" = 1 ] || [ -n "$(strip $(CK_PI5_LIFECYCLE))" ]; then \
 	  grep -aqF "lifecycle: ready" $(1) || { echo "service image lacks the resident lifecycle"; rm -f $(1); exit 1; }; \
 	else \
 	  if grep -aqF "lifecycle: ready" $(1); then echo "diagnostic image carries the resident lifecycle"; rm -f $(1); exit 1; fi; \
@@ -1164,7 +1199,7 @@ define cont_check
 	  grep -aqF "TEST-ONLY continuity mode selection image" $(1) || { echo "TEST continuity image lacks its TEST-ONLY announcement"; rm -f $(1); exit 1; }; \
 	else \
 	  m="|TEST-ONLY MUTANT"; [ "$(strip $(CK_TEST_STORE_CRASH))" = 1 ] && m=""; \
-	  if [ "$(strip $(CK_SERVICE))" = 1 ]; then \
+	  if [ "$(strip $(CK_SERVICE))" = 1 ] || [ -n "$(strip $(CK_PI5_LIFECYCLE))" ]; then \
 	    s=$$(grep -aoE "AIENCONT|RECOVERY_OPERATOR_KEY|RECOVERY_CORE:|CONTINUITY: $$m" $(1) | sort -u | tr "\n" " "); \
 	    y=$$($(KNM) $(1) | grep -E " (ck_cont_boot_stage|rc_inspect)$$" | tr "\n" " "); \
 	    grep -aqF "continuity: REFUSED" $(1) || { echo "service image lacks the production continuity wiring"; rm -f $(1); exit 1; }; \
@@ -1231,10 +1266,10 @@ $(FULL_EFI): $(FULL_ELF)
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
 	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/acpi_dev.c $(KDIR)/core/lifecycle_fsm.c \
-	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c $(KDIR)/core/unlock_req.c
+	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c $(KDIR)/core/unlock_req.c $(KDIR)/core/agent_cmd.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_pi5_net test_unlock_req test_context
+	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_pi5_net test_unlock_req test_context test_agent_cmd
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -1287,6 +1322,16 @@ $(OUT)/host/test_context_mutant: $(KDIR)/tests/test_context.c $(CONTEXT_SRCS) $(
 context-mutant: $(OUT)/host/test_context_mutant
 	@if $< > $<.log 2>&1; then cat $<.log; echo "test_context mutant (foreign binding check skipped): PASSED, test does not catch it"; exit 1; \
 	else grep -F "test_context: FAIL" $<.log && echo "test_context mutant (foreign binding check skipped): FAILS as required"; fi
+
+# PI5-7 cut 2 card command script parser (core/agent_cmd.c): the mutant accepts any word as a verb (a script could then carry unlock
+# or rotate); test_agent_cmd must FAIL against it (red before green). Host only, never part of an image.
+$(OUT)/host/test_agent_cmd_mutant: $(KDIR)/tests/test_agent_cmd.c $(KDIR)/core/agent_cmd.c $(KDIR)/core/agent_cmd.h $(KDIR)/tests/ck_test.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -DCK_AGENT_CMD_MUTANT_ANY_VERB -o $@ $< $(KDIR)/core/agent_cmd.c
+
+agent-cmd-mutant: $(OUT)/host/test_agent_cmd_mutant
+	@if $< > $<.log 2>&1; then cat $<.log; echo "test_agent_cmd mutant (any verb allowed): PASSED, test does not catch it"; exit 1; \
+	else grep -F "test_agent_cmd: FAIL" $<.log && echo "test_agent_cmd mutant (any verb allowed): FAILS as required"; fi
 
 # TEST-ONLY mutant of core/handoff_check.c (reserved0 check removed): the
 # handoff test must FAIL against it, so "make test" fails if the test stops
@@ -1366,8 +1411,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -2015,6 +2060,10 @@ pi5-agent:
 	CARGO_TARGET_DIR=$(REPO)/target/infer-kernel cargo build -q --release --target aarch64-unknown-none --manifest-path $(REPO)/crates/aienos-infer-kernel/Cargo.toml
 	$(MAKE) CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_AGENT=1 CK_INFER_LIB=$(PI5_INFER_LIB) full
 
+pi5-lifecycle:
+	CARGO_TARGET_DIR=$(REPO)/target/infer-kernel cargo build -q --release --target aarch64-unknown-none --manifest-path $(REPO)/crates/aienos-infer-kernel/Cargo.toml
+	$(MAKE) CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_LIFECYCLE=1 CK_INFER_LIB=$(PI5_INFER_LIB) full
+
 pi5:
 	$(MAKE) CK_PI5=1 all
 
@@ -2073,7 +2122,7 @@ $(OUT)/host-san/test_pi5_rng: $(KDIR)/tests/test_pi5_rng.c $(PI5_RNG_SRCS) $(KDI
 
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
-.PHONY: all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact pi5-agent test sanitize context-mutant cortex-image handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact pi5-agent pi5-lifecycle test sanitize context-mutant agent-cmd-mutant cortex-image handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
 
 # AIENOS-PI5 step 3 marker + Pi card GPT test (hosted; a file stands in for the card, QEMU cannot model the Pi SD host).
 PI5_MARKER_SRCS := $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \

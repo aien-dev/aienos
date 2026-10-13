@@ -39,8 +39,11 @@
  * (ck_store_pi5_unlock_run). No TEST keys, no TEST uuid are compiled, and the policy is the
  * hardware one: TEST-identity keys are refused before any disk access. It needs no owner
  * provisioning header (the store uuid is drawn at genesis or read from the manifest). */
-#if defined(CK_STORE_TEST_KEYS) || defined(CK_PI5_STORE) || defined(CK_TEST_STORE_CRASH) || defined(CK_SERVICE)
-#error "CK_PI5_UNLOCK cannot be combined with TEST keys, CK_PI5_STORE, CK_TEST_STORE_CRASH or CK_SERVICE"
+#if defined(CK_STORE_TEST_KEYS) || defined(CK_PI5_STORE) || defined(CK_TEST_STORE_CRASH) || (defined(CK_SERVICE) && !defined(CK_PI5_LIFECYCLE))
+#error "CK_PI5_UNLOCK cannot be combined with TEST keys, CK_PI5_STORE, CK_TEST_STORE_CRASH or CK_SERVICE (the one exception: the CK_PI5_LIFECYCLE qualification image, whose lifecycle sources are the CK_SERVICE ones)"
+#endif
+#if defined(CK_PI5_LIFECYCLE) && (!defined(CK_SERVICE) || !defined(CK_PI5_UNLOCK_CARD) || defined(CK_SERVICE_TEST_KEYS))
+#error "CK_PI5_LIFECYCLE needs CK_SERVICE sources, CK_PI5_UNLOCK_CARD (card secret) and no TEST keys"
 #endif
 #define CK_SB_HW 1
 #else
@@ -825,7 +828,7 @@ int ck_stage_store(void)
         }
     }
 #endif
-#if defined(CK_SERVICE) && !defined(CK_SERVICE_TEST_KEYS)
+#if defined(CK_SERVICE) && !defined(CK_SERVICE_TEST_KEYS) && !defined(CK_PI5_UNLOCK)
     /* Production service image without owner provisioning: the production
      * key source only (it refuses today: no in-kernel K_vol unwrap, P04). No
      * TEST key is ever used here. */

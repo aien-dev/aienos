@@ -189,4 +189,41 @@ for tier in CK_PI5_INFER=1 CK_PI5_PCIE=1 CK_PI5_FACT=1; do
     if make -n -C "${root}/native/kernel" ${tier} CK_PI5_AGENT=1 CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_INFER_LIB=/x/l.a full >/dev/null 2>&1; then echo "FAIL Makefile accepts ${tier} with CK_PI5_AGENT=1"; fail=1; fi
 done
 test -s "${root}/target/native-kernel-pi5-unlock-card-agent/full-pi5-unlock-card-agent/BOOTAA64.EFI" || { echo "FAIL no pi5-agent BOOTAA64.EFI"; fail=1; }
+# PI5-7 cut 2: the resident lifecycle driven by the card command script exists only in the pi5-lifecycle image.
+make -C "${root}/native/kernel" pi5-lifecycle >/dev/null
+ul="${root}/target/native-kernel-pi5-unlock-card-lifecycle/full-pi5-unlock-card-lifecycle/aienos-ck.elf"
+for s in ck_lifecycle_run ck_boot_agent_cmd_find ck_agent_cmd_parse ck_cont_service_start ck_ctx_finish ck_infer_prompt ck_infer_resident_close ck_store_pi5_unlock_run ck_boot_unlock_req_find ck_slot_service_update cx_open_with; do
+    if defined "${ul}" "${s}"; then echo "PASS pi5-lifecycle image defines ${s}"; else echo "FAIL pi5-lifecycle image lacks ${s}"; fail=1; fi
+done
+for s in ck_lifecycle_run ck_boot_agent_cmd_find ck_agent_cmd_parse ck_cont_service_start ck_slot_service_update; do
+    for other in "${ua}" "${uf}" "${uc}" "${uo}" "${ps}" "${pi5}" "${pinf}" "${def}"; do
+        if defined "${other}" "${s}"; then echo "FAIL ${other} defines ${s}"; fail=1; fi
+    done
+done
+echo "PASS no other Pi image (pi5-agent, pi5-fact, pi5-unlock-card, pi5-unlock, pi5-store, pi5, pi5-infer) nor the default image defines the lifecycle or its script reader"
+for s in ck_pi5_agent_run ck_store_pi5_agent_stage ck_pi5_fact_run ck_boot_fact_req_find ck_store_test_keys ck_store_test_uuid ck_slot_boot_capture ck_rc_inspect rc_inspect ck_cont_boot_stage fw_dma_read fwcfg_from_dsdt; do
+    if defined "${ul}" "${s}"; then echo "FAIL pi5-lifecycle image defines ${s}"; fail=1; else echo "PASS pi5-lifecycle image has no ${s}"; fi
+done
+ul_strings="$(strings -a "${ul}")"
+if grep -q "AIEN-TEST-BOOT\|LANE18-TEST-KVOL\|SEED-0B-\|TEST-ONLY service image" <<<"${ul_strings}"; then echo "FAIL pi5-lifecycle image carries a TEST label"; fail=1; else echo "PASS pi5-lifecycle image carries no TEST label (production-class Store)"; fi
+if grep -q "infer_source_mode: boot-disk model" <<<"${ul_strings}" && ! grep -q "opt/aienos/model\|TEST-ONLY QEMU fw_cfg" <<<"${ul_strings}"; then echo "PASS pi5-lifecycle image reads the model from the boot disk only (no fw_cfg source)"; else echo "FAIL pi5-lifecycle image model source"; fail=1; fi
+if grep -q "QUALIFICATION ONLY, throwaway secret" <<<"${ul_strings}"; then echo "PASS the loud unlock_source label is in the pi5-lifecycle image"; else echo "FAIL pi5-lifecycle image lacks the unlock_source label"; fail=1; fi
+if grep -q "card command script AGENT.CMD, QUALIFICATION ONLY" <<<"${ul_strings}"; then echo "PASS the loud command-script label is in the pi5-lifecycle image"; else echo "FAIL pi5-lifecycle image lacks the command-script label"; fail=1; fi
+# the lifecycle image never reads the console: no serial input line in the image, the script is the only input.
+if grep -q "operator input: serial" <<<"${ul_strings}"; then echo "FAIL pi5-lifecycle image carries the serial input path"; fail=1; else echo "PASS pi5-lifecycle image has no serial operator input"; fi
+if make -n -C "${root}/native/kernel" CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_LIFECYCLE=1 CK_INFER_LIB=/nonexistent/lib.a full >/dev/null 2>&1; then echo "PASS Makefile accepts CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_LIFECYCLE=1 CK_INFER_LIB=<lib>"; else echo "FAIL Makefile refuses the pi5-lifecycle flag set"; fail=1; fi
+for combo in "CK_PI5_LIFECYCLE=1" "CK_PI5_UNLOCK=1 CK_PI5_LIFECYCLE=1 CK_INFER_LIB=/x/l.a" "CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_LIFECYCLE=1" "CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_LIFECYCLE=2 CK_INFER_LIB=/x/l.a" "CK_PI5_UNLOCK_CARD=1 CK_PI5_LIFECYCLE=1 CK_INFER_LIB=/x/l.a"; do
+    # shellcheck disable=SC2086
+    if make -n -C "${root}/native/kernel" ${combo} full >/dev/null 2>&1; then echo "FAIL Makefile accepts ${combo}"; fail=1; else echo "PASS Makefile refuses ${combo}"; fi
+done
+for other in CK_PI5_STORE=1 CK_PI5_INFER=1 CK_PI5_PCIE=1 CK_PI5_FACT=1 CK_PI5_AGENT=1 CK_SERVICE=1 CK_SERVICE_TEST_KEYS=1 CK_HARDWARE_STAGING=1 CK_TEST_FWCFG_ARTIFACTS=1; do
+    # shellcheck disable=SC2086
+    if make -n -C "${root}/native/kernel" ${other} CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_LIFECYCLE=1 CK_INFER_LIB=/x/l.a full >/dev/null 2>&1; then echo "FAIL Makefile accepts ${other} with CK_PI5_LIFECYCLE=1"; fail=1; else echo "PASS Makefile refuses ${other} with CK_PI5_LIFECYCLE=1"; fi
+done
+# the other direction: the older Pi tiers refuse the lifecycle flag too.
+for tier in CK_PI5_INFER=1 CK_PI5_PCIE=1 CK_PI5_FACT=1 CK_PI5_AGENT=1; do
+    # shellcheck disable=SC2086
+    if make -n -C "${root}/native/kernel" ${tier} CK_PI5_LIFECYCLE=1 CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_INFER_LIB=/x/l.a full >/dev/null 2>&1; then echo "FAIL Makefile accepts ${tier} with CK_PI5_LIFECYCLE=1"; fail=1; fi
+done
+test -s "${root}/target/native-kernel-pi5-unlock-card-lifecycle/full-pi5-unlock-card-lifecycle/BOOTAA64.EFI" || { echo "FAIL no pi5-lifecycle BOOTAA64.EFI"; fail=1; }
 if [[ ${fail} == 0 ]]; then echo "CK_PI5_BUILD: PASS"; else echo "CK_PI5_BUILD: FAIL"; exit 1; fi
