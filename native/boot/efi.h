@@ -114,6 +114,18 @@ typedef struct {
     EFI_CONFIGURATION_TABLE *ConfigurationTable;
 } EFI_SYSTEM_TABLE;
 
+/* Runtime services: only ResetSystem is typed (UEFI 2.x section 8.5.1). */
+typedef enum { EfiResetCold, EfiResetWarm, EfiResetShutdown, EfiResetPlatformSpecific } EFI_RESET_TYPE;
+typedef struct {
+    EFI_TABLE_HEADER Hdr;
+    void *GetTime, *SetTime, *GetWakeupTime, *SetWakeupTime;
+    void *SetVirtualAddressMap, *ConvertPointer;
+    void *GetVariable, *GetNextVariableName, *SetVariable;
+    void *GetNextHighMonotonicCount;
+    void (*ResetSystem)(EFI_RESET_TYPE ResetType, EFI_STATUS ResetStatus, uint64_t DataSize, void *ResetData);
+} EFI_RUNTIME_SERVICES;
+_Static_assert(offsetof(EFI_RUNTIME_SERVICES, ResetSystem) == 0x68, "ResetSystem");
+
 /* Offsets fixed by the specification (LP64). */
 _Static_assert(offsetof(EFI_BOOT_SERVICES, AllocatePages) == 0x28, "AllocatePages");
 _Static_assert(offsetof(EFI_BOOT_SERVICES, GetMemoryMap) == 0x38, "GetMemoryMap");

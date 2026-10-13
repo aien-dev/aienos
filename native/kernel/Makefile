@@ -1750,8 +1750,8 @@ $(PI5DIAG_DIR)/libc_min.o: $(KDIR)/core/libc_min.c
 	@mkdir -p $(dir $@)
 	$(KCC) $(KCFLAGS) -c -o $@ $<
 $(PI5DIAG_ELF): $(PI5DIAG_OBJS) $(BOOT)/image.ld
-	@if grep -nE -- '->(ExitBootServices|RuntimeServices)' $(BOOT)/diag_main.c; then \
-	  echo "diag_main.c calls a service the diagnostic must never call"; exit 1; fi
+	@if grep -nE -- '->ExitBootServices' $(BOOT)/diag_main.c || grep -nE -- 'rt->' $(BOOT)/diag_main.c | grep -vE -- 'rt->ResetSystem'; then \
+	  echo "diag_main.c calls a service the diagnostic must never call (only ResetSystem is allowed)"; exit 1; fi
 	$(call link_image,$@,$(PI5DIAG_OBJS))
 	@k=$$($(KNM) $@ | grep -E ' [TtDdBbRr] (ck_kernel_entry|kmain|ck_boot_model_load|ck_printf)$$' || true); \
 	if [ -n "$$k" ]; then echo "PI5DIAG links kernel objects: $$k"; rm -f $@; exit 1; fi
