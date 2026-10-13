@@ -37,7 +37,9 @@ impl Pl011Uart {
         if self.dead.get() {
             return;
         }
-        let flags = MmioReg::<u32>::new(self.base + pl011_regs::FLAGS);
+        // SAFETY: `base` is the PL011 register frame this UART was created for;
+        // FLAGS and DATA are register offsets inside it.
+        let flags = unsafe { MmioReg::<u32>::new(self.base + pl011_regs::FLAGS) };
         let mut polls = 0u32;
         while flags.read() & pl011_regs::TX_FULL != 0 {
             polls += 1;
@@ -47,7 +49,8 @@ impl Pl011Uart {
             }
             core::hint::spin_loop();
         }
-        MmioReg::<u32>::new(self.base + pl011_regs::DATA).write(u32::from(b));
+        // SAFETY: as above, DATA is inside the PL011 register frame at `base`.
+        unsafe { MmioReg::<u32>::new(self.base + pl011_regs::DATA) }.write(u32::from(b));
     }
 }
 
