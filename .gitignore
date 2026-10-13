@@ -8,6 +8,7 @@ native/argus/out/
 native/argus/out-d/
 native/argus/out-*/
 native/store/out/
+native/kv/out/
 .crumb.local
 native/crypto/out/
 native/disk/qemu/build.log

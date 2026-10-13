@@ -1,0 +1,112 @@
+{
+  "about": "ADR 0003 section 2.5 (native slot header unit, 4096 bytes) and the authenticated mapping from the KV identity into M5 inputs. Produced by native/kv/tests/gen_slot_vectors.sh with printf, xxd, sha256sum and openssl only (independent of the C codec). unit bytes: 0..256 record header (record_header_hex), 256..320 M5 envelope header (AIENENV1, version 1, suite 1, flags 0, chunk_size 4080, total_plaintext_len = payload_len, envelope_id, nonce_prefix, key_epoch = key_generation, reserved 0), 320 slot_incarnation u64, 328 sealed_units u32, 332 envelope_len u32, 336 slot_index u32, 340..4064 zero, 4064..4096 unit_sha256 = SHA-256(bytes 0..4064). unit_prefix_hex is bytes 0..340. unit_full_sha256 is SHA-256 of the whole 4096-byte unit. k_kv = HKDF-Expand(k_domain, 'AIENOS-PKV-SLOT-KEY-V1' || 0x00, 32); k_envid_kv = HKDF-Expand(k_domain, 'AIENOS-PKV-ENVID-KEY-V1' || 0x00, 32); envelope_id || nonce_prefix = first 24 bytes of HMAC-SHA256(k_envid_kv, 'AIENOS-PKV-ENVID-V1' || 0x00 || store_uuid || namespace_id || chunk_key || slot_index u32le || slot_incarnation u64le || key_generation u64le || identity_class u8 || payload_len u64le || payload_sha256). The label NUL is one byte, as in the sc domain strings and the Store's sizeof(literal) convention. sealed_len = payload_len + 16 * ceil(payload_len / 4080); sealed_units = ceil(sealed_len / 4096); envelope_len = 64 + sealed_len; slot_units = 1 + sealed_units. Bounds: payload_len in 1 to 16711680 (4096 chunks of 4080).",
+  "format_version": 1,
+  "object_kind": 1312,
+  "object_version": 1,
+  "chunk_size": 4080,
+  "max_payload_len": 16711680,
+  "vectors": [
+    {
+      "name": "native-chunk0-slot3-test-class",
+      "input": {
+        "namespace_id": "a8bb7de9507f4fc2056d94bc89d7d8b64fcaa5d2824448faa7722e92b30a471e",
+        "chunk_key": "aa3175b3fffe8a0ecd9651e3455736f2ff2c20548c18b4ce00fa6897071d2df7",
+        "record_header_hex": "4149454e4b5643310100010000010000a8bb7de9507f4fc2056d94bc89d7d8b64fcaa5d2824448faa7722e92b30a471eaa3175b3fffe8a0ecd9651e3455736f2ff2c20548c18b4ce00fa6897071d2df70000000000000000000000000000000000000000000000000000000000000000abababababababababababababababababababababababababababababababab00000000400000004000000010000000100000000800000040000000050200000000400000000000dbf4db3f5f28d1481c2e10ae39a55d8c24ae34b8858e3ad2a7bdc5a1773dca4d00002a36fe9c971745b15d38689b6c1660b42e579f0c9b13a0bfcdf8c2f1ed765b917d8cf8011603",
+        "payload_len": 4194304,
+        "payload_sha256": "dbf4db3f5f28d1481c2e10ae39a55d8c24ae34b8858e3ad2a7bdc5a1773dca4d",
+        "slot_index": 3,
+        "slot_incarnation": 7,
+        "key_generation": 2,
+        "identity_class": 2,
+        "store_uuid": "000102030405060708090a0b0c0d0e0f",
+        "k_domain": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "expected": {
+        "k_kv": "8d8fcc317eca8c59858aa215a944c95e26ec7cb9ec7b500bc962abebff38ffe6",
+        "k_envid_kv": "a4e069902c09033f3bcf847efa7d439e7226b9598d3fa124e87f8af990868241",
+        "envelope_id": "fe275409f70445026f50ee0bd96a928c",
+        "nonce_prefix": "bea05d4fb0f4d75d",
+        "sealed_len": 4210768,
+        "sealed_units": 1029,
+        "envelope_len": 4210832,
+        "slot_units": 1030,
+        "unit_prefix_hex": "4149454e4b5643310100010000010000a8bb7de9507f4fc2056d94bc89d7d8b64fcaa5d2824448faa7722e92b30a471eaa3175b3fffe8a0ecd9651e3455736f2ff2c20548c18b4ce00fa6897071d2df70000000000000000000000000000000000000000000000000000000000000000abababababababababababababababababababababababababababababababab00000000400000004000000010000000100000000800000040000000050200000000400000000000dbf4db3f5f28d1481c2e10ae39a55d8c24ae34b8858e3ad2a7bdc5a1773dca4d00002a36fe9c971745b15d38689b6c1660b42e579f0c9b13a0bfcdf8c2f1ed765b917d8cf80116034149454e454e56310100010000000000f00f00000000400000000000fe275409f70445026f50ee0bd96a928cbea05d4fb0f4d75d0200000000000000000000000700000000000000050400009040400003000000",
+        "unit_sha256_field": "172177844791555e4df644aae20f70c2314baca95d1feda20684dbfa187ff960",
+        "unit_full_sha256": "1c4a5f7d63ad8b515230e519e931e4492441498514a5a0d975af0a716268df48"
+      }
+    }
+    ,
+    {
+      "name": "native-chunk1-partial-slot0-production-class",
+      "input": {
+        "namespace_id": "a8bb7de9507f4fc2056d94bc89d7d8b64fcaa5d2824448faa7722e92b30a471e",
+        "chunk_key": "1bc36528662191529d1c17a1010e62d4f6b570f84d8318e2db91efdbc60fb34c",
+        "record_header_hex": "4149454e4b5643310100010000010000a8bb7de9507f4fc2056d94bc89d7d8b64fcaa5d2824448faa7722e92b30a471e1bc36528662191529d1c17a1010e62d4f6b570f84d8318e2db91efdbc60fb34caa3175b3fffe8a0ecd9651e3455736f2ff2c20548c18b4ce00fa6897071d2df7abababababababababababababababababababababababababababababababab4000000006000000400000001000000010000000080000004000000005020100000006000000000066a6e4d1ca0cacfca2cffea7f269de56c86fed0e215c283a48a00465e39c03f201002a36fe9c97178993d1f240657f98506e420ca1dc24c9c93d0ffeda225f24d82c40794d982a81",
+        "payload_len": 393216,
+        "payload_sha256": "66a6e4d1ca0cacfca2cffea7f269de56c86fed0e215c283a48a00465e39c03f2",
+        "slot_index": 0,
+        "slot_incarnation": 1,
+        "key_generation": 1,
+        "identity_class": 1,
+        "store_uuid": "101112131415161718191a1b1c1d1e1f",
+        "k_domain": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+      },
+      "expected": {
+        "k_kv": "903d80008e32ca43681a9ab9010f354f1a3bd4bfa0d566ca9a302708be3c09fc",
+        "k_envid_kv": "4b2712fff80ed02ffe68b0643b85921464606fe3a2067378b0463586fab2e591",
+        "envelope_id": "1e655f745dccb9336d8131c9c972c5f6",
+        "nonce_prefix": "2ec542cae45a291c",
+        "sealed_len": 394768,
+        "sealed_units": 97,
+        "envelope_len": 394832,
+        "slot_units": 98,
+        "unit_prefix_hex": "4149454e4b5643310100010000010000a8bb7de9507f4fc2056d94bc89d7d8b64fcaa5d2824448faa7722e92b30a471e1bc36528662191529d1c17a1010e62d4f6b570f84d8318e2db91efdbc60fb34caa3175b3fffe8a0ecd9651e3455736f2ff2c20548c18b4ce00fa6897071d2df7abababababababababababababababababababababababababababababababab4000000006000000400000001000000010000000080000004000000005020100000006000000000066a6e4d1ca0cacfca2cffea7f269de56c86fed0e215c283a48a00465e39c03f201002a36fe9c97178993d1f240657f98506e420ca1dc24c9c93d0ffeda225f24d82c40794d982a814149454e454e56310100010000000000f00f000000000600000000001e655f745dccb9336d8131c9c972c5f62ec542cae45a291c0100000000000000000000000100000000000000610000005006060000000000",
+        "unit_sha256_field": "d8ee931075c29eaf243392d7836620e566baa79e7821219503dbe9b667e311b8",
+        "unit_full_sha256": "4453eba4b21cff1f276b2b7b98f3dd639994ca5aeb0b83c8bc05860e5a3a36b4"
+      }
+    }
+    ,
+    {
+      "name": "native-chunk0-extreme-counters",
+      "input": {
+        "namespace_id": "a8bb7de9507f4fc2056d94bc89d7d8b64fcaa5d2824448faa7722e92b30a471e",
+        "chunk_key": "aa3175b3fffe8a0ecd9651e3455736f2ff2c20548c18b4ce00fa6897071d2df7",
+        "record_header_hex": "4149454e4b5643310100010000010000a8bb7de9507f4fc2056d94bc89d7d8b64fcaa5d2824448faa7722e92b30a471eaa3175b3fffe8a0ecd9651e3455736f2ff2c20548c18b4ce00fa6897071d2df70000000000000000000000000000000000000000000000000000000000000000abababababababababababababababababababababababababababababababab00000000400000004000000010000000100000000800000040000000050200000000400000000000dbf4db3f5f28d1481c2e10ae39a55d8c24ae34b8858e3ad2a7bdc5a1773dca4d00002a36fe9c971745b15d38689b6c1660b42e579f0c9b13a0bfcdf8c2f1ed765b917d8cf8011603",
+        "payload_len": 4194304,
+        "payload_sha256": "dbf4db3f5f28d1481c2e10ae39a55d8c24ae34b8858e3ad2a7bdc5a1773dca4d",
+        "slot_index": 4294967295,
+        "slot_incarnation": 18446744073709551615,
+        "key_generation": 18446744073709551615,
+        "identity_class": 2,
+        "store_uuid": "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+        "k_domain": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f"
+      },
+      "expected": {
+        "k_kv": "2f6231cee6ccd85cd6b3ea089f01990f96391b745d7a3cccb29037134580cbd3",
+        "k_envid_kv": "dd28c9386e56b86133e577ca8e3ce5f2a1ecc68c7b6a09ed513beb5d479b8946",
+        "envelope_id": "b9fd7236887b1848514220d703dbf5cf",
+        "nonce_prefix": "1d12761b6f109022",
+        "sealed_len": 4210768,
+        "sealed_units": 1029,
+        "envelope_len": 4210832,
+        "slot_units": 1030,
+        "unit_prefix_hex": "4149454e4b5643310100010000010000a8bb7de9507f4fc2056d94bc89d7d8b64fcaa5d2824448faa7722e92b30a471eaa3175b3fffe8a0ecd9651e3455736f2ff2c20548c18b4ce00fa6897071d2df70000000000000000000000000000000000000000000000000000000000000000abababababababababababababababababababababababababababababababab00000000400000004000000010000000100000000800000040000000050200000000400000000000dbf4db3f5f28d1481c2e10ae39a55d8c24ae34b8858e3ad2a7bdc5a1773dca4d00002a36fe9c971745b15d38689b6c1660b42e579f0c9b13a0bfcdf8c2f1ed765b917d8cf80116034149454e454e56310100010000000000f00f00000000400000000000b9fd7236887b1848514220d703dbf5cf1d12761b6f109022ffffffffffffffff00000000ffffffffffffffff0504000090404000ffffffff",
+        "unit_sha256_field": "4ddb82af2818d7222cb12f79acf3874d28959a54cb6fd9cd52d37cfd7e4b463d",
+        "unit_full_sha256": "f17a61e20034d6997ed8f15366c074e4a0c2a46bfe70bc2565c6572b5eb8ee16"
+      }
+    }
+  ],
+  "bounds": [
+    {"payload_len": 1, "sealed_len": 17, "sealed_units": 1, "envelope_len": 81, "slot_units": 2},
+    {"payload_len": 4079, "sealed_len": 4095, "sealed_units": 1, "envelope_len": 4159, "slot_units": 2},
+    {"payload_len": 4080, "sealed_len": 4096, "sealed_units": 1, "envelope_len": 4160, "slot_units": 2},
+    {"payload_len": 4081, "sealed_len": 4113, "sealed_units": 2, "envelope_len": 4177, "slot_units": 3},
+    {"payload_len": 8160, "sealed_len": 8192, "sealed_units": 2, "envelope_len": 8256, "slot_units": 3},
+    {"payload_len": 8161, "sealed_len": 8209, "sealed_units": 3, "envelope_len": 8273, "slot_units": 4},
+    {"payload_len": 393216, "sealed_len": 394768, "sealed_units": 97, "envelope_len": 394832, "slot_units": 98},
+    {"payload_len": 4194304, "sealed_len": 4210768, "sealed_units": 1029, "envelope_len": 4210832, "slot_units": 1030},
+    {"payload_len": 16707600, "sealed_len": 16773120, "sealed_units": 4095, "envelope_len": 16773184, "slot_units": 4096},
+    {"payload_len": 16711679, "sealed_len": 16777215, "sealed_units": 4096, "envelope_len": 16777279, "slot_units": 4097},
+    {"payload_len": 16711680, "sealed_len": 16777216, "sealed_units": 4096, "envelope_len": 16777280, "slot_units": 4097}
+  ]
+}

@@ -1,0 +1,8 @@
+# Pin of the persistent-KV byte contract (sovereign-core ADR 0003 sections 1, 2.1, 2.5, 12).
+# N1 (aienos#367). Read by tests/kv_record_test.c, which refuses to run on a mismatch,
+# and by `make pin-check`. A change here is a deliberate two-repo bump.
+format_version = 1
+sc_commit = cd5be4c8922eda9b6a7f9036e11cf7b452b19052
+sc_adr = docs/adr/0003-persistent-kv-identity-storage-contract-and-ownership.md
+vectors_sha256 = 7683cab9f5b1d5127773afb8a350ac1b3324afa67b80d2466e64bb61fb57fb29
+slot_vectors_sha256 = 0598b98d9cddfe61b71ef2f0fe0a00620bf4f9e386580265f34772d8d4dcdd20
