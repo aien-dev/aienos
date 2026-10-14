@@ -587,6 +587,11 @@ static void decoded(const uint8_t *b, struct cka_receipt *r)
     }
 }
 
+static const char *tier_name(uint16_t t)
+{
+    return t == CKR_TIER_SEED0B_PI5 ? "SEED-0B-PI5" : "SEED-0B-QEMU";
+}
+
 static const char *decision(const struct cka_receipt *r)
 {
     return r->decision == CKR_ADMITTED ? "Admitted" : "Rejected";
@@ -653,9 +658,9 @@ static int receipt(int argc, char **argv)
         uint8_t d[32];
         cka_receipt_digest(rec, d);
         hex(d, 32, h);
-        printf("RECEIPT_CHECK: PASS digest=%s decision=%s tier=SEED-0B-QEMU stage=%u reason=0x%x "
+        printf("RECEIPT_CHECK: PASS digest=%s decision=%s tier=%s stage=%u reason=0x%x "
                "status=%s exit=%d syscalls=%u reads_ok=%u denials=%u flags=0x%02x\n",
-               h, decision(&r), r.stage, r.reason, cka_status_name(r.status), r.exit, r.syscalls,
+               h, decision(&r), tier_name(r.tier), r.stage, r.reason, cka_status_name(r.status), r.exit, r.syscalls,
                r.reads, r.denials, r.result_flags);
         return 0;
     }
@@ -683,8 +688,8 @@ static int receipt(int argc, char **argv)
         uint8_t d[32];
         cka_receipt_digest(rec, d);
         hex(d, 32, h);
-        printf("RECEIPT_VERIFY: PASS digest=%s decision=%s tier=SEED-0B-QEMU "
-               "trust=SEED-0B-TEST-ONLY\n", h, decision(&r));
+        printf("RECEIPT_VERIFY: PASS digest=%s decision=%s tier=%s "
+               "trust=SEED-0B-TEST-ONLY\n", h, decision(&r), tier_name(r.tier));
         return 0;
     }
     die("usage: receipt from-hex HEX OUT | check REC ARTIFACT | sign-test IN OUT | verify REC");

@@ -110,6 +110,51 @@ static void test_receipt(void)
     }
 }
 
+/* Receipt tier by image: a Pi image (build with -DCK_PI5) writes SEED-0B-PI5, any other image SEED-0B-QEMU; the
+ * hosted verifier decodes both, round-trips the Pi tier, signs and verifies it, and refuses any other value. */
+static void test_tier(void)
+{
+    struct cka_receipt r, back;
+    uint8_t rec[CKA_RECEIPT_SIZE], ver[32];
+#ifdef CK_PI5
+    CHECK(CKA_IMAGE_TIER == CKR_TIER_SEED0B_PI5);
+#else
+    CHECK(CKA_IMAGE_TIER == CKR_TIER_SEED0B_QEMU);
+#endif
+    memset(&r, 0, sizeof r);
+    cka_verifier_identity("0123456789abcdef0123456789abcdef01234567", 1, ver);
+    r.decision = CKR_ADMITTED;
+    r.tier = CKA_IMAGE_TIER;
+    r.seq = 1;
+    memcpy(r.verifier, ver, 32);
+    cka_receipt_nonce(ver, 1, r.nonce);
+    r.status = CKR_EXITED;
+    r.result_flags = 0xff;
+    memset(r.id, 0x11, 32);
+    memset(r.payload, 0x22, 32);
+    memset(r.signer, 0x33, 32);
+    memset(r.policy, 0x44, 32);
+    memset(r.requested, 0x55, 32);
+    memset(r.granted, 0x66, 32);
+    memset(r.resources, 0x77, 32);
+    cka_receipt_encode(&r, rec);
+    CHECK(cka_receipt_decode(rec, &back) == 0 && back.tier == CKA_IMAGE_TIER);
+    CHECK(rec[22] == (uint8_t)CKA_IMAGE_TIER && rec[23] == 0);
+    r.tier = CKR_TIER_SEED0B_PI5;
+    cka_receipt_encode(&r, rec);
+    CHECK(cka_receipt_decode(rec, &back) == 0 && back.tier == CKR_TIER_SEED0B_PI5);
+    CHECK(cka_receipt_sign(rec, test2_seed) == 0);
+    CHECK(cka_receipt_verify(rec, &cka_test2_pk, 1) == 0);
+    rec[22] = 1; /* the tier is covered by the signature */
+    CHECK(cka_receipt_verify(rec, &cka_test2_pk, 1) != 0);
+    r.tier = 2;
+    cka_receipt_encode(&r, rec);
+    CHECK(cka_receipt_decode(rec, &back) != 0);
+    r.tier = 4;
+    cka_receipt_encode(&r, rec);
+    CHECK(cka_receipt_decode(rec, &back) != 0);
+}
+
 static void test_names(void)
 {
     CHECK(strcmp(cka_error_name(CKA_UNTRUSTED_SIGNER), "UntrustedSigner") == 0);
@@ -122,6 +167,7 @@ int main(void)
 {
     test_verify_and_admit();
     test_receipt();
+    test_tier();
     test_names();
     return ck_t_verdict("test_artifact");
 }

@@ -51,6 +51,7 @@ pub enum ReceiptDecision {
 pub enum QualificationTier {
     Seed0bQemu = 1,
     Seed0bMachine1 = 2,
+    Seed0bPi5 = 3,
 }
 
 /// Offset 64; §7.3 mapping of the task runtime outcome.
@@ -204,6 +205,7 @@ impl QualificationTier {
         match v {
             1 => Some(Self::Seed0bQemu),
             2 => Some(Self::Seed0bMachine1),
+            3 => Some(Self::Seed0bPi5),
             _ => None,
         }
     }
@@ -212,6 +214,7 @@ impl QualificationTier {
         match self {
             Self::Seed0bQemu => "SEED-0B-QEMU",
             Self::Seed0bMachine1 => "SEED-0B-MACHINE1",
+            Self::Seed0bPi5 => "SEED-0B-PI5",
         }
     }
 }

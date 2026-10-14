@@ -151,7 +151,21 @@ int cka_evaluate(const struct cka_policy *pol, const struct cka_parsed *p,
 #define CKA_RECEIPT_SIZE 512u
 #define CKA_RECEIPT_SIGNED_LEN 400u
 enum { CKR_ADMITTED = 1, CKR_REJECTED = 2 };
-enum { CKR_TIER_SEED0B_QEMU = 1 };
+enum { CKR_TIER_SEED0B_QEMU = 1, CKR_TIER_SEED0B_PI5 = 3 };
+/* Tier a receipt carries, chosen by the image: the Pi image (CK_PI5) writes SEED-0B-PI5, every other image
+ * (QEMU, Spark) writes SEED-0B-QEMU exactly as before. CKA_TIER_MUTANT is a host-test mutant only. */
+#if defined(CK_PI5) && !defined(CKA_TIER_MUTANT)
+#define CKA_IMAGE_TIER CKR_TIER_SEED0B_PI5
+#else
+#define CKA_IMAGE_TIER CKR_TIER_SEED0B_QEMU
+#endif
+/* Tiers decode accepts: the Pi tier only in the Pi image and in hosted tools (the verifier); the QEMU and
+ * Spark kernels still accept SEED-0B-QEMU only, so their code is unchanged. */
+#if defined(CK_PI5) || (defined(__STDC_HOSTED__) && __STDC_HOSTED__)
+#define CKA_TIER_OK(t) ((t) == CKR_TIER_SEED0B_QEMU || (t) == CKR_TIER_SEED0B_PI5)
+#else
+#define CKA_TIER_OK(t) ((t) == CKR_TIER_SEED0B_QEMU)
+#endif
 enum {
     CKR_NOT_RUN = 0, CKR_EXITED, CKR_TIMEOUT, CKR_FAULT, CKR_BAD_SYSCALL, CKR_RESOURCE_OVERRUN,
 };

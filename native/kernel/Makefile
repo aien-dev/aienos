@@ -1459,8 +1459,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant artifact-card-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant artifact-card-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant artifact-card-mutant artifact-tier-pi5 artifact-tier-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant artifact-card-mutant artifact-tier-pi5 artifact-tier-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -1489,6 +1489,23 @@ ART_HOST_DEPS := $(ART_HOST_SRCS) $(wildcard $(KDIR)/artifact/*.h) $(ART_HDRS)
 $(OUT)/host/test_artifact: $(KDIR)/tests/test_artifact.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(ART_HOST_INC) -o $@ $< $(ART_HOST_SRCS)
+
+# PI5-8 Q3: the receipt tier is chosen by the image. test_artifact built with -DCK_PI5 (the Pi image's define) must see
+# SEED-0B-PI5; the mutant (-DCKA_TIER_MUTANT, Pi image still writes the QEMU tier) must make that test FAIL.
+$(OUT)/host/test_artifact_pi5: $(KDIR)/tests/test_artifact.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(ART_HOST_INC) -DCK_PI5 -o $@ $< $(ART_HOST_SRCS)
+
+$(OUT)/host/test_artifact_pi5_mutant: $(KDIR)/tests/test_artifact.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(ART_HOST_INC) -DCK_PI5 -DCKA_TIER_MUTANT -o $@ $< $(ART_HOST_SRCS)
+
+artifact-tier-pi5: $(OUT)/host/test_artifact_pi5
+	@$<
+
+artifact-tier-mutant: $(OUT)/host/test_artifact_pi5_mutant
+	@if $< > $<.log 2>&1; then cat $<.log; echo "test_artifact Pi tier mutant (Pi image writes the QEMU tier): PASSED, test does not catch it"; exit 1; \
+	else echo "test_artifact Pi tier mutant (Pi image writes the QEMU tier): FAILS as required"; fi
 
 $(OUT)/host/test_osc_unit: $(KDIR)/tests/test_osc_unit.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h
 	@mkdir -p $(dir $@)
@@ -2091,9 +2108,11 @@ pi5-diag: $(PI5DIAG_EFI)
 pi5-store:
 	$(MAKE) CK_PI5_STORE=1 full
 
+# PI5-8 Q1: --remap-path-prefix keeps the build directory out of the Rust panic-location strings, so the three Pi images
+# that link this library are byte-identical when built from different checkout paths (scripts/ck_pi5_repro_check.sh).
 PI5_INFER_LIB := $(REPO)/target/infer-kernel/aarch64-unknown-none/release/libaienos_infer_kernel.a
 pi5-infer:
-	CARGO_TARGET_DIR=$(REPO)/target/infer-kernel cargo build -q --release --target aarch64-unknown-none --manifest-path $(REPO)/crates/aienos-infer-kernel/Cargo.toml
+	RUSTFLAGS="--remap-path-prefix=$(REPO)=/aienos" CARGO_TARGET_DIR=$(REPO)/target/infer-kernel cargo build -q --release --target aarch64-unknown-none --manifest-path $(REPO)/crates/aienos-infer-kernel/Cargo.toml
 	$(MAKE) CK_PI5_INFER=1 CK_INFER_LIB=$(PI5_INFER_LIB) all
 pi5-unlock:
 	$(MAKE) CK_PI5_UNLOCK=1 full
@@ -2105,11 +2124,11 @@ pi5-fact:
 	$(MAKE) CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_FACT=1 full
 
 pi5-agent:
-	CARGO_TARGET_DIR=$(REPO)/target/infer-kernel cargo build -q --release --target aarch64-unknown-none --manifest-path $(REPO)/crates/aienos-infer-kernel/Cargo.toml
+	RUSTFLAGS="--remap-path-prefix=$(REPO)=/aienos" CARGO_TARGET_DIR=$(REPO)/target/infer-kernel cargo build -q --release --target aarch64-unknown-none --manifest-path $(REPO)/crates/aienos-infer-kernel/Cargo.toml
 	$(MAKE) CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_AGENT=1 CK_INFER_LIB=$(PI5_INFER_LIB) full
 
 pi5-lifecycle:
-	CARGO_TARGET_DIR=$(REPO)/target/infer-kernel cargo build -q --release --target aarch64-unknown-none --manifest-path $(REPO)/crates/aienos-infer-kernel/Cargo.toml
+	RUSTFLAGS="--remap-path-prefix=$(REPO)=/aienos" CARGO_TARGET_DIR=$(REPO)/target/infer-kernel cargo build -q --release --target aarch64-unknown-none --manifest-path $(REPO)/crates/aienos-infer-kernel/Cargo.toml
 	$(MAKE) CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_LIFECYCLE=1 CK_INFER_LIB=$(PI5_INFER_LIB) full
 
 pi5-artifact:
@@ -2173,6 +2192,7 @@ $(OUT)/host-san/test_pi5_rng: $(KDIR)/tests/test_pi5_rng.c $(PI5_RNG_SRCS) $(KDI
 
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
+.PHONY: artifact-tier-pi5 artifact-tier-mutant
 .PHONY: all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact pi5-agent pi5-lifecycle pi5-artifact artifact-card-mutant test sanitize context-mutant agent-cmd-mutant cortex-image handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
 
 # AIENOS-PI5 step 3 marker + Pi card GPT test (hosted; a file stands in for the card, QEMU cannot model the Pi SD host).
