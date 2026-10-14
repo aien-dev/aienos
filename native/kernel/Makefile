@@ -341,6 +341,45 @@ endif
 OUT ?= $(REPO)/target/native-kernel-artifact-card
 CK_EXTRA_CFLAGS += -DCK_ARTIFACT_CARD=1
 endif
+# Pi 5 ALLEN exam image (CK_PI5_ALLEN=1, "make pi5-allen", PI5-8 cut K, QUALIFICATION ONLY): the plain Pi image plus the
+# ALLEN exam stage (CK_ALLEN below). Own OUT; every other image carries none of this code.
+CK_PI5_ALLEN ?=
+ifneq ($(strip $(CK_PI5_ALLEN)),)
+ifneq ($(strip $(CK_PI5_ALLEN)),1)
+$(error CK_PI5_ALLEN must be empty or 1)
+endif
+CK_ALLEN := 1
+CK_PI5 := 1
+OUT ?= $(REPO)/target/native-kernel-pi5-allen
+endif
+# ALLEN exam stage (CK_ALLEN=1, PI5-8 cut K): links the ALLEN REFLEX decision core (CK_ALLEN_LIB=<liballen_reflex_kernel.a>,
+# crates/allen-reflex-kernel) and compiles core/allen.c, core/allen_gate.c (+ the card command parser and the lifecycle
+# state machine it judges with) and the UEFI stub's exam file reader (native/boot/efi_allen.c). The core image only: no
+# Store stage, no service, nothing written. Without CK_PI5 it is the QEMU twin (scripts/qemu_ck_allen_reflex_test.sh).
+# CK_ALLEN_HEAP_KIB sets the Rust heap region (default 32768 KiB = 32 MiB; the QEMU twin also builds a small one to prove
+# that exhaustion stops the run). Not combinable with another Rust staticlib (CK_INFER_LIB, CK_RUST_LIBS: two Rust
+# staticlibs duplicate compiler_builtins) or with any other tier.
+CK_ALLEN ?=
+CK_ALLEN_HEAP_KIB ?= 32768
+ifneq ($(strip $(CK_ALLEN)),)
+ifneq ($(strip $(CK_ALLEN)),1)
+$(error CK_ALLEN must be empty or 1)
+endif
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)$(CK_PI5_NET)$(CK_PI5_UNLOCK)$(CK_PI5_UNLOCK_CARD)$(CK_PI5_FACT)$(CK_PI5_AGENT)$(CK_PI5_LIFECYCLE)$(CK_PI5_ARTIFACT)$(CK_ARTIFACT_CARD)$(CK_SERVICE)$(CK_SERVICE_TEST_KEYS)$(CK_HARDWARE_STAGING)$(CK_TEST_FWCFG_ARTIFACTS)$(CK_INFER_LIB)$(CK_RUST_LIBS)),)
+$(error CK_ALLEN / CK_PI5_ALLEN cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_PCIE, CK_PI5_NET, CK_PI5_UNLOCK, CK_PI5_UNLOCK_CARD, CK_PI5_FACT, CK_PI5_AGENT, CK_PI5_LIFECYCLE, CK_PI5_ARTIFACT, CK_ARTIFACT_CARD, CK_SERVICE, CK_SERVICE_TEST_KEYS, CK_HARDWARE_STAGING, CK_TEST_FWCFG_ARTIFACTS, CK_INFER_LIB or CK_RUST_LIBS)
+endif
+ifeq ($(strip $(CK_ALLEN_LIB)),)
+$(error CK_ALLEN needs CK_ALLEN_LIB=<liballen_reflex_kernel.a> (use "make pi5-allen", which builds it))
+endif
+ifneq ($(filter full,$(MAKECMDGOALS)),)
+$(error CK_ALLEN / CK_PI5_ALLEN build the core image only: no Store stage)
+endif
+ifeq ($(shell echo '$(CK_ALLEN_HEAP_KIB)' | grep -xE '[1-9][0-9]{0,6}'),)
+$(error CK_ALLEN_HEAP_KIB must be a whole number of KiB, 1..9999999)
+endif
+OUT ?= $(REPO)/target/native-kernel-allen
+CK_EXTRA_CFLAGS += -DCK_ALLEN=1 -DCK_ALLEN_HEAP_KIB=$(CK_ALLEN_HEAP_KIB)
+endif
 CK_PI5 ?=
 ifneq ($(strip $(CK_PI5)),)
 ifneq ($(strip $(CK_PI5)),1)
@@ -878,7 +917,7 @@ CORE_C := $(BOOT)/efi_main.c $(BOOT)/efi_model.c $(BOOT)/efi_gop.c \
 	$(KDIR)/core/acpi.c $(KDIR)/core/acpi_dev.c $(KDIR)/core/acpi_platform.c $(KDIR)/core/console.c $(KDIR)/core/fbcon.c $(KDIR)/core/fmt.c \
 	$(KDIR)/core/kmain.c $(KDIR)/core/handoff_check.c $(KDIR)/core/libc_min.c $(KDIR)/core/report.c \
 	$(KDIR)/core/smmu.c $(KDIR)/core/smmu_svc.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c \
-	$(KDIR)/core/fpu.c $(KDIR)/core/cpufeat.c $(KDIR)/core/infer.c $(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c $(KDIR)/core/smp.c \
+	$(KDIR)/core/fpu.c $(KDIR)/core/cpufeat.c $(KDIR)/core/infer.c $(KDIR)/core/allen.c $(KDIR)/core/m3.c $(KDIR)/core/entropy.c $(KDIR)/arch/rndr.c $(KDIR)/core/smp.c \
 	$(KDIR)/mm/frames.c $(KDIR)/mm/heap.c $(KDIR)/mm/mmu.c $(KDIR)/mm/pt.c
 ifeq ($(strip $(CK_PI5)),1)
 CORE_C += $(BOOT)/efi_klog.c $(KDIR)/core/pi5.c $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c \
@@ -898,6 +937,9 @@ CORE_C += $(BOOT)/efi_fact.c $(KDIR)/core/fact_req.c
 endif
 ifneq ($(strip $(CK_PI5_LIFECYCLE)),)
 CORE_C += $(BOOT)/efi_agentcmd.c $(KDIR)/core/agent_cmd.c
+endif
+ifneq ($(strip $(CK_ALLEN)),)
+CORE_C += $(BOOT)/efi_allen.c $(KDIR)/core/allen_gate.c $(KDIR)/core/agent_cmd.c $(KDIR)/core/lifecycle_fsm.c
 endif
 # P2 sealed-artifact loader: format/admission/receipt (artifact/), SHA-256
 # (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
@@ -1083,6 +1125,8 @@ $(KOBJ)/kernel/dev/disk_part.o: KCFLAGS += -I$(NATIVE)/disk
 
 # core/infer.c uses the in-core SHA-256 (argus) to prove the ingested bytes.
 $(KOBJ)/kernel/core/infer.o: KCFLAGS += -I$(NATIVE)/argus
+# core/allen.c prints the SHA-256 of the exam file it read.
+$(KOBJ)/kernel/core/allen.o: KCFLAGS += -I$(NATIVE)/argus
 
 $(OUT)/trust.stamp: FORCE
 	@mkdir -p $(OUT)
@@ -1275,6 +1319,16 @@ define cont_check
 	fi
 endef
 
+# allen_check(elf): only a CK_ALLEN image carries the ALLEN unit (aienos_allen_* entry points) and its exam stage; it must carry
+# both, plus the gate. Every other core image must carry none of it.
+define allen_check
+	@a=$$($(KNM) $(1) | grep -cE " [Tt] (aienos_allen_decide|aienos_allen_train|ck_allen_gate_judge)$$" || true); \
+	if [ -n "$(strip $(CK_ALLEN))" ]; then \
+	  [ "$$a" = 3 ] && grep -aqF "AIENOS_CK_ALLEN: " $(1) || { echo "ALLEN image lacks the ALLEN unit, gate or exam stage"; rm -f $(1); exit 1; }; \
+	  echo "ALLEN exam image: ALLEN unit + gate + exam stage in $(1)"; \
+	elif [ "$$a" != 0 ] || grep -aqF "AIENOS_CK_ALLEN: " $(1); then echo "image without CK_ALLEN carries ALLEN code"; rm -f $(1); exit 1; fi
+endef
+
 # link_image(output elf, objects): refuses undefined symbols (weak stage
 # references excepted) and any relocation other than R_AARCH64_RELATIVE.
 define link_image
@@ -1294,7 +1348,8 @@ define pe_image
 endef
 
 $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
-	$(call link_image,$@,$(CORE_OBJS) $(CK_RUST_LIBS) $(CK_INFER_LIB))
+	$(call link_image,$@,$(CORE_OBJS) $(CK_RUST_LIBS) $(CK_INFER_LIB) $(CK_ALLEN_LIB))
+	$(call allen_check,$@)
 	@if [ -z "$(strip $(CK_TEST_STALE_HANDOFF))" ] && grep -aqF "TEST-ONLY stale handoff" $@; then \
 	  echo "default image carries the TEST-only stale handoff"; rm -f $@; exit 1; fi
 	$(call rollback_check,$@)
@@ -1305,7 +1360,7 @@ $(ELF): $(CORE_OBJS) $(BOOT)/image.ld
 	$(call b7b_check,$@)
 
 $(FULL_ELF): $(CORE_OBJS) $(STAGE_BUILT) $(BOOT)/image.ld
-	$(call link_image,$@,$(CORE_OBJS) $(STAGE_LINK) $(CK_RUST_LIBS) $(CK_INFER_LIB))
+	$(call link_image,$@,$(CORE_OBJS) $(STAGE_LINK) $(CK_RUST_LIBS) $(CK_INFER_LIB) $(CK_ALLEN_LIB))
 	$(call rollback_check,$@)
 	@for s in $(FULL_STAGE_SYMS); do \
 	  $(KNM) $@ | grep -qE " [TW] $$s$$" || { echo "full image lacks $$s"; rm -f $@; exit 1; }; done
@@ -1329,10 +1384,10 @@ $(FULL_EFI): $(FULL_ELF)
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
 	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/acpi_dev.c $(KDIR)/core/lifecycle_fsm.c \
-	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c $(KDIR)/core/unlock_req.c $(KDIR)/core/agent_cmd.c $(KDIR)/core/artifact_card.c
+	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c $(KDIR)/core/unlock_req.c $(KDIR)/core/agent_cmd.c $(KDIR)/core/artifact_card.c $(KDIR)/core/allen_gate.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_osc_receipt test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_pi5_net test_pi5_gem test_unlock_req test_context test_agent_cmd test_artifact_card
+	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_pi5_net test_pi5_gem test_unlock_req test_context test_agent_cmd test_artifact_card test_allen_gate
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -1395,6 +1450,17 @@ $(OUT)/host/test_agent_cmd_mutant: $(KDIR)/tests/test_agent_cmd.c $(KDIR)/core/a
 agent-cmd-mutant: $(OUT)/host/test_agent_cmd_mutant
 	@if $< > $<.log 2>&1; then cat $<.log; echo "test_agent_cmd mutant (any verb allowed): PASSED, test does not catch it"; exit 1; \
 	else grep -F "test_agent_cmd: FAIL" $<.log && echo "test_agent_cmd mutant (any verb allowed): FAILS as required"; fi
+
+# PI5-8 cut K ALLEN gate (core/allen_gate.c): the mutant proposes ALLEN's approve/deny/cancel like any other verb (ALLEN
+# would hold approval authority); test_allen_gate must FAIL against it (red before green). Host only, never part of an image.
+ALLEN_GATE_SRCS := $(KDIR)/core/allen_gate.c $(KDIR)/core/agent_cmd.c $(KDIR)/core/lifecycle_fsm.c
+$(OUT)/host/test_allen_gate_mutant: $(KDIR)/tests/test_allen_gate.c $(ALLEN_GATE_SRCS) $(KDIR)/core/allen_gate.h $(KDIR)/tests/ck_test.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -DCK_ALLEN_GATE_MUTANT_TRUST_AUTHORITY -o $@ $< $(ALLEN_GATE_SRCS)
+
+allen-gate-mutant: $(OUT)/host/test_allen_gate_mutant
+	@if $< > $<.log 2>&1; then cat $<.log; echo "test_allen_gate mutant (ALLEN approve proposed): PASSED, test does not catch it"; exit 1; \
+	else grep -F "test_allen_gate: FAIL" $<.log && echo "test_allen_gate mutant (ALLEN approve proposed): FAILS as required"; fi
 
 # PI5-7 cut 3 card artifact bundle parser (core/artifact_card.c): the mutant accepts bytes after the last entry (a second, unchecked
 # payload could ride along); test_artifact_card must FAIL against it (red before green). Host only, never part of an image.
@@ -1484,8 +1550,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) osc-receipt-mutants osc-receipt-release handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant artifact-card-mutant artifact-tier-pi5 artifact-tier-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check
-	@fail=0; for t in $(filter-out osc-receipt-mutants osc-receipt-release handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant artifact-card-mutant artifact-tier-pi5 artifact-tier-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) osc-receipt-mutants osc-receipt-release handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant allen-gate-mutant artifact-card-mutant artifact-tier-pi5 artifact-tier-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check
+	@fail=0; for t in $(filter-out osc-receipt-mutants osc-receipt-release handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant allen-gate-mutant artifact-card-mutant artifact-tier-pi5 artifact-tier-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -2204,6 +2270,15 @@ pi5-lifecycle:
 pi5-artifact:
 	$(MAKE) CK_PI5_ARTIFACT=1 all
 
+# PI5-8 cut K: the ALLEN unit (crates/allen-reflex-kernel) for aarch64-unknown-none, same path remap as pi5-infer.
+ALLEN_LIB := $(REPO)/target/allen-kernel/aarch64-unknown-none/release/liballen_reflex_kernel.a
+allen-lib:
+	RUSTFLAGS="--remap-path-prefix=$(REPO)=/aienos" CARGO_TARGET_DIR=$(REPO)/target/allen-kernel cargo build -q --release --locked --target aarch64-unknown-none --manifest-path $(REPO)/crates/allen-reflex-kernel/Cargo.toml
+
+# Raspberry Pi 5 ALLEN exam image (see CK_PI5_ALLEN above): target/native-kernel-pi5-allen/BOOTAA64.EFI
+pi5-allen: allen-lib
+	$(MAKE) CK_PI5_ALLEN=1 CK_ALLEN_LIB=$(ALLEN_LIB) all
+
 pi5:
 	$(MAKE) CK_PI5=1 all
 
@@ -2263,7 +2338,7 @@ $(OUT)/host-san/test_pi5_rng: $(KDIR)/tests/test_pi5_rng.c $(PI5_RNG_SRCS) $(KDI
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
 .PHONY: artifact-tier-pi5 artifact-tier-mutant
-.PHONY: osc-receipt-mutants osc-receipt-release all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact pi5-agent pi5-lifecycle pi5-artifact artifact-card-mutant test sanitize context-mutant agent-cmd-mutant cortex-image handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: osc-receipt-mutants osc-receipt-release all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact pi5-agent pi5-lifecycle pi5-artifact pi5-allen allen-lib artifact-card-mutant test sanitize context-mutant agent-cmd-mutant allen-gate-mutant cortex-image handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
 
 # AIENOS-PI5 step 3 marker + Pi card GPT test (hosted; a file stands in for the card, QEMU cannot model the Pi SD host).
 PI5_MARKER_SRCS := $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \

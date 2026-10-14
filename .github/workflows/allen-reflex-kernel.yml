@@ -1,0 +1,61 @@
+name: ALLEN REFLEX kernel link (allen-reflex-kernel)
+
+# Host and no_std checks for crates/allen-reflex-kernel, the glue that links the ALLEN REFLEX
+# decision core into the C kernel image of "make pi5-allen" (PI5-8 cut K). The C side (core/allen.c,
+# core/allen_gate.c, tests/test_allen_gate.c) runs in the CK kernel workflow's "make test".
+# Train/dev only: the held-out cases are never read.
+on:
+  pull_request:
+    paths:
+      - "crates/allen-reflex/**"
+      - "crates/allen-reflex-kernel/**"
+      - "scripts/allen_exam_card.sh"
+      - "docs/native/pi5-8/orchestrator-exam/cases-train.psv"
+      - "docs/native/pi5-8/orchestrator-exam/cases-dev.psv"
+      - "docs/native/pi5-8/orchestrator-exam/cases-reflex-extra.psv"
+      - "docs/native/pi5-8/orchestrator-exam/results/allen-reflex.train.*.jsonl"
+      - "docs/native/pi5-8/orchestrator-exam/results/allen-reflex.dev.*.jsonl"
+      - ".github/workflows/allen-reflex-kernel.yml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/allen-reflex/**"
+      - "crates/allen-reflex-kernel/**"
+
+permissions:
+  contents: read
+
+jobs:
+  allen-reflex-kernel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: crates/allen-reflex-kernel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: aarch64-unknown-none
+      - name: fmt
+        run: cargo fmt --check
+      - name: clippy (host)
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: clippy (kernel target)
+        run: cargo clippy --locked --release --target aarch64-unknown-none --lib -- -D warnings
+      - name: test (unit + heap budget)
+        run: cargo test --locked --release
+      - name: kernel staticlib (aarch64-unknown-none)
+        run: cargo build --locked --release --target aarch64-unknown-none --lib
+      - name: host harness equals the committed train/dev results
+        working-directory: .
+        run: |
+          exam=docs/native/pi5-8/orchestrator-exam
+          scripts/allen_exam_card.sh /tmp/td.exm "$exam/cases-train.psv" "$exam/cases-dev.psv"
+          cargo run --locked --release --manifest-path crates/allen-reflex-kernel/Cargo.toml --example host_exam -- /tmp/td.exm >/tmp/host.txt
+          for mode in reflex nearest perceptron; do
+            diff <(grep "^ALLEN_D $mode " /tmp/host.txt | sed "s/^ALLEN_D $mode //") \
+                 <(cat "$exam/results/allen-reflex.train.$mode.jsonl" "$exam/results/allen-reflex.dev.$mode.jsonl" | jq -r '.id + " " + .raw')
+            echo "$mode: identical"
+          done
