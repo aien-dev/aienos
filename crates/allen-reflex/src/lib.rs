@@ -36,6 +36,7 @@ pub mod policy;
 pub mod segment;
 pub mod span;
 pub mod text;
+pub mod tower;
 
 pub use action::{Action, N_LABELS};
 pub use dialog::{Pending, Role, Turn};

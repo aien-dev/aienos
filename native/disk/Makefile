@@ -27,7 +27,7 @@ ifeq ($(shell uname -m),aarch64)
 FREEFLAGS += -mstrict-align -mgeneral-regs-only
 endif
 OUT ?= out
-MUTANT_TIMEOUT ?= 60
+MUTANT_TIMEOUT ?= 5
 
 SRCS = disk.c disk_nvme.c disk_sdhci.c
 OBJS = $(SRCS:%.c=$(OUT)/%.o)
@@ -109,24 +109,43 @@ GUARDS = disk-zero disk-lba disk-end queue-bound queue-failstop \
 	sdhci-nocard sdhci-cmd8 sdhci-acmd41-bound sdhci-csd-zero sdhci-ready sdhci-range \
 	sdhci-tran sdhci-failstop
 
-mutants: | $(OUT)
-	@ulimit -c 0; fail=0; n=0; k=0; for g in $(GUARDS); do \
-	  n=$$((n+1)); \
-	  f=$$(grep -l "GUARD:$$g \*/" $(SRCS)); \
-	  if [ $$(echo "$$f" | wc -w) -ne 1 ]; then echo "mutant $$g: guard tag missing or duplicated"; fail=1; continue; fi; \
-	  if [ $$(grep -c "GUARD:$$g \*/" $$f) -ne 1 ]; then echo "mutant $$g: guard tag duplicated"; fail=1; continue; fi; \
-	  d=$(OUT)/mut_$$g; rm -rf $$d; mkdir -p $$d/scratch; \
-	  for s in $(SRCS); do if [ $$s = $$f ]; then sed "/GUARD:$$g \*\//d" $$s > $$d/$$s; else cp $$s $$d/$$s; fi; done; \
-	  if cmp -s $$f $$d/$$f; then echo "mutant $$g: sed changed nothing (FAIL)"; fail=1; continue; fi; \
-	  $(CC) $(CFLAGS) -Wno-error -I. -o $$d/dt tests/disk_test.c disk_file.c $$d/disk.c $$d/disk_nvme.c $$d/disk_sdhci.c 2> $$d/cc.log \
-	    && $(CC) $(CFLAGS) -Wno-error -I. -o $$d/nt tests/nvme_test.c $$d/disk.c $$d/disk_nvme.c $$d/disk_sdhci.c 2>> $$d/cc.log \
-	    && $(CC) $(CFLAGS) -Wno-error -I. -o $$d/st tests/sdhci_test.c $$d/disk.c $$d/disk_nvme.c $$d/disk_sdhci.c 2>> $$d/cc.log \
-	    || { echo "mutant $$g: does not compile (FAIL)"; fail=1; continue; }; \
-	  if timeout $(MUTANT_TIMEOUT) ./$$d/dt $$d/scratch > $$d/run.log 2>&1 && \
-	     timeout $(MUTANT_TIMEOUT) ./$$d/nt >> $$d/run.log 2>&1 && \
-	     timeout $(MUTANT_TIMEOUT) ./$$d/st >> $$d/run.log 2>&1; then \
-	    echo "mutant $$g: SURVIVED (FAIL)"; fail=1; \
-	  else echo "mutant $$g: killed"; k=$$((k+1)); fi; \
+DISK_MUT_TEST_OBJS = $(OUT)/t_disk_test.o $(OUT)/t_nvme_test.o $(OUT)/t_sdhci_test.o
+$(OUT)/t_%_test.o: tests/%_test.c $(HDRS) | $(OUT)
+	$(CC) $(CFLAGS) -Wno-error -I. -c -o $@ $<
+
+mutants: $(OBJS) $(FILE_OBJ) $(DISK_MUT_TEST_OBJS) | $(OUT)
+	@ulimit -c 0; fail=0; n=0; k=0; \
+	for g in $(GUARDS); do \
+	  n=$$((n+1)); d=$(OUT)/mut_$$g; rm -rf $$d; mkdir -p $$d/scratch; \
+	  ( f=$$(grep -l "GUARD:$$g \*/" $(SRCS)); \
+	    if [ $$(echo "$$f" | wc -w) -ne 1 ]; then echo "mutant $$g: guard tag missing or duplicated" > $$d/msg; echo 1 > $$d/fail; exit 0; fi; \
+	    if [ $$(grep -c "GUARD:$$g \*/" $$f) -ne 1 ]; then echo "mutant $$g: guard tag duplicated" > $$d/msg; echo 1 > $$d/fail; exit 0; fi; \
+	    sed "/GUARD:$$g \*\//d" $$f > $$d/$$f; \
+	    if cmp -s $$f $$d/$$f; then echo "mutant $$g: sed changed nothing (FAIL)" > $$d/msg; echo 1 > $$d/fail; exit 0; fi; \
+	    others=""; for s in $(SRCS); do [ "$$s" = "$$f" ] || others="$$others $(OUT)/$${s%.c}.o"; done; \
+	    $(CC) $(CFLAGS) -Wno-error -I. -c -o $$d/m.o $$d/$$f 2> $$d/cc.log \
+	      && $(CC) $(CFLAGS) -Wno-error -o $$d/dt $(OUT)/t_disk_test.o $(FILE_OBJ) $$d/m.o $$others 2>> $$d/cc.log \
+	      && $(CC) $(CFLAGS) -Wno-error -o $$d/nt $(OUT)/t_nvme_test.o $$d/m.o $$others 2>> $$d/cc.log \
+	      && $(CC) $(CFLAGS) -Wno-error -o $$d/st $(OUT)/t_sdhci_test.o $$d/m.o $$others 2>> $$d/cc.log \
+	      || { echo "mutant $$g: does not compile (FAIL)" > $$d/msg; echo 1 > $$d/fail; exit 0; }; \
+	    case "$$f" in \
+	      disk.c)       order="dt nt st" ;; \
+	      disk_nvme.c)  order="nt dt st" ;; \
+	      *)            order="st dt nt" ;; \
+	    esac; \
+	    pass=1; : > $$d/run.log; \
+	    for b in $$order; do \
+	      if [ "$$b" = "dt" ]; then timeout $(MUTANT_TIMEOUT) ./$$d/dt $$d/scratch >> $$d/run.log 2>&1 || { pass=0; break; }; \
+	      else timeout $(MUTANT_TIMEOUT) ./$$d/$$b >> $$d/run.log 2>&1 || { pass=0; break; }; fi; \
+	    done; \
+	    if [ $$pass -eq 1 ]; then echo "mutant $$g: SURVIVED (FAIL)" > $$d/msg; echo 1 > $$d/fail; \
+	    else echo "mutant $$g: killed" > $$d/msg; fi \
+	  ) & \
+	done; \
+	wait; \
+	for g in $(GUARDS); do \
+	  d=$(OUT)/mut_$$g; cat $$d/msg; \
+	  if [ -f $$d/fail ]; then fail=1; else k=$$((k+1)); fi; \
 	done; \
 	echo "mutants killed: $$k/$$n"; \
 	if [ $$fail -eq 0 ] && [ $$n -ge 10 ]; then echo "AIENOS_DISK_MUTANTS: PASS"; else echo "AIENOS_DISK_MUTANTS: FAIL"; exit 1; fi

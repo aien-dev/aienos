@@ -127,7 +127,11 @@ MUT_DIR = $(OUT)/mut
 MUT_TABLE = $(OUT)/mutants.table
 MUT_TIMEOUT ?= 300
 
-mutants: $(TEST) $(CONTAIN_TEST) | $(OUT)
+CAP_MUT_TEST_OBJS = $(OUT)/t_capability_test.o $(OUT)/t_contain_test.o $(OUT)/aienos_capability.o $(OUT)/aienos_contain.o
+$(OUT)/t_%_test.o: tests/%_test.c aienos_capability.h aienos_contain.h | $(OUT)
+	$(CC) $(CFLAGS) -Wno-error -I. -pthread -c -o $@ $<
+
+mutants: $(TEST) $(CONTAIN_TEST) $(CAP_MUT_TEST_OBJS) | $(OUT)
 	@rm -rf $(MUT_DIR); mkdir -p $(MUT_DIR)
 	$(file >$(MUT_TABLE),$(CAP_MUTANTS))
 	@ulimit -c 0; \
@@ -136,25 +140,33 @@ mutants: $(TEST) $(CONTAIN_TEST) | $(OUT)
 	else echo "baseline (no mutation): tests FAIL, mutants are meaningless"; \
 	  echo "---- baseline log ($(MUT_DIR)/baseline.log) ----"; cat $(MUT_DIR)/baseline.log; echo "---- end baseline log ----"; \
 	  echo "AIENOS_CAP_MUTANTS: FAIL"; exit 1; fi; \
-	n=0; killed=0; fail=0; \
+	n=0; killed=0; fail=0; names=""; \
 	while IFS='|' read -r name file k from to; do \
-	  [ -n "$$name" ] || continue; n=$$((n+1)); d=$(MUT_DIR)/$$name; mkdir -p $$d; \
-	  if ! awk -v k="$$k" -v from="$$from" -v to="$$to" \
-	      'index($$0, from) { c++; if (c == k) { i = index($$0, from); $$0 = substr($$0, 1, i - 1) to substr($$0, i + length(from)); hit = 1 } } { print } END { exit hit ? 0 : 3 }' \
-	      $$file > $$d/$$file; then \
-	    echo "mutant $$name: did not apply, text not found in $$file (FAIL)"; fail=1; continue; fi; \
-	  if cmp -s $$file $$d/$$file; then echo "mutant $$name: no change (FAIL)"; fail=1; continue; fi; \
-	  if [ $$file = aienos_capability.c ]; then capsrc=$$d/aienos_capability.c; gatesrc=aienos_contain.c; \
-	  else capsrc=aienos_capability.c; gatesrc=$$d/aienos_contain.c; fi; \
-	  if ! $(CC) $(CFLAGS) -Wno-error -I. -pthread -o $$d/capability_test tests/capability_test.c $$capsrc > $$d/build.log 2>&1 || \
-	     ! $(CC) $(CFLAGS) -Wno-error -I. -pthread -o $$d/contain_test tests/contain_test.c $$gatesrc $$capsrc >> $$d/build.log 2>&1; then \
-	    echo "mutant $$name: does not compile (FAIL, see $$d/build.log)"; fail=1; continue; fi; \
-	  by=""; \
-	  timeout $(MUT_TIMEOUT) $$d/capability_test > $$d/run.log 2>&1 || by="capability_test"; \
-	  timeout $(MUT_TIMEOUT) $$d/contain_test >> $$d/run.log 2>&1 || by="$${by:+$$by+}contain_test"; \
-	  if [ -n "$$by" ]; then echo "mutant $$name: killed by $$by"; killed=$$((killed+1)); \
-	  else echo "mutant $$name: SURVIVED (FAIL)"; fail=1; fi; \
+	  [ -n "$$name" ] || continue; n=$$((n+1)); names="$$names $$name"; d=$(MUT_DIR)/$$name; mkdir -p $$d; \
+	  ( if ! awk -v k="$$k" -v from="$$from" -v to="$$to" \
+	        'index($$0, from) { c++; if (c == k) { i = index($$0, from); $$0 = substr($$0, 1, i - 1) to substr($$0, i + length(from)); hit = 1 } } { print } END { exit hit ? 0 : 3 }' \
+	        $$file > $$d/$$file; then \
+	      echo "mutant $$name: did not apply, text not found in $$file (FAIL)" > $$d/msg; echo 1 > $$d/fail; exit 0; fi; \
+	    if cmp -s $$file $$d/$$file; then echo "mutant $$name: no change (FAIL)" > $$d/msg; echo 1 > $$d/fail; exit 0; fi; \
+	    if ! $(CC) $(CFLAGS) -Wno-error -I. -pthread -c -o $$d/m.o $$d/$$file > $$d/build.log 2>&1; then \
+	      echo "mutant $$name: does not compile (FAIL, see $$d/build.log)" > $$d/msg; echo 1 > $$d/fail; exit 0; fi; \
+	    if [ $$file = aienos_capability.c ]; then capobj=$$d/m.o; gateobj=$(OUT)/aienos_contain.o; \
+	    else capobj=$(OUT)/aienos_capability.o; gateobj=$$d/m.o; fi; \
+	    if ! $(CC) $(CFLAGS) -Wno-error -pthread -o $$d/capability_test $(OUT)/t_capability_test.o $$capobj >> $$d/build.log 2>&1 || \
+	       ! $(CC) $(CFLAGS) -Wno-error -pthread -o $$d/contain_test $(OUT)/t_contain_test.o $$gateobj $$capobj >> $$d/build.log 2>&1; then \
+	      echo "mutant $$name: does not compile (FAIL, see $$d/build.log)" > $$d/msg; echo 1 > $$d/fail; exit 0; fi; \
+	    by=""; \
+	    timeout $(MUT_TIMEOUT) $$d/capability_test > $$d/run.log 2>&1 || by="capability_test"; \
+	    timeout $(MUT_TIMEOUT) $$d/contain_test >> $$d/run.log 2>&1 || by="$${by:+$$by+}contain_test"; \
+	    if [ -n "$$by" ]; then echo "mutant $$name: killed by $$by" > $$d/msg; \
+	    else echo "mutant $$name: SURVIVED (FAIL)" > $$d/msg; echo 1 > $$d/fail; fi \
+	  ) & \
 	done < $(MUT_TABLE); \
+	wait; \
+	for name in $$names; do \
+	  d=$(MUT_DIR)/$$name; cat $$d/msg; \
+	  if [ -f $$d/fail ]; then fail=1; else killed=$$((killed+1)); fi; \
+	done; \
 	if [ $$n -lt 8 ]; then echo "only $$n mutants defined, need at least 8"; fail=1; fi; \
 	if [ $$fail -eq 0 ] && [ $$killed -eq $$n ]; then echo "AIENOS_CAP_MUTANTS: PASS ($$killed/$$n killed)"; \
 	else echo "AIENOS_CAP_MUTANTS: FAIL ($$killed/$$n killed)"; exit 1; fi

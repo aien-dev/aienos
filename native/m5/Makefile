@@ -101,21 +101,37 @@ GUARDS = class-in-kdf slot-empty slot-check slot-suite slot-kdf slot-flags secma
 	osig-self osig-source osig-dest osig-agent osig-gen osig-format osig-envcount osig-envset \
 	osig-manifest osig-ownergen osig-replay osig-bind-manifest osig-bind-counter
 
-mutants: | $(OUT)
-	@ulimit -c 0; fail=0; for g in $(GUARDS); do \
-	  f=$$(grep -l "GUARD:$$g \*/" $(SRCS)); \
-	  if [ $$(echo "$$f" | wc -w) -ne 1 ]; then echo "mutant $$g: guard tag missing or duplicated"; fail=1; continue; fi; \
-	  if [ $$(grep -c "GUARD:$$g \*/" $$f) -ne 1 ]; then echo "mutant $$g: guard tag duplicated"; fail=1; continue; fi; \
-	  mkdir -p $(OUT)/mut_$$g; \
-	  for s in $(SRCS); do if [ $$s = $$f ]; then sed "/GUARD:$$g \*\//d" $$s > $(OUT)/mut_$$g/$$s; else cp $$s $(OUT)/mut_$$g/$$s; fi; done; \
-	  $(CC) $(CFLAGS) -Wno-error -I. -o $(OUT)/mut_$$g/t tests/m5_test.c \
-	    $(addprefix $(OUT)/mut_$$g/,$(SRCS)) $(CRYPTO_SRCS) $(SIG_SRCS) ../argus/sha256.c 2> $(OUT)/mut_$$g/cc.log \
-	    && $(CC) $(CFLAGS) -Wno-error -I. -o $(OUT)/mut_$$g/t2 tests/m5_migsig_test.c \
-	    $(addprefix $(OUT)/mut_$$g/,$(SRCS)) $(CRYPTO_SRCS) $(SIG_SRCS) ../argus/sha256.c 2>> $(OUT)/mut_$$g/cc.log \
-	    || { echo "mutant $$g: does not compile (FAIL)"; fail=1; continue; }; \
-	  if ./$(OUT)/mut_$$g/t > $(OUT)/mut_$$g/run.log 2>&1 && ./$(OUT)/mut_$$g/t2 >> $(OUT)/mut_$$g/run.log 2>&1; then \
-	    echo "mutant $$g: SURVIVED (FAIL)"; fail=1; \
-	  else echo "mutant $$g: killed"; fi; \
+M5_MUT_TEST_OBJS = $(OUT)/t_m5_test.o $(OUT)/t_m5_migsig_test.o
+$(OUT)/t_%_test.o: tests/%_test.c $(HDRS) | $(OUT)
+	$(CC) $(CFLAGS) -Wno-error -I. -c -o $@ $<
+
+mutants: $(OBJS) $(DEP_OBJS) $(M5_MUT_TEST_OBJS) | $(OUT)
+	@ulimit -c 0; fail=0; \
+	for g in $(GUARDS); do \
+	  d=$(OUT)/mut_$$g; rm -rf $$d; mkdir -p $$d; \
+	  ( f=$$(grep -l "GUARD:$$g \*/" $(SRCS)); \
+	    if [ $$(echo "$$f" | wc -w) -ne 1 ]; then echo "mutant $$g: guard tag missing or duplicated" > $$d/msg; echo 1 > $$d/fail; exit 0; fi; \
+	    if [ $$(grep -c "GUARD:$$g \*/" $$f) -ne 1 ]; then echo "mutant $$g: guard tag duplicated" > $$d/msg; echo 1 > $$d/fail; exit 0; fi; \
+	    sed "/GUARD:$$g \*\//d" $$f > $$d/$$f; \
+	    others=""; for s in $(SRCS); do [ "$$s" = "$$f" ] || others="$$others $(OUT)/$${s%.c}.o"; done; \
+	    $(CC) $(CFLAGS) -Wno-error -I. -c -o $$d/m.o $$d/$$f 2> $$d/cc.log \
+	      && $(CC) $(CFLAGS) -Wno-error -o $$d/t $(OUT)/t_m5_test.o $$d/m.o $$others $(DEP_OBJS) 2>> $$d/cc.log \
+	      && $(CC) $(CFLAGS) -Wno-error -o $$d/t2 $(OUT)/t_m5_migsig_test.o $$d/m.o $$others $(DEP_OBJS) 2>> $$d/cc.log \
+	      || { echo "mutant $$g: does not compile (FAIL)" > $$d/msg; echo 1 > $$d/fail; exit 0; }; \
+	    case "$$f" in \
+	      m5_owner_sig.c) order="t2 t" ;; \
+	      *)              order="t t2" ;; \
+	    esac; \
+	    pass=1; : > $$d/run.log; \
+	    for b in $$order; do ./$$d/$$b >> $$d/run.log 2>&1 || { pass=0; break; }; done; \
+	    if [ $$pass -eq 1 ]; then echo "mutant $$g: SURVIVED (FAIL)" > $$d/msg; echo 1 > $$d/fail; \
+	    else echo "mutant $$g: killed" > $$d/msg; fi \
+	  ) & \
+	done; \
+	wait; \
+	for g in $(GUARDS); do \
+	  d=$(OUT)/mut_$$g; cat $$d/msg; \
+	  [ ! -f $$d/fail ] || fail=1; \
 	done; \
 	if [ $$fail -eq 0 ]; then echo "M5_NATIVE_MUTANTS: PASS"; else echo "M5_NATIVE_MUTANTS: FAIL"; exit 1; fi
 

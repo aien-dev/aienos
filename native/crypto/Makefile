@@ -59,15 +59,27 @@ endif
 # fail (or crash) for every mutant, or that rule is not tested.
 GUARDS = tag-msb ctr-msb pt-max aad-max-seal ct-max aad-max-open tag-check wipe-on-fail
 
-mutants: | $(OUT)
-	@ulimit -c 0; fail=0; for g in $(GUARDS); do \
-	  grep -q "GUARD:$$g \*/" gcm_siv.c || { echo "mutant $$g: guard tag missing"; fail=1; continue; }; \
-	  sed "/GUARD:$$g \*\//d" gcm_siv.c > $(OUT)/mut_$$g.c; \
-	  $(CC) $(CFLAGS) -Wno-error -I. -o $(OUT)/mut_$$g tests/crypto_test.c $(OUT)/mut_$$g.c \
-	    aes.c polyval.c hmac.c ct.c ../argus/sha256.c || { fail=1; continue; }; \
-	  if ./$(OUT)/mut_$$g > $(OUT)/mut_$$g.log 2>&1; then \
-	    echo "mutant $$g: SURVIVED (FAIL)"; fail=1; \
-	  else echo "mutant $$g: killed"; fi; \
+$(OUT)/t_crypto_test.o: tests/crypto_test.c $(HDRS) | $(OUT)
+	$(CC) $(CFLAGS) -Wno-error -I. -c -o $@ $<
+
+mutants: $(OBJS) $(OUT)/sha256.o $(OUT)/t_crypto_test.o | $(OUT)
+	@ulimit -c 0; fail=0; \
+	for g in $(GUARDS); do \
+	  ( grep -q "GUARD:$$g \*/" gcm_siv.c || { echo "mutant $$g: guard tag missing" > $(OUT)/mut_$$g.msg; echo 1 > $(OUT)/mut_$$g.fail; exit 0; }; \
+	    sed "/GUARD:$$g \*\//d" gcm_siv.c > $(OUT)/mut_$$g.c; \
+	    $(CC) $(CFLAGS) -Wno-error -I. -c -o $(OUT)/mut_$$g.o $(OUT)/mut_$$g.c \
+	      && $(CC) $(CFLAGS) -Wno-error -o $(OUT)/mut_$$g $(OUT)/t_crypto_test.o $(OUT)/mut_$$g.o \
+	        $(OUT)/aes.o $(OUT)/polyval.o $(OUT)/hmac.o $(OUT)/ct.o $(OUT)/sha256.o \
+	      || { echo "mutant $$g: does not compile" > $(OUT)/mut_$$g.msg; echo 1 > $(OUT)/mut_$$g.fail; exit 0; }; \
+	    if ./$(OUT)/mut_$$g > $(OUT)/mut_$$g.log 2>&1; then \
+	      echo "mutant $$g: SURVIVED (FAIL)" > $(OUT)/mut_$$g.msg; echo 1 > $(OUT)/mut_$$g.fail; \
+	    else echo "mutant $$g: killed" > $(OUT)/mut_$$g.msg; fi \
+	  ) & \
+	done; \
+	wait; \
+	for g in $(GUARDS); do \
+	  cat $(OUT)/mut_$$g.msg; \
+	  if [ -f $(OUT)/mut_$$g.fail ]; then fail=1; rm -f $(OUT)/mut_$$g.fail; fi; \
 	done; \
 	if [ $$fail -eq 0 ]; then echo "AIENOS_CRYPTO_MUTANTS: PASS"; else echo "AIENOS_CRYPTO_MUTANTS: FAIL"; exit 1; fi
 

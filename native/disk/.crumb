@@ -18,26 +18,26 @@
       "children": [
         {
           "digest": "54a25a2ce38d5cde54cce87582dfdcd66b3f21ba3ae18d330c8c66a7004b386a",
-          "last_commit": "1994c4f",
+          "last_commit": "2563059",
           "name": "qemu",
           "purpose": "Directory native/disk/qemu. Purpose not yet described by a human."
         },
         {
           "digest": "28bc8b4021cec8ccd5b90c15d11db3fe7dd396db65e062f5e1046631fa2e4755",
-          "last_commit": "1994c4f",
+          "last_commit": "2563059",
           "name": "tests",
           "purpose": "Directory native/disk/tests. Purpose not yet described by a human."
         }
       ],
       "children_root": "sha256:fb9a25a745be4f0d38936d5ff30f3fafdc68a80d6aaeff667fde54d196d6b132",
-      "compiled_at": "2026-10-13T05:44:11Z",
+      "compiled_at": "2026-10-14T14:17:07Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:3508a201e84c9e6a53160c5c46395f17c376b0c460b3b81049803505876d4f07",
+      "digest": "sha256:5f7e090612dfe2e9c4a1e77fcf8443615bf6191ae6eb50ec8a472f5855f29506",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 20,
-      "generated_at_commit": "1994c4f8c4e8521d7febed45306515aa5085f207",
-      "source_tree": "sha256:5aacdfa45187fd64a3b11a63ea0baa0a1445461e674422908bfc6ae1b8dbd9d7"
+      "generated_at_commit": "f5c90e7c1eb273e8bbe3ace0e49e02841e89b046",
+      "source_tree": "sha256:3d0f1765860ba9a04e29b2bc9becb299ca5bef8ded1b52082712e27bdaf37163"
     },
     "owner_lane": "",
     "provenance": {
