@@ -57,7 +57,8 @@ mk OUT="${out_osh}" CK_SEED0B_TEST_ANCHOR=1 CK_OSH_TEST=1 CK_OSH_OP_TEST=1 full
 make -s -C native/kernel OUT="${out_prod}" store-image gpt-image >/dev/null
 simg="${out_prod}/host/ck_store_image"
 
-files=("${fix}/osh_lex.unit" "${fix}/osh_parse.unit" "${fix}/osh_expand.unit")
+# aienos#383: each launch needs the unit's realization receipt
+files=("${fix}/osh_lex.unit" "${fix}/osh_parse.unit" "${fix}/osh_expand.unit" "${fix}/../osc_receipt/osh_lex.rcpt" "${fix}/../osc_receipt/osh_parse.rcpt" "${fix}/../osc_receipt/osh_expand.rcpt")
 disk="${work}/nvme.img"
 "${out_prod}/host/ck_gpt_image" create "${disk}" 512 64 aienos-middle >/dev/null || fail "GPT boot disk image created"
 if "${simg}" build "${disk}" 512 "${files[@]}" >"${work}/build.txt" 2>&1; then pass "boot disk built: $(head -1 "${work}/build.txt")"
@@ -102,7 +103,7 @@ exact() { # description, regex, expected count
     if [[ "${n}" == "$3" ]]; then pass "$1 (${n})"; else fail "$1: expected $3, got ${n}"; fi
 }
 check "${serial}" "left firmware and entered the kernel" "kernel: alive"
-check "${serial}" "kernel read all three candidates from the boot disk Store" "^artifact_candidates: 3$"
+check "${serial}" "kernel read all six candidates (three units, three receipts) from the boot disk Store" "^artifact_candidates: 6$"
 for u in osh_lex osh_parse osh_expand; do
     check "${serial}" "${u} admitted (real oscc output, TEST signer)" "^osc_unit: ${u}\\.unit ACCEPT unit_digest=[0-9a-f]{64} program_id=[0-9a-f]{64} funcs=[0-9]+ caps=0 signer=TEST$"
 done
