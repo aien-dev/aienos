@@ -1,0 +1,7 @@
+root ::= noargs | texted
+noargs ::= "{\"action\":\"" noact "\",\"args\":{}}"
+noact ::= "status" | "help" | "evidence" | "recall" | "facts" | "approve" | "deny" | "cancel" | "none" | "clarify" | "refuse"
+texted ::= "{\"action\":\"" tact "\",\"args\":{\"text\":\"" text "\"}}"
+tact ::= "remember" | "prefer" | "task" | "prompt"
+text ::= char{1,48}
+char ::= [ !#-\[\]-~]
