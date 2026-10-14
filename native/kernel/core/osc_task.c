@@ -13,6 +13,7 @@
 #include "arch.h"
 #include "ck_internal.h"
 #include "fmt.h"
+#include "osc_admit.h"
 #include "osc_task.h"
 #include "pt.h"
 #include "sha256.h"
@@ -154,8 +155,9 @@ static void refuse(struct osc_result *res, unsigned code)
     res->refused_code = (uint8_t)code;
 }
 
-void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept *a,
-                   const struct ck_osc_launch_req *rq, struct osc_result *res, struct ck_osc_launch_info *info)
+void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept *a, const uint8_t *rcpt,
+                   size_t rcpt_len, const struct ck_osc_launch_req *rq, struct osc_result *res,
+                   struct ck_osc_launch_info *info)
 {
     struct ck_osc_launch_info local;
     if (!info)
@@ -164,6 +166,18 @@ void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept
     info->slot_free_after = 1;
     info->tables_zeroed = 1; /* a refusal built no tables */
     refuse(res, OSC_RESOURCE_UNAVAILABLE);
+    /* aienos#383: no launch without a valid realization receipt for exactly this unit's program and code, under
+     * the kernel's own policy (never the caller's). Checked before the name lookup, so a refused receipt runs and
+     * maps nothing. The code is still hashed again below before it is made executable. */
+    {
+        struct osc_policy pol;
+        ck_osc_policy(&pol);
+        unsigned rc = osc_receipt_verify(rcpt, rcpt_len, a, &pol, &info->rcpt);
+        if (rc != 0) {
+            refuse(res, rc);
+            return;
+        }
+    }
     int fi = osc_unit_lookup(a, rq->name, rq->name_len);
     if (fi < 0) {
         refuse(res, OSC_LAUNCH_BAD_ENTRY);

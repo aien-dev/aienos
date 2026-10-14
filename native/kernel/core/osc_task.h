@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "osc_launch.h"
+#include "osc_receipt.h"
 #include "osc_unit.h"
 
 #define CK_OSC_PAGE 4096u
@@ -38,6 +39,7 @@ struct ck_osc_launch_req {
 };
 
 struct ck_osc_launch_info {
+    struct osc_receipt_info rcpt; /* what the receipt check saw (id, class, epochs, which revocation); diagnostic */
     uint64_t budget;          /* ticks granted */
     unsigned pages_mapped;    /* user pages that were mapped while the task existed */
     int tables_zeroed;        /* after teardown every page-table entry of the task is zero and its L0 slot is clear (says nothing about frame contents) */
@@ -50,10 +52,14 @@ uint64_t ck_osc_va_in(void);
 uint64_t ck_osc_va_ws(void);
 
 /* Launch the function rq->name of the accepted unit (bytes `unit`, verdict *a from osc_unit_admit on the
- * same bytes) and wait for it. *res is always filled. Refusals (40 unknown name, 41 argument shape or
- * range, 30 resources, 16 code hash) mean no unit instruction ran. */
-void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept *a,
-                   const struct ck_osc_launch_req *rq, struct osc_result *res, struct ck_osc_launch_info *info);
+ * same bytes) and wait for it. *res is always filled. A launch needs a realization receipt (`rcpt`, `rcpt_len`;
+ * omega receipt v1, artifact/osc_receipt.h, aienos#383): it is verified FIRST, against *a and the kernel policy
+ * (ck_osc_policy), and a missing or refused receipt is REFUSED with its named reason (64 RECEIPT_MISSING, 65..88
+ * RECEIPT_*) before anything else. The receipt grants nothing: entry, arguments, resources and grants are
+ * checked as before. Refusals (64..88 receipt, 40 unknown name, 41 argument shape or range, 30 resources,
+ * 14 limits, 16 code hash) mean no unit instruction ran and nothing was mapped. */
+void ck_osc_launch(const uint8_t *unit, size_t unit_len, const struct osc_accept *a, const uint8_t *rcpt,
+                   size_t rcpt_len, const struct ck_osc_launch_req *rq, struct osc_result *res, struct ck_osc_launch_info *info);
 
 /* "RETURNED value=..", "TRAPPED trap_code=..", "OUTCOME_UNKNOWN reason=..", "REFUSED code=.." */
 int ck_osc_result_str(const struct osc_result *r, char *buf, size_t n);

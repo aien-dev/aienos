@@ -39,6 +39,19 @@ const char *osc_code_name(unsigned code)
         return "LAUNCH_BAD_ENTRY";
     if (code == OSC_LAUNCH_ARG_SHAPE)
         return "LAUNCH_ARG_SHAPE";
+    /* Realization receipt refusals (artifact/osc_receipt.h): 64 + the omega receipt spec's reason number. */
+    static const char *const rcpt_names[] = {
+        [0] = "RECEIPT_MISSING", [1] = "RECEIPT_SIZE", [2] = "RECEIPT_MAGIC", [3] = "RECEIPT_VERSION",
+        [4] = "RECEIPT_SIGNATURE_ALGORITHM", [5] = "RECEIPT_SIGNER_CLASS", [6] = "RECEIPT_EVIDENCE_CLASS",
+        [7] = "RECEIPT_EPOCH_ORDER", [9] = "RECEIPT_TEST_SIGNER_IN_PRODUCTION", [10] = "RECEIPT_UNTRUSTED_SIGNER",
+        [11] = "RECEIPT_BAD_SIGNATURE", [12] = "RECEIPT_REVOKED", [13] = "RECEIPT_STALE_EPOCH",
+        [14] = "RECEIPT_EXPIRED", [15] = "RECEIPT_NOT_YET_VALID", [16] = "RECEIPT_WRONG_TARGET",
+        [17] = "RECEIPT_WRONG_FIRMWARE", [18] = "RECEIPT_PROGRAM_MISMATCH", [19] = "RECEIPT_EXECUTABLE_MISMATCH",
+        [20] = "RECEIPT_ARGUMENT", [22] = "RECEIPT_UNTRUSTED_CHECKER", [23] = "RECEIPT_WRONG_PRODUCER",
+        [24] = "RECEIPT_DEPENDENCIES_MISMATCH",
+    };
+    if (code >= 64 && code - 64 < sizeof rcpt_names / sizeof rcpt_names[0] && rcpt_names[code - 64])
+        return rcpt_names[code - 64];
     return "?";
 }
 

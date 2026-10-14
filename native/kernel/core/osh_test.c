@@ -47,6 +47,17 @@ enum { U_LEX = 0, U_PARSE = 1, U_EXPAND = 2, U_COUNT = 3 };
 static const char *const u_file[U_COUNT] = { "osh_lex.unit", "osh_parse.unit", "osh_expand.unit" };
 static const char *const u_entry[U_COUNT] = { "lex_run", "parse_run", "expand_run" };
 static const char *const u_label[U_COUNT] = { "lex", "parse", "expand" };
+/* each unit's realization receipt in the Store (aienos#383, tests/fixtures/osc_receipt; minted by omega checker2) */
+static const char *const u_rcpt[U_COUNT] = { "osh_lex.rcpt", "osh_parse.rcpt", "osh_expand.rcpt" };
+
+/* ck_osc_launch with the unit's receipt from the Store (none if it did not arrive: refused RECEIPT_MISSING) */
+static void launch_rcpt(const char *rname, const uint8_t *b, size_t len, const struct osc_accept *acc,
+                        const struct ck_osc_launch_req *rq, struct osc_result *r, struct ck_osc_launch_info *info)
+{
+    size_t rl = 0;
+    const uint8_t *rb = ck_osc_receipt_find(rname, &rl);
+    ck_osc_launch(b, len, acc, rb, rl, rq, r, info);
+}
 
 #define UNIT_BYTES 131072u /* the packed containers (IR + code + manifest) pass 64 KiB; the code stays under CK_OSC_CODE_MAX_BYTES */
 static struct {
@@ -134,7 +145,7 @@ static int launch(unsigned u, size_t in_len, uint64_t ws_cells, struct ck_osc_ws
     rq.in_len = in_len;
     rq.ws = wsr;
     rq.max_ticks = max_ticks;
-    ck_osc_launch(unit[u].bytes, unit[u].len, &unit[u].acc, &rq, r, info);
+    launch_rcpt(u_rcpt[u], unit[u].bytes, unit[u].len, &unit[u].acc, &rq, r, info);
     launches++;
     if (!info->slot_free_after)
         slots_held++;
@@ -511,7 +522,7 @@ static void negatives(void)
     rq.args[4] = 0x3333;
     rq.args[5] = 0x4444;
     rq.ws = &main_ws;
-    ck_osc_launch(unit[U_LEX].bytes, unit[U_LEX].len, &unit[U_LEX].acc, &rq, &r, &info);
+    launch_rcpt(u_rcpt[U_LEX], unit[U_LEX].bytes, unit[U_LEX].len, &unit[U_LEX].acc, &rq, &r, &info);
     hex(ws_mem + 512 * 8, sizeof ws_mem - 512 * 8, h1);
     ck_snprintf(x, sizeof x, "cell17=%llu cells_512_up_unchanged=%u", (unsigned long long)w[17], (unsigned)streq(h0, h1));
     neg_line("2a", "lex emit_tok(ws+0,len 512 cells,..) with w[17]=127", &r, &info, x);
@@ -557,7 +568,7 @@ static void negatives(void)
         rq.name = "spin";
         rq.name_len = 4;
         rq.max_ticks = 1;
-        ck_osc_launch(spin_unit.bytes, spin_unit.len, &spin_unit.acc, &rq, &r, &info);
+        launch_rcpt("l01.rcpt", spin_unit.bytes, spin_unit.len, &spin_unit.acc, &rq, &r, &info);
         neg_line("4b", "l01 spin() with the same max_ticks=1 cap", &r, &info, "");
     } else {
         ck_printf("osh_neg4b: NOT_RUN (l01_launch_fns.unit was not admitted); %s\n", LABEL);
