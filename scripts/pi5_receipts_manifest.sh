@@ -9,11 +9,11 @@
 # kernel.log, and the verdict lines picked by the checked-in table (scripts/pi5_receipts_verdicts.tsv).
 # Output is plain ASCII, LF line endings, no timestamps, no absolute paths: same inputs, same bytes.
 #
-# SIGNING (not done here): the manifest bytes on stdout are the message. A signature is an Ed25519 detached
-# signature over exactly those bytes (RFC 8032 pure Ed25519), checked with the in-tree verifier
-# (native/sig/ed25519.c) by native/kernel/tools/ck_manifest_sig.c ("verify MANIFEST SIG PUBKEYHEX").
-# No owner or release key exists yet; scripts/ck_pi5_manifest_check.sh proves sign+verify with the public
-# RFC 8032 TEST 1 key only.
+# SIGNING (not done here): the owner signs a fixed four-line statement that binds these manifest bytes by length and
+# sha256 (PIV Ed25519 takes only a small message), as plain Ed25519 (RFC 8032), checked with the in-tree verifier
+# (native/sig/ed25519.c) by native/kernel/tools/ck_manifest_sig.c ("verify MANIFEST SIG PUBKEYHEX"). The statement and the
+# YubiKey ceremony are in docs/native/PI5-8-OWNER-CEREMONY.md. No owner or release key exists yet;
+# scripts/ck_pi5_manifest_check.sh proves sign+verify with the public RFC 8032 TEST 1 key and an openssl TEST key only.
 #
 # Exit 0 and a manifest on stdout only when every run folder exists, every field was found and every table
 # row matched at least one line. Otherwise nothing goes to stdout; problems go to stderr (exit 1 evidence

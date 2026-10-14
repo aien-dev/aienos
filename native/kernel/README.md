@@ -58,6 +58,8 @@ of them:
   refuses the RFC 8032 TEST 1/2/3 public keys, the TEST machine id, the TEST
   store uuid, all-equal bytes, wrong lengths, non-hex, duplicates and unknown
   names. Real owner files are never committed.
+  The owner file for a YubiKey-held owner key is made by `scripts/pi5-8/owner_pubkey_file.sh` from the exported PIV public key
+  (`docs/native/PI5-8-OWNER-CEREMONY.md`, gate `scripts/ck_pi5_owner_check.sh`).
 - What the image uses: the machine id becomes the ARGUS machine id, the store
   uuid the boot Store uuid, and the boot log prints a SHA-256 fingerprint of
   the owner root key. Nothing in the kernel verifies with the owner root key
