@@ -8,7 +8,8 @@ Spark or any real machine. Contract: `OSC_UNIT_ARTIFACT.md` section 9 (aien-prot
 ## What runs
 
 An admitted unit (`struct osc_accept` from `osc_unit_admit`) is run as one function call in an EL0 task with
-its own address space, by `ck_osc_launch` (`core/osc_task.c`): look up the function by exact name, check the
+its own address space, by `ck_osc_launch` (`core/osc_task.c`): verify the unit's realization receipt (aienos#383,
+`docs/osc-receipts.md`; no valid receipt, no launch), look up the function by exact name, check the
 arguments, copy and re-hash the code, map, enter EL0, wait, classify, tear down. One call at a time, one slot.
 
 ## The call signature (what an entry gets)

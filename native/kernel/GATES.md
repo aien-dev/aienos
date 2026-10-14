@@ -787,6 +787,28 @@ it down). What is enforced, what is not, and the decisions taken: `docs/osc-laun
   execute an SVC, so only the host test reaches that lock).
 - Labels: QEMU (aarch64 virt), TEST signer, not physical. Nothing here ran on a Spark.
 
+## OSC_RECEIPT: launch requires a valid Omega realization receipt (aienos#383) -> CK `OSC_RECEIPT` (scripts/qemu_ck_osc_receipt_test.sh)
+
+Contract: omega `spec/one-layer-receipts.md` (receipt v1). Code: `native/kernel/artifact/osc_receipt.{h,c}`
+(pure verifier written from the spec), `core/osc_admit.c` (`ck_osc_policy`, Store receipt table),
+`core/osc_task.c` (`ck_osc_launch` verifies the receipt first; no receipt is `RECEIPT_MISSING`). Codes,
+policy, ambiguities and the UNVERIFIED list: `docs/osc-receipts.md`.
+
+- Host tests: `tests/test_osc_receipt.c`, part of `make test` and `make sanitize`, built for the qualification
+  and the release policy. Mutants: `make osc-receipt-mutants`, 25 of 25 guards killed.
+- QEMU gate: one boot of the qualification image built with `CK_SEED0B_TEST_ANCHOR=1 CK_OSC_LAUNCH_TEST=1
+  CK_OSC_RECEIPT_TEST=1` (TEST ONLY). The Store holds a01_valid_min.unit and 13 receipts minted by omega
+  checker2 with its TEST key. 17 launches of a01 add(a, b), one `osc_rcpt_launch:` line each: the valid receipt
+  RETURNS 3 and, after every refusal, 42; no receipt 64 MISSING; altered 75 BAD_SIGNATURE; replayed 77
+  STALE_EPOCH; revoked id 76 REVOKED (`revoked=receipt_id`); revoked TEST key 76 REVOKED (`revoked=signer_key`);
+  expired 78; not yet valid 79; wrong target 80; l01's receipt 83 EXECUTABLE_MISMATCH; other program 82
+  PROGRAM_MISMATCH; 417 bytes 65 SIZE; release policy 73 TEST_SIGNER_IN_PRODUCTION; firmware 81; dependency 88;
+  other checker 86 UNTRUSTED_CHECKER. Every refusal maps nothing (`ticks=0 pages_mapped=0`).
+- The OSC_LAUNCH, OSH_CORE and OSH_OP children now put each unit's receipt in the Store; their launches pass
+  through the same check.
+- Evidence class 2 is refused 96 LRAT_PROOFS_REQUIRED (host test only; no class 2 fixture is in the QEMU Store).
+- Labels: QEMU (aarch64 virt), TEST signer, not physical. The physical Spark row stays NOT_RUN.
+
 ## OSH_CORE: the Omega-native shell core as EL0 tasks, same step trace as Linux (OSH-AIENOS-0) -> CK `OSH_CORE` (scripts/qemu_ck_osh_core_test.sh)
 
 Label: **QEMU (aarch64 virt), TEST signer, not physical.** Three compiled OSC units (`lex_run`, `parse_run`, `expand_run`; real
