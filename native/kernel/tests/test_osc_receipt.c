@@ -261,6 +261,7 @@ static void structure_and_order(void)
     static const uint8_t (*const tk)[32] = &osc_rcpt_test_pk;
     p.rcpt_owner_anchors = tk;
     p.n_rcpt_owner = 1;
+    p.n_rcpt_test = 0; /* so the both-classes rule (guard 11) cannot answer for the owner-root rule (guard 10) */
     MUTATE(put16(r + 10, 2), OSC_RCPT_UNTRUSTED_SIGNER);
     p.release = 0;
     p.n_rcpt_test = 0;
