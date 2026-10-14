@@ -433,7 +433,7 @@ fn huge_fork_count_with_underivable_child_is_refused_without_spinning() {
         depth: 1,
         forks: 0,
     });
-    t.branches.sort_by(|a, b| a.id.cmp(&b.id));
+    t.branches.sort_by_key(|a| a.id);
     assert_eq!(
         t.validate(),
         Err(ContinuityError::Corrupt("branch lineage is inconsistent"))
