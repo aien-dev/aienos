@@ -5,6 +5,18 @@
 #   1. the Pi image defines the board glue: watchdog, SD host, card log slot;
 #   2. the default image (make -C native/kernel all) defines none of it, so the
 #      Spark and QEMU builds carry no Pi code (the hooks are weak and absent).
+#   3. the commit stamp (the "aienos_commit" string the kernel prints, read back
+#      out of the EFI with scripts/pi5/efi-commit.sh) tells the truth about the tree:
+#        - the default image always carries the bare HEAD hash (the QEMU gates
+#          compare "aienos_commit: <HEAD>"), dirty tree or not;
+#        - the Pi image carries the bare HEAD hash when no tracked file differs
+#          from HEAD, and "<HEAD>-dirty" when one does. The dirty case is built
+#          from a temporary appended line in native/kernel/README.md, restored
+#          afterwards, into its own OUT (deleted). With that same edit in place
+#          the default image is built too and must still carry the bare hash.
+#        If the tree already has uncommitted tracked changes when the script
+#        starts, the clean-tree and temporary-edit cases cannot be shown and are
+#        printed as NOT_RUN; the Pi image must then carry <HEAD>-dirty.
 # The Pi image cannot boot in QEMU (its SD host and PM watchdog addresses are
 # Pi 5 only); it is run on the hub Pi with the one-shot tryboot runner.
 set -euo pipefail

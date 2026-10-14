@@ -1,0 +1,78 @@
+
+report_version: 1
+aienos_commit: 502d1682153b03146c421e5eba4555a9b1ba1c4b
+report_kind: pre_exit
+last_stage: firmware_entry
+gop: none (LocateHandleBuffer status=0x800000000000000e handles=0)
+model_map: absent (no \EFI\AIENOS\MODEL.MAP on the boot volume)
+klog_map: slot lba=20848 sectors=4096 on a disk of 250347520 sectors (firmware read back the header)
+kernel_impl: c (native/kernel, Lane 18)
+firmware_vendor: EDK2
+firmware_revision: 0x10000
+firmware_el: EL2
+counter_frequency_hz: 54000000
+acpi_rsdp: 0x3e394018
+uart: pl011 spcr type=0x3 base=0x107d001000
+image: 0x3cc53000-0x3cd90000
+exiting firmware boot services
+screen: none (no UEFI Graphics Output Protocol); report on UART only
+pi5_watchdog: armed 15 s (PM block 0x107d200000), petted at every stage
+pi5_sd: host 0x1000fff000 version=0x1002 caps=0x15eac832 caps_base_mhz=200 using 200 MHz (clk_emmc2)
+pi5_sd: card ready spec=2 card_hz=25000000 high_capacity=1 blocks=250347520 (122240 MiB) rca=0x59b4 bus=4bit
+pi5_sd: read sector 0 rc=0 signature=55aa (MBR ok)
+pi5_part: AIENOS partition first_lba=1050624 blocks=8388608 (4096 MiB) entries_used=2 index=1 via GPT (CRC32 primary+backup ok)
+pi5_store_layer: reopened (payload identical to the pattern, generation bumped and read back) generation=2 region=64 sectors at partition block 8388544
+
+report_version: 1
+aienos_commit: 502d1682153b03146c421e5eba4555a9b1ba1c4b
+report_kind: kernel
+last_stage: kernel_el1
+mmu: enabled
+pt_frames_used: 18
+mmu_switch: firmware=EL2 firmware_mmu=on firmware_ttbr0=0x3fbfa000 aienos_root=0x210000 ttbr0_el1=0x210000 switched=yes
+mmu_regs: mair=0x4404ff tcr=0x280903510 sctlr=0x30d01805
+memory: ram_ranges=101 free_bytes=7384285184 stack=0x220000-0x260000 heap=0x261000-0x4261000 dma=0x4400000-0x4c00000 exit_attempts=1
+guard_page: ok fault=contained (stack=0x21f000 heap_lo=0x260000 heap_hi=0x4261000) [C kernel addition, not in the Rust kernel]
+gic: v2
+timer_irq: 19 ticks in 200 ms
+gic_madt: gicd=0x107fff9000 gicr=0x0 arch_rev=2 icc_sre=0
+gic_cpu_interface: mmio gicc=0x107fffa000
+timer_stats: intid=30 freq_hz=54000000 period_us=10000 min_us=10000 avg_us=10000 max_us=10000
+exception_level: EL1
+kernel: alive
+kernel_el: EL1h
+entropy: unavailable reason=absent (ID_AA64ISAR0_EL1.RNDR=0, no FEAT_RNG); security consumers refuse, fail closed
+smp: boot_mpidr=0x0 madt_cpus=4 conduit=smc psci_version=1.1
+smp_cpu_on: target=0x100 psci_rc=0 (SUCCESS)
+smp_cpu_on: target=0x200 psci_rc=0 (SUCCESS)
+smp_cpu_on: target=0x300 psci_rc=0 (SUCCESS)
+smp_cpu: target=0x100 checked_in=yes seen_mpidr=0x100 el=1 mmu=on ttbr0_match=yes stack_ok=yes parked=wfe
+smp_cpu: target=0x200 checked_in=yes seen_mpidr=0x200 el=1 mmu=on ttbr0_match=yes stack_ok=yes parked=wfe
+smp_cpu: target=0x300 checked_in=yes seen_mpidr=0x300 el=1 mmu=on ttbr0_match=yes stack_ok=yes parked=wfe
+smp: cpus=4 started=4 checked_in=4 psci_errors=0 distinct_mpidrs=4 wait_us=0 result=ok
+threads: ok interleave=ABABABABAB
+el0 user: hello
+el0: ok write=granted forged=denied fault=contained exit=0
+preempt: ok a=13077751 b=8718451 switches=4
+placement: worker0=class0/core0 worker1=class0/core1
+ipc: ok message=delivered cap=delegated rights=attenuated forged=denied revoked=denied
+ipc_detail: exit_a=0x0 exit_b0=0x0 exit_b1=0x0 child=0x100000001 revoke=0
+stage devices: not linked
+stage security: not linked
+stage store: not linked
+artifact_source: none (no Store stage in this image)
+artifact_candidates: 0
+artifact_receipt_tier: SEED-0B-QEMU
+artifact_verifier_identity: 30854467983f22c8740758c4821419eaae5133a39841544a6c1b8be9e0493728
+artifact_policy_digest: f81123b15a0032656f040e543f3619633ae62e59f98ab8260d5ed786d89e1fbb
+artifact_frames_free_before: 1802788
+artifact_frames_free_after: 1802788
+mm_usage: stack_bytes=262144 stack_used=2624 heap_bytes=67108864 heap_free=67108848 heap_min_free=67103696
+
+report_version: 1
+aienos_commit: 502d1682153b03146c421e5eba4555a9b1ba1c4b
+report_kind: final
+last_stage: final
+artifacts: candidates=0 admitted=0 rejected=0
+note: QEMU qualifies nothing physical
+klog_card: slot verified by the kernel's own SD driver (lba=20848 sectors=4096); writing

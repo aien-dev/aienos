@@ -1,0 +1,6 @@
+# sha256 of AIENOS/KLOG.BIN from each run (2097152 bytes each; the files are not in this folder).
+# Originals: ~/workspace/pi5-runs/<tag>/AIENOS/KLOG.BIN on the Spark.
+# Check on the Spark: cd ~/workspace/pi5-runs && sha256sum -c <this file>  (lines starting with # are ignored)
+b0d2272aed689d2962734f7eee78ad6bf8eebcbd76fd2d21cc2045e441231062  pi5-k1/AIENOS/KLOG.BIN
+5cb19e99e6ea169f049f29c41ce7b62d49db62601968ebb0c41bd20a5826c7b1  pi5-sd1a/AIENOS/KLOG.BIN
+a67d6a5c08233900c8bd2225d06240fc91b26ac75b19360f3f438c1eb4d714e6  pi5-sd1b/AIENOS/KLOG.BIN

@@ -1,0 +1,20 @@
+[07:28:33Z] run pi5-sd1a: efi=/home/drakestapleton/workspace/pi5-efi/PI5SD1.EFI sha256=b0ffdc61dc23a255af63723a2dc813952d4e069aa8e11e77383eedbbc01ec55a
+users: 0
+card+stick ready
+
+/mnt/aienos/EFI/AIENOS/KLOG.BIN:
+ filesystem blocksize 512, begins at LBA 2048; assuming 512 byte sectors.
+ byte_offset  begin_LBA    end_LBA    sectors
+           0      16392      20487       4096
+klog_slot_ready
+[07:32:29Z] klog slot lba=16392 sectors=4096 nonce=9dbd04a475665402fdfc26d9f8b45c5d (raw card sector matches)
+[07:33:18Z] block appended; rebooting the hub with tryboot
+[07:36:50Z] hub answers ping again after 212 s; waiting 60 s for ssh
+tryboot_flag_now=00000000
+block_removed
+ 07:39:14 up 3 min,  2 users,  load average: 8.50, 4.26, 1.68
+[07:39:14Z] config.txt restored byte for byte
+[07:39:14Z] report copied: /home/drakestapleton/workspace/pi5-runs/pi5-sd1a/AIENOS: KLOG.BIN KLOG.MAP 
+klog: state=1 log_len=4075 log_total=4075 stage=final
+[07:39:14Z] kernel log: 78 lines in /home/drakestapleton/workspace/pi5-runs/pi5-sd1a/kernel.log
+[07:39:14Z] run pi5-sd1a done

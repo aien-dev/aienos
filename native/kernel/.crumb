@@ -94,20 +94,20 @@
         },
         {
           "digest": "8c9d6edb01cdf61cdbeb1399e07e4bf4e506dc841c798db8a03e4ef86efb0a8e",
-          "last_commit": "2a5d40f",
+          "last_commit": "8937980",
           "name": "tools",
           "purpose": "Hosted (Linux-built) checkers for the native kernel, run by `make -C native/kernel test`; nothin"
         }
       ],
       "children_root": "sha256:07df85f4c5f2c7c519b2d0c0e9a94cdabf029ba6935c68d7af30c1076a8dcbec",
-      "compiled_at": "2026-10-14T02:50:41Z",
+      "compiled_at": "2026-10-14T13:28:10Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:4b6595e55bb546c4d40de5188663a10b77dd3dd9932b57f17f839f8096836383",
+      "digest": "sha256:31737455b2245028f473bf7d18f3c5e45f3f5e89d948d55d480c90f6b8b87f32",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 381,
-      "generated_at_commit": "2a5d40fb8714e3917e82215388e08865a579ecbb",
-      "source_tree": "sha256:ca852832288b60fe1665cd76bdac4a08f2ed10eb59b3c7c53b7509d808a9bf4c"
+      "generated_at_commit": "a0fa796235409ce465c467e8c72fbd977485d8f7",
+      "source_tree": "sha256:9cf06b5cf7b997b087b4ea61597184fa3fff7637a72dd44dcbf0230316cc03b0"
     },
     "owner_lane": "",
     "provenance": {

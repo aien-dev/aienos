@@ -1,0 +1,15 @@
+
+# >>> AIENOS-PI5 one-shot tryboot block (pi5-run.sh adds it before a run, removes it after)
+[tryboot]
+armstub=aienos/RPI_EFI.fd
+device_tree=aienos/bcm2712-rpi-5-b.dtb
+overlay_prefix=aienos/overlays/
+device_tree_address=0x1f0000
+device_tree_end=0x210000
+framebuffer_depth=32
+disable_overscan=1
+usb_max_current_enable=1
+force_turbo=1
+initramfs aienos/RPI_NV0.bin,aienos/RPI_NV1.bin 0x04000000
+[all]
+# <<< AIENOS-PI5

@@ -1,0 +1,20 @@
+[04:03:42Z] run pi5-k1: efi=/home/drakestapleton/.claude/jobs/9974574d/tmp/PI5K1-8863d91.EFI sha256=cb25f3d3294e6b72b7cc773a8cbae2ff0718ada55cfa12c57d767369f9a69266
+users: 0
+card+stick ready
+
+/mnt/aienos/EFI/AIENOS/KLOG.BIN:
+ filesystem blocksize 512, begins at LBA 2048; assuming 512 byte sectors.
+ byte_offset  begin_LBA    end_LBA    sectors
+           0      86336      90431       4096
+klog_slot_ready
+[04:06:43Z] klog slot lba=86336 sectors=4096 nonce=af203ca44b1f0ecab0a9340dc51590f3 (raw card sector matches)
+[04:07:16Z] block appended; rebooting the hub with tryboot
+[04:10:16Z] hub answers ping again after 180 s; waiting 60 s for ssh
+tryboot_flag_now=00000000
+block_removed
+ 04:13:04 up 3 min,  2 users,  load average: 12.43, 8.05, 3.37
+[04:13:04Z] config.txt restored byte for byte
+[04:13:05Z] report copied: /home/drakestapleton/workspace/pi5-runs/pi5-k1/AIENOS: KLOG.BIN KLOG.MAP 
+klog: state=1 log_len=3809 log_total=3809 stage=final
+[04:13:05Z] kernel log NOT written (slot still empty or missing)
+[04:13:05Z] run pi5-k1 done

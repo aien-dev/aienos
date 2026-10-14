@@ -28,7 +28,7 @@
         },
         {
           "digest": "c519b9b561e14e4c8017f79c86093d14b250c72e5c17258d77507130dd420a44",
-          "last_commit": "f78977a",
+          "last_commit": "09e59a8",
           "name": "docs",
           "purpose": "Directory native/argus/docs. Purpose not yet described by a human."
         },
@@ -40,13 +40,13 @@
         }
       ],
       "children_root": "sha256:60f887eb1e514a9e647f622c81848e2accd452e38b157103e8a9f58a32bb1694",
-      "compiled_at": "2026-10-14T01:16:45Z",
+      "compiled_at": "2026-10-14T13:28:10Z",
       "compiler": "crumb-compile/1",
       "digest": "sha256:50aa2fbd6ca356b7703517bc7ecf439f7b6e0a6b935d0ca6ca4c6f7caf23ce34",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 47,
-      "generated_at_commit": "f78977a6ce33ea89a5b3b1952c0a0e403d4504fa",
+      "generated_at_commit": "a0fa796235409ce465c467e8c72fbd977485d8f7",
       "source_tree": "sha256:9511497343ad28d30fb7c58c0d11c87ab936d6e95ff561bf245ea2e5acbbb4f1"
     },
     "owner_lane": "",
