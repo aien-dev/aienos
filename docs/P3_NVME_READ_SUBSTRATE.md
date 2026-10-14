@@ -1,6 +1,6 @@
 # D5  -  P3 Native NVMe Read Substrate: adapter and wiring design
 
-Baseline: `aien-dev/aienos` @ `ff5de9c` (mirror `/Users/drakestapleton/aienos-p3`).
+Baseline: `aien-spark/aienos` @ `ff5de9c` (mirror `/Users/drakestapleton/aienos-p3`).
 Lane: P3 Native NVMe Read Substrate. Deliverable: the native adapter/wiring that
 lets the AIENOS handoff image drive an NVMe controller directly after firmware
 exit, plus the QEMU harness `scripts/qemu_nvme_test.sh` (this directory's

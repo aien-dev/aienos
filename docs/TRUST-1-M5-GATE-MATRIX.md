@@ -59,7 +59,7 @@ for 9d41efc; its three C-kernel QEMU rows (`ck_m1_boot_qemu`, `ck_store_kernel_q
 `ck_argus1_revoke_qemu`) are STALE and are replaced by the same gates in the 640522a
 `ck_gates` receipt (rows M1, M4_STORE, ARGUS1_REVOKE all PASS there).
 
-GitHub CI on 9d41efc (OBSERVED, `gh run list -R aien-dev/aienos -b main`): Native suites,
+GitHub CI on 9d41efc (OBSERVED, `gh run list -R aien-spark/aienos -b main`): Native suites,
 Crypto boundary, Crumb compiler, Push on main and "C kernel (CK) gates" (run 37257444148)
 all concluded success (CK gates checked again at 03:29Z on 2026-10-05; it was still in
 progress at 03:23Z). The CK run is a QEMU-only check.

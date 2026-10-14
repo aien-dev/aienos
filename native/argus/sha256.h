@@ -1,4 +1,4 @@
-/* Copied from aien-dev/omega src/sha256.{c,h} at ceb68d6 (in-house lineage), unchanged except this note */
+/* Copied from aien-spark/omega src/sha256.{c,h} at ceb68d6 (in-house lineage), unchanged except this note */
 #ifndef OMEGA_SHA256_H
 #define OMEGA_SHA256_H
 

@@ -27,7 +27,7 @@ pull request is reviewed.
 
 For boot work, install QEMU for AArch64 and the AAVMF UEFI firmware (on Ubuntu:
 `qemu-system-arm` and `qemu-efi-aarch64`). An automated emulator boot is being
-added in [#18](https://github.com/aien-dev/aienos/issues/18); once it lands it
+added in [#18](https://github.com/aien-spark/aienos/issues/18); once it lands it
 becomes part of `verify_all.sh`.
 
 ## Rules for code
@@ -75,5 +75,5 @@ contribution you agree that it is licensed under the same terms.
 ## Crumbs
 
 This repo uses the Crumb Protocol (RFC-0001). Each directory carries a `.crumb` file (what the directory is for, its rules, and a backfilled history). Live coordination between agents goes in `.crumb.local`, which is never committed.
-Before editing a directory, read its `.crumb`. Rules and the `crumb` tool: https://github.com/aien-dev/aien-architecture/blob/main/docs/CRUMB_PROTOCOL.md
+Before editing a directory, read its `.crumb`. Rules and the `crumb` tool: https://github.com/aien-spark/aien-architecture/blob/main/docs/CRUMB_PROTOCOL.md
 Backfilled history (marked as such, not live whispers) is in `docs/crumbs/BACKFILL.md`.

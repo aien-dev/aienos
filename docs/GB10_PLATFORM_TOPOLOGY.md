@@ -5,7 +5,7 @@ and compares them against what the existing AIENOS UEFI discovery path already
 assumes. It is a Linux and firmware observation exercise. It does not
 initialize the GPU or submit a command.
 
-Governing: issue [#36](https://github.com/aien-dev/aienos/issues/36),
+Governing: issue [#36](https://github.com/aien-spark/aienos/issues/36),
 [GB10_HARDWARE_PROFILE.md](GB10_HARDWARE_PROFILE.md),
 [GB10_NATIVE_STATUS.md](GB10_NATIVE_STATUS.md).
 

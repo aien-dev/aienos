@@ -32,7 +32,7 @@ with the release candidate."
 
 | Group | Lines |
 |---|---|
-| Source revision | `format 3`, `repo aien-dev/aienos`, `commit <40 hex>`, `commit_time <unix seconds>`, `tree_clean yes` (`no` only for test builds with `--allow-dirty`) |
+| Source revision | `format 3`, `repo aien-spark/aienos`, `commit <40 hex>`, `commit_time <unix seconds>`, `tree_clean yes` (`no` only for test builds with `--allow-dirty`) |
 | What was asked for | `variant`, `generation`, `policy_generation`, `min_rollback_generation` |
 | Toolchain | `toolchain_cross <prefix or none>` (the `CROSS` value the kernel Makefile resolves, asked from make itself), `toolchain_cc`, `toolchain_ld`, `toolchain_objcopy` (first line of `<CROSS>gcc/ld/objcopy --version`), `toolchain_make` (first line of `make --version`), `build_host_arch` (`uname -m`) |
 | Inputs | `input_make_goal` (`all` for core, `full` otherwise), `input_make_vars` (`none`, or `CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS=sha256:<hex> CK_MACHINE_ID=sha256:<hex>`), `input_env_ck none` (any `CK_*` in the environment or in an outer make's `MAKEFLAGS` is refused, so nothing unrecorded selects the image), `input_makefile_sha256` (`native/kernel/Makefile`), `input_image_ld_sha256` (`native/boot/image.ld`), `pin <repo> <sha>` per `--pins` line, `model_bytes`/`model_sha256` from `--model`, `firmware <name> <bytes> <sha256>` per `--firmware`, and for the staging variant `owner_pubkeys_sha256` and `machine_id_sha256` |

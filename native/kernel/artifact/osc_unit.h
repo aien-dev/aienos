@@ -1,6 +1,6 @@
 /* osc_unit.h -- admission of OSC unit containers (OSCUNIT, container v1).
  *
- * Contract: aien-dev/aien-protocols PR #17, specs/osc-unit-artifact/
+ * Contract: aien-spark/aien-protocols PR #17, specs/osc-unit-artifact/
  * OSC_UNIT_ARTIFACT.md (section numbers below refer to it). This is a
  * different format from Binary Artifact v0 (ck_artifact.h, ADR 0014); it
  * reuses the in-tree SHA-256 (argus/sha256.c) and Ed25519 verify

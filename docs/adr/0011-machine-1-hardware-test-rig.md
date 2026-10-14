@@ -5,7 +5,7 @@ before maintainers wire anything. It does not change the boot architecture.
 Governing: [MILESTONES.md gate M2C](../MILESTONES.md),
 [HARDWARE_TEST_RIG.md](../HARDWARE_TEST_RIG.md),
 [NATIVE_BOOT_ONE_TIME.md](../NATIVE_BOOT_ONE_TIME.md),
-issue [#25](https://github.com/aien-dev/aienos/issues/25).
+issue [#25](https://github.com/aien-spark/aienos/issues/25).
 
 ## Context
 
@@ -27,14 +27,14 @@ existing Raspberry Pi controller, with the parts list and wiring in
 2. **Display and console capture**: a UVC HDMI capture dongle with
    loop-through on the Spark's display output, and the Pi GPIO UART for the
    Spark console once SPCR-based UART discovery
-   ([#22](https://github.com/aien-dev/aienos/issues/22)) exists.
+   ([#22](https://github.com/aien-spark/aienos/issues/22)) exists.
 3. **Deterministic input and boot selection**: the Pi USB OTG port as an HID
    boot-protocol keyboard gadget, driven by scripted, capture-verified
    keystroke sequences.
 
 All three functions are serialized through
 `aien-proof hold --resource machine-1`, whose implementation and ledger live
-in the [aien-sovereign-core](https://github.com/aien-dev/aien-sovereign-core)
+in the [aien-sovereign-core](https://github.com/aien-spark/aien-sovereign-core)
 repository. This repository holds the design, the operating contract and the
 versioned boot sequences.
 
@@ -66,10 +66,10 @@ versioned boot sequences.
   post-exit drawing gap in the M2 evidence becomes a capture artifact named
   in the ledger payload.
 - Recovery-media testing
-  ([#17](https://github.com/aien-dev/aienos/issues/17)) and the TRUST-1
+  ([#17](https://github.com/aien-spark/aienos/issues/17)) and the TRUST-1
   100-boot campaign can run without a person at the machine.
 - The HID gadget becomes the hardware test target for the native xHCI/HID
-  keyboard driver ([#24](https://github.com/aien-dev/aienos/issues/24)).
+  keyboard driver ([#24](https://github.com/aien-spark/aienos/issues/24)).
 - `aien-proof` gains rig commands under the existing `machine-1` resource
   lock; that work lands in aien-sovereign-core, not here.
 - The rig is removed piece by piece only if a native path replaces it (for

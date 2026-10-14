@@ -436,7 +436,7 @@
         },
         {
           "lane": "lane19",
-          "note": "Part A, aienos resend jitter: PASS (hosted).** PR aien-dev/aienos #193, merged 8d511d6. native/net only; no public signature, struct field or wire change.",
+          "note": "Part A, aienos resend jitter: PASS (hosted).** PR aien-spark/aienos #193, merged 8d511d6. native/net only; no public signature, struct field or wire change.",
           "pr": 193,
           "ref": "2026-10-01-push-lane19-report.md",
           "sha": "8d511d6",
@@ -468,7 +468,7 @@
         },
         {
           "lane": "lane16",
-          "note": "Pull request:** aien-dev/aienos #192, merged as 08cb905. Clean-tree receipt: native/net/receipts/m6a_net_host_83748f32...txt.",
+          "note": "Pull request:** aien-spark/aienos #192, merged as 08cb905. Clean-tree receipt: native/net/receipts/m6a_net_host_83748f32...txt.",
           "pr": 192,
           "ref": "2026-10-01-push-lane16-report.md",
           "sha": "08cb905",
@@ -604,7 +604,7 @@
         },
         {
           "lane": "lane10",
-          "note": "Verdict: PASS (software primitive). PR aien-dev/aienos #188 MERGED, merge commit 913b962 (main tree identical to the tested branch cea54be).",
+          "note": "Verdict: PASS (software primitive). PR aien-spark/aienos #188 MERGED, merge commit 913b962 (main tree identical to the tested branch cea54be).",
           "pr": 188,
           "ref": "2026-10-01-push-lane10-report.md",
           "sha": "913b962",
@@ -660,7 +660,7 @@
         },
         {
           "lane": "lane5",
-          "note": "PR: aien-dev/aienos #184, MERGED, merge sha 999b5aac1e5ad4ebee969fbce9ddbe2b71308b69",
+          "note": "PR: aien-spark/aienos #184, MERGED, merge sha 999b5aac1e5ad4ebee969fbce9ddbe2b71308b69",
           "pr": 184,
           "ref": "2026-10-01-push-lane5-report.md",
           "sha": "999b5aa",

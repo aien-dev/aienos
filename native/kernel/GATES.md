@@ -705,7 +705,7 @@ Evidence: red on main a93e27b (`AIENOS_CK_SCREEN: FAIL`, gate script and branch-
 
 ## OSC_UNIT: OSC unit admission (C-only, Campaign 3, arch#158/#162) -> CK `OSC_UNIT` (scripts/qemu_ck_osc_unit_test.sh)
 
-Contract: aien-dev/aien-protocols PR #17, `specs/osc-unit-artifact/OSC_UNIT_ARTIFACT.md` (container v1,
+Contract: aien-spark/aien-protocols PR #17, `specs/osc-unit-artifact/OSC_UNIT_ARTIFACT.md` (container v1,
 frozen). Code: `native/kernel/artifact/osc_unit.{h,c}` (pure admission function, section 8.2 check order,
 section 8.4 code scan with the decoder round trip), `native/kernel/core/osc_admit.{h,c}` (kernel policy and the
 `osc_unit:` report lines). It reuses `argus/sha256.c` and `sig/ed25519.c` (strict verify, `S < L`); no new crypto.
@@ -810,7 +810,7 @@ the units do not use them. (4) Nothing executes: no environment, files or exec.
 
 ## OSH_OP: a real capability-authorized operation through the shared OSH interface (OSH-AIENOS-OP) -> CK `OSH_OP` (scripts/qemu_ck_osh_op_test.sh)
 
-Label: **QEMU (aarch64 virt), TEST signer, not physical.** Part of aien-dev/aien-architecture#158. The OSH_CORE gate above (fixture traces,
+Label: **QEMU (aarch64 virt), TEST signer, not physical.** Part of aien-spark/aien-architecture#158. The OSH_CORE gate above (fixture traces,
 nothing executes) is unchanged and separate. This gate runs the same three shell units as admitted EL0 tasks (build flags
 `CK_SEED0B_TEST_ANCHOR=1 CK_OSH_TEST=1 CK_OSH_OP_TEST=1`; the fixtures are not run in that image). On a ready pipeline the driver
 hands the request record (OSH_PLATFORM_ABI section 7, aien-protocols#16 DRAFT) to the adapter layer `core/osh_op.c`, which does

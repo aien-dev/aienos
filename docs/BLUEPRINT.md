@@ -1,6 +1,6 @@
 # AIENOS — Final Architectural Blueprint
 
-> **REFERENCE DESIGN SNAPSHOT, NOT AN ACTIVE EXECUTION PLAN.** Current AIENOS sequencing is [../ROADMAP.md](../ROADMAP.md). Whole-system sequencing is owned by `aien-dev/aien-architecture/CURRENT_EXECUTION_PLAN.md`. See [PLAN_AUTHORITY.md](PLAN_AUTHORITY.md).
+> **REFERENCE DESIGN SNAPSHOT, NOT AN ACTIVE EXECUTION PLAN.** Current AIENOS sequencing is [../ROADMAP.md](../ROADMAP.md). Whole-system sequencing is owned by `aien-spark/aien-architecture/CURRENT_EXECUTION_PLAN.md`. See [PLAN_AUTHORITY.md](PLAN_AUTHORITY.md).
 
 ## 1. The final vision
 

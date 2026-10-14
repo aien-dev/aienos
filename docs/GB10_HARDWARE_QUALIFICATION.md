@@ -5,7 +5,7 @@ on Machine 1. It is not to be executed as part of this characterization phase.
 It exists so the operator run, when authorized, collects only approved
 read-only facts and returns the machine to Linux unchanged.
 
-Governing: issue [#36](https://github.com/aien-dev/aienos/issues/36),
+Governing: issue [#36](https://github.com/aien-spark/aienos/issues/36),
 [NATIVE_BOOT_ONE_TIME.md](NATIVE_BOOT_ONE_TIME.md),
 [HARDWARE_TEST_RIG.md](HARDWARE_TEST_RIG.md),
 [GB10_PLATFORM_TOPOLOGY.md](GB10_PLATFORM_TOPOLOGY.md).

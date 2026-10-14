@@ -3,7 +3,7 @@
 Status: Accepted, Option 3 (operator, 2026-10-08). The counter is not built yet; its trigger is tracked in aienos#285.
 Date: 2026-10-08
 Amends: [ADR 0013](0013-aienos-abi-v1.md) (adds a resource generation beside the handle generation), [ADR 0014](0014-binary-artifact-v0-and-native-admission.md) (replaces amendment "the OSC unit is a second container type", point 5).
-Governing: [ADR 0012](0012-self-construction-capability-growth-and-generations.md) (rule 5: no native admission without enforcement), [aien-protocols](https://github.com/aien-dev/aien-protocols) `specs/osc-unit-artifact/OSC_UNIT_ARTIFACT.md` (v1 FROZEN, read at `666100969cedb97eded6533906c42307320ea61c`), sections 6.3, 8.2 step 15 and 15.3 C1.
+Governing: [ADR 0012](0012-self-construction-capability-growth-and-generations.md) (rule 5: no native admission without enforcement), [aien-protocols](https://github.com/aien-spark/aien-protocols) `specs/osc-unit-artifact/OSC_UNIT_ARTIFACT.md` (v1 FROZEN, read at `666100969cedb97eded6533906c42307320ea61c`), sections 6.3, 8.2 step 15 and 15.3 C1.
 
 ## Context
 

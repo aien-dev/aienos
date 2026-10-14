@@ -5,7 +5,7 @@ read-only Linux collector that fills it. It is characterization only. Nothing
 here initializes the GPU, talks to GSP, submits a command, allocates GPU
 memory, executes a kernel, or performs inference.
 
-Governing: issue [#36](https://github.com/aien-dev/aienos/issues/36),
+Governing: issue [#36](https://github.com/aien-spark/aienos/issues/36),
 [GB10_NATIVE_STATUS.md](GB10_NATIVE_STATUS.md),
 [GB10_PLATFORM_TOPOLOGY.md](GB10_PLATFORM_TOPOLOGY.md),
 [GB10_NATIVE_ACCELERATOR_BOUNDARY.md](GB10_NATIVE_ACCELERATOR_BOUNDARY.md).

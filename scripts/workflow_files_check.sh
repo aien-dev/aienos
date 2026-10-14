@@ -10,7 +10,7 @@
 #
 #   scripts/workflow_files_check.sh <commit sha>
 # Needs: gh with a token that can read Actions (GITHUB_TOKEN in CI), and
-# GITHUB_REPOSITORY (owner/name; defaults to aien-dev/aienos). POSIX sh, no
+# GITHUB_REPOSITORY (owner/name; defaults to aien-spark/aienos). POSIX sh, no
 # Python. Exit 0 when every workflow run on the commit has at least one job,
 # 1 when one does not, 2 on usage or API error.
 set -eu

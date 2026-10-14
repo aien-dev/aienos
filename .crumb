@@ -444,7 +444,7 @@
         },
         {
           "lane": "lane19",
-          "note": "Part A, aienos resend jitter: PASS (hosted).** PR aien-dev/aienos #193, merged 8d511d6. native/net only; no public signature, struct field or wire change.",
+          "note": "Part A, aienos resend jitter: PASS (hosted).** PR aien-spark/aienos #193, merged 8d511d6. native/net only; no public signature, struct field or wire change.",
           "pr": 193,
           "ref": "2026-10-01-push-lane19-report.md",
           "sha": "8d511d6",
@@ -476,7 +476,7 @@
         },
         {
           "lane": "lane16",
-          "note": "Pull request:** aien-dev/aienos #192, merged as 08cb905. Clean-tree receipt: native/net/receipts/m6a_net_host_83748f32...txt.",
+          "note": "Pull request:** aien-spark/aienos #192, merged as 08cb905. Clean-tree receipt: native/net/receipts/m6a_net_host_83748f32...txt.",
           "pr": 192,
           "ref": "2026-10-01-push-lane16-report.md",
           "sha": "08cb905",
@@ -612,7 +612,7 @@
         },
         {
           "lane": "lane10",
-          "note": "Verdict: PASS (software primitive). PR aien-dev/aienos #188 MERGED, merge commit 913b962 (main tree identical to the tested branch cea54be).",
+          "note": "Verdict: PASS (software primitive). PR aien-spark/aienos #188 MERGED, merge commit 913b962 (main tree identical to the tested branch cea54be).",
           "pr": 188,
           "ref": "2026-10-01-push-lane10-report.md",
           "sha": "913b962",
@@ -656,7 +656,7 @@
       "git": {
         "branch": "docs/crumb-seed",
         "head": "84e2962",
-        "remote": "git@github.com:aien-dev/aienos.git"
+        "remote": "git@github.com:aien-spark/aienos.git"
       },
       "purpose_auto": "Repository root cs-aienos. Purpose not yet described by a human."
     }

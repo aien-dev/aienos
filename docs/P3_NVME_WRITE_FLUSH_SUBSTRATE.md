@@ -15,7 +15,7 @@ at `nvme-rw-subagents/d5/qemu_nvme_rw_test.sh`). Companion to the merged read
 qualification `scripts/qemu_nvme_test.sh` and follows the mode conventions of
 `scripts/qemu_keyboard_test.sh`.
 
-Base: `aien-dev/aienos` @ `ef359ec`. Read-only against the repo; no repo edits,
+Base: `aien-spark/aienos` @ `ef359ec`. Read-only against the repo; no repo edits,
 no `cargo`, no `qemu`, no hardware, no Python.
 
 ## 1. What is being proved

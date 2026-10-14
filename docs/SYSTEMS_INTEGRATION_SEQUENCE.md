@@ -1,6 +1,6 @@
 # AIENOS Systems Integration Sequence & Epistemic Calibration
 
-> **HISTORICAL INTEGRATION SEQUENCE, SUPERSEDED AS EXECUTION ORDER.** Preserve this document for rationale and acceptance-history context. Current AIENOS sequencing is [../ROADMAP.md](../ROADMAP.md). Whole-system sequencing is owned by `aien-dev/aien-architecture/CURRENT_EXECUTION_PLAN.md`. See [PLAN_AUTHORITY.md](PLAN_AUTHORITY.md).
+> **HISTORICAL INTEGRATION SEQUENCE, SUPERSEDED AS EXECUTION ORDER.** Preserve this document for rationale and acceptance-history context. Current AIENOS sequencing is [../ROADMAP.md](../ROADMAP.md). Whole-system sequencing is owned by `aien-spark/aien-architecture/CURRENT_EXECUTION_PLAN.md`. See [PLAN_AUTHORITY.md](PLAN_AUTHORITY.md).
 
 > **Status:** Historical Integration Framework; execution order superseded by `../ROADMAP.md`
 > **Authority:** Operator Directive (2026-09-23)
