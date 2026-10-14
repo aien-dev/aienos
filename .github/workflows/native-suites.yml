@@ -7,7 +7,7 @@
 #   native/capability  test + ABI isolation   this file (capability-abi job: C rule tests,
 #                      Rust aienos-capability{,-ffi} fmt/clippy/test, and
 #                      scripts/cap_abi_isolation_test.sh)
-#   native/store       test mutants           ci.yml (ci.yml is disabled_manually on GitHub, so this does NOT run in CI today)
+#   native/store       test sanitize mutants freestanding  store.yml (always on, including Rust cross-check)
 #   native/kernel      test sanitize + gates  ck-kernel.yml (owned by another lane)
 #   native/net         test sanitize mutants  this file
 #   native/sig         test sanitize mutants  this file
