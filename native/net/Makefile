@@ -146,9 +146,10 @@ $(OUT)/t_%_test.o: tests/%_test.c $(wildcard *.h) | $(OUT)
 	$(CC) $(CFLAGS) -Wno-error -I. -c -o $@ $<
 
 mutants: $(OBJS) $(NET_MUT_TEST_OBJS) | $(OUT)
-	@killed=0; total=0; survived=""; pids=""; list=""; \
+	@killed=0; total=0; survived=""; list=""; \
 	for f in $(SEC_GUARD_FILES); do \
 	  for g in $$(grep -o 'GUARD:[a-z0-9-]*' $$f | cut -d: -f2); do \
+	    case " $$list " in *" $$g "*) echo "mutant $$g: guard tag appears twice, parallel runs would collide"; survived="$$survived $$g"; continue ;; esac; \
 	    total=$$((total+1)); mdir=$(OUT)/mut_$$g; rm -rf $$mdir; mkdir -p $$mdir; list="$$list $$g"; \
 	    ( cp *.h $$mdir/; \
 	      sed "/GUARD:$$g \*\//d" $$f > $$mdir/$$f; \
@@ -166,14 +167,15 @@ mutants: $(OBJS) $(NET_MUT_TEST_OBJS) | $(OUT)
 	      esac; \
 	      pass=1; for b in $$order; do if ! ./$$b >/dev/null 2>&1; then pass=0; break; fi; done; \
 	      if [ $$pass -eq 1 ]; then echo "mutant $$g: SURVIVED" > $$mdir/msg; echo "$$g" > $$mdir/surv; \
-	      else echo "mutant $$g: killed" > $$mdir/msg; fi \
+	      else echo "mutant $$g: killed" > $$mdir/msg; : > $$mdir/killed; fi \
 	    ) & \
 	  done; \
 	done; \
 	wait; \
 	for g in $$list; do \
-	  mdir=$(OUT)/mut_$$g; cat $$mdir/msg; \
-	  if [ -f $$mdir/surv ]; then survived="$$survived $$g"; else killed=$$((killed+1)); fi; \
+	  mdir=$(OUT)/mut_$$g; \
+	  if [ -f $$mdir/msg ]; then cat $$mdir/msg; else echo "mutant $$g: no result recorded (counts as not killed)"; fi; \
+	  if [ -f $$mdir/killed ] && [ ! -f $$mdir/surv ]; then killed=$$((killed+1)); else survived="$$survived $$g"; fi; \
 	done; \
 	echo "NET_SECURE_MUTANTS: $$killed/$$total killed"; \
 	[ -z "$$survived" ] && [ $$total -ge 12 ] || { echo "NET_SECURE_MUTANTS: FAIL (not killed:$$survived)"; exit 1; }

@@ -134,6 +134,9 @@ dependencies = [
 [[package]]
 name = "allen-reflex"
 version = "0.1.0"
+dependencies = [
+ "aienos-crypto",
+]
 
 [[package]]
 name = "base64ct"

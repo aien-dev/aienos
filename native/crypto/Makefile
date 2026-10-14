@@ -64,7 +64,10 @@ $(OUT)/t_crypto_test.o: tests/crypto_test.c $(HDRS) | $(OUT)
 
 mutants: $(OBJS) $(OUT)/sha256.o $(OUT)/t_crypto_test.o | $(OUT)
 	@ulimit -c 0; fail=0; \
+	dups=$$(printf '%s\n' $(GUARDS) | sort | uniq -d); \
+	[ -z "$$dups" ] || { echo "duplicate guard names (parallel runs would collide):" $$dups; echo "AIENOS_CRYPTO_MUTANTS: FAIL"; exit 1; }; \
 	for g in $(GUARDS); do \
+	  rm -f $(OUT)/mut_$$g.msg $(OUT)/mut_$$g.fail $(OUT)/mut_$$g.killed; \
 	  ( grep -q "GUARD:$$g \*/" gcm_siv.c || { echo "mutant $$g: guard tag missing" > $(OUT)/mut_$$g.msg; echo 1 > $(OUT)/mut_$$g.fail; exit 0; }; \
 	    sed "/GUARD:$$g \*\//d" gcm_siv.c > $(OUT)/mut_$$g.c; \
 	    $(CC) $(CFLAGS) -Wno-error -I. -c -o $(OUT)/mut_$$g.o $(OUT)/mut_$$g.c \
@@ -73,13 +76,13 @@ mutants: $(OBJS) $(OUT)/sha256.o $(OUT)/t_crypto_test.o | $(OUT)
 	      || { echo "mutant $$g: does not compile" > $(OUT)/mut_$$g.msg; echo 1 > $(OUT)/mut_$$g.fail; exit 0; }; \
 	    if ./$(OUT)/mut_$$g > $(OUT)/mut_$$g.log 2>&1; then \
 	      echo "mutant $$g: SURVIVED (FAIL)" > $(OUT)/mut_$$g.msg; echo 1 > $(OUT)/mut_$$g.fail; \
-	    else echo "mutant $$g: killed" > $(OUT)/mut_$$g.msg; fi \
+	    else echo "mutant $$g: killed" > $(OUT)/mut_$$g.msg; : > $(OUT)/mut_$$g.killed; fi \
 	  ) & \
 	done; \
 	wait; \
 	for g in $(GUARDS); do \
-	  cat $(OUT)/mut_$$g.msg; \
-	  if [ -f $(OUT)/mut_$$g.fail ]; then fail=1; rm -f $(OUT)/mut_$$g.fail; fi; \
+	  if [ -f $(OUT)/mut_$$g.msg ]; then cat $(OUT)/mut_$$g.msg; else echo "mutant $$g: no result recorded (FAIL)"; fi; \
+	  [ -f $(OUT)/mut_$$g.killed ] && [ ! -f $(OUT)/mut_$$g.fail ] || fail=1; \
 	done; \
 	if [ $$fail -eq 0 ]; then echo "AIENOS_CRYPTO_MUTANTS: PASS"; else echo "AIENOS_CRYPTO_MUTANTS: FAIL"; exit 1; fi
 

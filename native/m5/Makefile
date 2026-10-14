@@ -107,6 +107,8 @@ $(OUT)/t_%_test.o: tests/%_test.c $(HDRS) | $(OUT)
 
 mutants: $(OBJS) $(DEP_OBJS) $(M5_MUT_TEST_OBJS) | $(OUT)
 	@ulimit -c 0; fail=0; \
+	dups=$$(printf '%s\n' $(GUARDS) | sort | uniq -d); \
+	[ -z "$$dups" ] || { echo "duplicate guard names (parallel runs would collide):" $$dups; echo "M5_NATIVE_MUTANTS: FAIL"; exit 1; }; \
 	for g in $(GUARDS); do \
 	  d=$(OUT)/mut_$$g; rm -rf $$d; mkdir -p $$d; \
 	  ( f=$$(grep -l "GUARD:$$g \*/" $(SRCS)); \
@@ -125,13 +127,14 @@ mutants: $(OBJS) $(DEP_OBJS) $(M5_MUT_TEST_OBJS) | $(OUT)
 	    pass=1; : > $$d/run.log; \
 	    for b in $$order; do ./$$d/$$b >> $$d/run.log 2>&1 || { pass=0; break; }; done; \
 	    if [ $$pass -eq 1 ]; then echo "mutant $$g: SURVIVED (FAIL)" > $$d/msg; echo 1 > $$d/fail; \
-	    else echo "mutant $$g: killed" > $$d/msg; fi \
+	    else echo "mutant $$g: killed" > $$d/msg; : > $$d/killed; fi \
 	  ) & \
 	done; \
 	wait; \
 	for g in $(GUARDS); do \
-	  d=$(OUT)/mut_$$g; cat $$d/msg; \
-	  [ ! -f $$d/fail ] || fail=1; \
+	  d=$(OUT)/mut_$$g; \
+	  if [ -f $$d/msg ]; then cat $$d/msg; else echo "mutant $$g: no result recorded (FAIL)"; fi; \
+	  [ -f $$d/killed ] && [ ! -f $$d/fail ] || fail=1; \
 	done; \
 	if [ $$fail -eq 0 ]; then echo "M5_NATIVE_MUTANTS: PASS"; else echo "M5_NATIVE_MUTANTS: FAIL"; exit 1; fi
 

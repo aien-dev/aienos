@@ -27,7 +27,7 @@ ifeq ($(shell uname -m),aarch64)
 FREEFLAGS += -mstrict-align -mgeneral-regs-only
 endif
 OUT ?= out
-MUTANT_TIMEOUT ?= 5
+MUTANT_TIMEOUT ?= 60
 
 SRCS = disk.c disk_nvme.c disk_sdhci.c
 OBJS = $(SRCS:%.c=$(OUT)/%.o)
@@ -115,6 +115,8 @@ $(OUT)/t_%_test.o: tests/%_test.c $(HDRS) | $(OUT)
 
 mutants: $(OBJS) $(FILE_OBJ) $(DISK_MUT_TEST_OBJS) | $(OUT)
 	@ulimit -c 0; fail=0; n=0; k=0; \
+	dups=$$(printf '%s\n' $(GUARDS) | sort | uniq -d); \
+	[ -z "$$dups" ] || { echo "duplicate guard names (parallel runs would collide):" $$dups; echo "AIENOS_DISK_MUTANTS: FAIL"; exit 1; }; \
 	for g in $(GUARDS); do \
 	  n=$$((n+1)); d=$(OUT)/mut_$$g; rm -rf $$d; mkdir -p $$d/scratch; \
 	  ( f=$$(grep -l "GUARD:$$g \*/" $(SRCS)); \
@@ -139,13 +141,14 @@ mutants: $(OBJS) $(FILE_OBJ) $(DISK_MUT_TEST_OBJS) | $(OUT)
 	      else timeout $(MUTANT_TIMEOUT) ./$$d/$$b >> $$d/run.log 2>&1 || { pass=0; break; }; fi; \
 	    done; \
 	    if [ $$pass -eq 1 ]; then echo "mutant $$g: SURVIVED (FAIL)" > $$d/msg; echo 1 > $$d/fail; \
-	    else echo "mutant $$g: killed" > $$d/msg; fi \
+	    else echo "mutant $$g: killed" > $$d/msg; : > $$d/killed; fi \
 	  ) & \
 	done; \
 	wait; \
 	for g in $(GUARDS); do \
-	  d=$(OUT)/mut_$$g; cat $$d/msg; \
-	  if [ -f $$d/fail ]; then fail=1; else k=$$((k+1)); fi; \
+	  d=$(OUT)/mut_$$g; \
+	  if [ -f $$d/msg ]; then cat $$d/msg; else echo "mutant $$g: no result recorded (FAIL)"; fi; \
+	  if [ -f $$d/killed ] && [ ! -f $$d/fail ]; then k=$$((k+1)); else fail=1; fi; \
 	done; \
 	echo "mutants killed: $$k/$$n"; \
 	if [ $$fail -eq 0 ] && [ $$n -ge 10 ]; then echo "AIENOS_DISK_MUTANTS: PASS"; else echo "AIENOS_DISK_MUTANTS: FAIL"; exit 1; fi

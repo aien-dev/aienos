@@ -142,7 +142,9 @@ mutants: $(TEST) $(CONTAIN_TEST) $(CAP_MUT_TEST_OBJS) | $(OUT)
 	  echo "AIENOS_CAP_MUTANTS: FAIL"; exit 1; fi; \
 	n=0; killed=0; fail=0; names=""; \
 	while IFS='|' read -r name file k from to; do \
-	  [ -n "$$name" ] || continue; n=$$((n+1)); names="$$names $$name"; d=$(MUT_DIR)/$$name; mkdir -p $$d; \
+	  [ -n "$$name" ] || continue; n=$$((n+1)); \
+	  case " $$names " in *" $$name "*) echo "mutant $$name: name appears twice, parallel runs would collide (FAIL)"; fail=1; continue ;; esac; \
+	  names="$$names $$name"; d=$(MUT_DIR)/$$name; mkdir -p $$d; \
 	  ( if ! awk -v k="$$k" -v from="$$from" -v to="$$to" \
 	        'index($$0, from) { c++; if (c == k) { i = index($$0, from); $$0 = substr($$0, 1, i - 1) to substr($$0, i + length(from)); hit = 1 } } { print } END { exit hit ? 0 : 3 }' \
 	        $$file > $$d/$$file; then \
@@ -158,14 +160,15 @@ mutants: $(TEST) $(CONTAIN_TEST) $(CAP_MUT_TEST_OBJS) | $(OUT)
 	    by=""; \
 	    timeout $(MUT_TIMEOUT) $$d/capability_test > $$d/run.log 2>&1 || by="capability_test"; \
 	    timeout $(MUT_TIMEOUT) $$d/contain_test >> $$d/run.log 2>&1 || by="$${by:+$$by+}contain_test"; \
-	    if [ -n "$$by" ]; then echo "mutant $$name: killed by $$by" > $$d/msg; \
+	    if [ -n "$$by" ]; then echo "mutant $$name: killed by $$by" > $$d/msg; : > $$d/killed; \
 	    else echo "mutant $$name: SURVIVED (FAIL)" > $$d/msg; echo 1 > $$d/fail; fi \
 	  ) & \
 	done < $(MUT_TABLE); \
 	wait; \
 	for name in $$names; do \
-	  d=$(MUT_DIR)/$$name; cat $$d/msg; \
-	  if [ -f $$d/fail ]; then fail=1; else killed=$$((killed+1)); fi; \
+	  d=$(MUT_DIR)/$$name; \
+	  if [ -f $$d/msg ]; then cat $$d/msg; else echo "mutant $$name: no result recorded (FAIL)"; fi; \
+	  if [ -f $$d/killed ] && [ ! -f $$d/fail ]; then killed=$$((killed+1)); else fail=1; fi; \
 	done; \
 	if [ $$n -lt 8 ]; then echo "only $$n mutants defined, need at least 8"; fail=1; fi; \
 	if [ $$fail -eq 0 ] && [ $$killed -eq $$n ]; then echo "AIENOS_CAP_MUTANTS: PASS ($$killed/$$n killed)"; \
