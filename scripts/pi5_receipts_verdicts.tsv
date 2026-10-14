@@ -1,0 +1,72 @@
+# PI5-8 Q6: verdict-line table for scripts/pi5_receipts_manifest.sh.
+# Columns (TAB separated): run tag, milestone label, grep -E pattern matched against that run's kernel.log.
+# A row whose pattern matches no line makes the manifest tool fail (the evidence is not there). Tags and the
+# milestone each belongs to follow docs/native/PI5-*-RUNS.md; PI5-3 storage runs are the SD/Store/RNG runs
+# of the first Pi cuts (their run logs are on the Spark under ~/workspace/pi5-runs). Lines are matched
+# after carriage returns are removed; the manifest records every matching line verbatim (non-ASCII as ?).
+#
+# PI5-3 storage (microSD, sealed Store with TEST keys, RNG200)
+pi5-sd1a	PI5-3 storage	^pi5_sd: read sector 0 rc=0 signature=55aa
+pi5-sd1a	PI5-3 storage	^pi5_store_layer: formatted .* generation=1 
+pi5-sd1b	PI5-3 storage	^pi5_store_layer: reopened .* generation=2 
+pi5-store1	PI5-3 storage	^store: blank disk .*formatted TEST store
+pi5-store1	PI5-3 storage	^store: opened generation=1 
+pi5-store1	PI5-3 storage	^stage store: ok$
+pi5-store2	PI5-3 storage	^store: opened generation=2 
+pi5-store2	PI5-3 storage	^store: committed generation=3 
+pi5-store2	PI5-3 storage	^stage store: ok$
+pi5-store3	PI5-3 storage	^pi5_store_layer: formatted .* generation=1 
+pi5-store3	PI5-3 storage	^store: blank disk .*formatted TEST store
+pi5-store3	PI5-3 storage	^stage store: ok$
+pi5-store4	PI5-3 storage	^pi5_store_layer: reopened .* generation=2 
+pi5-store4	PI5-3 storage	^store: opened generation=2 
+pi5-store4	PI5-3 storage	^stage store: ok$
+pi5-rng1	PI5-3 rng	^entropy: source=rng200 
+# PI5-4 recovery-secret unlock runs A-E
+pi5-unlock-a	PI5-4 unlock A	^store: blank disk .*formatted production store
+pi5-unlock-a	PI5-4 unlock A	^store: opened generation=1 
+pi5-unlock-a	PI5-4 unlock A	^stage store: ok$
+pi5-unlock-b	PI5-4 unlock B	^store: opened generation=2 
+pi5-unlock-b	PI5-4 unlock B	^store: security manifest sequence=2 
+pi5-unlock-b	PI5-4 unlock B	^stage store: ok$
+pi5-unlock-c	PI5-4 unlock C	^store: REFUSED .*RecoverySecretRejected
+pi5-unlock-c	PI5-4 unlock C	^stage store: FAIL rc=-2004$
+pi5-unlock-d	PI5-4 unlock D	^store: REFUSED .*CorruptRecoveryRequired
+pi5-unlock-d	PI5-4 unlock D	^stage store: FAIL rc=-105$
+pi5-unlock-e	PI5-4 unlock E	^store: opened generation=3 
+pi5-unlock-e	PI5-4 unlock E	^store: security manifest sequence=3 
+pi5-unlock-e	PI5-4 unlock E	^stage store: ok$
+# PI5-5 Cortex fact runs F1-F3
+pi5-fact-f1	PI5-5 fact F1	^fact_stage: remember records=1 
+pi5-fact-f1	PI5-5 fact F1	^stage store: ok$
+pi5-fact-f2	PI5-5 fact F2	^fact_stage: recall records=1 
+pi5-fact-f2	PI5-5 fact F2	^stage store: ok$
+pi5-fact-f3	PI5-5 fact F3	^fact_stage: NOTHING RECALLED
+pi5-fact-f3	PI5-5 fact F3	^stage store: FAIL rc=-2004$
+# PI5-6 inference (scalar, then SDOT) and agent runs G1-G3
+pi5-infer-a	PI5-6 infer	^infer: sha256=3f5a22426976ab26cfe84dba63c1d08391717abb1af893e10f1b2968d862dcc1 
+pi5-infer-a	PI5-6 infer	^AIENOS_CK_INFER_SESSION: PASS$
+pi5-infer-b	PI5-6 infer	^infer: dot_path=sdot 
+pi5-infer-b	PI5-6 infer	^AIENOS_CK_INFER_SESSION: PASS$
+pi5-agent-g1	PI5-6 agent G1	^AIENOS_PI5_AGENT: GENERATED PASS$
+pi5-agent-g2	PI5-6 agent G2	^AIENOS_PI5_AGENT: RECOVERED PASS$
+pi5-agent-g3	PI5-6 agent G3	^AIENOS_PI5_AGENT: NOSTORE$
+# PI5-7 resident lifecycle L1-L3, real power cut P1, EL0 artifact loader a1
+pi5-lifecycle-l1	PI5-7 lifecycle L1	^lifecycle: (cortex open|facts|evidence) 
+pi5-lifecycle-l1	PI5-7 lifecycle L1	^lifecycle: recall gen=12 kind=reply 
+pi5-lifecycle-l2	PI5-7 lifecycle L2	^lifecycle: (cortex open|facts|evidence) 
+pi5-lifecycle-l2	PI5-7 lifecycle L2	^lifecycle: recall gen=12 kind=reply 
+pi5-lifecycle-l3	PI5-7 lifecycle L3	^lifecycle: evidence 
+pi5-lifecycle-powercut	PI5-7 powercut P1	^lifecycle: (cortex open|facts|evidence) 
+pi5-lifecycle-powercut	PI5-7 powercut P1	^lifecycle: recall gen=12 kind=reply 
+pi5-artifact-a1	PI5-7 artifact a1	^artifact_receipt_tier: 
+pi5-artifact-a1	PI5-7 artifact a1	^artifact: [A-Z0-9]*\.AIEN (admitted|rejected) 
+pi5-artifact-a1	PI5-7 artifact a1	^artifacts: candidates=
+pi5-artifact-a2	PI5-8 artifact a2 (Pi tier in the receipt)	^artifact_receipt_tier: SEED-0B-PI5$
+pi5-artifact-a2	PI5-8 artifact a2 (Pi tier in the receipt)	^receipt: [A-Z0-9]+\.AIEN seq=[0-9]+ digest=[0-9a-f]{64} record=.{44}0300
+pi5-artifact-a2	PI5-8 artifact a2 (Pi tier in the receipt)	^artifacts: candidates=6 admitted=5 rejected=1$
+# Network lane: PCIe/RP1 enumerator, inbound DMA window, GEM frame test
+pi5-pcie-1	NET pi5-pcie-1	^pi5_dma: hw_window=
+pi5-net-1	NET pi5-net-1	^pi5_dma: hw_window (before|after)=
+pi5-net-1	NET pi5-net-1	^pi5_dma: apply rc=0 
+pi5-net-3-r1	NET pi5-net-3-r1	^pi5_gem: (CONFINEMENT [AB] result|LOOPBACK .* PASS|WIRE tx PASS)

@@ -284,6 +284,17 @@ fn rejects_unknown_flags_and_nonzero_reserved_bytes() {
 }
 
 #[test]
+fn pi5_tier_round_trips_with_its_label() {
+    let r = Receipt {
+        tier: QualificationTier::Seed0bPi5,
+        ..admitted()
+    };
+    let back = decode(&encode(&r)).unwrap();
+    assert_eq!(back.tier, QualificationTier::Seed0bPi5);
+    assert_eq!(back.tier.label(), "SEED-0B-PI5");
+}
+
+#[test]
 fn rejects_unknown_enum_and_code_values() {
     let b = encode(&admitted());
     let m16 = |at: usize, v: u16| {
@@ -298,7 +309,7 @@ fn rejects_unknown_enum_and_code_values() {
             "decision {v}"
         );
     }
-    for v in [0u16, 3, 0xffff] {
+    for v in [0u16, 4, 0xffff] {
         assert_eq!(
             decode(&m16(22, v)),
             Err(ArtifactError::MalformedReceipt),

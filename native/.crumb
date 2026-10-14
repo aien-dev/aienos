@@ -50,7 +50,7 @@
       "children": [
         {
           "digest": "50aa2fbd6ca356b7703517bc7ecf439f7b6e0a6b935d0ca6ca4c6f7caf23ce34",
-          "last_commit": "f78977a",
+          "last_commit": "09e59a8",
           "name": "argus",
           "purpose": "Directory native/argus. Purpose not yet described by a human."
         },
@@ -79,8 +79,8 @@
           "purpose": "Directory native/disk. Purpose not yet described by a human."
         },
         {
-          "digest": "1ea30e8921bc8f61835ecaa6e3896b1084c4b0a6034ff00493f21390a98f1b25",
-          "last_commit": "f78977a",
+          "digest": "48357362d2e3f9fa0d22b866d4503fa63953378c4841d5c87c64797bc77932c6",
+          "last_commit": "c31f632",
           "name": "kernel",
           "purpose": "Directory native/kernel. Purpose not yet described by a human."
         },
@@ -109,15 +109,15 @@
           "purpose": "Directory native/store. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:f717850d29ca52ae372b396eee8f4323cb090798258f2b4eea23bbe5ce4f92cb",
-      "compiled_at": "2026-10-14T01:16:45Z",
+      "children_root": "sha256:6a6528f2ebd9224370f98ec6bb454dfcdf6e3adddb0c32966ff52acea7bb1c64",
+      "compiled_at": "2026-10-14T02:20:15Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:c4788a6bd2633e3ad2933270f03e65212b0003f61e629a09f3b637ec9ff4a481",
+      "digest": "sha256:10e9c2e0ebceb8e60113783dfa5c83ddaf7ef3fef3d700d6c489cae331117f11",
       "evidence_files": 4,
       "evidence_root": "sha256:e410b845507e00568e15b51a5797af32a97e0e4b8ab4e8487bb7c98e7e0cf335",
-      "files": 561,
-      "generated_at_commit": "f78977a6ce33ea89a5b3b1952c0a0e403d4504fa",
-      "source_tree": "sha256:9bbd7b42a9f48a2cbc7b805a8ad5973bce1ef2f1950fc66d4933575f20f54d8c"
+      "files": 562,
+      "generated_at_commit": "7cd74cbbd0a45def4384618e7f82513c76021aad",
+      "source_tree": "sha256:df21964cda544ea6321f93e03355d98405d1626fd8d1876096e71b65c9ffaede"
     },
     "owner_lane": "",
     "provenance": {

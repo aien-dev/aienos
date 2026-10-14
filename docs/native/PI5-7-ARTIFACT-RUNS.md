@@ -80,7 +80,7 @@ artifacts: candidates=6 admitted=5 rejected=1
 
 ## Limits
 
-- The receipt record's `tier` field still reads `SEED-0B-QEMU` on the Pi (fixed in the loader's receipt writer, unchanged here); the separate line `artifact_receipt_tier: SEED-0B-PI5` is the Pi tier.
+- Run a1 predates PI5-8 Q3: its receipt record `tier` field read `SEED-0B-QEMU` on the Pi. Since PI5-8 Q3 the Pi image writes `SEED-0B-PI5` into the receipt itself (run `pi5-artifact-a2`, see PI5-8-QUALIFICATION.md).
 - Isolation was shown for the three attack classes above against the two kernel addresses used; it is not a proof for every kernel address, and the kernel does not itself
   re-read the targets after the stores (the faulting stores never retire, FAR names the address).
 - `contained=yes` in `artifact_fault:` means the fault handler terminated the task and returned to the kernel; it is not an independent audit.

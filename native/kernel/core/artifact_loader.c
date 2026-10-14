@@ -1003,7 +1003,7 @@ static void print_receipt(const char *name, const struct report *r)
     memset(&rc, 0, sizeof rc);
     int adm = r->admitted;
     rc.decision = adm ? CKR_ADMITTED : CKR_REJECTED;
-    rc.tier = CKR_TIER_SEED0B_QEMU;
+    rc.tier = CKA_IMAGE_TIER;
     rc.seq = seq;
     memcpy(rc.verifier, verifier_id, 32);
     cka_receipt_nonce(verifier_id, seq, rc.nonce);

@@ -109,7 +109,7 @@ int cka_receipt_decode(const uint8_t b[CKA_RECEIPT_SIZE], struct cka_receipt *r)
     r->tier = cka_rd16(b + 22);
     r->status = cka_rd32(b + 64);
     if ((r->decision != CKR_ADMITTED && r->decision != CKR_REJECTED) ||
-        r->tier != CKR_TIER_SEED0B_QEMU || r->status > CKR_RESOURCE_OVERRUN)
+        !CKA_TIER_OK(r->tier) || r->status > CKR_RESOURCE_OVERRUN)
         return CKA_MALFORMED_RECEIPT;
     r->seq = cka_rd64(b + 24);
     put(r->nonce, b + 32, 16);
