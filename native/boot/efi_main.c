@@ -47,6 +47,9 @@ void ck_boot_fact_req_find(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
 #ifdef CK_PI5_LIFECYCLE
 void ck_boot_agent_cmd_find(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
 #endif
+#ifdef CK_ARTIFACT_CARD
+void ck_boot_artifact_card_find(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
+#endif
 #ifdef CK_KLOG
 void ck_boot_klog_find(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
 #endif
@@ -154,6 +157,10 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 #ifdef CK_PI5_LIFECYCLE
     /* PI5-7 cut 2 qualification image: the lifecycle command script (efi_agentcmd.c). */
     ck_boot_agent_cmd_find(image, st);
+#endif
+#ifdef CK_ARTIFACT_CARD
+    /* PI5-7 cut 3 qualification image: the card artifact bundle (efi_artifact.c). */
+    ck_boot_artifact_card_find(image, st);
 #endif
     ck_puts("kernel_impl: c (native/kernel, Lane 18)\n");
     vendor_print(st->FirmwareVendor);

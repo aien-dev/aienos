@@ -925,6 +925,15 @@ static const char *classify_fault(const struct report *r)
         return "exec-nx";
     if (ec == 0x20 && status == 1)
         return "exec-unmapped";
+#ifdef CK_ARTIFACT_CARD
+    /* Arm ARM (DDI 0487) ESR_ELx.EC: 0x24 data abort from a lower exception level (bit 6 = WnR, write not read);
+     * 0x18 trapped MSR/MRS/system instruction; 0x00 unknown reason (an UNDEFINED instruction). Only the card
+     * qualification image names these: every other image keeps the two-name set above and "other". */
+    if (ec == 0x24 && !WITHIN(r->code_base, r->code_end) && !in_ds)
+        return (esr & (1u << 6)) ? "outside-write" : "outside-read";
+    if (ec == 0x18 || ec == 0x00)
+        return "privileged-insn";
+#endif
 #undef WITHIN
     return "other";
 }
@@ -1114,6 +1123,19 @@ static void finish_candidate(const char *name)
     else
         run_rejected++;
     print_candidate(name, &rep);
+#ifdef CK_ARTIFACT_CARD
+    if (rep.admitted && rep.out.status == ST_FAULT) {
+        /* FAR_EL1 is architecturally defined only for instruction (0x20) and data (0x24) aborts from EL0. */
+        uint64_t fec = (rep.out.esr >> 26) & 0x3f;
+        ck_printf("artifact_fault: %s class=%s esr=0x%llx ec=0x%llx ", name, classify_fault(&rep),
+                  (unsigned long long)rep.out.esr, (unsigned long long)fec);
+        if (fec == 0x20 || fec == 0x24)
+            ck_printf("far=0x%llx ", (unsigned long long)rep.out.far);
+        else
+            ck_puts("far=n/a ");
+        ck_printf("elr=0x%llx contained=yes\n", (unsigned long long)rep.out.elr);
+    }
+#endif
     print_grants(name, &rep);
     print_receipt(name, &rep);
 }
@@ -1135,10 +1157,16 @@ static uint32_t disk_source(void)
         count = MAX_CANDIDATES;
     if (why)
         ck_printf("artifact_source: none (%s)\n", why);
+#ifdef CK_ARTIFACT_CARD
+    else
+        ck_printf("artifact_source: card_file candidates=%u "
+                  "(read from the card by the UEFI stub; bytes untrusted until verified)\n", count);
+#else
     else
         ck_printf("artifact_source: nvme_store generation=%llu candidates=%u "
                   "(read by the store stage; bytes untrusted until verified)\n",
                   (unsigned long long)da.generation, count);
+#endif
     source_preamble(count);
     for (uint32_t c = 0; c < count; c++) {
         const struct ck_disk_artifact *a = &da.a[c];

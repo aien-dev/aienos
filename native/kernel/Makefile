@@ -307,6 +307,40 @@ $(error CK_PI5_LIFECYCLE needs CK_INFER_LIB=<libaienos_infer_kernel.a> (use "mak
 endif
 CK_EXTRA_CFLAGS += -DCK_PI5_LIFECYCLE=1 -DCK_INFER_DISK_ONLY=1 -DCK_INFER_RESIDENT=1
 endif
+# EL0 artifact qualification image (CK_ARTIFACT_CARD=1, "make pi5-artifact" for the Pi, PI5-7 cut 3, QUALIFICATION ONLY, TEST keys only):
+# the plain core image (no Store stage, no NVMe) whose signed artifact candidates come from ONE card file, \EFI\AIENOS\ARTIFACT.BND
+# (core/artifact_card.h, read by native/boot/efi_artifact.c), and which trusts the RFC 8032 TEST 1 public key only
+# (CK_SEED0B_TEST_ANCHOR=1, forced by CK_PI5_ARTIFACT=1; the image prints "artifact_trust: ... TEST ONLY"). CK_PI5_ARTIFACT=1 is the Pi
+# image (CK_PI5=1); CK_ARTIFACT_CARD=1 CK_SEED0B_TEST_ANCHOR=1 alone is its QEMU twin (scripts/qemu_ck_artifact_card_test.sh). Both
+# refuse every other tier flag (so the other images refuse it too) and the "full" image (its Store stage owns the same hook), and each
+# has its own OUT. No other image changes: the code is behind -DCK_ARTIFACT_CARD.
+CK_ARTIFACT_CARD ?=
+CK_PI5_ARTIFACT ?=
+ifneq ($(strip $(CK_PI5_ARTIFACT)),)
+ifneq ($(strip $(CK_PI5_ARTIFACT)),1)
+$(error CK_PI5_ARTIFACT must be empty or 1)
+endif
+CK_ARTIFACT_CARD := 1
+CK_PI5 := 1
+CK_SEED0B_TEST_ANCHOR := 1
+OUT ?= $(REPO)/target/native-kernel-pi5-artifact
+endif
+ifneq ($(strip $(CK_ARTIFACT_CARD)),)
+ifneq ($(strip $(CK_ARTIFACT_CARD)),1)
+$(error CK_ARTIFACT_CARD must be empty or 1)
+endif
+ifeq ($(strip $(CK_SEED0B_TEST_ANCHOR)),)
+$(error CK_ARTIFACT_CARD (card artifact bundle, QUALIFICATION ONLY) needs CK_SEED0B_TEST_ANCHOR=1: it only ever trusts the public TEST key)
+endif
+ifneq ($(strip $(CK_PI5_STORE)$(CK_PI5_INFER)$(CK_PI5_PCIE)$(CK_PI5_NET)$(CK_PI5_UNLOCK)$(CK_PI5_UNLOCK_CARD)$(CK_PI5_FACT)$(CK_PI5_AGENT)$(CK_PI5_LIFECYCLE)$(CK_SERVICE)$(CK_SERVICE_TEST_KEYS)$(CK_HARDWARE_STAGING)$(CK_TEST_FWCFG_ARTIFACTS)$(CK_INFER_LIB)),)
+$(error CK_ARTIFACT_CARD / CK_PI5_ARTIFACT cannot be combined with CK_PI5_STORE, CK_PI5_INFER, CK_PI5_PCIE, CK_PI5_NET, CK_PI5_UNLOCK, CK_PI5_UNLOCK_CARD, CK_PI5_FACT, CK_PI5_AGENT, CK_PI5_LIFECYCLE, CK_SERVICE, CK_SERVICE_TEST_KEYS, CK_HARDWARE_STAGING, CK_TEST_FWCFG_ARTIFACTS or CK_INFER_LIB)
+endif
+ifneq ($(filter full,$(MAKECMDGOALS)),)
+$(error CK_ARTIFACT_CARD / CK_PI5_ARTIFACT build the core image only: the "full" image's Store stage owns the artifact hook)
+endif
+OUT ?= $(REPO)/target/native-kernel-artifact-card
+CK_EXTRA_CFLAGS += -DCK_ARTIFACT_CARD=1
+endif
 CK_PI5 ?=
 ifneq ($(strip $(CK_PI5)),)
 ifneq ($(strip $(CK_PI5)),1)
@@ -848,6 +882,10 @@ ART_C := $(KDIR)/core/artifact_loader.c $(KDIR)/core/osc_admit.c $(KDIR)/core/os
 	$(NATIVE)/sig/ed25519.c $(NATIVE)/sig/ct.c
 ART_INC := -I$(KDIR)/svc/compat -I$(KDIR)/artifact -I$(NATIVE)/sig -I$(NATIVE)/argus
 ART_C += $(OSH_TEST_C)
+ifneq ($(strip $(CK_ARTIFACT_CARD)),)
+ART_C += $(KDIR)/core/artifact_card.c $(KDIR)/core/artifact_card_stage.c
+CORE_C += $(BOOT)/efi_artifact.c
+endif
 CORE_C += $(ART_C)
 CORE_S := $(BOOT)/efi_entry.S $(KDIR)/arch/vectors.S $(KDIR)/arch/m3.S $(KDIR)/arch/smp_entry.S
 HDRS := $(wildcard $(KDIR)/include/*.h $(KDIR)/*/*.h $(BOOT)/*.h)
@@ -1266,10 +1304,10 @@ $(FULL_EFI): $(FULL_ELF)
 HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/mm/frames.c \
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
 	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/acpi_dev.c $(KDIR)/core/lifecycle_fsm.c \
-	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c $(KDIR)/core/unlock_req.c $(KDIR)/core/agent_cmd.c
+	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c $(KDIR)/core/unlock_req.c $(KDIR)/core/agent_cmd.c $(KDIR)/core/artifact_card.c
 TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
-	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_pi5_net test_pi5_gem test_unlock_req test_context test_agent_cmd
+	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_pi5_net test_pi5_gem test_unlock_req test_context test_agent_cmd test_artifact_card
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
@@ -1332,6 +1370,16 @@ $(OUT)/host/test_agent_cmd_mutant: $(KDIR)/tests/test_agent_cmd.c $(KDIR)/core/a
 agent-cmd-mutant: $(OUT)/host/test_agent_cmd_mutant
 	@if $< > $<.log 2>&1; then cat $<.log; echo "test_agent_cmd mutant (any verb allowed): PASSED, test does not catch it"; exit 1; \
 	else grep -F "test_agent_cmd: FAIL" $<.log && echo "test_agent_cmd mutant (any verb allowed): FAILS as required"; fi
+
+# PI5-7 cut 3 card artifact bundle parser (core/artifact_card.c): the mutant accepts bytes after the last entry (a second, unchecked
+# payload could ride along); test_artifact_card must FAIL against it (red before green). Host only, never part of an image.
+$(OUT)/host/test_artifact_card_mutant: $(KDIR)/tests/test_artifact_card.c $(KDIR)/core/artifact_card.c $(KDIR)/core/artifact_card.h $(KDIR)/tests/ck_test.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) -DCK_ACARD_MUTANT_TRAILING -o $@ $< $(KDIR)/core/artifact_card.c
+
+artifact-card-mutant: $(OUT)/host/test_artifact_card_mutant
+	@if $< > $<.log 2>&1; then cat $<.log; echo "test_artifact_card mutant (trailing bytes accepted): PASSED, test does not catch it"; exit 1; \
+	else grep -F "test_artifact_card: FAIL" $<.log && echo "test_artifact_card mutant (trailing bytes accepted): FAILS as required"; fi
 
 # TEST-ONLY mutant of core/handoff_check.c (reserved0 check removed): the
 # handoff test must FAIL against it, so "make test" fails if the test stops
@@ -1411,8 +1459,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant artifact-card-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check
+	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant artifact-card-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -2064,6 +2112,9 @@ pi5-lifecycle:
 	CARGO_TARGET_DIR=$(REPO)/target/infer-kernel cargo build -q --release --target aarch64-unknown-none --manifest-path $(REPO)/crates/aienos-infer-kernel/Cargo.toml
 	$(MAKE) CK_PI5_UNLOCK=1 CK_PI5_UNLOCK_CARD=1 CK_PI5_LIFECYCLE=1 CK_INFER_LIB=$(PI5_INFER_LIB) full
 
+pi5-artifact:
+	$(MAKE) CK_PI5_ARTIFACT=1 all
+
 pi5:
 	$(MAKE) CK_PI5=1 all
 
@@ -2122,7 +2173,7 @@ $(OUT)/host-san/test_pi5_rng: $(KDIR)/tests/test_pi5_rng.c $(PI5_RNG_SRCS) $(KDI
 
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
-.PHONY: all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact pi5-agent pi5-lifecycle test sanitize context-mutant agent-cmd-mutant cortex-image handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact pi5-agent pi5-lifecycle pi5-artifact artifact-card-mutant test sanitize context-mutant agent-cmd-mutant cortex-image handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
 
 # AIENOS-PI5 step 3 marker + Pi card GPT test (hosted; a file stands in for the card, QEMU cannot model the Pi SD host).
 PI5_MARKER_SRCS := $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \
