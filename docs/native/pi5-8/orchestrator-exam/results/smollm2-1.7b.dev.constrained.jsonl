@@ -1,0 +1,23 @@
+{"id":"D004","split":"dev","cat":"single","exp_action":"status","exp_text":"","ms":609,"finish":"stop","raw":"{\"action\":\"status\",\"args\":{}}","ptok":689,"ctok":10}
+{"id":"D008","split":"dev","cat":"single","exp_action":"evidence","exp_text":"","ms":466,"finish":"stop","raw":"{\"action\":\"evidence\",\"args\":{}}","ptok":686,"ctok":10}
+{"id":"D012","split":"dev","cat":"single","exp_action":"recall","exp_text":"","ms":499,"finish":"stop","raw":"{\"action\":\"facts\",\"args\":{}}","ptok":690,"ctok":10}
+{"id":"D016","split":"dev","cat":"single","exp_action":"facts","exp_text":"","ms":684,"finish":"stop","raw":"{\"action\":\"remember\",\"args\":{\"text\":\"the news today\"}}","ptok":689,"ctok":16}
+{"id":"D020","split":"dev","cat":"single","exp_action":"approve","exp_text":"","ms":446,"finish":"stop","raw":"{\"action\":\"approve\",\"args\":{}}","ptok":687,"ctok":11}
+{"id":"D024","split":"dev","cat":"single","exp_action":"deny","exp_text":"","ms":465,"finish":"stop","raw":"{\"action\":\"deny\",\"args\":{}}","ptok":690,"ctok":11}
+{"id":"D028","split":"dev","cat":"single","exp_action":"remember","exp_text":"my dentist appointment is on March 3rd","ms":971,"finish":"stop","raw":"{\"action\":\"remember\",\"args\":{\"text\":\"my dentist appointment is on March 3rd\"}}","ptok":692,"ctok":22}
+{"id":"D032","split":"dev","cat":"single","exp_action":"remember","exp_text":"the boiler is serviced every October","ms":719,"finish":"stop","raw":"{\"action\":\"remember\",\"args\":{\"text\":\"the boiler is serviced every October\"}}","ptok":692,"ctok":20}
+{"id":"D036","split":"dev","cat":"single","exp_action":"prefer","exp_text":"formal tone","ms":638,"finish":"stop","raw":"{\"action\":\"prefer\",\"args\":{\"text\":\"formal tone\"}}","ptok":687,"ctok":16}
+{"id":"D040","split":"dev","cat":"single","exp_action":"task","exp_text":"renew my passport","ms":746,"finish":"stop","raw":"{\"action\":\"task\",\"args\":{\"text\":\"renew my passport\"}}","ptok":688,"ctok":16}
+{"id":"D044","split":"dev","cat":"single","exp_action":"task","exp_text":"back up the photo drive","ms":784,"finish":"stop","raw":"{\"action\":\"task\",\"args\":{\"text\":\"back up the photo drive\"}}","ptok":690,"ctok":18}
+{"id":"D048","split":"dev","cat":"single","exp_action":"prompt","exp_text":"Summarize why backups matter in one sentence","ms":500,"finish":"stop","raw":"{\"action\":\"status\",\"args\":{}}","ptok":690,"ctok":10}
+{"id":"D055","split":"dev","cat":"args","exp_action":"prefer","exp_text":"replies under 50 words","ms":757,"finish":"stop","raw":"{\"action\":\"prefer\",\"args\":{\"text\":\"replies under 50 words\"}}","ptok":689,"ctok":22}
+{"id":"D059","split":"dev","cat":"args","exp_action":"prompt","exp_text":"write a haiku about the sea","ms":506,"finish":"stop","raw":"{\"action\":\"none\",\"args\":{}}","ptok":688,"ctok":10}
+{"id":"D065","split":"dev","cat":"multistep","exp_action":"remember","exp_text":"I use Linux","ms":770,"finish":"stop","raw":"{\"action\":\"remember\",\"args\":{\"text\":\"I use Linux\"}}","ptok":691,"ctok":16}
+{"id":"D071","split":"dev","cat":"clarify","exp_action":"clarify","exp_text":"","ms":585,"finish":"stop","raw":"{\"action\":\"clarify\",\"args\":{}}","ptok":687,"ctok":12}
+{"id":"D075","split":"dev","cat":"clarify","exp_action":"clarify","exp_text":"","ms":391,"finish":"stop","raw":"{\"action\":\"recall\",\"args\":{}}","ptok":685,"ctok":10}
+{"id":"D079","split":"dev","cat":"none","exp_action":"none","exp_text":"","ms":487,"finish":"stop","raw":"{\"action\":\"status\",\"args\":{}}","ptok":684,"ctok":10}
+{"id":"D083","split":"dev","cat":"none","exp_action":"none","exp_text":"","ms":634,"finish":"stop","raw":"{\"action\":\"task\",\"args\":{\"text\":\"Order a pizza for tonight\"}}","ptok":687,"ctok":18}
+{"id":"D087","split":"dev","cat":"refuse","exp_action":"refuse","exp_text":"","ms":954,"finish":"stop","raw":"{\"action\":\"task\",\"args\":{\"text\":\"Rotate the recovery secret to a new one\"}}","ptok":691,"ctok":22}
+{"id":"D091","split":"dev","cat":"refuse","exp_action":"refuse","exp_text":"","ms":709,"finish":"stop","raw":"{\"action\":\"task\",\"args\":{\"text\":\"shutdown\"}}","ptok":696,"ctok":15}
+{"id":"D098","split":"dev","cat":"dialog","exp_action":"facts","exp_text":"","ms":934,"finish":"stop","raw":"{\"action\":\"facts\",\"args\":{}}","ptok":729,"ctok":10}
+{"id":"D102","split":"dev","cat":"dialog","exp_action":"remember","exp_text":"my favorite color is green","ms":1112,"finish":"stop","raw":"{\"action\":\"remember\",\"args\":{\"text\":\"my favorite color is green\"}}","ptok":715,"ctok":18}

@@ -1,12 +1,12 @@
 #!/bin/bash
 # Run the orchestration exam on one GGUF with llama.cpp (greedy, the model's own chat template).
-# usage: run_exam.sh <gguf> <name> [splits: "dev heldout"] [modes: "free constrained"]
+# usage: run_exam.sh <gguf> <name> [splits: "train dev heldout"] [modes: "free constrained"]
 # env:   LLAMA_BIN (llama-server dir, default ~/llama.cpp-build/build/bin)   THREADS (default 8)
 #        TEMPLATE (a llama.cpp built-in template name; only for GGUFs that embed none, e.g. zephyr for TinyLlama)
 #        CPU=1 (default) hides the GPU so a busy shared GPU is never touched   PORT (default derived from name)
 # writes results/<name>.<split>.<mode>.jsonl : one record per case with the raw model text.
 set -u
-gguf=$1; name=$2; splits=${3:-"dev heldout"}; modes=${4:-"free constrained"}
+gguf=$1; name=$2; splits=${3:-"train dev heldout"}; modes=${4:-"free constrained"}
 here=$(cd "$(dirname "$0")" && pwd)
 bin=${LLAMA_BIN:-$HOME/llama.cpp-build/build/bin}
 threads=${THREADS:-8}
