@@ -189,7 +189,7 @@ unsigned osc_receipt_verify(const uint8_t *r, size_t len, const struct osc_accep
         return OSC_RCPT_PROGRAM_MISMATCH;
     if (!MUT(22) && !eq32(r + 80, a->code_sha256))
         return OSC_RCPT_EXECUTABLE_MISMATCH;
-    if (!MUT(23) && p->rcpt_producer && !eq32(r + 176, p->rcpt_producer))
+    if (!MUT(23) && !eq32(r + 176, p->rcpt_producer ? p->rcpt_producer : zero32))
         return OSC_RCPT_WRONG_PRODUCER;
     {
         uint8_t deps[32];

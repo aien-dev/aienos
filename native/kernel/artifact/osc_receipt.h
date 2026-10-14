@@ -19,8 +19,7 @@
  * target = SHA-256("OMEGA-TARGET-V1\0" || OSC_RCPT_TARGET_NAME), firmware = none (all zero unless the policy
  * names one), dependencies = the empty list (the kernel resolves no dependency receipts, so any claimed
  * dependency is refused). Checker identity: required to be in the policy's list (an empty list refuses every
- * receipt). Producer: checked only when the policy names one; the kernel policy names none, so the producer is
- * NOT CHECKED (the unit carries no producer identity to compare with). NOT bound by a receipt: the container
+ * receipt). Producer: none (all zero unless the policy names one; the unit carries no producer identity). NOT bound by a receipt: the container
  * manifest (entry table, capability table, stack and tick budgets); those stay bound by the unit signature.
  * Requirements and input fields are NOT CHECKED. Evidence class 2 (LRAT): spec section 10 makes a class 2 receipt
  * valid only when its proofs are given and replayed; the kernel has no proofs and no LRAT checker, so it refuses

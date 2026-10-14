@@ -136,7 +136,7 @@ static void expected_table(void)
         if (got != want) printf("  %s unit=%s variant=%s: got %u %s, want %s\n", name, unit, variant, got, osc_code_name(got), kv);
         CHECK(got == want);
         /* where the kernel checks what checker2 checks, the verdicts agree (the oracle) */
-        if (strcmp(name, "n_producer.rcpt") || strcmp(variant, "qual")) CHECK(!strcmp(c2, kv));
+        CHECK(!strcmp(c2, kv));
 #else
         /* release policy: TEST receipts are refused; only a structure fault is reported before that */
         unsigned rel = want == OSC_RCPT_SIZE ? OSC_RCPT_SIZE : OSC_RCPT_TEST_SIGNER_IN_PRODUCTION;
@@ -284,10 +284,11 @@ static void structure_and_order(void)
 
 static void policy_edges(void)
 {
-    uint8_t g[1024], rv[1024], fw[1024];
+    uint8_t g[1024], rv[1024], fw[1024], np[1024];
     CHECK(rcpt("a01.rcpt", g) == OSC_RCPT_BYTES);
     CHECK(rcpt("n_revoked_id.rcpt", rv) == OSC_RCPT_BYTES);
     CHECK(rcpt("n_firmware.rcpt", fw) == OSC_RCPT_BYTES);
+    CHECK(rcpt("n_producer.rcpt", np) == OSC_RCPT_BYTES);
     struct osc_accept a;
     CHECK(admit("a01", &a));
     struct osc_policy p = qual();
@@ -340,6 +341,12 @@ static void policy_edges(void)
     p.rcpt_firmware = fw + 240;
     CHECK(v(fw, 416, &a, &p) == 0);
     CHECK(v(g, 416, &a, &p) == OSC_RCPT_WRONG_FIRMWARE);
+    /* producer: NULL means none (all zero); a policy that names one accepts exactly that one */
+    p = qual();
+    CHECK(v(np, 416, &a, &p) == OSC_RCPT_WRONG_PRODUCER);
+    p.rcpt_producer = np + 176;
+    CHECK(v(np, 416, &a, &p) == 0);
+    CHECK(v(g, 416, &a, &p) == OSC_RCPT_WRONG_PRODUCER);
     /* the binding reads the admitted unit: a different code hash in the verdict is EXECUTABLE_MISMATCH, a different
      * IR hash PROGRAM_MISMATCH (program before executable) */
     p = qual();

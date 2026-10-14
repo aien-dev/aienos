@@ -51,7 +51,7 @@ static void hex(char *out, const uint8_t *b, size_t n)
 
 /* Realization receipt policy (artifact/osc_receipt.h, aienos#383), local to this build:
  *   - both builds: the accepted checker2 identities of osc_receipt_anchor.h, target aienos-ck-aarch64-el0, no
- *     firmware, no dependencies, producer NOT CHECKED (the unit names no producer), epoch floor and current epoch
+ *     firmware, no dependencies, no producer (all zero: the unit names no producer), epoch floor and current epoch
  *     fixed below (the kernel has no epoch authority yet, so they are compile-time constants), no OWNER receipt
  *     anchor (the owner root is listed, not trusted, until docs/OWNER_KEY_CEREMONY.md says so).
  *   - release build: release mode, so every TEST receipt is TEST_SIGNER_IN_PRODUCTION; no receipt anchor at all,
@@ -435,7 +435,7 @@ unsigned ck_osc_candidate(const char *name, const uint8_t *b, size_t len)
 #endif
         ck_printf("osc_receipt_policy: mode=%s receipt_test_anchors=%u receipt_owner_anchors=0 (owner root listed, not "
                   "trusted) checkers=%u target=%s epoch_floor=%u epoch_now=%u revoked_ids=%u revoked_keys=0 "
-                  "firmware=none dependencies=none producer=NOT_CHECKED; launch requires a valid receipt; QEMU, not "
+                  "firmware=none dependencies=none producer=none; launch requires a valid receipt; QEMU, not "
                   "physical\n",
                   p.release ? "release" : "qualification", p.n_rcpt_test, p.n_rcpt_checkers, OSC_RCPT_TARGET_NAME,
                   (unsigned)CK_OSC_RCPT_EPOCH_FLOOR, (unsigned)CK_OSC_RCPT_EPOCH_NOW, p.n_rcpt_revoked_ids);

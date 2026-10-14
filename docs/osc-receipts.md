@@ -40,7 +40,7 @@ section 6; the first failure decides.
 | 77, 78, 79 | STALE_EPOCH, EXPIRED, NOT_YET_VALID | epoch window, inclusive at both ends |
 | 86 | UNTRUSTED_CHECKER | checker identity not in the pinned list |
 | 80..83 | WRONG_TARGET, WRONG_FIRMWARE, PROGRAM_MISMATCH, EXECUTABLE_MISMATCH | binding to the unit |
-| 87 | WRONG_PRODUCER | only when a policy names a producer (the kernel's does not) |
+| 87 | WRONG_PRODUCER | the kernel's policy expects none (all zero) |
 | 88 | DEPENDENCIES_MISMATCH | any dependency claimed |
 | 96 | LRAT_PROOFS_REQUIRED | evidence class 2 (kernel-assigned number, see below) |
 | 84 | ARGUMENT | verifier called without a unit or a policy |
@@ -48,7 +48,7 @@ section 6; the first failure decides.
 ## Kernel policy (`ck_osc_policy`)
 
 - Target: SHA-256(`"OMEGA-TARGET-V1\0"` ‖ `aienos-ck-aarch64-el0`). Program = the unit's IR hash (section 1).
-  Executable = the unit's code hash. Firmware: none (all zero). Dependencies: the empty list.
+  Executable = the unit's code hash. Firmware: none (all zero). Dependencies: the empty list. Producer: none (all zero).
 - Checker identity: one pinned identity, checker2 at omega 265ce82a (`artifact/osc_receipt_anchor.h`).
 - Epoch floor 10, current epoch 20 (compile-time constants: there is no epoch authority yet).
 - Qualification build (`CK_SEED0B_TEST_ANCHOR=1`): checker2's TEST key is the only receipt anchor
@@ -69,10 +69,9 @@ section 6; the first failure decides.
    section 6 order).
 3. **The "current epoch" and the floor** have no source in the spec beyond "the verifier's". The kernel uses
    compile-time constants.
-4. **Producer.** The unit carries no producer identity, so there is nothing to compare with; the kernel
-   policy names none and the producer field is NOT CHECKED (checker2's `verify` with no `--producer` would
-   require all zero; n_producer.rcpt is the one case where the kernel and checker2 disagree, recorded in
-   `expected.txt`).
+4. **Producer.** The unit carries no producer identity, so the kernel policy names none (`NULL`), which
+   expects an all-zero producer field (`"none"`), matching `checker2 receipt verify` when no `--producer`
+   is given. The kernel and `checker2` agree on all 22 rows of `expected.txt`.
 
 ## UNVERIFIED (not done, not claimed)
 
@@ -82,13 +81,16 @@ section 6; the first failure decides.
 - **Translation validation:** the executable is bound to the program by hash only (evidence class 1 says
   so). Nothing shows the code implements the IR.
 - **LRAT proofs** are not replayed in the kernel; class 2 is refused instead.
-- **Requirements and input digests:** NOT CHECKED. **Producer:** NOT CHECKED.
+- **Requirements and input digests:** NOT CHECKED.
 - **Dependency receipts:** not resolved; any claimed dependency is refused.
 - **Container manifest** (entry table, capabilities, stack and tick budgets) is not bound by a receipt; it
   stays bound by the unit signature only.
 - **Epoch and revocation** are compile-time; there is no live revocation feed or epoch authority.
 - **Name pairing** of unit and receipt in the self-test drivers is a test convenience; no Store-driven or
   shell-driven launch exists yet.
+- **Pre-existing non-OSC EL0 entry paths:** two pre-existing EL0 entry paths remain receipt-free: the
+  legacy P2 artifact `run_task` (`artifact_loader.c:810`) and the M3 self-test. Neither takes OSC units;
+  this change does not gate them.
 
 ## Tests
 

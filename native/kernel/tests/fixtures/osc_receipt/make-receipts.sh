@@ -104,7 +104,7 @@ test_fp=$(hexat "$OUT/a01.rcpt" 320 32)
 revoked_id=$(id_of n_revoked_id)
 # The same policy for checker2 verify (the oracle) as the kernel's qualification policy: TEST key allowed,
 # floor 10, epoch 20, target aienos-ck-aarch64-el0, no firmware, no dependencies, revoked id n_revoked_id.
-# checker2 always compares the producer (none = all zero); the kernel does NOT check it (osc_receipt.h).
+# Both checker2 and the kernel compare the producer (none = all zero unless the policy names one).
 qual=(--allow-test-key --floor "$FLOOR" --epoch "$NOW" --target "$TARGET" --revoked-id "$revoked_id")
 # oracle NAME UNIT VARIANT KERNEL-VERDICT [extra verify options]
 oracle() {
@@ -127,7 +127,7 @@ oracle() {
     echo "# columns: receipt unit variant checker2-verify-verdict kernel-verdict receipt-id"
     echo "# variant: qual = kernel qualification policy; release = the same with release=1 (TEST refused);"
     echo "#          revoke_key = qual plus the TEST key fingerprint on the revoked-key list;"
-    echo "#          producer = qual plus an expected producer (the kernel policy itself does NOT check producers)"
+    echo "#          producer = qual plus an expected producer (qual expects none = all zero)"
     oracle a01 a01 qual VALID
     oracle l01 l01 qual VALID
     oracle osh_lex osh_lex qual VALID
@@ -147,7 +147,7 @@ oracle() {
     oracle l01 a01 qual EXECUTABLE_MISMATCH
     oracle n_deps a01 qual DEPENDENCIES_MISMATCH
     oracle n_checker a01 qual UNTRUSTED_CHECKER
-    oracle n_producer a01 qual VALID
+    oracle n_producer a01 qual WRONG_PRODUCER
     oracle n_producer a01 producer VALID
     oracle a01 a01 producer WRONG_PRODUCER
 } >"$OUT/expected.txt"

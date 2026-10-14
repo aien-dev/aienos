@@ -110,7 +110,7 @@ check "${serial}" "final report reached the console" "report_kind: final"
 if has "${serial}" "report_kind: (panic|fault)"; then fail "panic or fault reported"; else pass "no kernel panic or fault report"; fi
 check "${serial}" "a01 admitted (the container check is unchanged)" "^osc_unit: a01_valid_min\\.unit ACCEPT "
 check "${serial}" "receipt policy line: qualification, TEST receipt anchor, owner root listed but not trusted, launch requires a receipt" \
-    "^osc_receipt_policy: mode=qualification receipt_test_anchors=1 receipt_owner_anchors=0 \\(owner root listed, not trusted\\) checkers=1 target=aienos-ck-aarch64-el0 epoch_floor=10 epoch_now=20 revoked_ids=1 revoked_keys=0 firmware=none dependencies=none producer=NOT_CHECKED; launch requires a valid receipt; QEMU, not physical$"
+    "^osc_receipt_policy: mode=qualification receipt_test_anchors=1 receipt_owner_anchors=0 \\(owner root listed, not trusted\\) checkers=1 target=aienos-ck-aarch64-el0 epoch_floor=10 epoch_now=20 revoked_ids=1 revoked_keys=0 firmware=none dependencies=none producer=none; launch requires a valid receipt; QEMU, not physical$"
 for r in "${rcpts[@]}"; do
     b=$(stat -c %s "${rfix}/${r}.rcpt"); id=-
     [[ "${b}" == 416 ]] && id=$(sha256sum "${rfix}/${r}.rcpt" | cut -c1-64)

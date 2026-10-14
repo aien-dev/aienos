@@ -4,7 +4,7 @@
 # columns: receipt unit variant checker2-verify-verdict kernel-verdict receipt-id
 # variant: qual = kernel qualification policy; release = the same with release=1 (TEST refused);
 #          revoke_key = qual plus the TEST key fingerprint on the revoked-key list;
-#          producer = qual plus an expected producer (the kernel policy itself does NOT check producers)
+#          producer = qual plus an expected producer (qual expects none = all zero)
 a01.rcpt unit=a01 variant=qual checker2=VALID kernel=VALID id=613e1cece39535842e2b3e406147b837b4bb1ed91628caf54735c7c09cb70996
 l01.rcpt unit=l01 variant=qual checker2=VALID kernel=VALID id=8330c39a4142e03fcce68bdff096dfc01dfcbb899ad03ef09b54342e7eeea403
 osh_lex.rcpt unit=osh_lex variant=qual checker2=VALID kernel=VALID id=40ae77b1a1855ed441403394012252549f9669f60a1bea1e4fa58a2f30d25156
@@ -24,6 +24,6 @@ n_program.rcpt unit=a01 variant=qual checker2=PROGRAM_MISMATCH kernel=PROGRAM_MI
 l01.rcpt unit=a01 variant=qual checker2=EXECUTABLE_MISMATCH kernel=EXECUTABLE_MISMATCH id=8330c39a4142e03fcce68bdff096dfc01dfcbb899ad03ef09b54342e7eeea403
 n_deps.rcpt unit=a01 variant=qual checker2=DEPENDENCIES_MISMATCH kernel=DEPENDENCIES_MISMATCH id=de49adf3d0c35d6d1782eaa7fd8c35074b3fbf9d230ae414b439761dad62d162
 n_checker.rcpt unit=a01 variant=qual checker2=UNTRUSTED_CHECKER kernel=UNTRUSTED_CHECKER id=5c9e707051daf1244985ef16cb18956f372686d3c5d9704142b2d44a68a762bb
-n_producer.rcpt unit=a01 variant=qual checker2=WRONG_PRODUCER kernel=VALID id=8caf618b4183c11a954ed01e8475b87d50e836a465db954c8cf0b63595c2527d
+n_producer.rcpt unit=a01 variant=qual checker2=WRONG_PRODUCER kernel=WRONG_PRODUCER id=8caf618b4183c11a954ed01e8475b87d50e836a465db954c8cf0b63595c2527d
 n_producer.rcpt unit=a01 variant=producer checker2=VALID kernel=VALID id=8caf618b4183c11a954ed01e8475b87d50e836a465db954c8cf0b63595c2527d
 a01.rcpt unit=a01 variant=producer checker2=WRONG_PRODUCER kernel=WRONG_PRODUCER id=613e1cece39535842e2b3e406147b837b4bb1ed91628caf54735c7c09cb70996

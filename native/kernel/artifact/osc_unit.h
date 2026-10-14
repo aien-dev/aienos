@@ -111,7 +111,7 @@ struct osc_policy {
     uint64_t rcpt_epoch_now;                  /* the kernel's current policy epoch (no clock) */
     const uint8_t *rcpt_target;               /* 32-byte target hash; NULL: every receipt is WRONG_TARGET */
     const uint8_t *rcpt_firmware;             /* 32-byte firmware hash; NULL: none (all zero) */
-    const uint8_t *rcpt_producer;             /* 32-byte producer identity; NULL: producer NOT CHECKED */
+    const uint8_t *rcpt_producer;             /* 32-byte producer identity; NULL: none (all zero) */
 };
 
 /* 0 accepted (*out filled), else the first refusal code. out may be NULL only if the caller
