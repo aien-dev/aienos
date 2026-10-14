@@ -3,6 +3,10 @@
 #
 #   owner_ceremony.sh --dry-run [--out DIR]        rehearsal with a SOFTWARE key (openssl). Labelled TEST. Never touches a YubiKey.
 #   owner_ceremony.sh --real [--out DIR]           the ceremony. Writes to the YubiKey. Run it only when the Spark is offline.
+#   owner_ceremony.sh --real --online-by-owner-decision [--out DIR]
+#                                                  the ceremony on a Spark that stays online (owner decision, used 2026-10-14
+#                                                  because the Spark has no screen). Skips only the offline check and records
+#                                                  the network state in ceremony-report.txt.
 #   owner_ceremony.sh --sign-manifest MANIFEST SIGOUT OWNERFILE
 #                                                  after the ceremony: the YubiKey signs the statement that binds MANIFEST
 #                                                  (PIN once, then touch). Checks the signature against OWNERFILE before it finishes.
@@ -27,7 +31,7 @@ PIV="${AIENOS_PIV_TOOL:-${HOME}/.local/yubico-piv-tool/bin/yubico-piv-tool}"
 YKMAN="${AIENOS_YKMAN:-${HOME}/.local/ykman-venv/bin/ykman}"
 export LD_LIBRARY_PATH="$(dirname "$(dirname "${PIV}")")/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 SLOT=9c
-mode="" out="" tmp=""
+mode="" out="" tmp="" online_ok="" online_state=""
 say() { printf '%s\n' "$*"; }
 die() { printf 'REFUSED: %s\n' "$*" >&2; exit "${2:-1}"; }
 cleanup() { [ -z "${tmp}" ] || rm -rf "${tmp}"; }
@@ -175,7 +179,11 @@ ceremony() { # dry|real
         sw_generate "${out}/slot-9c-public.pem"
     else
         [ -t 0 ] && [ -t 1 ] || die "run this at the keyboard of the Spark (it asks you to type secrets)" 2
-        say "STEP 1: checking the Spark is offline."; require_offline; say "Offline: OK."
+        if [ -n "${online_ok}" ]; then
+            online_state="$(network_state | tr "\n" ";")"
+            say "STEP 1: offline check SKIPPED on purpose (--online-by-owner-decision). The Spark is ONLINE: ${online_state}"
+            say "This is recorded in the ceremony report."
+        else say "STEP 1: checking the Spark is offline."; require_offline; say "Offline: OK."; fi
         say "STEP 2: checking the tools and the YubiKey."; need_tools; yk_info
         read -r -p "Does that serial number match your YubiKey (type YES to go on)? " ans; [ "${ans}" = YES ] || die "stopped by you" 1
         yk_slot_must_be_empty
@@ -201,7 +209,9 @@ ceremony() { # dry|real
         echo "owner_root_ed25519: ${OWNER_HEX}"
         echo "owner_file_sha256: $(cut -d' ' -f1 "${out}/owner-pubkeys.txt.sha256")"
         echo "signed_statement_sha256: $(sha256sum < "${out}/ceremony-statement" | cut -d' ' -f1)"
-        echo "checks: network offline $([ "${kind}" = dry ] && echo n/a || echo ok); owner file accepted by ck_owner_gen; signature verified by in-tree Ed25519 and openssl; changed manifest refused"
+        net="ok"; [ "${kind}" = dry ] && net="n/a"
+        [ -n "${online_ok}" ] && net="NOT CHECKED: ONLINE by owner decision (Drake 2026-10-14, Spark has no screen output, run over a remote login); state: ${online_state}"
+        echo "checks: network offline ${net}; owner file accepted by ck_owner_gen; signature verified by in-tree Ed25519 and openssl; changed manifest refused"
     } > "${out}/ceremony-report.txt"
     say ""
     if [ "${kind}" = dry ]; then say "DRY RUN COMPLETE (TEST). Files in ${out}"; say "CEREMONY_DRY_RUN: PASS"
@@ -229,5 +239,5 @@ case "${1:-}" in
     --sign-manifest) [ $# = 4 ] || die "usage: --sign-manifest MANIFEST SIGOUT OWNERFILE" 2; sign_manifest "$2" "$3" "$4"; exit 0;;
     *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2;;
 esac
-while [ $# -gt 0 ]; do case "$1" in --out) out="${2:?--out DIR}"; shift 2;; *) die "unknown argument $1" 2;; esac; done
+while [ $# -gt 0 ]; do case "$1" in --out) out="${2:?--out DIR}"; shift 2;; --online-by-owner-decision) online_ok=1; shift;; *) die "unknown argument $1" 2;; esac; done
 ceremony "${mode}"
