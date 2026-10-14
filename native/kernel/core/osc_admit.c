@@ -1,9 +1,4 @@
-void ck_osc_summary(void)
-{
-    if (rcpt_seen)
-        ck_printf("osc_receipts: seen=%u stored=%u dropped=%u (each is verified when a launch presents it)\n", rcpt_seen,
-                  rcpt_n, rcpt_dropped);
-    if (seen || oversize)/* osc_admit.c -- kernel policy and reporting for OSC unit admission.
+/* osc_admit.c -- kernel policy and reporting for OSC unit admission.
  *
  * Policy (OSC_UNIT_ARTIFACT.md section 8.1), all local to this build:
  *   - ordinary build: release mode, no TEST anchor, no OWNER anchor. A TEST
@@ -479,6 +474,9 @@ void ck_osc_oversize(const char *name, uint64_t len)
 
 void ck_osc_summary(void)
 {
+    if (rcpt_seen)
+        ck_printf("osc_receipts: seen=%u stored=%u dropped=%u (each is verified when a launch presents it)\n", rcpt_seen,
+                  rcpt_n, rcpt_dropped);
     if (seen || oversize)
 #if defined(CK_OSC_LAUNCH_TEST) || defined(CK_OSH_TEST)
     {

@@ -249,7 +249,8 @@ static void structure_and_order(void)
     MUTATE((put16(r + 14, 3), put64(r + 312, 9)), OSC_RCPT_EVIDENCE_CLASS);
     MUTATE((put64(r + 312, 9), r[400] ^= 1), OSC_RCPT_EPOCH_ORDER);
     MUTATE(r[400] ^= 1, OSC_RCPT_BAD_SIGNATURE);
-    MUTATE(r[351] ^= 1, OSC_RCPT_BAD_SIGNATURE);
+    MUTATE(r[303] ^= 1, OSC_RCPT_BAD_SIGNATURE);     /* last byte of the input digest, signed */
+    MUTATE(r[351] ^= 1, OSC_RCPT_UNTRUSTED_SIGNER);   /* last fingerprint byte */
     MUTATE(r[320] ^= 1, OSC_RCPT_UNTRUSTED_SIGNER);    /* fingerprint names no anchor */
     MUTATE(put16(r + 10, 2), OSC_RCPT_UNTRUSTED_SIGNER); /* OWNER class: no owner anchor in the kernel policy */
     p.release = 1;
