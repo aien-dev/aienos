@@ -1,0 +1,11 @@
+[package]
+name = "allen-reflex"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "ALLEN REFLEX: no_std hypervector decision core that maps an operator message to one agent action"
+
+[lib]
+path = "src/lib.rs"

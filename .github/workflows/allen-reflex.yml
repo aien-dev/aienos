@@ -1,0 +1,48 @@
+name: ALLEN REFLEX decision core (allen-reflex)
+
+# Host checks for the no_std ALLEN REFLEX decision core (PI5-8). Tests train on the
+# exam train split and cases-reflex-extra.psv only; held-out is never read.
+on:
+  pull_request:
+    paths:
+      - "crates/allen-reflex/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "docs/native/pi5-8/orchestrator-exam/cases-train.psv"
+      - "docs/native/pi5-8/orchestrator-exam/cases-dev.psv"
+      - "docs/native/pi5-8/orchestrator-exam/cases-reflex-extra.psv"
+      - ".github/workflows/allen-reflex.yml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/allen-reflex/**"
+
+permissions:
+  contents: read
+
+jobs:
+  allen-reflex-host:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: aarch64-unknown-none
+      - name: crate present?
+        id: present
+        run: |
+          if [ -d crates/allen-reflex ]; then echo "yes=true" >> "$GITHUB_OUTPUT"; else echo "crates/allen-reflex absent on this ref; nothing to check"; echo "yes=false" >> "$GITHUB_OUTPUT"; fi
+      - name: fmt
+        if: steps.present.outputs.yes == 'true'
+        run: cargo fmt -p allen-reflex --check
+      - name: clippy
+        if: steps.present.outputs.yes == 'true'
+        run: cargo clippy -p allen-reflex --all-targets -- -D warnings
+      - name: test
+        if: steps.present.outputs.yes == 'true'
+        run: cargo test -p allen-reflex
+      - name: no_std build (aarch64-unknown-none)
+        if: steps.present.outputs.yes == 'true'
+        run: cargo build -p allen-reflex --target aarch64-unknown-none

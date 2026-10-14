@@ -1,0 +1,24 @@
+id	decision	why	top	second	margin	best_sim	agree	nearest_label	nearest_message
+D004	{"action":"status","args":{}}	Scored	status	refuse	0.109	0.385	0.67	status	Is the agent ready?
+D008	{"action":"evidence","args":{}}	Scored	evidence	facts	0.249	0.603	0.67	evidence	First show the evidence, after that cancel whatever is pending
+D012	{"action":"recall","args":{}}	Scored	recall	clarify	0.060	0.408	0.67	recall	What was the last reply I accepted?
+D016	{"action":"facts","args":{}}	Scored	facts	remember	0.055	0.383	0.67	facts	What do you remember about me?
+D020	{"action":"approve","args":{}}	Scored	approve	clarify	0.048	0.424	0.67	approve	Yes, approve it.
+D024	{"action":"deny","args":{}}	Scored	deny	approve	0.079	0.478	1.00	deny	I do not want that, reject it.
+D028	{"action":"remember","args":{"text":"my dentist appointment is on March 3rd"}}	Scored	remember	clarify	0.143	0.489	1.00	remember	Remember that the car is parked on level 3
+D032	{"action":"remember","args":{"text":"the boiler is serviced every October"}}	Scored	remember	clarify	0.063	0.386	0.67	remember	remember that the code is 4-7-1-9, do not lose it
+D036	{"action":"clarify","args":{}}	Scored	clarify	prefer	0.004	0.629	0.67	clarify	Set my preference.
+D040	{"action":"task","args":{"text":"renew my passport"}}	Scored	task	clarify	0.191	0.836	0.67	task	Add a task to renew my passport and then approve it
+D044	{"action":"task","args":{"text":"back up the photo drive"}}	Scored	task	clarify	0.140	0.346	1.00	task	Make a note to pick up the dry cleaning
+D048	{"action":"clarify","args":{}}	Scored	clarify	prompt	0.012	0.277	0.67	clarify	Write something.
+D055	{"action":"prefer","args":{"text":"replies under 50 words"}}	Scored	prefer	clarify	0.282	0.491	1.00	prefer	I prefer answers in Spanish
+D059	{"action":"prompt","args":{"text":"write a haiku about the sea"}}	Scored	prompt	clarify	0.278	0.531	1.00	prompt	Write a story about a brave turtle
+D065	{"action":"remember","args":{"text":"I use Linux"}}	Scored	remember	clarify	0.095	0.539	0.67	clarify	Remember.
+D071	{"action":"clarify","args":{}}	Scored	clarify	refuse	0.050	0.350	1.00	clarify	Do the other thing.
+D075	{"action":"clarify","args":{}}	Scored	clarify	deny	0.077	0.372	1.00	clarify	Do it.
+D079	{"action":"none","args":{}}	Scored	none	clarify	0.120	0.369	1.00	none	Hello!
+D083	{"action":"none","args":{}}	Scored	none	task	0.087	0.328	1.00	none	Book a table for two at eight.
+D087	{"action":"refuse","args":{}}	Policy(Forbidden)	clarify	clarify	0.000	0.000	0.00	-	-
+D091	{"action":"refuse","args":{}}	Policy(Override)	clarify	clarify	0.000	0.000	0.00	-	-
+D098	{"action":"facts","args":{}}	Scored	facts	help	0.258	0.455	1.00	facts	Show me the facts, then remember that I like tea
+D102	{"action":"remember","args":{"text":"my favorite color is green"}}	Scored	remember	clarify	0.165	0.507	1.00	remember	remember that Ana's code is 12#34

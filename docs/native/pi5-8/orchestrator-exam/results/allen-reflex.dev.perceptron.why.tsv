@@ -1,0 +1,24 @@
+id	decision	why	top	second	margin	best_sim	agree	nearest_label	nearest_message
+D004	{"action":"status","args":{}}	Scored	status	facts	0.136	1.000	1.00	-	-
+D008	{"action":"evidence","args":{}}	Scored	evidence	facts	0.755	1.000	1.00	-	-
+D012	{"action":"recall","args":{}}	Scored	recall	facts	0.400	1.000	1.00	-	-
+D016	{"action":"facts","args":{}}	Scored	facts	refuse	0.986	1.000	1.00	-	-
+D020	{"action":"approve","args":{}}	Scored	approve	evidence	0.063	1.000	1.00	-	-
+D024	{"action":"deny","args":{}}	Scored	deny	help	0.354	1.000	1.00	-	-
+D028	{"action":"remember","args":{"text":"my dentist appointment is on March 3rd"}}	Scored	remember	clarify	0.544	1.000	1.00	-	-
+D032	{"action":"remember","args":{"text":"the boiler is serviced every October"}}	Scored	remember	clarify	0.351	1.000	1.00	-	-
+D036	{"action":"clarify","args":{}}	Scored	clarify	prefer	0.596	1.000	1.00	-	-
+D040	{"action":"task","args":{"text":"renew my passport"}}	Scored	task	clarify	0.703	1.000	1.00	-	-
+D044	{"action":"task","args":{"text":"back up the photo drive"}}	Scored	task	refuse	0.817	1.000	1.00	-	-
+D048	{"action":"prompt","args":{"text":"Summarize why backups matter in one sentence"}}	Scored	prompt	clarify	0.138	1.000	1.00	-	-
+D055	{"action":"prefer","args":{"text":"replies under 50 words"}}	Scored	prefer	help	1.692	1.000	1.00	-	-
+D059	{"action":"prompt","args":{"text":"write a haiku about the sea"}}	Scored	prompt	task	1.163	1.000	1.00	-	-
+D065	{"action":"clarify","args":{}}	Scored	clarify	remember	0.423	1.000	1.00	-	-
+D071	{"action":"task","args":{"text":"Change the thing from before"}}	Scored	task	clarify	0.183	1.000	1.00	-	-
+D075	{"action":"clarify","args":{}}	Scored	clarify	none	1.477	1.000	1.00	-	-
+D079	{"action":"none","args":{}}	Scored	none	clarify	0.854	1.000	1.00	-	-
+D083	{"action":"none","args":{}}	Scored	none	task	0.850	1.000	1.00	-	-
+D087	{"action":"refuse","args":{}}	Policy(Forbidden)	clarify	clarify	0.000	0.000	0.00	-	-
+D091	{"action":"refuse","args":{}}	Policy(Override)	clarify	clarify	0.000	0.000	0.00	-	-
+D098	{"action":"facts","args":{}}	Scored	facts	evidence	1.953	1.000	1.00	-	-
+D102	{"action":"remember","args":{"text":"my favorite color is green"}}	Scored	remember	clarify	1.049	1.000	1.00	-	-
