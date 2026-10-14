@@ -18,26 +18,26 @@
       "children": [
         {
           "digest": "e29df0084abf67fb52332b236e7c2888d702decb0b9cadb78a372fd00f465a90",
-          "last_commit": "fbbfc9c",
+          "last_commit": "49ff776",
           "name": "src",
           "purpose": "Directory crates/aienos-kernel/src. Purpose not yet described by a human."
         },
         {
-          "digest": "e092f60723faa08615842e988f91c6bdb4cacce5838a69f8776d3e27a878af9f",
-          "last_commit": "5ac7cfc",
+          "digest": "4a5f74d8e889ecb0089082469852f1e4b1c034af70dfeab3df2902cd35662ddb",
+          "last_commit": "f78977a",
           "name": "tests",
           "purpose": "Directory crates/aienos-kernel/tests. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:ec143c4fad7fef691060763f947d9715dbad8da5c6fcaef41d74c94fe7e9e7c6",
-      "compiled_at": "2026-10-13T02:27:54Z",
+      "children_root": "sha256:2ce1d83fe153f2870441fab50adb6e7ebb06cbb876b2ee2167c9acaf3f56acc6",
+      "compiled_at": "2026-10-14T01:16:45Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:1f8ba1326707e021f21de9eea6a03533e02e48089471d5561373cca1ed6cea64",
+      "digest": "sha256:622300849736c15c24036d522c7629061ac688ee94d689ac0c0cf80c7d0e6e48",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 85,
-      "generated_at_commit": "74f638c298bc04543b03d6851a83dac815d36645",
-      "source_tree": "sha256:e7b689ea85e4c7b6057a19a4996aff03de1f56b44e87a85079eba7f879005241"
+      "generated_at_commit": "f78977a6ce33ea89a5b3b1952c0a0e403d4504fa",
+      "source_tree": "sha256:6c09374888ad0c1a95b002f2a84d3251f035f9fe2e2b2b57acd1d23803ad844e"
     },
     "owner_lane": "",
     "provenance": {
