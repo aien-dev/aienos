@@ -28,7 +28,10 @@ expect_refused() { # what, needle, cmd...
 has_line() { # what, file, regex
     if /usr/bin/grep -qE -- "$3" "$2"; then pass "$1"; else fail "$1"; fi
 }
-remake_sums() { (cd "$1" && sha256sum image/BOOTAA64.EFI loader/SLOTLDR.EFI PACKAGE.txt >SHA256SUMS); }
+remake_sums() {
+    (cd "$1" && sha256sum image/BOOTAA64.EFI loader/SLOTLDR.EFI PACKAGE.txt >SHA256SUMS
+     if [ -f inputs/libaienos_infer_kernel.a ]; then sha256sum inputs/libaienos_infer_kernel.a >>SHA256SUMS; fi)
+}
 remake_all() { remake_sums "$1"; echo "package_sha256 $(sha256sum "$1/SHA256SUMS" | cut -c1-64)" >"$1/PROVENANCE.txt"; }
 dirty=()
 tree_clean=yes
@@ -90,6 +93,8 @@ if git -C "$repo" -c core.hooksPath=/dev/null worktree add -q --detach "$T/wt" H
     echo "# dirty" >>"$T/wt/native/kernel/Makefile"
     expect_refused "build refuses a dirty tree" "working tree is dirty" "$T/wt/scripts/native_package.sh" build --out "$T/pd" --generation 7 --variant core
     [ ! -e "$T/pd" ] && pass "dirty refusal leaves no package" || fail "dirty refusal left a package"
+    printf 'fn main() {}\n' >"$T/wt/crates/aienos-infer-kernel/build.rs"
+    expect_refused "service refuses automatically discovered untracked Rust build script" "untracked inference build inputs" "$T/wt/scripts/native_package.sh" build --out "$T/untracked-service" --generation 1 --variant service-hardware-staging --owner-pubkeys "$fix/TEST-FIXTURE-owner-pubkeys.txt" --machine-id "$fix/TEST-FIXTURE-machine-id.txt" --model "$T/model.bin" --allow-dirty
 else
     fail "could not make a scratch worktree for the dirty-tree check"; fail "dirty refusal leaves no package (not run)"
 fi
@@ -202,6 +207,49 @@ if openssl genpkey -algorithm ed25519 -out "$T/throwaway.key.pem" 2>/dev/null; t
 else
     fail "openssl genpkey ed25519 unavailable: offline signing round trip not run"
 fi
+
+# 9. The integrated production CPU service uses disk-only inference and owner
+# keys. Public fixtures exercise the recipe; nothing is signed for deployment or booted.
+S="$T/service"
+service_args=(--generation 8 --variant service-hardware-staging --owner-pubkeys "$fix/TEST-FIXTURE-owner-pubkeys.txt" --machine-id "$fix/TEST-FIXTURE-machine-id.txt")
+expect_refused "service needs model identity" "needs --model" "$np" build --out "$S" "${service_args[@]}" "${dirty[@]}"
+expect_refused "service needs owner provisioning" "needs --owner-pubkeys" "$np" build --out "$S" --generation 8 --variant service-hardware-staging --model "$T/model.bin" "${dirty[@]}"
+expect_refused "service refuses externally supplied test flags" "CK_SERVICE_TEST_KEYS" env CK_SERVICE_TEST_KEYS=1 "$np" build --out "$S" "${service_args[@]}" --model "$T/model.bin" "${dirty[@]}"
+expect_refused "service refuses non-reproducible inference archive" "two clean inference library builds differ" env NATIVE_PACKAGE_TEST_CORRUPT_INFER_SECOND=1 "$np" build --out "$S" "${service_args[@]}" --model "$T/model.bin" "${dirty[@]}"
+[ ! -e "$S" ] && pass "inference reproducibility refusal leaves no package" || fail "inference reproducibility refusal left a package"
+mkdir -p "$T/hostile/.cargo"
+printf '[build]\nrustflags = ["--invalid-ancestor-config-flag"]\n' >"$T/hostile/.cargo/config.toml"
+expect_refused "service refuses scratch ancestor Cargo config" "unrecorded Cargo configuration" env TMPDIR="$T/hostile" "$np" build --out "$S" "${service_args[@]}" --model "$T/model.bin" "${dirty[@]}"
+# Rust environment overrides must not reach the recorded fixed build recipe.
+mkdir -p "$T/caller/.cargo"
+printf '[build]\nrustflags = ["--invalid-caller-config-flag"]\n' >"$T/caller/.cargo/config.toml"
+service_from_external_cwd() { (cd "$T/caller" && env RUSTFLAGS=--invalid-package-test-flag "$np" "$@"); }
+expect_ok "build production service package with isolated Rust environment and caller config" service_from_external_cwd build --out "$S" "${service_args[@]}" --model "$T/model.bin" "${dirty[@]}"
+SP="$S/PACKAGE.txt"
+has_line "service profile recorded" "$SP" '^variant service-hardware-staging$'
+has_line "service uses owner slot keys" "$SP" '^loader_keys owner$'
+has_line "service fixed offline inference recipe recorded" "$SP" '^input_infer_build offline_locked_release_aarch64-unknown-none$'
+has_line "service make variables bind inference archive" "$SP" '^input_make_vars CK_SERVICE=1 .* CK_INFER_LIB=sha256:[0-9a-f]{64}$'
+has_line "service archive is signed through package checksum" "$S/SHA256SUMS" ' inputs/libaienos_infer_kernel.a$'
+has_line "service Rust toolchain recorded" "$SP" '^toolchain_rustc rustc '
+has_line "service Cargo lock recorded" "$SP" "^input_infer_lock_sha256 $(sha256sum "$repo/crates/aienos-infer-kernel/Cargo.lock" | cut -c1-64)$"
+expect_ok "verify complete unsigned service package on same host" "$np" verify --package "$S" --keys "$fix/TEST-FIXTURE-owner-pubkeys.txt" --allow-unsigned --same-host "${dirty[@]}"
+cp -r "$S" "$T/service-bad"
+chmod u+w "$T/service-bad/inputs/libaienos_infer_kernel.a"
+printf X >>"$T/service-bad/inputs/libaienos_infer_kernel.a"
+expect_refused "service rejects changed archive" "SHA256SUMS" "$np" verify --package "$T/service-bad" --keys "$fix/TEST-FIXTURE-owner-pubkeys.txt" --allow-unsigned "${dirty[@]}"
+remake_all "$T/service-bad"
+expect_refused "service rejects rechecksummed archive with stale record" "infer_library_sha256" "$np" verify --package "$T/service-bad" --keys "$fix/TEST-FIXTURE-owner-pubkeys.txt" --allow-unsigned "${dirty[@]}"
+rm -rf "$T/service-bad"
+cp -r "$S" "$T/service-bad"
+sed -i '/^input_infer_lock_sha256 /d' "$T/service-bad/PACKAGE.txt"
+remake_all "$T/service-bad"
+expect_refused "service rejects missing inference lock record" "exactly one input_infer_lock_sha256" "$np" verify --package "$T/service-bad" --keys "$fix/TEST-FIXTURE-owner-pubkeys.txt" --allow-unsigned "${dirty[@]}"
+rm -rf "$T/service-bad"
+cp -r "$S" "$T/service-bad"
+sed -i '/ inputs\/libaienos_infer_kernel.a$/d' "$T/service-bad/SHA256SUMS"
+echo "package_sha256 $(sha256sum "$T/service-bad/SHA256SUMS" | cut -c1-64)" >"$T/service-bad/PROVENANCE.txt"
+expect_refused "service archive cannot be omitted from signed checksum" "must cover inputs" "$np" verify --package "$T/service-bad" --keys "$fix/TEST-FIXTURE-owner-pubkeys.txt" --allow-unsigned "${dirty[@]}"
 
 echo "NATIVE_PACKAGE_TEST: $([ "$fails" = 0 ] && echo PASS || echo FAIL) ($checks checks, $fails failures)"
 [ "$fails" = 0 ]
