@@ -50,13 +50,16 @@ lines picked by the checked-in table `scripts/pi5_receipts_verdicts.tsv` (PI5-3 
 PI5-6 infer and G1-G3, PI5-7 L1-L3, power cut P1, artifact a1 and a2, pi5-pcie-1, pi5-net-1, pi5-net-3-r1). It refuses to
 print anything if a folder is missing, a field is absent or a table row matches no line. Plain ASCII, LF only, no timestamps or paths.
 
-Signing design: the signature is a detached Ed25519 signature (RFC 8032, 64 raw bytes) over the exact manifest bytes.
-`native/kernel/tools/ck_manifest_sig.c verify MANIFEST SIG PUBKEYHEX` checks it with the in-tree verifier; its only signing
-command, `sign-test`, uses the public RFC 8032 TEST 1 key and says TEST ONLY. `scripts/ck_pi5_manifest_check.sh` proves the
-round trip (and that a tampered manifest, a tampered signature and a different key all fail).
+Signing design (updated for the owner YubiKey, see `docs/native/PI5-8-OWNER-CEREMONY.md`): PIV Ed25519 signs only a small message,
+so the owner signs a fixed four-line ASCII statement that binds the manifest by its length and sha256; the signature is a plain
+Ed25519 signature (RFC 8032, 64 raw bytes) over those statement bytes. `native/kernel/tools/ck_manifest_sig.c verify MANIFEST SIG
+PUBKEYHEX` rebuilds the statement from the manifest and checks it with the in-tree verifier; its only signing command,
+`sign-test`, uses the public RFC 8032 TEST 1 key and says TEST ONLY. `scripts/ck_pi5_manifest_check.sh` proves the round trip (a
+tampered manifest, a tampered signature, a different key and a signature over the raw manifest all fail; an openssl TEST key
+signature verifies too).
 
 ## Limits
 
-- All Pi evidence is one Pi, one card, TEST keys. The manifest is unsigned for real: only a TEST signature was made.
+- All Pi evidence is one Pi, one card, TEST keys. The manifest is unsigned for real: only a TEST signature was made. The owner-key ceremony is prepared and rehearsed (software keys) but not performed.
 - Run folders live on the Spark (`~/workspace/pi5-runs`), not in the repository; the manifest records their hashes.
 - The Pi image tier change affects every Pi image that links the artifact loader (none of the other Pi images presents candidates).
