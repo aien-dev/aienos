@@ -60,17 +60,32 @@ MUTANTS = sha512.c:sha-pad sha512.c:sha-len \
 	ed25519.c:sc-sub ed25519.c:s-range ed25519.c:a-small-order ed25519.c:r-small-order \
 	ed25519.c:r-check
 
-mutants: | $(OUT)
-	@ulimit -c 0; fail=0; n=0; for m in $(MUTANTS); do \
+$(OUT)/t_sig_test.o: tests/sig_test.c $(TEST_HDRS) $(HDRS) | $(OUT)
+	$(CC) $(CFLAGS) -Wno-error -I. -c -o $@ $<
+
+mutants: $(OBJS) $(OUT)/t_sig_test.o | $(OUT)
+	@ulimit -c 0; fail=0; n=0; \
+	dups=$$(printf '%s\n' $(MUTANTS) | sed 's/.*://' | sort | uniq -d); \
+	[ -z "$$dups" ] || { echo "duplicate guard names (parallel runs would collide):" $$dups; echo "AIENOS_SIG_MUTANTS: FAIL"; exit 1; }; \
+	for m in $(MUTANTS); do \
 	  f=$${m%%:*}; g=$${m#*:}; n=$$((n+1)); \
-	  grep -q "GUARD:$$g \*/" $$f || { echo "mutant $$g: guard tag missing"; fail=1; continue; }; \
-	  sed "/GUARD:$$g \*\//d" $$f > $(OUT)/mut_$$g.c; \
-	  others=$$(for s in $(SRCS); do [ $$s = $$f ] || echo $$s; done); \
-	  $(CC) $(CFLAGS) -Wno-error -I. -o $(OUT)/mut_$$g tests/sig_test.c $(OUT)/mut_$$g.c $$others \
-	    || { fail=1; continue; }; \
-	  if ./$(OUT)/mut_$$g > $(OUT)/mut_$$g.log 2>&1; then \
-	    echo "mutant $$g: SURVIVED (FAIL)"; fail=1; \
-	  else echo "mutant $$g: killed"; fi; \
+	  rm -f $(OUT)/mut_$$g.msg $(OUT)/mut_$$g.fail $(OUT)/mut_$$g.killed; \
+	  ( grep -q "GUARD:$$g \*/" $$f || { echo "mutant $$g: guard tag missing" > $(OUT)/mut_$$g.msg; echo 1 > $(OUT)/mut_$$g.fail; exit 0; }; \
+	    sed "/GUARD:$$g \*\//d" $$f > $(OUT)/mut_$$g.c; \
+	    others=$$(for s in $(SRCS); do [ $$s = $$f ] || echo $(OUT)/$${s%.c}.o; done); \
+	    $(CC) $(CFLAGS) -Wno-error -I. -c -o $(OUT)/mut_$$g.o $(OUT)/mut_$$g.c \
+	      && $(CC) $(CFLAGS) -Wno-error -o $(OUT)/mut_$$g $(OUT)/t_sig_test.o $(OUT)/mut_$$g.o $$others \
+	      || { echo "mutant $$g: does not compile" > $(OUT)/mut_$$g.msg; echo 1 > $(OUT)/mut_$$g.fail; exit 0; }; \
+	    if ./$(OUT)/mut_$$g > $(OUT)/mut_$$g.log 2>&1; then \
+	      echo "mutant $$g: SURVIVED (FAIL)" > $(OUT)/mut_$$g.msg; echo 1 > $(OUT)/mut_$$g.fail; \
+	    else echo "mutant $$g: killed" > $(OUT)/mut_$$g.msg; : > $(OUT)/mut_$$g.killed; fi \
+	  ) & \
+	done; \
+	wait; \
+	for m in $(MUTANTS); do \
+	  g=$${m#*:}; \
+	  if [ -f $(OUT)/mut_$$g.msg ]; then cat $(OUT)/mut_$$g.msg; else echo "mutant $$g: no result recorded (FAIL)"; fi; \
+	  [ -f $(OUT)/mut_$$g.killed ] && [ ! -f $(OUT)/mut_$$g.fail ] || fail=1; \
 	done; \
 	if [ $$fail -eq 0 ]; then echo "AIENOS_SIG_MUTANTS: PASS ($$n/$$n killed)"; else echo "AIENOS_SIG_MUTANTS: FAIL"; exit 1; fi
 

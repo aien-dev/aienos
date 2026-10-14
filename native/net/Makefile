@@ -141,22 +141,41 @@ endif
 # the M6-B sources and the Lane 19 resend jitter in aienos_ctl.c; the X25519,
 # secure transport and control-transport tests must then fail. A
 # mutant that compiles and passes all three tests SURVIVED, and fails this target.
-mutants: | $(OUT)
-	@killed=0; total=0; survived=""; \
+NET_MUT_TEST_OBJS = $(OUT)/t_x25519_test.o $(OUT)/t_sec_test.o $(OUT)/t_ctl_test.o
+$(OUT)/t_%_test.o: tests/%_test.c $(wildcard *.h) | $(OUT)
+	$(CC) $(CFLAGS) -Wno-error -I. -c -o $@ $<
+
+mutants: $(OBJS) $(NET_MUT_TEST_OBJS) | $(OUT)
+	@killed=0; total=0; survived=""; list=""; \
 	for f in $(SEC_GUARD_FILES); do \
 	  for g in $$(grep -o 'GUARD:[a-z0-9-]*' $$f | cut -d: -f2); do \
-	    total=$$((total+1)); mdir=$(OUT)/mut_$$g; mkdir -p $$mdir; \
-	    for s in $(SRCS); do cp $$s $$mdir/; done; cp *.h $$mdir/; \
-	    sed "/GUARD:$$g \*\//d" $$f > $$mdir/$$f; \
-	    if cmp -s $$f $$mdir/$$f; then echo "mutant $$g: guard line not found"; survived="$$survived $$g"; continue; fi; \
-	    if ! $(CC) $(CFLAGS) -Wno-error -I. -o $$mdir/x25519_t tests/x25519_test.c $$(for s in $(SRCS); do echo $$mdir/$$s; done) $(DEP_SRCS) 2>/dev/null || \
-	       ! $(CC) $(CFLAGS) -Wno-error -I. -o $$mdir/sec_t tests/sec_test.c $$(for s in $(SRCS); do echo $$mdir/$$s; done) $(DEP_SRCS) 2>/dev/null || \
-	       ! $(CC) $(CFLAGS) -Wno-error -I. -o $$mdir/ctl_t tests/ctl_test.c $$(for s in $(SRCS); do echo $$mdir/$$s; done) $(DEP_SRCS) 2>/dev/null; then \
-	      echo "mutant $$g: does not compile (counts as not killed)"; survived="$$survived $$g"; continue; fi; \
-	    if ./$$mdir/x25519_t >/dev/null 2>&1 && ./$$mdir/sec_t >/dev/null 2>&1 && ./$$mdir/ctl_t >/dev/null 2>&1; then \
-	      echo "mutant $$g: SURVIVED"; survived="$$survived $$g"; \
-	    else echo "mutant $$g: killed"; killed=$$((killed+1)); fi; \
+	    case " $$list " in *" $$g "*) echo "mutant $$g: guard tag appears twice, parallel runs would collide"; survived="$$survived $$g"; continue ;; esac; \
+	    total=$$((total+1)); mdir=$(OUT)/mut_$$g; rm -rf $$mdir; mkdir -p $$mdir; list="$$list $$g"; \
+	    ( cp *.h $$mdir/; \
+	      sed "/GUARD:$$g \*\//d" $$f > $$mdir/$$f; \
+	      if cmp -s $$f $$mdir/$$f; then echo "mutant $$g: guard line not found" > $$mdir/msg; echo "$$g" > $$mdir/surv; exit 0; fi; \
+	      others=""; for s in $(SRCS); do [ "$$s" = "$$f" ] || others="$$others $(OUT)/$${s%.c}.o"; done; \
+	      if ! $(CC) $(CFLAGS) -Wno-error -I. -c -o $$mdir/m.o $$mdir/$$f 2>/dev/null || \
+	         ! $(CC) $(CFLAGS) -Wno-error -o $$mdir/x25519_t $(OUT)/t_x25519_test.o $$mdir/m.o $$others $(DEP_OBJS) 2>/dev/null || \
+	         ! $(CC) $(CFLAGS) -Wno-error -o $$mdir/sec_t $(OUT)/t_sec_test.o $$mdir/m.o $$others $(DEP_OBJS) 2>/dev/null || \
+	         ! $(CC) $(CFLAGS) -Wno-error -o $$mdir/ctl_t $(OUT)/t_ctl_test.o $$mdir/m.o $$others $(DEP_OBJS) 2>/dev/null; then \
+	        echo "mutant $$g: does not compile (counts as not killed)" > $$mdir/msg; echo "$$g" > $$mdir/surv; exit 0; fi; \
+	      case "$$f" in \
+	        x25519.c)     order="$$mdir/x25519_t $$mdir/sec_t $$mdir/ctl_t" ;; \
+	        aienos_sec.c) order="$$mdir/sec_t $$mdir/x25519_t $$mdir/ctl_t" ;; \
+	        *)            order="$$mdir/ctl_t $$mdir/x25519_t $$mdir/sec_t" ;; \
+	      esac; \
+	      pass=1; for b in $$order; do if ! ./$$b >/dev/null 2>&1; then pass=0; break; fi; done; \
+	      if [ $$pass -eq 1 ]; then echo "mutant $$g: SURVIVED" > $$mdir/msg; echo "$$g" > $$mdir/surv; \
+	      else echo "mutant $$g: killed" > $$mdir/msg; : > $$mdir/killed; fi \
+	    ) & \
 	  done; \
+	done; \
+	wait; \
+	for g in $$list; do \
+	  mdir=$(OUT)/mut_$$g; \
+	  if [ -f $$mdir/msg ]; then cat $$mdir/msg; else echo "mutant $$g: no result recorded (counts as not killed)"; fi; \
+	  if [ -f $$mdir/killed ] && [ ! -f $$mdir/surv ]; then killed=$$((killed+1)); else survived="$$survived $$g"; fi; \
 	done; \
 	echo "NET_SECURE_MUTANTS: $$killed/$$total killed"; \
 	[ -z "$$survived" ] && [ $$total -ge 12 ] || { echo "NET_SECURE_MUTANTS: FAIL (not killed:$$survived)"; exit 1; }

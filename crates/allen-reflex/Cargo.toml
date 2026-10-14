@@ -9,3 +9,6 @@ description = "ALLEN REFLEX: no_std hypervector decision core that maps an opera
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+aienos-crypto = { workspace = true }

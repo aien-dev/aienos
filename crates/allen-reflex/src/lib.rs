@@ -19,8 +19,9 @@
 //! 6. Abstention: low similarity, low margin or low neighbour agreement -> `clarify`/`none`.
 //! 7. [`span`]: copy the argument text (1..48 printable ASCII bytes) or answer `clarify`.
 //!
-//! The crate is `no_std` + `alloc` with no dependencies. A kernel that links it must
-//! provide a global allocator and a panic handler. Every input is bounded (see [`Config`]).
+//! The crate is `no_std` + `alloc`; its only dependency is the in-repo `aienos-crypto`
+//! (SHA-256 for [`tower`] cache keys). A kernel that links it must provide a global
+//! allocator and a panic handler. Every input is bounded (see [`Config`]).
 
 extern crate alloc;
 #[cfg(test)]
@@ -36,6 +37,7 @@ pub mod policy;
 pub mod segment;
 pub mod span;
 pub mod text;
+pub mod tower;
 
 pub use action::{Action, N_LABELS};
 pub use dialog::{Pending, Role, Turn};

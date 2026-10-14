@@ -131,34 +131,65 @@ GUARDS = parity-a parity-b b-needs-a adjacent first-remnant a-alone-seq1
 
 mutants: torn-slot-mutants store-mutants
 
-torn-slot-mutants: | $(OUT)
-	@fail=0; for g in $(GUARDS); do \
-	  grep -q "GUARD:$$g \*/" torn_slot.c || { echo "mutant $$g: guard tag missing"; fail=1; continue; }; \
-	  sed "/GUARD:$$g \*\//d" torn_slot.c > $(OUT)/mut_$$g.c; \
-	  $(CC) $(CFLAGS) -Wno-error -I. -o $(OUT)/mut_$$g tests/torn_slot_test.c $(OUT)/mut_$$g.c ../argus/sha256.c || { fail=1; continue; }; \
-	  if ./$(OUT)/mut_$$g --rules-only > $(OUT)/mut_$$g.log 2>&1; then \
-	    echo "mutant $$g: SURVIVED (FAIL)"; fail=1; \
-	  else echo "mutant $$g: killed"; fi; \
+$(OUT)/t_torn_slot_test.o: tests/torn_slot_test.c torn_slot.h ../argus/sha256.h | $(OUT)
+	$(CC) $(CFLAGS) -Wno-error -I. -c -o $@ $<
+
+torn-slot-mutants: $(OUT)/t_torn_slot_test.o $(OUT)/sha256.o | $(OUT)
+	@fail=0; \
+	dups=$$(printf '%s\n' $(GUARDS) | sort | uniq -d); \
+	[ -z "$$dups" ] || { echo "duplicate guard names (parallel runs would collide):" $$dups; echo "TORN_SLOT_MUTANTS: FAIL"; exit 1; }; \
+	for g in $(GUARDS); do \
+	  rm -f $(OUT)/mut_$$g.msg $(OUT)/mut_$$g.fail $(OUT)/mut_$$g.killed; \
+	  ( grep -q "GUARD:$$g \*/" torn_slot.c || { echo "mutant $$g: guard tag missing" > $(OUT)/mut_$$g.msg; echo 1 > $(OUT)/mut_$$g.fail; exit 0; }; \
+	    sed "/GUARD:$$g \*\//d" torn_slot.c > $(OUT)/mut_$$g.c; \
+	    $(CC) $(CFLAGS) -Wno-error -I. -c -o $(OUT)/mut_$$g.o $(OUT)/mut_$$g.c \
+	      && $(CC) $(CFLAGS) -Wno-error -o $(OUT)/mut_$$g $(OUT)/t_torn_slot_test.o $(OUT)/mut_$$g.o $(OUT)/sha256.o \
+	      || { echo "mutant $$g: does not compile" > $(OUT)/mut_$$g.msg; echo 1 > $(OUT)/mut_$$g.fail; exit 0; }; \
+	    if ./$(OUT)/mut_$$g --rules-only > $(OUT)/mut_$$g.log 2>&1; then \
+	      echo "mutant $$g: SURVIVED (FAIL)" > $(OUT)/mut_$$g.msg; echo 1 > $(OUT)/mut_$$g.fail; \
+	    else echo "mutant $$g: killed" > $(OUT)/mut_$$g.msg; : > $(OUT)/mut_$$g.killed; fi \
+	  ) & \
+	done; \
+	wait; \
+	for g in $(GUARDS); do \
+	  if [ -f $(OUT)/mut_$$g.msg ]; then cat $(OUT)/mut_$$g.msg; else echo "mutant $$g: no result recorded (FAIL)"; fi; \
+	  [ -f $(OUT)/mut_$$g.killed ] && [ ! -f $(OUT)/mut_$$g.fail ] || fail=1; \
 	done; \
 	if [ $$fail -eq 0 ]; then echo "TORN_SLOT_MUTANTS: PASS"; else echo "TORN_SLOT_MUTANTS: FAIL"; exit 1; fi
 
 STORE_GUARDS = $(shell grep -ho 'GUARD:[a-z0-9-]* \*/' $(STORE_SRCS) | sed 's/GUARD://; s/ \*\///')
+# Each store mutant works in its own $(OUT)/smut_<guard> directory, a different name
+# space from the torn-slot mutants above, so `make -j mutants` can run both at once.
 store-mutants: $(STORE_OBJS) $(TEST_OBJS) $(DEP_OBJS) $(OUT)/torn_slot.o $(HOST_OBJS)
-	@mkdir -p $(OUT)/mut; fail=0; total=0; killed=0; \
+	@fail=0; total=0; killed=0; \
+	dups=$$(printf '%s\n' $(STORE_GUARDS) | sort | uniq -d); \
+	[ -z "$$dups" ] || { echo "duplicate guard tags (parallel runs would collide):" $$dups; echo "AIENOS_STORE_MUTANTS: FAIL"; exit 1; }; \
 	for g in $(STORE_GUARDS); do \
-	  total=$$((total + 1)); \
-	  f=$$(grep -l "GUARD:$$g \*/" $(STORE_SRCS)); \
-	  [ $$(echo $$f | wc -w) -eq 1 ] || { echo "mutant $$g: tag not unique ($$f)"; fail=1; continue; }; \
-	  sed "/GUARD:$$g \*\//d" $$f > $(OUT)/mut/$$f; \
-	  $(CC) $(CFLAGS) -Wno-error $(INC) -c -o $(OUT)/mut/m.o $(OUT)/mut/$$f || { echo "mutant $$g: does not compile"; fail=1; continue; }; \
-	  objs=""; for s in $(STORE_SRCS); do [ $$s = $$f ] || objs="$$objs $(OUT)/$${s%.c}.o"; done; \
-	  dead=0; \
-	  for t in $(TEST_NAMES); do \
-	    $(CC) $(CFLAGS) -o $(OUT)/mut/$$t $(OUT)/t_$$t.o $(OUT)/mut/m.o $$objs $(OUT)/torn_slot.o $(DEP_OBJS) $(HOST_OBJS) || { dead=2; break; }; \
-	    if ! ./$(OUT)/mut/$$t $(OUT)/mut > $(OUT)/mut/$$g.log 2>&1; then dead=1; break; fi; \
-	  done; \
-	  if [ $$dead -eq 1 ]; then echo "mutant $$g ($$f): killed by $$t"; killed=$$((killed + 1)); \
-	  else echo "mutant $$g ($$f): SURVIVED (FAIL)"; fail=1; fi; \
+	  total=$$((total + 1)); d=$(OUT)/smut_$$g; rm -rf $$d; mkdir -p $$d; \
+	  ( f=$$(grep -l "GUARD:$$g \*/" $(STORE_SRCS)); \
+	    [ $$(echo $$f | wc -w) -eq 1 ] || { echo "mutant $$g: tag not unique ($$f)" > $$d/msg; echo 1 > $$d/fail; exit 0; }; \
+	    sed "/GUARD:$$g \*\//d" $$f > $$d/$$f; \
+	    $(CC) $(CFLAGS) -Wno-error $(INC) -c -o $$d/m.o $$d/$$f 2> $$d/cc.log || { echo "mutant $$g: does not compile (see $$d/cc.log)" > $$d/msg; echo 1 > $$d/fail; exit 0; }; \
+	    objs=""; for s in $(STORE_SRCS); do [ $$s = $$f ] || objs="$$objs $(OUT)/$${s%.c}.o"; done; \
+	    case "$$f" in \
+	      store_v1.c)     order="store_v1_test store_engine_test store_sealed_test store_powercut_test" ;; \
+	      store_sealed.c) order="store_sealed_test store_powercut_test store_engine_test store_v1_test" ;; \
+	      *)              order="store_engine_test store_v1_test store_sealed_test store_powercut_test" ;; \
+	    esac; \
+	    dead=0; by=""; \
+	    for t in $$order; do \
+	      $(CC) $(CFLAGS) -o $$d/$$t $(OUT)/t_$$t.o $$d/m.o $$objs $(OUT)/torn_slot.o $(DEP_OBJS) $(HOST_OBJS) || { dead=2; break; }; \
+	      if ! ./$$d/$$t $$d > $$d/$$g.log 2>&1; then dead=1; by="$$t"; break; fi; \
+	    done; \
+	    if [ $$dead -eq 1 ]; then echo "mutant $$g ($$f): killed by $$by" > $$d/msg; : > $$d/killed; \
+	    else echo "mutant $$g ($$f): SURVIVED (FAIL)" > $$d/msg; echo 1 > $$d/fail; fi \
+	  ) & \
+	done; \
+	wait; \
+	for g in $(STORE_GUARDS); do \
+	  d=$(OUT)/smut_$$g; \
+	  if [ -f $$d/msg ]; then cat $$d/msg; else echo "mutant $$g: no result recorded (FAIL)"; fi; \
+	  if [ -f $$d/killed ] && [ ! -f $$d/fail ]; then killed=$$((killed + 1)); else fail=1; fi; \
 	done; \
 	echo "store mutants: $$killed of $$total killed"; \
 	if [ $$fail -eq 0 ] && [ $$total -ge 12 ]; then echo "AIENOS_STORE_MUTANTS: PASS"; else echo "AIENOS_STORE_MUTANTS: FAIL"; exit 1; fi
