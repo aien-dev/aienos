@@ -85,3 +85,4 @@ artifacts: candidates=6 admitted=5 rejected=1
   re-read the targets after the stores (the faulting stores never retire, FAR names the address).
 - `contained=yes` in `artifact_fault:` means the fault handler terminated the task and returned to the kernel; it is not an independent audit.
 - One Pi run, one card, TEST keys. Not a production or release claim.
+- The Pi run used the image built at commit 1192a687 on top of main 15c19d4. The branch was then rebased onto main 9404c9e (PI5-NET-3, which does not touch the artifact path; one Makefile test-list conflict resolved). Host and QEMU gates were re-run after the rebase; the Pi was not re-run.
