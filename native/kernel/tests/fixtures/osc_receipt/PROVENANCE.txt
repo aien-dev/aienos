@@ -1,0 +1,23 @@
+Omega realization receipt fixtures (receipt v1, 416 bytes; omega spec/one-layer-receipts.md) for OSC unit
+admission (aienos#383). Label: TEST key only, protects nothing.
+
+Minted by:   omega checker2 (`checker2 receipt issue`), built by make-receipts.sh from aien-dev/omega
+             265ce82a1c220caa5f027abe068ca3aa813c633c (omega#448 merged: src/checker2, spec/one-layer-receipts.md).
+             checker_id = d7aae601e732b4b145c73e8d4f92769f56dac2e6fba5f77aed490aec429cf3ba
+             (`checker2 version`; pinned in artifact/osc_receipt_anchor.h). n_checker.rcpt was minted by
+             checker2_other (omega's own test build of the same sources under another identity).
+Key:         checker2's TEST key, class TEST (1): seed = SHA-256("OMEGA-CHECKER2-TEST-KEY-v1 NOT FOR PRODUCTION"),
+             public key 602810d43c0115df877b0cf8c327010e5a7e570490c85e31466c0cff6ca374c5,
+             fingerprint 6b5ab4e52d94a45a2cef54425bc3a321d07f1d3e14746e4a399b66ddc0d6c8ad.
+             This is NOT the OSC unit container TEST key (osc_unit/keys/test1.pub). The public key was derived
+             independently with openssl from the seed and matches the fingerprint in every receipt;
+             tests/test_osc_receipt.c checks the header bytes against these fixtures.
+Inputs:      the IR (section 1) and code (section 2) of the committed units, extracted by make-receipts.sh from
+             osc_unit/vectors/a01_valid_min.unit, osc_unit/launch/l01_launch_fns.unit and osh/osh_{lex,parse,expand}.unit
+             (each extracted section must hash to its section-table entry). Target "aienos-ck-aarch64-el0".
+Altered:     n_altered.rcpt = a01.rcpt with byte 80 (first byte of the executable hash) XOR 1;
+             n_length.rcpt = a01.rcpt plus one zero byte (417 bytes). Nothing else was edited by hand.
+Reproduce:   native/kernel/tests/fixtures/osc_receipt/make-receipts.sh --check <omega checkout at the commit above>
+             rebuilds everything in a temporary directory and requires byte-identical files (Ed25519 is
+             deterministic). expected.txt records, per case, checker2's own `receipt verify` verdict under the
+             same policy as the kernel's (the oracle) next to the verdict the kernel must give.

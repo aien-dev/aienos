@@ -61,7 +61,9 @@ make -s -C native/kernel OUT="${out_prod}" store-image gpt-image >/dev/null
 simg="${out_prod}/host/ck_store_image"
 
 fix="native/kernel/tests/fixtures/osc_unit"
-files=("${fix}/vectors/a01_valid_min.unit" "${fix}/launch/l01_launch_fns.unit" "${fix}/vectors/a06_valid_limits_at_max.unit" "${fix}/launch/l02_stack_over.unit")
+rfix="native/kernel/tests/fixtures/osc_receipt"
+# aienos#383: a launch needs a valid realization receipt; a06 shares a01's, l02 shares l01's (same IR and code)
+files=("${fix}/vectors/a01_valid_min.unit" "${fix}/launch/l01_launch_fns.unit" "${fix}/vectors/a06_valid_limits_at_max.unit" "${fix}/launch/l02_stack_over.unit" "${rfix}/a01.rcpt" "${rfix}/l01.rcpt")
 a01_line=$(grep -E '^a01_valid_min\.unit ' "${fix}/vectors/expected.txt")
 a01_digest=$(sed -E 's/.* unit_digest=([0-9a-f]{64}) .*/\1/' <<<"${a01_line}")
 [[ ${#a01_digest} == 64 ]] || fail "expected UnitDigest read from the frozen expected.txt"
@@ -110,13 +112,18 @@ boot "${out_launch}/full/BOOTAA64.EFI" "${serial}" "${work}/disk-run.img"
 release_flag
 
 check "${serial}" "left firmware and entered the kernel" "kernel: alive"
-check "${serial}" "kernel read all four candidates from the boot disk Store" "^artifact_candidates: 4$"
+check "${serial}" "kernel read all six candidates (four units, two receipts) from the boot disk Store" "^artifact_candidates: 6$"
 if has "${serial}" "^report-truncated:"; then fail "kernel report lines were truncated"; else pass "no kernel report line was truncated"; fi
 check "${serial}" "final report reached the console" "report_kind: final"
 if has "${serial}" "report_kind: (panic|fault)"; then fail "panic or fault reported (a unit fault must stay contained)"; else pass "no kernel panic or fault report: unit faults stayed contained"; fi
 check "${serial}" "a01 admitted with the frozen UnitDigest" "^osc_unit: a01_valid_min\\.unit ACCEPT unit_digest=${a01_digest} "
 check "${serial}" "l01 admitted (every hand-assembled word is in the OSC subset)" "^osc_unit: l01_launch_fns\\.unit ACCEPT .* funcs=14 caps=0 signer=TEST$"
 check "${serial}" "totals: 4 seen, 4 accepted" "^osc_units: seen=4 accepted=4 refused=0 oversize=0 "
+check "${serial}" "receipt policy line (aienos#383): launch requires a valid receipt" \
+    "^osc_receipt_policy: mode=qualification receipt_test_anchors=1 .* launch requires a valid receipt; QEMU, not physical$"
+check "${serial}" "a01.rcpt stored from the Store" "^osc_receipt: a01\\.rcpt STORED bytes=416 id=$(sha256sum native/kernel/tests/fixtures/osc_receipt/a01.rcpt | cut -c1-64) "
+check "${serial}" "l01.rcpt stored from the Store" "^osc_receipt: l01\\.rcpt STORED bytes=416 id=$(sha256sum native/kernel/tests/fixtures/osc_receipt/l01.rcpt | cut -c1-64) "
+check "${serial}" "receipt totals: 2 seen, 2 stored" "^osc_receipts: seen=2 stored=2 dropped=0 "
 check "${serial}" "launch policy line, labelled" "^osc_launch_policy: units=4 code_max=65536 stack_max=65536 in_max=4096 ws_max=32 pages; 1 tick = 10 ms; QEMU \\(aarch64 virt\\), TEST signer, not physical$"
 
 label='QEMU \(aarch64 virt\), TEST signer, not physical'

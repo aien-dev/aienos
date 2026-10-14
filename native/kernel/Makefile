@@ -820,6 +820,16 @@ $(error CK_OSC_LAUNCH_TEST needs CK_SEED0B_TEST_ANCHOR=1 (it launches TEST-signe
 endif
 ART_TRUST_FLAGS += -DCK_OSC_LAUNCH_TEST=1
 endif
+# aienos#383: the receipt self-test variant of the launch self-test (CK_OSC_LAUNCH_TEST=1 CK_OSC_RECEIPT_TEST=1) runs
+# a fixed script of launches with valid, missing and refused realization receipts instead of the C3-3a script.
+# TEST ONLY, QEMU only.
+CK_OSC_RECEIPT_TEST ?=
+ifeq ($(strip $(CK_OSC_RECEIPT_TEST)),1)
+ifneq ($(strip $(CK_OSC_LAUNCH_TEST)),1)
+$(error CK_OSC_RECEIPT_TEST needs CK_OSC_LAUNCH_TEST=1)
+endif
+ART_TRUST_FLAGS += -DCK_OSC_RECEIPT_TEST=1
+endif
 # OSH-AIENOS-0: the shell-core self-test (core/osh_test.c) runs the three osh units over embedded fixture scripts and
 # prints the step trace. TEST ONLY, QEMU only; not combined with the launch self-test.
 CK_OSH_TEST ?=
@@ -893,7 +903,7 @@ endif
 # (argus), Ed25519/SHA-512 (sig). Built into the core so every image carries
 # the loader; the TEST-anchor qualification build is CK_SEED0B_TEST_ANCHOR=1.
 ART_C := $(KDIR)/core/artifact_loader.c $(KDIR)/core/osc_admit.c $(KDIR)/core/osc_task.c $(KDIR)/artifact/osc_launch.c $(KDIR)/artifact/format.c $(KDIR)/artifact/admission.c \
-	$(KDIR)/artifact/receipt.c $(KDIR)/artifact/osc_unit.c $(NATIVE)/argus/sha256.c $(NATIVE)/sig/sha512.c \
+	$(KDIR)/artifact/receipt.c $(KDIR)/artifact/osc_unit.c $(KDIR)/artifact/osc_receipt.c $(NATIVE)/argus/sha256.c $(NATIVE)/sig/sha512.c \
 	$(NATIVE)/sig/ed25519.c $(NATIVE)/sig/ct.c
 ART_INC := -I$(KDIR)/svc/compat -I$(KDIR)/artifact -I$(NATIVE)/sig -I$(NATIVE)/argus
 ART_C += $(OSH_TEST_C)
@@ -1320,7 +1330,7 @@ HOST_SRCS := $(KDIR)/core/fmt.c $(KDIR)/core/acpi.c $(KDIR)/core/smmu.c $(KDIR)/
 	$(KDIR)/mm/pt.c $(KDIR)/mm/heap.c $(KDIR)/core/sched.c $(KDIR)/core/ipc.c $(KDIR)/core/entropy.c \
 	$(KDIR)/core/handoff_check.c $(KDIR)/core/fbcon.c $(KDIR)/core/acpi_dev.c $(KDIR)/core/lifecycle_fsm.c \
 	$(KDIR)/core/line_rx.c $(KDIR)/core/klog.c $(KDIR)/core/klog_slot.c $(KDIR)/core/cpufeat.c $(KDIR)/core/unlock_req.c $(KDIR)/core/agent_cmd.c $(KDIR)/core/artifact_card.c
-TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_entropy test_handoff test_fbcon test_osh_op \
+TESTS := test_fmt test_frames test_pt test_acpi test_acpi_dev test_heap test_smmu test_sched test_ipc test_artifact test_osc_unit test_osc_launch test_osc_admit test_osc_receipt test_entropy test_handoff test_fbcon test_osh_op \
 	test_continuity_codec test_continuity_resolve test_continuity_commit test_continuity_recovery test_continuity_geometry \
 	test_continuity_subject test_continuity_subject_provision test_lifecycle test_console_rx test_klog test_klog_slot test_pi5 test_pi5_marker test_pi5_rng test_cpufeat test_dma_window test_pi5_pcie test_pi5_net test_pi5_gem test_unlock_req test_context test_agent_cmd test_artifact_card
 HCFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(KDIR)/core -I$(KDIR)/mm -I$(KDIR)/tests -I$(BOOT)
@@ -1474,8 +1484,8 @@ smmu-l2-mutants: $(OUT)/host/test_smmu
 	else echo "mutant flag refused under CK_HARDWARE_STAGING"; fi; \
 	if [ $$fail = 0 ]; then echo "CK_SMMU_L2_MUTANTS: PASS"; else echo "CK_SMMU_L2_MUTANTS: FAIL"; exit 1; fi
 
-test: $(addprefix $(OUT)/host/,$(TESTS)) handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant artifact-card-mutant artifact-tier-pi5 artifact-tier-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check
-	@fail=0; for t in $(filter-out handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant artifact-card-mutant artifact-tier-pi5 artifact-tier-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check,$^); do $$t || fail=1; done; \
+test: $(addprefix $(OUT)/host/,$(TESTS)) osc-receipt-mutants osc-receipt-release handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant artifact-card-mutant artifact-tier-pi5 artifact-tier-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check
+	@fail=0; for t in $(filter-out osc-receipt-mutants osc-receipt-release handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants osh-op-mutant context-mutant agent-cmd-mutant artifact-card-mutant artifact-tier-pi5 artifact-tier-mutant test-continuity-subject-restart gsp-fw-inspect-test gsp-cot-test gsp-bindata-test gsp-bootargs-test gsp-rpc-test slot-test slot-free package-test slot-loader-check,$^); do $$t || fail=1; done; \
 	if [ $$fail = 0 ]; then echo "CK_CORE_HOST: PASS"; else echo "CK_CORE_HOST: FAIL"; exit 1; fi
 
 sanitize: $(addprefix $(OUT)/host-san/,$(TESTS))
@@ -1496,7 +1506,7 @@ $(OUT)/host/ck_udp_echo: $(KDIR)/tools/ck_udp_echo.c
 
 # Artifact library host test and the in-tree C artifact tool (pack, sign with
 # TEST keys, negative corpus, bundle, receipt check) used by the QEMU gate.
-ART_HOST_SRCS := $(KDIR)/artifact/format.c $(KDIR)/artifact/admission.c $(KDIR)/artifact/receipt.c $(KDIR)/artifact/osc_unit.c $(KDIR)/artifact/osc_launch.c \
+ART_HOST_SRCS := $(KDIR)/artifact/format.c $(KDIR)/artifact/admission.c $(KDIR)/artifact/receipt.c $(KDIR)/artifact/osc_unit.c $(KDIR)/artifact/osc_receipt.c $(KDIR)/artifact/osc_launch.c \
 	$(NATIVE)/argus/sha256.c $(NATIVE)/sig/sha512.c $(NATIVE)/sig/ed25519.c $(NATIVE)/sig/ct.c
 ART_HOST_INC := -I$(KDIR)/artifact -I$(NATIVE)/sig -I$(NATIVE)/argus
 ART_HOST_DEPS := $(ART_HOST_SRCS) $(wildcard $(KDIR)/artifact/*.h) $(ART_HDRS)
@@ -1555,6 +1565,51 @@ $(OUT)/host/test_osc_admit: $(KDIR)/tests/test_osc_admit.c $(KDIR)/core/osc_admi
 $(OUT)/host-san/test_osc_admit: $(KDIR)/tests/test_osc_admit.c $(KDIR)/core/osc_admit.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(ART_HOST_INC) -I$(KDIR)/include -o $@ $< $(KDIR)/core/osc_admit.c $(ART_HOST_SRCS)
+
+# aienos#383 realization receipts (artifact/osc_receipt.c): host test over the checker2-minted fixtures
+# (tests/fixtures/osc_receipt) and the kernel's own policy (core/osc_admit.c, release and qualification builds), plus
+# the mutation run: each MUT(n) guard of osc_receipt.c removed in turn (-DOSC_RCPT_MUTANT=n) must make the test FAIL.
+# The run refuses a guard count that differs from OSC_RCPT_MUTANTS, and a kernel-side build of a mutant.
+OSC_RCPT_MUTANTS := 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25
+OSC_RCPT_TEST_DEF := -DOSC_RCPT_HOST_TEST -I$(KDIR)/include -DOSC_FIXTURE_DIR='"$(abspath $(KDIR)/tests/fixtures)"'
+OSC_RCPT_TEST_SRCS := $(KDIR)/tests/test_osc_receipt.c $(KDIR)/core/osc_admit.c $(ART_HOST_SRCS)
+$(OUT)/host/test_osc_receipt: $(KDIR)/tests/test_osc_receipt.c $(KDIR)/core/osc_admit.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h $(wildcard $(KDIR)/tests/fixtures/osc_receipt/*)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(ART_HOST_INC) $(OSC_RCPT_TEST_DEF) -DCK_SEED0B_TEST_ANCHOR=1 -o $@ $(OSC_RCPT_TEST_SRCS)
+
+$(OUT)/host-san/test_osc_receipt: $(KDIR)/tests/test_osc_receipt.c $(KDIR)/core/osc_admit.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h $(wildcard $(KDIR)/tests/fixtures/osc_receipt/*)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(ART_HOST_INC) $(OSC_RCPT_TEST_DEF) -DCK_SEED0B_TEST_ANCHOR=1 -o $@ $(OSC_RCPT_TEST_SRCS)
+
+# the same test against the release policy of core/osc_admit.c (no CK_SEED0B_TEST_ANCHOR): every TEST receipt refused
+$(OUT)/host/test_osc_receipt_release: $(KDIR)/tests/test_osc_receipt.c $(KDIR)/core/osc_admit.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h $(wildcard $(KDIR)/tests/fixtures/osc_receipt/*)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(HCFLAGS) $(ART_HOST_INC) $(OSC_RCPT_TEST_DEF) -o $@ $(OSC_RCPT_TEST_SRCS)
+
+osc-receipt-release: $(OUT)/host/test_osc_receipt_release
+	@$<
+
+osc-receipt-mutants: $(OUT)/host/test_osc_receipt
+	@mkdir -p $(OUT)/host-mut; fail=0; \
+	tags=$$(grep -o 'MUT([0-9]*)' $(KDIR)/artifact/osc_receipt.c | sort -u | wc -l); \
+	uses=$$(grep -o 'MUT([0-9]*)' $(KDIR)/artifact/osc_receipt.c | wc -l); \
+	if [ $$tags != $(words $(OSC_RCPT_MUTANTS)) ] || [ $$uses != $$tags ]; then \
+	  echo "guard count: $$uses uses, $$tags distinct, $(words $(OSC_RCPT_MUTANTS)) mutants listed (FAIL)"; fail=1; fi; \
+	$(OUT)/host/test_osc_receipt > $(OUT)/host-mut/osc_receipt_base.log 2>&1 || { echo "unmutated test_osc_receipt fails"; fail=1; }; \
+	killed=0; \
+	for m in $(OSC_RCPT_MUTANTS); do \
+	  b=$(OUT)/host-mut/test_osc_receipt_m$$m; \
+	  if ! $(HOSTCC) $(HCFLAGS) $(ART_HOST_INC) $(OSC_RCPT_TEST_DEF) -DCK_SEED0B_TEST_ANCHOR=1 -DOSC_RCPT_MUTANT=$$m -o $$b $(OSC_RCPT_TEST_SRCS); then \
+	    echo "mutant $$m: does not build (FAIL)"; fail=1; continue; fi; \
+	  if $$b > $$b.log 2>&1; then echo "mutant $$m: SURVIVED (FAIL)"; fail=1; \
+	  elif grep -q "^test_osc_receipt: FAIL" $$b.log; then killed=$$((killed + 1)); \
+	    echo "mutant $$m: killed ($$(grep -c '^  FAIL ' $$b.log) checks failed)"; \
+	  else echo "mutant $$m: no FAIL verdict (crashed?) (FAIL)"; fail=1; fi; \
+	done; \
+	if $(HOSTCC) $(HCFLAGS) $(ART_HOST_INC) -DOSC_RCPT_MUTANT=1 -fsyntax-only $(KDIR)/artifact/osc_receipt.c 2>/dev/null; then \
+	  echo "mutant flag accepted without OSC_RCPT_HOST_TEST (FAIL)"; fail=1; \
+	else echo "mutant flag refused without OSC_RCPT_HOST_TEST"; fi; \
+	if [ $$fail = 0 ]; then echo "CK_OSC_RECEIPT_MUTANTS: PASS ($$killed of $(words $(OSC_RCPT_MUTANTS)) killed)"; else echo "CK_OSC_RECEIPT_MUTANTS: FAIL"; exit 1; fi
 
 # Continuity codec (C port cut 1, contract CONTINUITY_RECOVERY_CONTRACT.md,
 # aienos#222): host test plus TEST-only -D mutants, each of which must make
@@ -2208,7 +2263,7 @@ $(OUT)/host-san/test_pi5_rng: $(KDIR)/tests/test_pi5_rng.c $(PI5_RNG_SRCS) $(KDI
 FORCE:
 .PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
 .PHONY: artifact-tier-pi5 artifact-tier-mutant
-.PHONY: all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact pi5-agent pi5-lifecycle pi5-artifact artifact-card-mutant test sanitize context-mutant agent-cmd-mutant cortex-image handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
+.PHONY: osc-receipt-mutants osc-receipt-release all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact pi5-agent pi5-lifecycle pi5-artifact artifact-card-mutant test sanitize context-mutant agent-cmd-mutant cortex-image handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
 
 # AIENOS-PI5 step 3 marker + Pi card GPT test (hosted; a file stands in for the card, QEMU cannot model the Pi SD host).
 PI5_MARKER_SRCS := $(KDIR)/core/pi5_marker.c $(KDIR)/dev/disk_part.c $(NATIVE)/disk/disk.c $(NATIVE)/disk/disk_file.c \

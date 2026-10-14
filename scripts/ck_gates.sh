@@ -12,11 +12,11 @@
 # scripts/qemu_ck_infer_test.sh, scripts/qemu_ck_screen_test.sh,
 # scripts/qemu_ck_console_test.sh,
 # scripts/qemu_ck_rollback_test.sh, scripts/qemu_ck_osc_unit_test.sh,
-# scripts/qemu_ck_osc_launch_test.sh, scripts/qemu_ck_osh_core_test.sh, scripts/qemu_ck_osh_op_test.sh,
+# scripts/qemu_ck_osc_launch_test.sh, scripts/qemu_ck_osc_receipt_test.sh, scripts/qemu_ck_osh_core_test.sh, scripts/qemu_ck_osh_op_test.sh,
 # scripts/qemu_ck_slot_loader_test.sh), and prints
 # one line per gate:
 #     AIENOS_CK_<gate>: PASS|FAIL|NOT_RUN [(reason)]
-# for M1 M3 SMMU NVME_SHUTDOWN P2_ARTIFACT M0_ROLLBACK OSC_UNIT OSC_LAUNCH OSH_CORE OSH_OP M4_NVME M4_STORE M4_STORE_CRASH
+# for M1 M3 SMMU NVME_SHUTDOWN P2_ARTIFACT M0_ROLLBACK OSC_UNIT OSC_LAUNCH OSC_RECEIPT OSH_CORE OSH_OP M4_NVME M4_STORE M4_STORE_CRASH
 # M4_CONTINUITY M4_RECOVERY M4_ALLEN ARGUS1_REVOKE KEYBOARD NET SMP DISK_LAYOUT FPU INFER SCREEN CONSOLE SLOT_LOADER. Gates with no C
 # implementation print NOT_RUN (MISSING_IMPLEMENTATION: <reason>) and never
 # run anything. A missing child script, a child that reports NOT_RUN, a child
@@ -72,6 +72,7 @@ set -uo pipefail
 #         rollback -> verdict line from scripts/qemu_ck_rollback_test.sh (C image as the one-time BootNext candidate, AAVMF)
 #         osc -> verdict line from scripts/qemu_ck_osc_unit_test.sh (OSC unit admission, OSC_UNIT_ARTIFACT v1; QEMU, TEST signer, not physical)
 #         osc_launch -> verdict line from scripts/qemu_ck_osc_launch_test.sh (OSC unit task launch, OSC_UNIT_ARTIFACT v1 section 9; QEMU, TEST signer, not physical)
+#         osc_receipt -> verdict line from scripts/qemu_ck_osc_receipt_test.sh (launch requires a valid Omega realization receipt, aienos#383; QEMU, TEST signer, not physical)
 #         osh_core -> verdict line from scripts/qemu_ck_osh_core_test.sh (OSH shell core as EL0 tasks, step trace equals Linux; QEMU, TEST signer, not physical)
 #         osh_op -> verdict line from scripts/qemu_ck_osh_op_test.sh (a real capability-authorized OSH operation, klog; QEMU, TEST signer, not physical)
 #         slots -> verdict line from scripts/qemu_ck_slot_loader_test.sh (SLOTLDR.EFI signed A/B slot loader: bounded tries, rollback, refusals; QEMU, TEST signer, not physical)
@@ -86,6 +87,7 @@ P2_ARTIFACT|artifact|-
 M0_ROLLBACK|rollback|-
 OSC_UNIT|osc|-
 OSC_LAUNCH|osc_launch|-
+OSC_RECEIPT|osc_receipt|-
 OSH_CORE|osh_core|-
 OSH_OP|osh_op|-
 M4_NVME|store|-
@@ -105,7 +107,7 @@ SCREEN|screen|-
 CONSOLE|console|-
 SLOT_LOADER|slots|-
 '
-CHILDREN=(boot store net artifact smp crash disk cont recov allen kbd fpu infer screen console rollback osc osc_launch osh_core osh_op slots)
+CHILDREN=(boot store net artifact smp crash disk cont recov allen kbd fpu infer screen console rollback osc osc_launch osc_receipt osh_core osh_op slots)
 # Gate selection (--only): empty selection means every gate (the default).
 selection_active=0
 declare -A sel_gate=()
@@ -188,6 +190,7 @@ set_default_children() {
         [rollback]="${repo_root}/scripts/qemu_ck_rollback_test.sh"
         [osc]="${repo_root}/scripts/qemu_ck_osc_unit_test.sh"
         [osc_launch]="${repo_root}/scripts/qemu_ck_osc_launch_test.sh"
+        [osc_receipt]="${repo_root}/scripts/qemu_ck_osc_receipt_test.sh"
         [osh_core]="${repo_root}/scripts/qemu_ck_osh_core_test.sh"
         [osh_op]="${repo_root}/scripts/qemu_ck_osh_op_test.sh"
         [slots]="${repo_root}/scripts/qemu_ck_slot_loader_test.sh"
@@ -441,11 +444,11 @@ self_test() {
     }
     expect_missing_all() {
         local g
-        for g in P2_ARTIFACT M0_ROLLBACK OSC_UNIT OSC_LAUNCH OSH_CORE OSH_OP M4_STORE_CRASH M4_CONTINUITY M4_RECOVERY M4_ALLEN KEYBOARD DISK_LAYOUT FPU INFER SCREEN CONSOLE; do expect "${g}" NOT_RUN; done  # P2_ARTIFACT: no artifact child in A..G; M4_STORE_CRASH: no crash child in A..J and R; DISK_LAYOUT: no disk child in A..S
+        for g in P2_ARTIFACT M0_ROLLBACK OSC_UNIT OSC_LAUNCH OSC_RECEIPT OSH_CORE OSH_OP M4_STORE_CRASH M4_CONTINUITY M4_RECOVERY M4_ALLEN KEYBOARD DISK_LAYOUT FPU INFER SCREEN CONSOLE; do expect "${g}" NOT_RUN; done  # P2_ARTIFACT: no artifact child in A..G; M4_STORE_CRASH: no crash child in A..J and R; DISK_LAYOUT: no disk child in A..S
     }
     scenario() { # NAME BOOT_SCRIPT STORE_SCRIPT [NET_SCRIPT] [ARTIFACT_SCRIPT] [SMP_SCRIPT] [CRASH_SCRIPT] [DISK_SCRIPT] (absent: missing)
         scen="$1"
-        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}" [smp]="${6:-${tmp}/kids/no_smp_child.sh}" [crash]="${7:-${tmp}/kids/no_crash_child.sh}" [disk]="${8:-${tmp}/kids/no_disk_child.sh}" [cont]="${tmp}/kids/no_cont_child.sh" [recov]="${tmp}/kids/no_recov_child.sh" [allen]="${tmp}/kids/no_allen_child.sh" [kbd]="${kbd_kid:-${tmp}/kids/no_kbd_child.sh}" [fpu]="${tmp}/kids/no_fpu_child.sh" [infer]="${tmp}/kids/no_infer_child.sh" [screen]="${tmp}/kids/no_screen_child.sh" [console]="${console_kid:-${tmp}/kids/no_console_child.sh}" [rollback]="${rollback_kid:-${tmp}/kids/no_rollback_child.sh}" [osc]="${osc_kid:-${tmp}/kids/no_osc_child.sh}" [osc_launch]="${osc_launch_kid:-${tmp}/kids/no_osc_launch_child.sh}" [osh_core]="${osh_core_kid:-${tmp}/kids/no_osh_core_child.sh}" [osh_op]="${osh_op_kid:-${tmp}/kids/no_osh_op_child.sh}" [slots]="${slots_kid:-${tmp}/kids/no_slots_child.sh}")
+        declare -gA child_script=([boot]="$2" [store]="$3" [net]="${4:-${tmp}/kids/net_not_present.sh}" [artifact]="${5:-${tmp}/kids/no_artifact_child.sh}" [smp]="${6:-${tmp}/kids/no_smp_child.sh}" [crash]="${7:-${tmp}/kids/no_crash_child.sh}" [disk]="${8:-${tmp}/kids/no_disk_child.sh}" [cont]="${tmp}/kids/no_cont_child.sh" [recov]="${tmp}/kids/no_recov_child.sh" [allen]="${tmp}/kids/no_allen_child.sh" [kbd]="${kbd_kid:-${tmp}/kids/no_kbd_child.sh}" [fpu]="${tmp}/kids/no_fpu_child.sh" [infer]="${tmp}/kids/no_infer_child.sh" [screen]="${tmp}/kids/no_screen_child.sh" [console]="${console_kid:-${tmp}/kids/no_console_child.sh}" [rollback]="${rollback_kid:-${tmp}/kids/no_rollback_child.sh}" [osc]="${osc_kid:-${tmp}/kids/no_osc_child.sh}" [osc_launch]="${osc_launch_kid:-${tmp}/kids/no_osc_launch_child.sh}" [osc_receipt]="${osc_receipt_kid:-${tmp}/kids/no_osc_receipt_child.sh}" [osh_core]="${osh_core_kid:-${tmp}/kids/no_osh_core_child.sh}" [osh_op]="${osh_op_kid:-${tmp}/kids/no_osh_op_child.sh}" [slots]="${slots_kid:-${tmp}/kids/no_slots_child.sh}")
         run_children 2>/dev/null
         evaluate_table >"${tmp}/${scen}.out"
     }
@@ -461,8 +464,8 @@ self_test() {
         "$(fake smpA 0 'PASS  3 secondary cores checked in' 'AIENOS_CK_SMP_MUTATION: FAIL' 'AIENOS_CK_SMP: PASS')"
     expect M1 PASS; expect M3 PASS; expect M4_NVME PASS; expect M4_STORE PASS; expect ARGUS1_REVOKE PASS; expect SMMU PASS; expect NVME_SHUTDOWN PASS; expect NET PASS; expect SMP PASS; expect_missing_all
     count_rows
-    [[ "${n_pass}/${n_fail}/${n_notrun}/${n_total}" == "9/0/17/26" && ${overall} == NOT_ALL_GATES_PASS ]] \
-        && ok "A: counts 9/0/17 of 26, verdict NOT_ALL_GATES_PASS" || bad "A: counts ${n_pass}/${n_fail}/${n_notrun}/${n_total} ${overall}"
+    [[ "${n_pass}/${n_fail}/${n_notrun}/${n_total}" == "9/0/18/27" && ${overall} == NOT_ALL_GATES_PASS ]] \
+        && ok "A: counts 9/0/18 of 27, verdict NOT_ALL_GATES_PASS" || bad "A: counts ${n_pass}/${n_fail}/${n_notrun}/${n_total} ${overall}"
     [[ "$(nvme_dma_mode)" == "Confined (QEMU SMMUv3 stage 1, out-of-window DMA faulted); no-SMMU boot denied (NoSmmu); TEST-ONLY bypass image checked separately" ]] && ok "A: confined DMA mode recorded from the store PASS lines" || bad "A: dma mode '$(nvme_dma_mode)'"
     grep -qxF "AIENOS_CK_M4_NVME: PASS (${M4_NVME_PASS_NOTE})" "${tmp}/A.out" \
         && ok "A: M4_NVME PASS line carries the confined-mode note" || bad "A: M4_NVME PASS line lacks the note"
@@ -474,7 +477,7 @@ self_test() {
         && ok "a missing-source row is NOT_RUN (MISSING_IMPLEMENTATION: reason)" || bad "missing-source row not NOT_RUN"
     grep -q '^AIENOS_CK_KEYBOARD: NOT_RUN' "${tmp}/A.out" \
         && ok "A: KEYBOARD claimed PASS by the store child stays NOT_RUN without its own child" || bad "A: KEYBOARD line wrong"
-    [[ "$(grep -c '^AIENOS_CK_[A-Z0-9_]*: ' "${tmp}/A.out")" == 26 ]] && ok "A: exactly 26 verdict lines" || bad "A: verdict line count"
+    [[ "$(grep -c '^AIENOS_CK_[A-Z0-9_]*: ' "${tmp}/A.out")" == 27 ]] && ok "A: exactly 27 verdict lines" || bad "A: verdict line count"
 
     # B: boot FAIL; store script missing -> its three gates NOT_RUN, never PASS.
     scenario B "$(fake bootB 1 'FAIL  kernel: alive' 'AIENOS_CK_M3: FAIL' 'AIENOS_CK_M1: FAIL')" "${tmp}/kids/does_not_exist.sh"
@@ -615,6 +618,17 @@ self_test() {
     scenario LB "$(fake bootLB 0 'AIENOS_CK_M1: PASS')" "$(fake storeLB 0 'AIENOS_CK_OSC_LAUNCH: PASS')"
     expect OSC_LAUNCH FAIL
     unset osc_launch_kid
+    # EA, EB, EC: OSC_RECEIPT comes only from its own child (scripts/qemu_ck_osc_receipt_test.sh, aienos#383).
+    osc_receipt_kid="$(fake orA 0 'PASS  x' 'AIENOS_CK_OSC_RECEIPT: PASS')"
+    scenario EA "$(fake bootEA 0 'AIENOS_CK_M1: PASS')" "$(fake storeEA 0 'AIENOS_CK_OSC_RECEIPT: FAIL')"
+    expect OSC_RECEIPT PASS
+    osc_receipt_kid="$(fake orB 1 'FAIL  y' 'AIENOS_CK_OSC_RECEIPT: FAIL')"
+    scenario EB "$(fake bootEB 0 'AIENOS_CK_M1: PASS')" "$(fake storeEB 0 'AIENOS_CK_OSC_RECEIPT: PASS')"
+    expect OSC_RECEIPT FAIL
+    osc_receipt_kid="$(fake orC 3 'NOT_RUN  QEMU gate lock held' 'AIENOS_CK_OSC_RECEIPT: NOT_RUN')"
+    scenario EC "$(fake bootEC 0 'AIENOS_CK_M1: PASS')" "$(fake storeEC 0 'AIENOS_CK_OSC_RECEIPT: PASS')"
+    expect OSC_RECEIPT NOT_RUN
+    unset osc_receipt_kid
     # HA, HB: OSH_CORE comes only from its own child (scripts/qemu_ck_osh_core_test.sh).
     osh_core_kid="$(fake ohA 0 'PASS  x' 'AIENOS_CK_OSH_CORE: PASS')"
     scenario HA "$(fake bootHA 0 'AIENOS_CK_M1: PASS')" "$(fake storeHA 0 'AIENOS_CK_OSH_CORE: FAIL')"
@@ -634,10 +648,10 @@ self_test() {
         && ok "SEL1: the store child was not run, the boot child was" || bad "SEL1: child selection wrong"
     grep -qxF "AIENOS_CK_SMMU: NOT_SELECTED (not in this run's --only list)" "${tmp}/SEL1.out" \
         && ok "SEL1: selected-out gate prints an explicit NOT_SELECTED line" || bad "SEL1: no NOT_SELECTED line"
-    [[ "$(grep -c '^AIENOS_CK_' "${tmp}/SEL1.out")" == 26 ]] && ok "SEL1: all 26 gates still reported (none dropped)" || bad "SEL1: gate lines dropped"
+    [[ "$(grep -c '^AIENOS_CK_' "${tmp}/SEL1.out")" == 27 ]] && ok "SEL1: all 27 gates still reported (none dropped)" || bad "SEL1: gate lines dropped"
     count_rows
-    [[ "${n_pass}/${n_fail}/${n_notrun}/${n_notsel}/${n_total}" == "2/0/0/24/26" && ${overall} == SELECTED_GATES_PASS_QEMU_ONLY ]] \
-        && ok "SEL1: counts 2 pass, 24 not selected, never ALL_GATES_PASS" || bad "SEL1: counts ${n_pass}/${n_fail}/${n_notrun}/${n_notsel}/${n_total} ${overall}"
+    [[ "${n_pass}/${n_fail}/${n_notrun}/${n_notsel}/${n_total}" == "2/0/0/25/27" && ${overall} == SELECTED_GATES_PASS_QEMU_ONLY ]] \
+        && ok "SEL1: counts 2 pass, 25 not selected, never ALL_GATES_PASS" || bad "SEL1: counts ${n_pass}/${n_fail}/${n_notrun}/${n_notsel}/${n_total} ${overall}"
     # SEL2: a selected gate that FAILs fails the run; a selected gate with no
     # verdict is FAIL, not dropped.
     scenario SEL2 "$(fake bootS2 1 'AIENOS_CK_M1: FAIL' 'AIENOS_CK_M3: PASS')" "$(fake storeS2 0 'AIENOS_CK_SMMU: PASS')"
@@ -690,10 +704,10 @@ self_test() {
     # Restore the clean-tree receipt as the one the checks below look at.
     write_receipt
     if command -v jq >/dev/null; then
-        jq -e '.physical == "NOT_RUN" and (.gates | length) == 26 and .verdict == "NOT_ALL_GATES_PASS"
+        jq -e '.physical == "NOT_RUN" and (.gates | length) == 27 and .verdict == "NOT_ALL_GATES_PASS"
                and ([.gates[] | select(.id == "M1")][0].verdict == "PASS")
                and ([.gates[] | select(.id == "ARGUS1_REVOKE")][0].verdict == "FAIL")
-               and (.children | length) == 21 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
+               and (.children | length) == 22 and .commit_subject == "quote \" backslash \\ tab\tend"' "${receipt_path}" >/dev/null \
             && ok "receipt is valid JSON (jq) with expected fields" || bad "receipt JSON invalid or fields wrong"
     else
         echo "NOT_RUN  jq not installed; JSON validity not machine-checked"; jq_skipped=1
@@ -706,18 +720,18 @@ self_test() {
         bad "an existing receipt was overwritten or the clash was not refused"
     fi
 
-    # The gate table parses: 26 rows, known sources, reasons only on missing rows.
+    # The gate table parses: 27 rows, known sources, reasons only on missing rows.
     local g s w rows=0 tbad=0
     while IFS='|' read -r g s w; do
         [[ -n "${g}" ]] || continue
         rows=$((rows + 1))
         case "${s}" in
-            boot|store|net|artifact|smp|crash|disk|cont|recov|allen|kbd|fpu|infer|screen|console|rollback|osc|osc_launch|osh_core|osh_op|slots) [[ "${w}" == - ]] || tbad=1 ;;
+            boot|store|net|artifact|smp|crash|disk|cont|recov|allen|kbd|fpu|infer|screen|console|rollback|osc|osc_launch|osc_receipt|osh_core|osh_op|slots) [[ "${w}" == - ]] || tbad=1 ;;
             missing) [[ -n "${w}" && "${w}" != - ]] || tbad=1 ;;
             *) tbad=1 ;;
         esac
     done <<<"${CK_GATE_TABLE}"
-    [[ ${tbad} == 0 && ${rows} == 26 ]] && ok "gate table: 26 rows well-formed" || bad "gate table malformed (${rows} rows)"
+    [[ ${tbad} == 0 && ${rows} == 27 ]] && ok "gate table: 27 rows well-formed" || bad "gate table malformed (${rows} rows)"
 
     # Dirty-tree refusal, end to end, on a private clone (never this tree).
     # Both runs stop before any child script (no QEMU).

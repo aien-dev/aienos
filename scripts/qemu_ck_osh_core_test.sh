@@ -89,7 +89,8 @@ flip=$(printf '%02x' $(( 0x${orig} ^ 0x01 )))
 printf "\\x${flip}" | dd of="${work}/osh_lex_badsig.unit" bs=1 seek=${sig_at} conv=notrunc status=none
 [[ "$(od -An -tx1 -j${sig_at} -N1 "${work}/osh_lex_badsig.unit" | tr -d ' ')" == "${flip}" ]] && pass "flipped one signature byte at offset ${sig_at} (${orig} -> ${flip})" || fail "signature byte flip"
 
-files=("${fix}/osh_lex.unit" "${fix}/osh_parse.unit" "${fix}/osh_expand.unit" "${work}/osh_lex_flipped.unit" "${work}/osh_lex_badsig.unit" "${fix}/../osc_unit/launch/l01_launch_fns.unit")
+files=("${fix}/osh_lex.unit" "${fix}/osh_parse.unit" "${fix}/osh_expand.unit" "${work}/osh_lex_flipped.unit" "${work}/osh_lex_badsig.unit" "${fix}/../osc_unit/launch/l01_launch_fns.unit"
+       "${fix}/../osc_receipt/osh_lex.rcpt" "${fix}/../osc_receipt/osh_parse.rcpt" "${fix}/../osc_receipt/osh_expand.rcpt" "${fix}/../osc_receipt/l01.rcpt") # aienos#383: receipts
 disk="${work}/nvme.img"
 "${out_prod}/host/ck_gpt_image" create "${disk}" 512 64 aienos-middle >/dev/null || fail "GPT boot disk image created"
 if "${simg}" build "${disk}" 512 "${files[@]}" >"${work}/build.txt" 2>&1; then pass "boot disk built: $(head -1 "${work}/build.txt")"
@@ -135,7 +136,7 @@ release_flag
 
 label='QEMU \(aarch64 virt\), TEST signer, not physical'
 check "${serial}" "left firmware and entered the kernel" "kernel: alive"
-check "${serial}" "kernel read all six candidates from the boot disk Store" "^artifact_candidates: 6$"
+check "${serial}" "kernel read all ten candidates (six units, four receipts) from the boot disk Store" "^artifact_candidates: 10$"
 if has "${serial}" "^report-truncated:"; then fail "kernel report lines were truncated"; else pass "no kernel report line was truncated"; fi
 check "${serial}" "final report reached the console" "report_kind: final"
 if has "${serial}" "report_kind: (panic|fault)"; then fail "panic or fault reported (a unit fault must stay contained)"; else pass "no kernel panic or fault report"; fi

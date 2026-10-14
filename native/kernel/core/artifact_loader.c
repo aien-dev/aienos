@@ -1182,6 +1182,12 @@ static uint32_t disk_source(void)
             run_seen++;
             continue;
         }
+        if (a->state == CK_DISK_ART_OK && a->bytes && ck_osc_is_receipt(a->bytes, a->len)) {
+            /* Omega realization receipt (aienos#383): kept for the launch that presents it, never an artifact. */
+            ck_osc_receipt_candidate(name, a->bytes, a->len);
+            run_seen++;
+            continue;
+        }
         if (a->state == CK_DISK_ART_OK && a->bytes && a->len >= 1 && a->len <= MAX_BATCH * PAGE)
             process_candidate(a->bytes, a->len, &rep);
         else if (a->state == CK_DISK_ART_TOO_LARGE || a->len > MAX_BATCH * PAGE) {

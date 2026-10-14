@@ -95,6 +95,23 @@ struct osc_policy {
     /* Step 16: nonzero refuses with RESOURCE_UNAVAILABLE. NULL: reservation succeeds. */
     int (*reserve)(void *ctx, const struct osc_accept *a);
     void *ctx;
+    /* Realization receipts (artifact/osc_receipt.h, aienos#383): read only by osc_receipt_verify, never by
+     * osc_unit_admit. Local authority, never taken from a receipt. `release` above also refuses TEST receipts. */
+    const uint8_t (*rcpt_test_anchors)[32];   /* raw Ed25519 public keys, receipt class TEST */
+    unsigned n_rcpt_test;
+    const uint8_t (*rcpt_owner_anchors)[32];  /* receipt class OWNER; empty until the owner key ceremony says so */
+    unsigned n_rcpt_owner;
+    const uint8_t (*rcpt_checkers)[32];       /* accepted checker2 identities; none: every receipt is refused */
+    unsigned n_rcpt_checkers;
+    const uint8_t (*rcpt_revoked_ids)[32];    /* revoked receipt ids (SHA-256 of the 416 bytes) */
+    unsigned n_rcpt_revoked_ids;
+    const uint8_t (*rcpt_revoked_keys)[32];   /* revoked signer key fingerprints (SHA-256 of the public key) */
+    unsigned n_rcpt_revoked_keys;
+    uint64_t rcpt_epoch_floor;                /* receipts issued under an older policy epoch are replays */
+    uint64_t rcpt_epoch_now;                  /* the kernel's current policy epoch (no clock) */
+    const uint8_t *rcpt_target;               /* 32-byte target hash; NULL: every receipt is WRONG_TARGET */
+    const uint8_t *rcpt_firmware;             /* 32-byte firmware hash; NULL: none (all zero) */
+    const uint8_t *rcpt_producer;             /* 32-byte producer identity; NULL: none (all zero) */
 };
 
 /* 0 accepted (*out filled), else the first refusal code. out may be NULL only if the caller

@@ -198,6 +198,7 @@ jobs:
           - { name: screen,      gates: "SCREEN" }
           - { name: osh_op,      gates: "OSH_OP" }
           - { name: osc_launch,  gates: "OSC_LAUNCH" }
+          - { name: osc_receipt, gates: "OSC_RECEIPT" }
           - { name: osc_unit,    gates: "OSC_UNIT" }
           - { name: boot,        gates: "M1,M3" }
           - { name: smp,         gates: "SMP" }
@@ -284,4 +285,4 @@ jobs:
           pattern: ck-shard-*
           path: ${{ runner.temp }}/shards
       - name: Every gate reported exactly once across the gate jobs
-        run: bash scripts/ck_shards_verify.sh 20 "${RUNNER_TEMP}/shards"
+        run: bash scripts/ck_shards_verify.sh 21 "${RUNNER_TEMP}/shards"
