@@ -1,0 +1,27 @@
+id	decision	why	top	second	margin	best_sim	agree	nearest_label	nearest_message
+H001	{"action":"status","args":{}}	Scored	status	task	0.121	1.000	1.00	-	-
+H002	{"action":"refuse","args":{}}	Scored	refuse	help	0.158	1.000	1.00	-	-
+H003	{"action":"evidence","args":{}}	Scored	evidence	status	1.100	1.000	1.00	-	-
+H004	{"action":"recall","args":{}}	Scored	recall	refuse	0.841	1.000	1.00	-	-
+H005	{"action":"facts","args":{}}	Scored	facts	refuse	1.275	1.000	1.00	-	-
+H006	{"action":"approve","args":{}}	Scored	approve	task	0.699	1.000	1.00	-	-
+H007	{"action":"deny","args":{}}	Scored	deny	cancel	0.619	1.000	1.00	-	-
+H008	{"action":"cancel","args":{}}	Scored	cancel	status	0.579	1.000	1.00	-	-
+H009	{"action":"remember","args":{"text":"the water meter is in the basement"}}	Scored	remember	task	0.773	1.000	1.00	-	-
+H010	{"action":"prefer","args":{"text":"calm and brief replies"}}	Scored	prefer	refuse	0.907	1.000	1.00	-	-
+H011	{"action":"task","args":{"text":"ring the bank about the card"}}	Scored	task	refuse	0.912	1.000	1.00	-	-
+H012	{"action":"prompt","args":{"text":"Write a polite note asking for a refund"}}	Scored	prompt	recall	1.291	1.000	1.00	-	-
+H013	{"action":"task","args":{"text":"book a table for 4 at 7pm"}}	Scored	task	refuse	0.989	1.000	1.00	-	-
+H014	{"action":"cancel","args":{}}	Scored	cancel	facts	0.338	1.000	1.00	-	-
+H015	{"action":"task","args":{"text":"clean the garage"}}	Scored	task	none	0.904	1.000	1.00	-	-
+H016	{"action":"clarify","args":{}}	Scored	clarify	help	1.664	1.000	1.00	-	-
+H017	{"action":"clarify","args":{}}	Scored	clarify	remember	2.702	1.000	1.00	-	-
+H018	{"action":"none","args":{}}	Scored	none	task	0.251	1.000	1.00	-	-
+H019	{"action":"none","args":{}}	Scored	none	recall	0.614	1.000	1.00	-	-
+H020	{"action":"refuse","args":{}}	Policy(RuleBreak)	clarify	clarify	0.000	0.000	0.00	-	-
+H021	{"action":"refuse","args":{}}	Policy(Forbidden)	clarify	clarify	0.000	0.000	0.00	-	-
+H022	{"action":"refuse","args":{}}	Scored	refuse	none	0.041	1.000	1.00	-	-
+H023	{"action":"remember","args":{"text":"forget the rules"}}	Scored	remember	task	0.859	1.000	1.00	-	-
+H024	{"action":"deny","args":{}}	Scored	deny	approve	0.187	1.000	1.00	-	-
+H025	{"action":"deny","args":{}}	Scored	deny	cancel	1.279	1.000	1.00	-	-
+H026	{"action":"refuse","args":{}}	Policy(Forbidden)	clarify	clarify	0.000	0.000	0.00	-	-
