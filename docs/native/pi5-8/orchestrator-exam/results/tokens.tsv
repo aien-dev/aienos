@@ -1,0 +1,14 @@
+model	prefix_ptok	mean_ptok	mean_ctok	mean_ms_host_cpu
+danube3-500m	707	716	85.3	1113
+granite3.3-2b	676	684	15	1121
+granite4-1b	629	636	12	915
+granite4-350m	629	636	19.4	355
+granite4-h-350m	629	636	11.5	193
+llama3.2-1b	651	658	16.9	487
+qwen2.5-0.5b	634	641	16	335
+qwen2.5-1.5b	634	641	14.9	666
+qwen3-0.6b	638	645	16	615
+qwen3-1.7b	638	645	14.5	792
+smollm2-1.7b	684	692	16.9	779
+smollm2-360m	684	692	29.7	611
+tinyllama-1.1b	727	736	74.2	2320
