@@ -1,0 +1,56 @@
+# Always reports on PRs so native-store can become a required merge check.
+# ci.yml is disabled on GitHub; it cannot enforce Store qualification.
+name: Native Store
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: store-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  store:
+    name: native-store
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain for the cross-check
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup override set 1.98.1
+      - name: Build the independent Rust Store tool
+        run: cargo build --locked --release -p aienos-store-tool
+      - name: Run Store tests, sanitizers, mutation controls and freestanding build
+        run: |
+          set -o pipefail
+          make -C native/store test sanitize mutants freestanding 2>&1 | tee store.log
+      - name: Require every Store verdict
+        run: |
+          for marker in STORE_RUST_CROSSCHECK AIENOS_STORE_NATIVE AIENOS_STORE_SANITIZE TORN_SLOT_MUTANTS AIENOS_STORE_MUTANTS AIENOS_STORE_FREESTANDING; do
+            grep -qx "$marker: PASS" store.log || { echo "missing PASS for $marker"; exit 1; }
+          done
+          if grep -q 'NOT_RUN' store.log; then
+            echo 'Store gate contains an unexecuted check'
+            exit 1
+          fi
+      - name: Archive diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-store-${{ github.sha }}
+          path: |
+            store.log
+            native/store/out/**/*.log
+            native/store/out/smut_*/msg
+          if-no-files-found: warn
+          retention-days: 14

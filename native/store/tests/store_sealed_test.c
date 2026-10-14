@@ -656,6 +656,15 @@ static void ed_ks_bad_unclaimed(ss_store *s, void *a)
     (void)a;
     s->ws->objs[s->ws->nobjs++] = (st_object){SS_KIND_KEYSLOT, 1, KSM_BAD, sizeof KSM_BAD};
 }
+/* Keep both the structural Store id and the keyed claim valid, so a bad
+ * manifest is rejected by its shape rather than an unrelated digest check. */
+static void ed_ks_bad_shape(ss_store *s, void *a)
+{
+    size_t offset = *(const size_t *)a;
+    KSM[offset] ^= 1;
+    sv1_object_id(SS_KIND_KEYSLOT, 1, KSM, sizeof KSM, s->ws->tx + SS_TX_HDR);
+    reseal(s, 0, fx_ks_prev_digest);
+}
 
 static void test_keyslot(void)
 {
@@ -684,6 +693,9 @@ static void test_keyslot(void)
         o[0].len = sizeof m; o[0].version = 2;
         SCHECK_EQ(ks_prepare_rc(o, 1), SS_E_KEYSLOT, "manifest version 2 refused at prepare");
         o[0].version = 1;
+        /* Both independently qualify as the next manifest on this store.
+         * Sequence 2 here would be rejected even without the count guard. */
+        o[1] = o[0];
         SCHECK_EQ(ks_prepare_rc(o, 2), SS_E_KEYSLOT, "two manifests in one transaction refused");
         SCHECK_EQ(ks_prepare_rc(o, 1), 0, "one well-formed manifest prepares");
     }
@@ -760,6 +772,7 @@ static void test_keyslot(void)
         ksm_fill(KSM2, 2, RIG_UUID); /* sequence 2 with no link */
         SCHECK_EQ(forge_objs(ed_ks_second, NULL, o, 2), SS_E_ENVELOPE, "a second manifest unclaimed in the catalog");
         SCHECK_EQ(bootstrap_rc(out, sizeof out, &len), SS_E_KEYSLOT, "bootstrap refuses a broken chain (sequence 2 without its link)");
+        CHECK(len == 0 && sv1_all_zero(out, sizeof out), "broken bootstrap chain scrubs its output");
     }
     CHECK(file_save(g_path, img_a, RIG_BYTES) == 0, "restore");
     {
@@ -774,7 +787,105 @@ static void test_keyslot(void)
     SCHECK_EQ(forge(ed_ks_bad_unclaimed, NULL), SS_E_ENVELOPE, "unclaimed malformed manifest refused keyed");
     SCHECK_EQ(bootstrap_rc(out, sizeof out, &len), SS_E_KEYSLOT, "bootstrap refuses a malformed manifest");
     CHECK(len == 0, "refused bootstrap reports zero length");
+    CHECK(sv1_all_zero(out, sizeof out), "malformed bootstrap scrubs its output");
+    /* Magic, version and store identity each have a valid sequence/link and
+     * freshly sealed claim, isolating the keyed shape check. */
+    static const size_t offsets[] = {0, 8, 12};
+    for (size_t i = 0; i < sizeof offsets / sizeof offsets[0]; i++) {
+        CHECK(file_save(g_path, img_a, RIG_BYTES) == 0, "restore for shape forgery");
+        ksm_fill(KSM, 1, RIG_UUID);
+        ss_object o = {SS_KIND_KEYSLOT, 1, KSM, sizeof KSM};
+        SCHECK_EQ(forge_objs(ed_ks_bad_shape, (void *)&offsets[i], &o, 1), SS_E_KEYSLOT,
+                  "digest-bound malformed manifest refused keyed");
+        if (offsets[i] != 12) {
+            SCHECK_EQ(bootstrap_rc(out, sizeof out, &len), SS_E_KEYSLOT,
+                      "valid-chain malformed manifest refused at bootstrap");
+            CHECK(len == 0 && sv1_all_zero(out, sizeof out), "malformed bootstrap has no output");
+        }
+        ksm_fill(KSM, 1, RIG_UUID);
+    }
     CHECK(file_save(g_path, img_a, RIG_BYTES) == 0, "restore");
+}
+
+static void test_keyslot_limits(void)
+{
+    /* A structural Store can contain hostile, unclaimed manifests. Bootstrap
+     * must stop before writing past its bounded chain workspace, and keyed
+     * open must classify the chain overflow before processing its records. */
+    memdev m;
+    mem_init(&m, 256);
+    st_dev d = mem_dev(&m);
+    st_store raw;
+    static uint8_t manifests[SS_KS_CHAIN_MAX + 1][SS_KEYSLOT_MIN];
+    st_object objects[SS_KS_CHAIN_MAX + 1];
+    uint8_t prev[32] = {0};
+    for (unsigned i = 0; i <= SS_KS_CHAIN_MAX; i++) {
+        ksm_fill(manifests[i], i + 1, RIG_UUID);
+        ksm_link(manifests[i], prev);
+        objects[i] = (st_object){SS_KIND_KEYSLOT, 1, manifests[i], sizeof manifests[i]};
+        CHECK_EQ(sv1_object_id(SS_KIND_KEYSLOT, 1, manifests[i], sizeof manifests[i], prev), 0,
+                 "derive raw manifest id");
+    }
+    CHECK_EQ(st_format(&d, RIG_UUID), 0, "format raw chain store");
+    CHECK_EQ(st_open(&raw, &d, &g_ws.st), 0, "open raw chain store");
+    CHECK_EQ(st_transact(&raw, objects, SS_KS_CHAIN_MAX + 1, NULL, NULL), 0, "write oversized raw chain");
+    uint8_t out[SS_KEYSLOT_MIN];
+    size_t len = 99;
+    memset(g_ws.bygen, 0xa5, sizeof g_ws.bygen);
+    SCHECK_EQ(ss_keyslot_bootstrap(&ks_scratch, &d, &g_ws, out, sizeof out, &len), SS_E_KEYSLOT,
+              "oversized bootstrap chain refused");
+    CHECK(len == 0, "oversized bootstrap returns no manifest");
+    int intact = 1;
+    for (unsigned i = 0; i < ST_CAT_CAP; i++) intact &= g_ws.bygen[i] == UINT32_C(0xa5a5a5a5);
+    CHECK(intact, "oversized bootstrap does not overwrite the adjacent workspace");
+    /* Supply a valid genesis anchor; record verification precedes the
+     * anti-rollback decision about this unclaimed generation-2 Store. */
+    rig r;
+    CHECK_EQ(rig_open(&r, g_path, g_bs, 1), 0, "create anchor fixture");
+    SCHECK_EQ(ss_format(&r.sdev, &r.tdev, 0, RIG_UUID, &K, &g_ws), 0, "format anchor fixture");
+    ss_store s;
+    SCHECK_EQ(ss_open(&s, &d, &r.tdev, 0, &K, &g_ws), SS_E_KEYSLOT,
+              "oversized keyed chain refused before missing records");
+    rig_close(&r);
+    mem_free(&m);
+
+    /* Exercise the real maximum through the sealed service API, on both
+     * disk geometries. The usual 64-unit fixture is too small for rotations. */
+    disk_file f;
+    disk_dev disk;
+    st_disk adapter;
+    st_dev store;
+    ts_device anchor;
+    uint32_t bpu = SV1_UNIT / g_bs;
+    CHECK_EQ(disk_file_open(&f, &disk, g_path, g_bs, 1028u * bpu, 1), 0, "create rotation disk");
+    CHECK_EQ(st_disk_bind(&adapter, &disk, 4u * bpu, 1024, &store), 0, "bind rotation disk");
+    ss_ts_device(&disk, &anchor);
+    SCHECK_EQ(ss_format(&store, &anchor, 0, RIG_UUID, &K, &g_ws), 0, "format rotation store");
+    SCHECK_EQ(ss_open(&s, &store, &anchor, 0, &K, &g_ws), 0, "open rotation store");
+    memset(prev, 0, sizeof prev);
+    uint8_t ids[1][32];
+    for (unsigned i = 0; i < SS_KS_CHAIN_MAX; i++) {
+        ksm_fill(KSM, i + 1, RIG_UUID);
+        ksm_link(KSM, prev);
+        ss_object o = {SS_KIND_KEYSLOT, 1, KSM, sizeof KSM};
+        SCHECK_EQ(ss_transact(&s, &o, 1, NULL, NULL, ids), 0, "commit valid rotation");
+        memcpy(prev, ids[0], sizeof prev);
+    }
+    SCHECK_EQ(ss_open(&s, &store, &anchor, 0, &K, &g_ws), 0, "reopen full rotation chain");
+    CHECK(s.nkeyslot == SS_KS_CHAIN_MAX, "all rotations remain bound after reopen");
+    SCHECK_EQ(ss_keyslot_bootstrap(&ks_scratch, &store, &g_ws, out, sizeof out, &len), 0,
+              "bootstrap full chain succeeds");
+    CHECK(len == sizeof KSM && memcmp(out, KSM, len) == 0, "full-chain bootstrap returns newest manifest");
+    /* Bootstrap reuses the workspace: reopen before any sealed operation. */
+    SCHECK_EQ(ss_open(&s, &store, &anchor, 0, &K, &g_ws), 0, "reopen after bootstrap");
+    ksm_fill(KSM, SS_KS_CHAIN_MAX + 1, RIG_UUID);
+    ksm_link(KSM, prev);
+    ss_object extra = {SS_KIND_KEYSLOT, 1, KSM, sizeof KSM};
+    uint64_t written = f.blocks_written, flushes = f.flushes;
+    SCHECK_EQ(ss_prepare(&s, &extra, 1), SS_E_KEYSLOT, "rotation past chain limit refused at prepare");
+    CHECK(g_ws.nobjs == 0, "refused rotation leaves no prepared transaction");
+    CHECK(f.blocks_written == written && f.flushes == flushes, "refused rotation performs no disk effects");
+    disk_file_close(&f);
 }
 
 static void test_anchor_crash(void)
@@ -982,6 +1093,7 @@ int main(int argc, char **argv)
         test_keyslot();
         test_anchor_crash();
         test_nonce();
+        test_keyslot_limits();
         printf("sealed store, %u-byte blocks: %s\n", g_bs, g_failed == before ? "ok" : "FAILED");
         unlink(g_path);
     }
