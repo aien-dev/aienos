@@ -46,7 +46,7 @@
       "children": [
         {
           "digest": "ad829eca65ef7878ec3f262d4ba17592c984c4f25e29b2012ea00fd6d3909260",
-          "last_commit": "a2a0382",
+          "last_commit": "49ff776",
           "name": "arch",
           "purpose": "Directory crates/aienos-kernel/src/arch. Purpose not yet described by a human."
         },
@@ -94,20 +94,20 @@
         },
         {
           "digest": "f51233705a5c33d1c72abca84575d077a80fd907e73c14ee95d9939a02c06eb0",
-          "last_commit": "35b3086",
+          "last_commit": "49ff776",
           "name": "usb",
           "purpose": "Directory crates/aienos-kernel/src/usb. Purpose not yet described by a human."
         }
       ],
       "children_root": "sha256:e84717f6b7c3368dbb75c1fe5496c2b6b70a63404a35a96dc89e2aa5dec251b2",
-      "compiled_at": "2026-10-13T02:27:54Z",
+      "compiled_at": "2026-10-14T05:42:42Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:e29df0084abf67fb52332b236e7c2888d702decb0b9cadb78a372fd00f465a90",
+      "digest": "sha256:734b26e98d61b37aac677c0414839f40a617df3d632281dcdb103300def3fb33",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 75,
-      "generated_at_commit": "74f638c298bc04543b03d6851a83dac815d36645",
-      "source_tree": "sha256:c4c81471f2da936667a4c13311c072ac5829e542f07e2eb13dd59a6dd5a3ebd0"
+      "generated_at_commit": "02f8eab6a95907159c13e8b83fc0aaf2c100db11",
+      "source_tree": "sha256:6922d3c9969a87d4fa673b02e20dba31cec91d56266fdc7ff3a57454fcef3de0"
     },
     "owner_lane": "",
     "provenance": {
