@@ -1,0 +1,44 @@
+## pi5-8-tinyllama-a (kernel.log lines)
+model_map: ok len=668788096 extents=1 sector=512 disk=29ceb42de1b36445b340924422ebcae3
+model: reading 668788096 bytes in 1 extents, block_size=512 last_block=250347519 -> 0x1404a000
+model: base=0x1404a000 len=668788096 extents=1 read_us=6958249 declared_sha256=9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0
+cpu_features: dotprod=1 i8mm=0 bf16=0 fhm=0 fp16=1 sve=0 rndr=0
+infer: sha256=9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0 sha_us=4202964
+infer: dot_path=sdot cpu_dotprod=1
+infer: session open rc=0 tensors=201 vocab=32000 layers=22 kv_capacity=192 max_new=16 max_prompt_bytes=256 heap_reserve_kib=64 heap_used_kib=12014 open_us=47488
+infer: measure req=0 name=short ids=24 prefill=24 prefill_us=15296424 produced=8 mean_tok_us=683917 tokens=1576 7483 310 3444 338 3681 29889 2 golden=match request_us=20084557 rc=3
+infer: measure req=1 name=short ids=24 prefill=24 prefill_us=15296235 produced=8 mean_tok_us=684024 tokens=1576 7483 310 3444 338 3681 29889 2 golden=match request_us=20085135 rc=3
+infer: measure req=2 name=short ids=24 prefill=24 prefill_us=15296252 produced=8 mean_tok_us=683980 tokens=1576 7483 310 3444 338 3681 29889 2 golden=match request_us=20128237 rc=3
+infer: measure req=3 name=long1 ids=45 prefill=45 prefill_us=28693996 produced=16 mean_tok_us=686969 tokens=1576 14744 5692 7254 2645 278 2462 1363 278 6575 4366 9432 29879 1283 278 11563 golden=MISMATCH request_us=38999497 rc=3
+infer: measure req=4 name=long2 ids=119 prefill=119 prefill_us=76316053 produced=16 mean_tok_us=695546 tokens=29928 799 21886 29892 13 13 4806 27746 675 363 278 9055 297 13138 366 411 golden=match request_us=86750226 rc=3
+infer: session close rc=0 heap_used_kib=12015 heap_peak_kib=12015 frames_free_before=1636052 frames_free_after=1636052 rc=0
+AIENOS_CK_INFER_SESSION: FAIL
+
+## pi5-8-danube3-a (kernel.log lines)
+model_map: ok len=317877408 extents=1 sector=512 disk=29ceb42de1b36445b340924422ebcae3
+model: reading 317877408 bytes in 1 extents, block_size=512 last_block=250347519 -> 0x28ef2000
+model: base=0x28ef2000 len=317877408 extents=1 read_us=3305807 declared_sha256=021f78849c5670ecb2aa4cd7c5972eee0a3c9e41e33e5902c408a2ab989f0b43
+cpu_features: dotprod=1 i8mm=0 bf16=0 fhm=0 fp16=1 sve=0 rndr=0
+infer: sha256=021f78849c5670ecb2aa4cd7c5972eee0a3c9e41e33e5902c408a2ab989f0b43 sha_us=2073031
+infer: dot_path=sdot cpu_dotprod=1
+infer: session open rc=0 tensors=147 vocab=32000 layers=16 kv_capacity=192 max_new=16 max_prompt_bytes=256 heap_reserve_kib=64 heap_used_kib=20263 open_us=21803
+infer: measure req=0 name=short ids=20 prefill=20 prefill_us=5510966 produced=8 mean_tok_us=309842 tokens=1014 5565 302 4843 349 5465 28723 2 golden=match request_us=7680584 rc=3
+infer: measure req=1 name=short ids=20 prefill=20 prefill_us=5510354 produced=8 mean_tok_us=309893 tokens=1014 5565 302 4843 349 5465 28723 2 golden=match request_us=7680329 rc=3
+infer: measure req=2 name=short ids=20 prefill=20 prefill_us=5511523 produced=8 mean_tok_us=309866 tokens=1014 5565 302 4843 349 5465 28723 2 golden=match request_us=7724662 rc=3
+infer: measure req=3 name=long1 ids=41 prefill=41 prefill_us=11288449 produced=16 mean_tok_us=311511 tokens=28740 28723 415 7212 8045 5045 1938 272 1370 1096 22950 349 20995 486 8887 13938 golden=MISMATCH request_us=15962102 rc=3
+infer: measure req=4 name=long2 ids=113 prefill=113 prefill_us=31324828 produced=16 mean_tok_us=316571 tokens=28737 28742 28719 7371 298 3934 369 368 28742 267 2461 7598 395 574 12602 4796 golden=match request_us=36074389 rc=3
+infer: session close rc=0 heap_used_kib=20264 heap_peak_kib=20264 frames_free_before=1721724 frames_free_after=1721724 rc=0
+AIENOS_CK_INFER_SESSION: FAIL
+
+## pi5-8-restore (kernel.log lines)
+model_map: ok len=807694368 extents=1 sector=512 disk=29ceb42de1b36445b340924422ebcae3
+model: reading 807694368 bytes in 1 extents, block_size=512 last_block=250347519 -> 0xbbd2000
+model: base=0xbbd2000 len=807694368 extents=1 read_us=8399537 declared_sha256=3f5a22426976ab26cfe84dba63c1d08391717abb1af893e10f1b2968d862dcc1
+cpu_features: dotprod=1 i8mm=0 bf16=0 fhm=0 fp16=1 sve=0 rndr=0
+infer: sha256=3f5a22426976ab26cfe84dba63c1d08391717abb1af893e10f1b2968d862dcc1 sha_us=5077435
+infer: dot_path=sdot cpu_dotprod=1
+infer: session open rc=0 tensors=147 vocab=128256 layers=16 kv_capacity=64 max_new=16 max_prompt_bytes=256 heap_reserve_kib=64 heap_used_kib=22900 open_us=274252
+infer: session prompt=2 ids=17 steps=25 prefill=17 produced=8 last=yes prefill_us=11135404 mean_tok_us=832559 tokens=791 6864 315 9822 374 12366 13 128009 text=The capital of France is Paris. heap_used_kib=22901 request_us=16964153 rc=3
+infer: session close rc=0 heap_used_kib=22902 heap_peak_kib=24695 frames_free_before=1602139 frames_free_after=1602139 rc=0
+AIENOS_CK_INFER_SESSION: PASS
+

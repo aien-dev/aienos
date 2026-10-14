@@ -1,0 +1,172 @@
+diff --git a/crates/aienos-infer-kernel/src/session.rs b/crates/aienos-infer-kernel/src/session.rs
+index b1dad4f..c4870bc 100644
+--- a/crates/aienos-infer-kernel/src/session.rs
++++ b/crates/aienos-infer-kernel/src/session.rs
+@@ -20,6 +20,7 @@
+ use alloc::vec::Vec;
+ use core::cell::UnsafeCell;
+ use core::slice;
++use core::sync::atomic::{AtomicU32, Ordering};
+ 
+ use aienos_infer::{argmax, DecodeState, Gguf, Model, Tokenizer};
+ 
+@@ -93,6 +94,9 @@ struct Slot(UnsafeCell<Option<Session>>);
+ unsafe impl Sync for Slot {}
+ static SLOT: Slot = Slot(UnsafeCell::new(None));
+ 
++/// PI5-8 measurement build only: end-of-generation id of the model under test (default: the Llama-3 EOT).
++static EOS: AtomicU32 = AtomicU32::new(EOT);
++
+ fn slot() -> &'static mut Option<Session> {
+     // SAFETY: single-threaded by contract; no reference escapes a call.
+     unsafe { &mut *SLOT.0.get() }
+@@ -253,7 +257,7 @@ pub unsafe extern "C" fn aienos_infer_session_step(token: *mut u32, us: *mut u64
+         if !token.is_null() {
+             *token = t;
+         }
+-        if t == EOT || s.out.len() >= s.limits.max_new as usize {
++        if t == EOS.load(Ordering::Relaxed) || s.out.len() >= s.limits.max_new as usize {
+             s.done = true;
+             rc = STEP_LAST;
+         } else {
+@@ -382,3 +386,38 @@ pub unsafe extern "C" fn aienos_infer_session_close() -> i32 {
+     *slot() = None;
+     0
+ }
++
++/// PI5-8 measurement build only: set the end-of-generation token id.
++#[no_mangle]
++pub extern "C" fn aienos_infer_session_set_eos(id: u32) {
++    EOS.store(id, Ordering::Relaxed);
++}
++
++/// PI5-8 measurement build only: start a request from token ids (the engine's tokenizer is bypassed;
++/// the ids come from llama.cpp). Same checks and effects as `aienos_infer_session_prompt`.
++///
++/// # Safety
++/// `ids` must point to `n` readable u32s. Same execution contract as open.
++#[no_mangle]
++pub unsafe extern "C" fn aienos_infer_session_prompt_set_ids(ids: *const u32, n: u32) -> i32 {
++    let s = match slot() {
++        Some(s) => s,
++        None => return E_STATE,
++    };
++    if ids.is_null() || n == 0 {
++        return E_ARG;
++    }
++    if heap_remaining() < s.limits.heap_reserve as usize {
++        return E_HEAP;
++    }
++    let v: Vec<u32> = slice::from_raw_parts(ids, n as usize).to_vec();
++    if v.len() + s.limits.max_new as usize > s.limits.kv_capacity as usize {
++        return E_TOO_LONG;
++    }
++    s.st.reset();
++    s.prompt = v;
++    s.fed = 0;
++    s.out = Vec::new();
++    s.done = false;
++    s.prompt.len() as i32
++}
+diff --git a/native/kernel/core/infer.c b/native/kernel/core/infer.c
+index 4f25b37..db15f94 100644
+--- a/native/kernel/core/infer.c
++++ b/native/kernel/core/infer.c
+@@ -91,6 +91,8 @@ extern int32_t aienos_infer_session_prompt_ids(uint32_t *out, uint32_t cap);
+ extern int32_t aienos_infer_session_text(const uint32_t *ids, uint32_t n, uint8_t *out, uint32_t cap);
+ extern int32_t aienos_infer_session_close(void);
+ extern void aienos_infer_heap_stats(uint64_t *used, uint64_t *peak);
++extern int32_t aienos_infer_session_prompt_set_ids(const uint32_t *ids, uint32_t n);
++extern void aienos_infer_session_set_eos(uint32_t id);
+ #define SESS_E_STATE (-12)
+ #define SESS_E_PROMPT_BYTES (-16)
+ #define SESS_STEP_DONE 0
+@@ -118,6 +120,10 @@ static const uint32_t expect_ids[4] = {128000, 128006, 882, 128007};
+ /* The greedy reply llama.cpp produced for the same prompt ("step" lines of the
+  * same fixture): "The capital of France is Paris." then <|eot_id|>. */
+ static const uint32_t expect_gen[8] = {791, 6864, 315, 9822, 374, 12366, 13, 128009};
++#ifdef CK_PI5_MEASURE
++/* PI5-8 measurement build: prompt ids and llama.cpp expected tokens of the model under test (generated header). */
++#include "pi5_measure.h"
++#endif
+ /* Decoded reply, escaped for one console line: printable ASCII other than
+  * backslash as is, everything else as \\xNN. 4 bytes per input byte + NUL. */
+ static char esc[4 * INFER_TEXT_BYTES + 1];
+@@ -268,7 +274,11 @@ static void hex(char *out, const uint8_t *b, unsigned n)
+ /* Session limits of the probe: a 64-position cache, 16 generated tokens, a
+  * 256-byte prompt and 64 KiB of heap kept free (every prompt costs a few
+  * KiB that the bump allocator never gives back). */
++#ifdef CK_PI5_MEASURE
++#define SESS_KV 192u
++#else
+ #define SESS_KV 64u
++#endif
+ #define SESS_MAX_NEW 16u
+ #define SESS_PROMPT_BYTES 256u
+ #define SESS_RESERVE (64u << 10)
+@@ -342,6 +352,44 @@ static int session_request(unsigned which, const char *text, unsigned cancel_aft
+     return ok;
+ }
+ 
++#ifdef CK_PI5_MEASURE
++/* PI5-8 measurement request q: prompt ids from the generated header, steps with a pet each, tokens compared with
++ * llama.cpp's greedy reply. One line per request: prefill and decode microseconds, tokens, match. */
++static int measure_request(unsigned q)
++{
++    const struct meas_req *r = &meas_reqs[q];
++    uint64_t t0 = ck_time_us(), pre_us = 0, tok_us_sum = 0;
++    unsigned prefill = 0, produced = 0, last = 0;
++    int32_t ids = aienos_infer_session_prompt_set_ids(r->ids, r->nids);
++    if (ids < 0) {
++        ck_printf("infer: measure req=%u name=%s REFUSED rc=%d\n", q, r->name, ids);
++        return 0;
++    }
++    int32_t rc = 0;
++    for (;;) {
++        uint32_t t = 0;
++        uint64_t us = 0;
++        rc = aienos_infer_session_step(&t, &us);
++        pet();
++        if (rc < 0 || rc == SESS_STEP_DONE) break;
++        if (rc == SESS_STEP_PREFILL) { prefill++; pre_us += us; continue; }
++        produced++;
++        tok_us_sum += us;
++        if (rc == SESS_STEP_LAST) { last = 1; break; }
++    }
++    static uint32_t toks[SESS_MAX_NEW];
++    int32_t n = aienos_infer_session_tokens(toks, SESS_MAX_NEW);
++    int ok = rc >= 0 && n == (int32_t)produced && last && (unsigned)ids == prefill && produced == r->nexp;
++    for (unsigned i = 0; ok && i < r->nexp; i++) ok = ok && toks[i] == r->exp[i];
++    uint64_t mean = produced > 1 ? tok_us_sum / (produced - 1) : 0;
++    ck_printf("infer: measure req=%u name=%s ids=%d prefill=%u prefill_us=%llu produced=%u mean_tok_us=%llu tokens=", q, r->name, ids,
++              prefill, (unsigned long long)pre_us, produced, (unsigned long long)mean);
++    for (unsigned i = 0; i < produced; i++) ck_printf("%s%u", i ? " " : "", toks[i]);
++    ck_printf(" golden=%s request_us=%llu rc=%d\n", ok ? "match" : "MISMATCH", (unsigned long long)(ck_time_us() - t0), rc);
++    return ok;
++}
++#endif
++
+ /* The bounded session over the ingested model: open with explicit limits,
+  * a request cancelled during its prefill, the golden prompt run to its end
+  * through the step API (must equal the one-shot probe's reply), a second
+@@ -369,6 +417,12 @@ static void session_run(uint64_t mpa, uint64_t msize)
+     if (ok) {
+         /* Cheap refusals: a second open, an over-long prompt, a step with no
+          * request pending. None of them touches the model. */
++#ifdef CK_PI5_MEASURE
++        aienos_infer_session_set_eos(MEAS_EOS);
++        for (unsigned q = 0; q < MEAS_NREQ; q++) ok = measure_request(q) && ok;
++        if (0)
++#endif
++        {
+         static char longp[SESS_PROMPT_BYTES + 2];
+         memset(longp, 'a', sizeof longp - 1);
+         longp[sizeof longp - 1] = 0;
+@@ -382,6 +436,7 @@ static void session_run(uint64_t mpa, uint64_t msize)
+         ok = session_request(2, "What is the capital of France?", 0, expect_gen,
+                              sizeof expect_gen / sizeof expect_gen[0], expect_ids) && ok;
+         ok = session_request(3, "Say hello.", 1, 0, 0, 0) && ok;
++        }
+     }
+     uint64_t used = 0, peak = 0;
+     aienos_infer_heap_stats(&used, &peak);
