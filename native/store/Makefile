@@ -158,6 +158,9 @@ torn-slot-mutants: $(OUT)/t_torn_slot_test.o $(OUT)/sha256.o | $(OUT)
 	if [ $$fail -eq 0 ]; then echo "TORN_SLOT_MUTANTS: PASS"; else echo "TORN_SLOT_MUTANTS: FAIL"; exit 1; fi
 
 STORE_GUARDS = $(shell grep -ho 'GUARD:[a-z0-9-]* \*/' $(STORE_SRCS) | sed 's/GUARD://; s/ \*\///')
+# A removed refusal may read outside a bounded workspace and still return
+# the expected error by accident. Detect that invalid access at its source.
+MUTANT_SANFLAGS = -fsanitize=undefined -fno-sanitize-recover=all
 # Each store mutant works in its own $(OUT)/smut_<guard> directory, a different name
 # space from the torn-slot mutants above, so `make -j mutants` can run both at once.
 store-mutants: $(STORE_OBJS) $(TEST_OBJS) $(DEP_OBJS) $(OUT)/torn_slot.o $(HOST_OBJS)
@@ -169,7 +172,7 @@ store-mutants: $(STORE_OBJS) $(TEST_OBJS) $(DEP_OBJS) $(OUT)/torn_slot.o $(HOST_
 	  ( f=$$(grep -l "GUARD:$$g \*/" $(STORE_SRCS)); \
 	    [ $$(echo $$f | wc -w) -eq 1 ] || { echo "mutant $$g: tag not unique ($$f)" > $$d/msg; echo 1 > $$d/fail; exit 0; }; \
 	    sed "/GUARD:$$g \*\//d" $$f > $$d/$$f; \
-	    $(CC) $(CFLAGS) -Wno-error $(INC) -c -o $$d/m.o $$d/$$f 2> $$d/cc.log || { echo "mutant $$g: does not compile (see $$d/cc.log)" > $$d/msg; echo 1 > $$d/fail; exit 0; }; \
+	    $(CC) $(CFLAGS) $(MUTANT_SANFLAGS) -Wno-error $(INC) -c -o $$d/m.o $$d/$$f 2> $$d/cc.log || { echo "mutant $$g: does not compile (see $$d/cc.log)" > $$d/msg; echo 1 > $$d/fail; exit 0; }; \
 	    objs=""; for s in $(STORE_SRCS); do [ $$s = $$f ] || objs="$$objs $(OUT)/$${s%.c}.o"; done; \
 	    case "$$f" in \
 	      store_v1.c)     order="store_v1_test store_engine_test store_sealed_test store_powercut_test" ;; \
@@ -178,7 +181,7 @@ store-mutants: $(STORE_OBJS) $(TEST_OBJS) $(DEP_OBJS) $(OUT)/torn_slot.o $(HOST_
 	    esac; \
 	    dead=0; by=""; \
 	    for t in $$order; do \
-	      $(CC) $(CFLAGS) -o $$d/$$t $(OUT)/t_$$t.o $$d/m.o $$objs $(OUT)/torn_slot.o $(DEP_OBJS) $(HOST_OBJS) || { dead=2; break; }; \
+	      $(CC) $(CFLAGS) $(MUTANT_SANFLAGS) -o $$d/$$t $(OUT)/t_$$t.o $$d/m.o $$objs $(OUT)/torn_slot.o $(DEP_OBJS) $(HOST_OBJS) || { dead=2; break; }; \
 	      if ! ./$$d/$$t $$d > $$d/$$g.log 2>&1; then dead=1; by="$$t"; break; fi; \
 	    done; \
 	    if [ $$dead -eq 1 ]; then echo "mutant $$g ($$f): killed by $$by" > $$d/msg; : > $$d/killed; \
