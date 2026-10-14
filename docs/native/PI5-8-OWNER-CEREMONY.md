@@ -1,7 +1,21 @@
-# PI5-8 Q2: the owner-key ceremony (prepared, NOT performed)
+# PI5-8 Q2: the owner-key ceremony (PERFORMED 2026-10-14)
 
-Status: prepared and rehearsed with software keys only. No owner key exists. Nothing was written to any YubiKey. The real
-ceremony is run once, by Drake, on the Spark with the network down.
+Status: performed once, by Drake, on 2026-10-14 at 11:45Z. `CEREMONY_REAL: PASS`. The owner key is an Ed25519 key in PIV slot
+9c of YubiKey serial 39017074. Public key `owner_root_ed25519 578ada3cb0c2d154623ac089191023c8ad4bc5e63b8ccd1a38db2d679b8c9e76`,
+owner file sha256 `9d2aabd949c71aa5e3d618e9182af1ce58bb8a2b52e10006caf0af2ceb34d181`. Re-checked afterwards with a separate
+tool: openssl verifies the ceremony signature over the ceremony statement; `ykman piv info` shows no factory PIN, PUK or
+management key (management key AES256), PIN tries 3/3, PUK tries 3/3, slot 9C occupied.
+
+Deviation from the plan below, by Drake's decision: the Spark was ONLINE. It has no screen output (it boots without a display,
+and the graphics driver offers no display connectors), so the ceremony ran over an ssh login from Drake's MacBook on the home
+network, with Drake beside the Spark to touch the key. The script was run as
+`owner_ceremony.sh --real --online-by-owner-decision`. That flag skips only the offline check, prints the network state, and
+writes it into `ceremony-report.txt` (`checks: network offline NOT CHECKED: ONLINE by owner decision ...`). Without the flag,
+`--real` still refuses while the Spark is online. What stays true: the private key was generated inside the YubiKey and never
+left it; the PIN, PUK and management key were typed by Drake and never seen, stored or logged by the script. What is weaker: the
+PIN, PUK and management key crossed the home network inside the encrypted ssh session.
+
+The text below is the plan as prepared before the ceremony.
 
 ## What this is
 
