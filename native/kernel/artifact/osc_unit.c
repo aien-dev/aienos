@@ -48,7 +48,7 @@ const char *osc_code_name(unsigned code)
         [14] = "RECEIPT_EXPIRED", [15] = "RECEIPT_NOT_YET_VALID", [16] = "RECEIPT_WRONG_TARGET",
         [17] = "RECEIPT_WRONG_FIRMWARE", [18] = "RECEIPT_PROGRAM_MISMATCH", [19] = "RECEIPT_EXECUTABLE_MISMATCH",
         [20] = "RECEIPT_ARGUMENT", [22] = "RECEIPT_UNTRUSTED_CHECKER", [23] = "RECEIPT_WRONG_PRODUCER",
-        [24] = "RECEIPT_DEPENDENCIES_MISMATCH",
+        [24] = "RECEIPT_DEPENDENCIES_MISMATCH", [32] = "RECEIPT_LRAT_PROOFS_REQUIRED",
     };
     if (code >= 64 && code - 64 < sizeof rcpt_names / sizeof rcpt_names[0] && rcpt_names[code - 64])
         return rcpt_names[code - 64];

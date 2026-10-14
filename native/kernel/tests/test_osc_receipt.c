@@ -23,6 +23,7 @@
 #include "osc_unit.h"
 #include "osc_unit_test_anchor.h"
 #include "sha256.h"
+#include "aienos_sig.h"
 
 #ifndef OSC_FIXTURE_DIR
 #define OSC_FIXTURE_DIR "native/kernel/tests/fixtures"
@@ -365,11 +366,74 @@ static void policy_edges(void)
     CHECK(v(g, 416, &a, &p) == 0 && v(g, 416, &a, &p) == 0 && memcmp(before, g, 416) == 0);
 }
 
+/* Re-sign a receipt in memory with checker2's published TEST key (spec section 3: seed = SHA-256 of the stated
+ * string; the key is a TEST key by definition, never a release signer). Written from spec section 3; it must
+ * reproduce checker2's own signature on an unchanged receipt (Ed25519 is deterministic), which cross-checks the
+ * signed-message construction of the verifier from a second direction. */
+static void test_seed(uint8_t sk[32])
+{
+    static const char s[] = "OMEGA-CHECKER2-TEST-KEY-v1 NOT FOR PRODUCTION";
+    sha256_hash((const uint8_t *)s, sizeof s - 1, sk);
+}
+
+static void resign(uint8_t *r)
+{
+    static const char body_dom[] = "OMEGA-REALIZATION-RECEIPT-V1", sig_dom[] = "OMEGA-REALIZATION-RECEIPT-SIG-V1";
+    uint8_t msg[sizeof sig_dom + 32], sk[32];
+    sha256_ctx c;
+    memcpy(msg, sig_dom, sizeof sig_dom);
+    sha256_init(&c);
+    sha256_update(&c, (const uint8_t *)body_dom, sizeof body_dom);
+    sha256_update(&c, r, OSC_RCPT_SIGNED_BYTES);
+    sha256_final(&c, msg + sizeof sig_dom);
+    test_seed(sk);
+    CHECK(aienos_ed25519_sign(r + OSC_RCPT_SIGNED_BYTES, msg, sizeof msg, sk) == AIENOS_SIG_OK);
+    memset(sk, 0, sizeof sk);
+}
+
+static void resigned(void)
+{
+    uint8_t g[1024], r[416], sk[32], pk[32];
+    CHECK(rcpt("a01.rcpt", g) == OSC_RCPT_BYTES);
+    test_seed(sk);
+    CHECK(aienos_ed25519_public_key(pk, sk) == AIENOS_SIG_OK && memcmp(pk, osc_rcpt_test_pk, 32) == 0);
+    memcpy(r, g, 416);
+    memset(r + 352, 0, 64);
+    resign(r);
+    CHECK(memcmp(r, g, 416) == 0); /* same bytes as checker2 wrote */
+    struct osc_accept a;
+    CHECK(admit("a01", &a));
+    struct osc_policy p = qual();
+    /* evidence class 2, correctly signed: refused LRAT_PROOFS_REQUIRED, and only after every section 6 step */
+    memcpy(r, g, 416);
+    put16(r + 14, 2);
+    resign(r);
+    CHECK(v(r, 416, &a, &p) == OSC_RCPT_LRAT_PROOFS_REQUIRED);
+    memcpy(r, g, 416);
+    put16(r + 14, 2);
+    r[208] ^= 1;
+    resign(r);
+    CHECK(v(r, 416, &a, &p) == OSC_RCPT_WRONG_TARGET);
+    /* a signed class 1 receipt with a changed field reaches the step that reads that field */
+    memcpy(r, g, 416);
+    r[272] ^= 1; /* input digest: NOT CHECKED, still valid */
+    r[16] ^= 1;  /* requirements digest: NOT CHECKED for class 1, still valid */
+    resign(r);
+    CHECK(v(r, 416, &a, &p) == 0);
+    memcpy(r, g, 416);
+    put64(r + 304, 15); /* policy epoch 15, now 20: valid; now 14: NOT_YET_VALID */
+    resign(r);
+    CHECK(v(r, 416, &a, &p) == 0);
+    p.rcpt_epoch_now = 14;
+    CHECK(v(r, 416, &a, &p) == OSC_RCPT_NOT_YET_VALID);
+}
+
 static void names(void)
 {
     CHECK(!strcmp(osc_code_name(OSC_RCPT_MISSING), "RECEIPT_MISSING"));
     CHECK(!strcmp(osc_code_name(OSC_RCPT_REVOKED), "RECEIPT_REVOKED"));
     CHECK(!strcmp(osc_code_name(OSC_RCPT_DEPENDENCIES_MISMATCH), "RECEIPT_DEPENDENCIES_MISMATCH"));
+    CHECK(!strcmp(osc_code_name(OSC_RCPT_LRAT_PROOFS_REQUIRED), "RECEIPT_LRAT_PROOFS_REQUIRED") && !strcmp(osc_code_name(95), "?"));
     CHECK(!strcmp(osc_code_name(72), "?") && !strcmp(osc_code_name(85), "?") && !strcmp(osc_code_name(89), "?"));
     CHECK(!strcmp(osc_code_name(OSC_CODE_HASH_MISMATCH), "CODE_HASH_MISMATCH")); /* unit codes unchanged */
     /* spec reason n is kernel code 64 + n */
@@ -428,6 +492,7 @@ int main(void)
     structure_and_order();
     policy_edges();
     names();
+    resigned();
     store_table();
     return ck_t_verdict("test_osc_receipt");
 }

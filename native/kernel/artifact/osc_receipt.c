@@ -197,5 +197,11 @@ unsigned osc_receipt_verify(const uint8_t *r, size_t len, const struct osc_accep
         if (!MUT(24) && !eq32(r + 112, deps))
             return OSC_RCPT_DEPENDENCIES_MISMATCH;
     }
+
+    /* 8. Evidence class 2 (spec section 10): valid only when the same LRAT proofs are given and replayed. The
+     * kernel is given none and has no LRAT checker, so class 2 is refused (fail closed). The spec does not place
+     * this check in the section 6 order; it runs last, after every section 6 step passed. */
+    if (!MUT(25) && ev == 2)
+        return OSC_RCPT_LRAT_PROOFS_REQUIRED;
     return 0;
 }

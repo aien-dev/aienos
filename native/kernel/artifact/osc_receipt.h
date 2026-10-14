@@ -22,8 +22,9 @@
  * receipt). Producer: checked only when the policy names one; the kernel policy names none, so the producer is
  * NOT CHECKED (the unit carries no producer identity to compare with). NOT bound by a receipt: the container
  * manifest (entry table, capability table, stack and tick budgets); those stay bound by the unit signature.
- * Requirements and input fields are NOT CHECKED; an evidence class 2 receipt is accepted as a receipt but its
- * LRAT proofs are NOT replayed by the kernel (see docs/osc-receipts.md, UNVERIFIED). */
+ * Requirements and input fields are NOT CHECKED. Evidence class 2 (LRAT): spec section 10 makes a class 2 receipt
+ * valid only when its proofs are given and replayed; the kernel has no proofs and no LRAT checker, so it refuses
+ * class 2 as RECEIPT_LRAT_PROOFS_REQUIRED (fail closed; see docs/osc-receipts.md). */
 #ifndef AIENOS_CK_OSC_RECEIPT_H
 #define AIENOS_CK_OSC_RECEIPT_H
 #include <stddef.h>
@@ -62,7 +63,10 @@ enum osc_rcpt_code {
     OSC_RCPT_ARGUMENT = 84,             /* 20: verifier called without a unit or a policy */
     OSC_RCPT_UNTRUSTED_CHECKER = 86,    /* 22 */
     OSC_RCPT_WRONG_PRODUCER = 87,       /* 23 */
-    OSC_RCPT_DEPENDENCIES_MISMATCH = 88 /* 24 */
+    OSC_RCPT_DEPENDENCIES_MISMATCH = 88, /* 24 */
+    /* kernel-assigned: spec section 10 names LRAT-PROOFS-REQUIRED without a number. The kernel is given no LRAT
+     * proofs, so every evidence class 2 receipt that passes the section 6 steps is refused with it. */
+    OSC_RCPT_LRAT_PROOFS_REQUIRED = 96
 };
 
 enum { OSC_RCPT_REVOKED_ID = 1, OSC_RCPT_REVOKED_KEY = 2 };
@@ -72,7 +76,7 @@ enum { OSC_RCPT_REVOKED_ID = 1, OSC_RCPT_REVOKED_KEY = 2 };
 struct osc_receipt_info {
     uint8_t id[32];          /* SHA-256 of the 416 bytes (spec section 2) */
     uint16_t signer_class;   /* OSC_SIGNER_TEST or OSC_SIGNER_OWNER */
-    uint16_t evidence_class; /* 1 IR_CHECKED, 2 IR_CHECKED_LRAT (proofs not replayed here) */
+    uint16_t evidence_class; /* 1 IR_CHECKED, 2 IR_CHECKED_LRAT (refused: no proofs to replay) */
     uint64_t policy_epoch, expiry_epoch;
     unsigned revoked;        /* OSC_RCPT_REVOKED_ID or OSC_RCPT_REVOKED_KEY when the verdict is REVOKED */
     int have_id;
