@@ -1,0 +1,469 @@
+# ALLEN REFLEX tuning log (dev + 10-fold family-grouped cross-validation of train+extra; held-out never read)
+# rule (own judgment): move one knob at a time; adopt the best change only if dev exact + cv exact rises by 3 or more; stop when none does
+## round 1 base: weights [3,2,1,4,4,3,3,2] all modes, k 3, perceptron 20 epochs
+reflex     frozen                       dev action 21/23 exact 21/23   cv action 243/282 exact 223/282
+reflex     k=1                          dev action 22/23 exact 22/23   cv action 232/282 exact 215/282
+reflex     k=5                          dev action 22/23 exact 22/23   cv action 243/282 exact 222/282
+reflex     weight[0]=0                  dev action 21/23 exact 21/23   cv action 244/282 exact 223/282
+reflex     weight[0]=6                  dev action 20/23 exact 20/23   cv action 221/282 exact 207/282
+reflex     weight[1]=0                  dev action 21/23 exact 21/23   cv action 243/282 exact 222/282
+reflex     weight[1]=6                  dev action 21/23 exact 21/23   cv action 233/282 exact 216/282
+reflex     weight[2]=0                  dev action 21/23 exact 21/23   cv action 243/282 exact 222/282
+reflex     weight[2]=6                  dev action 19/23 exact 19/23   cv action 211/282 exact 199/282
+reflex     weight[3]=0                  dev action 21/23 exact 21/23   cv action 212/282 exact 196/282
+reflex     weight[3]=6                  dev action 21/23 exact 21/23   cv action 252/282 exact 231/282
+reflex     weight[4]=0                  dev action 22/23 exact 22/23   cv action 245/282 exact 225/282
+reflex     weight[4]=6                  dev action 21/23 exact 21/23   cv action 232/282 exact 211/282
+reflex     weight[5]=0                  dev action 23/23 exact 23/23   cv action 241/282 exact 221/282
+reflex     weight[5]=6                  dev action 21/23 exact 21/23   cv action 219/282 exact 201/282
+reflex     weight[6]=0                  dev action 21/23 exact 21/23   cv action 244/282 exact 224/282
+reflex     weight[6]=6                  dev action 21/23 exact 21/23   cv action 236/282 exact 215/282
+reflex     weight[7]=0                  dev action 21/23 exact 21/23   cv action 241/282 exact 223/282
+reflex     weight[7]=6                  dev action 19/23 exact 19/23   cv action 217/282 exact 197/282
+reflex     D=4096                       dev action 22/23 exact 22/23   cv action 243/282 exact 223/282
+reflex     D=16384                      dev action 21/23 exact 21/23   cv action 244/282 exact 224/282
+reflex     alpha=0                      dev action 21/23 exact 21/23   cv action 240/282 exact 219/282
+reflex     alpha=0.25                   dev action 22/23 exact 22/23   cv action 243/282 exact 222/282
+reflex     alpha=0.75                   dev action 21/23 exact 21/23   cv action 237/282 exact 220/282
+reflex     alpha=1                      dev action 21/23 exact 21/23   cv action 230/282 exact 215/282
+reflex     zero_band=0                  dev action 21/23 exact 21/23   cv action 241/282 exact 221/282
+reflex     zero_band=0.8                dev action 21/23 exact 21/23   cv action 239/282 exact 219/282
+reflex     epochs=0 eta=0.5             dev action 22/23 exact 22/23   cv action 243/282 exact 223/282
+reflex     epochs=10 eta=0.5            dev action 21/23 exact 21/23   cv action 243/282 exact 223/282
+reflex     epochs=40 eta=0.05           dev action 21/23 exact 21/23   cv action 243/282 exact 223/282
+reflex     epochs=40 eta=1              dev action 21/23 exact 21/23   cv action 243/282 exact 223/282
+nearest    frozen                       dev action 21/23 exact 21/23   cv action 227/282 exact 213/282
+nearest    k=1                          dev action 21/23 exact 21/23   cv action 208/282 exact 200/282
+nearest    k=5                          dev action 23/23 exact 23/23   cv action 232/282 exact 216/282
+nearest    weight[0]=0                  dev action 21/23 exact 21/23   cv action 232/282 exact 217/282
+nearest    weight[0]=6                  dev action 21/23 exact 21/23   cv action 223/282 exact 211/282
+nearest    weight[1]=0                  dev action 21/23 exact 21/23   cv action 227/282 exact 213/282
+nearest    weight[1]=6                  dev action 21/23 exact 21/23   cv action 221/282 exact 210/282
+nearest    weight[2]=0                  dev action 21/23 exact 21/23   cv action 228/282 exact 212/282
+nearest    weight[2]=6                  dev action 18/23 exact 18/23   cv action 205/282 exact 197/282
+nearest    weight[3]=0                  dev action 22/23 exact 22/23   cv action 214/282 exact 203/282
+nearest    weight[3]=6                  dev action 21/23 exact 21/23   cv action 231/282 exact 217/282
+nearest    weight[4]=0                  dev action 20/23 exact 20/23   cv action 224/282 exact 212/282
+nearest    weight[4]=6                  dev action 21/23 exact 21/23   cv action 227/282 exact 213/282
+nearest    weight[5]=0                  dev action 22/23 exact 22/23   cv action 226/282 exact 212/282
+nearest    weight[5]=6                  dev action 21/23 exact 21/23   cv action 221/282 exact 209/282
+nearest    weight[6]=0                  dev action 21/23 exact 21/23   cv action 216/282 exact 205/282
+nearest    weight[6]=6                  dev action 21/23 exact 21/23   cv action 231/282 exact 217/282
+nearest    weight[7]=0                  dev action 20/23 exact 20/23   cv action 224/282 exact 213/282
+nearest    weight[7]=6                  dev action 22/23 exact 22/23   cv action 225/282 exact 210/282
+perceptron frozen                       dev action 19/23 exact 19/23   cv action 227/282 exact 211/282
+perceptron epochs=5                     dev action 20/23 exact 20/23   cv action 233/282 exact 215/282
+perceptron epochs=10                    dev action 20/23 exact 20/23   cv action 234/282 exact 218/282
+perceptron epochs=40                    dev action 19/23 exact 19/23   cv action 226/282 exact 211/282
+perceptron weight[0]=0                  dev action 20/23 exact 20/23   cv action 241/282 exact 221/282
+perceptron weight[0]=6                  dev action 17/23 exact 17/23   cv action 217/282 exact 202/282
+perceptron weight[1]=0                  dev action 18/23 exact 18/23   cv action 240/282 exact 220/282
+perceptron weight[1]=6                  dev action 17/23 exact 17/23   cv action 219/282 exact 208/282
+perceptron weight[2]=0                  dev action 20/23 exact 20/23   cv action 227/282 exact 209/282
+perceptron weight[2]=6                  dev action 19/23 exact 19/23   cv action 197/282 exact 188/282
+perceptron weight[3]=0                  dev action 20/23 exact 20/23   cv action 216/282 exact 201/282
+perceptron weight[3]=6                  dev action 18/23 exact 18/23   cv action 235/282 exact 219/282
+perceptron weight[4]=0                  dev action 19/23 exact 19/23   cv action 226/282 exact 209/282
+perceptron weight[4]=6                  dev action 21/23 exact 21/23   cv action 222/282 exact 206/282
+perceptron weight[5]=0                  dev action 19/23 exact 19/23   cv action 225/282 exact 209/282
+perceptron weight[5]=6                  dev action 20/23 exact 20/23   cv action 236/282 exact 218/282
+perceptron weight[6]=0                  dev action 21/23 exact 21/23   cv action 224/282 exact 209/282
+perceptron weight[6]=6                  dev action 19/23 exact 19/23   cv action 229/282 exact 213/282
+perceptron weight[7]=0                  dev action 20/23 exact 20/23   cv action 224/282 exact 209/282
+perceptron weight[7]=6                  dev action 21/23 exact 21/23   cv action 234/282 exact 217/282
+## round 2 base: reflex concept 6; nearest concept 6 + k 5; perceptron word 0 + 10 epochs
+reflex     frozen                       dev action 21/23 exact 21/23   cv action 252/282 exact 231/282
+reflex     k=1                          dev action 22/23 exact 22/23   cv action 241/282 exact 223/282
+reflex     k=5                          dev action 22/23 exact 22/23   cv action 250/282 exact 229/282
+reflex     weight[0]=0                  dev action 21/23 exact 21/23   cv action 252/282 exact 231/282
+reflex     weight[0]=6                  dev action 21/23 exact 21/23   cv action 238/282 exact 221/282
+reflex     weight[1]=0                  dev action 21/23 exact 21/23   cv action 255/282 exact 234/282
+reflex     weight[1]=6                  dev action 21/23 exact 21/23   cv action 248/282 exact 229/282
+reflex     weight[2]=0                  dev action 21/23 exact 21/23   cv action 254/282 exact 233/282
+reflex     weight[2]=6                  dev action 20/23 exact 20/23   cv action 213/282 exact 201/282
+reflex     weight[3]=0                  dev action 21/23 exact 21/23   cv action 212/282 exact 196/282
+reflex     weight[3]=6                  dev action 21/23 exact 21/23   cv action 252/282 exact 231/282
+reflex     weight[4]=0                  dev action 22/23 exact 22/23   cv action 250/282 exact 229/282
+reflex     weight[4]=6                  dev action 21/23 exact 21/23   cv action 247/282 exact 226/282
+reflex     weight[5]=0                  dev action 22/23 exact 22/23   cv action 251/282 exact 230/282
+reflex     weight[5]=6                  dev action 21/23 exact 21/23   cv action 243/282 exact 222/282
+reflex     weight[6]=0                  dev action 21/23 exact 21/23   cv action 252/282 exact 231/282
+reflex     weight[6]=6                  dev action 21/23 exact 21/23   cv action 248/282 exact 227/282
+reflex     weight[7]=0                  dev action 21/23 exact 21/23   cv action 248/282 exact 228/282
+reflex     weight[7]=6                  dev action 22/23 exact 22/23   cv action 239/282 exact 218/282
+reflex     D=4096                       dev action 22/23 exact 22/23   cv action 252/282 exact 231/282
+reflex     D=16384                      dev action 22/23 exact 22/23   cv action 250/282 exact 229/282
+reflex     alpha=0                      dev action 23/23 exact 23/23   cv action 249/282 exact 228/282
+reflex     alpha=0.25                   dev action 23/23 exact 23/23   cv action 250/282 exact 229/282
+reflex     alpha=0.75                   dev action 21/23 exact 21/23   cv action 247/282 exact 228/282
+reflex     alpha=1                      dev action 21/23 exact 21/23   cv action 238/282 exact 222/282
+reflex     zero_band=0                  dev action 21/23 exact 21/23   cv action 253/282 exact 232/282
+reflex     zero_band=0.8                dev action 21/23 exact 21/23   cv action 251/282 exact 230/282
+reflex     epochs=0 eta=0.5             dev action 22/23 exact 22/23   cv action 250/282 exact 229/282
+reflex     epochs=10 eta=0.5            dev action 21/23 exact 21/23   cv action 252/282 exact 231/282
+reflex     epochs=40 eta=0.05           dev action 22/23 exact 22/23   cv action 251/282 exact 230/282
+reflex     epochs=40 eta=1              dev action 21/23 exact 21/23   cv action 252/282 exact 231/282
+nearest    frozen                       dev action 22/23 exact 22/23   cv action 236/282 exact 220/282
+nearest    k=1                          dev action 21/23 exact 21/23   cv action 211/282 exact 203/282
+nearest    k=5                          dev action 22/23 exact 22/23   cv action 236/282 exact 220/282
+nearest    weight[0]=0                  dev action 22/23 exact 22/23   cv action 241/282 exact 221/282
+nearest    weight[0]=6                  dev action 22/23 exact 22/23   cv action 231/282 exact 216/282
+nearest    weight[1]=0                  dev action 22/23 exact 22/23   cv action 237/282 exact 221/282
+nearest    weight[1]=6                  dev action 22/23 exact 22/23   cv action 235/282 exact 219/282
+nearest    weight[2]=0                  dev action 22/23 exact 22/23   cv action 245/282 exact 225/282
+nearest    weight[2]=6                  dev action 20/23 exact 20/23   cv action 212/282 exact 199/282
+nearest    weight[3]=0                  dev action 21/23 exact 21/23   cv action 218/282 exact 203/282
+nearest    weight[3]=6                  dev action 22/23 exact 22/23   cv action 236/282 exact 220/282
+nearest    weight[4]=0                  dev action 21/23 exact 21/23   cv action 234/282 exact 218/282
+nearest    weight[4]=6                  dev action 22/23 exact 22/23   cv action 237/282 exact 221/282
+nearest    weight[5]=0                  dev action 23/23 exact 23/23   cv action 237/282 exact 221/282
+nearest    weight[5]=6                  dev action 22/23 exact 22/23   cv action 234/282 exact 218/282
+nearest    weight[6]=0                  dev action 22/23 exact 22/23   cv action 230/282 exact 215/282
+nearest    weight[6]=6                  dev action 22/23 exact 22/23   cv action 240/282 exact 223/282
+nearest    weight[7]=0                  dev action 22/23 exact 22/23   cv action 235/282 exact 220/282
+nearest    weight[7]=6                  dev action 22/23 exact 22/23   cv action 232/282 exact 214/282
+perceptron frozen                       dev action 20/23 exact 20/23   cv action 243/282 exact 223/282
+perceptron epochs=5                     dev action 20/23 exact 20/23   cv action 243/282 exact 223/282
+perceptron epochs=10                    dev action 20/23 exact 20/23   cv action 243/282 exact 223/282
+perceptron epochs=40                    dev action 20/23 exact 20/23   cv action 238/282 exact 218/282
+perceptron weight[0]=0                  dev action 20/23 exact 20/23   cv action 243/282 exact 223/282
+perceptron weight[0]=6                  dev action 17/23 exact 17/23   cv action 217/282 exact 202/282
+perceptron weight[1]=0                  dev action 20/23 exact 20/23   cv action 234/282 exact 214/282
+perceptron weight[1]=6                  dev action 18/23 exact 18/23   cv action 223/282 exact 210/282
+perceptron weight[2]=0                  dev action 17/23 exact 17/23   cv action 236/282 exact 215/282
+perceptron weight[2]=6                  dev action 20/23 exact 20/23   cv action 190/282 exact 182/282
+perceptron weight[3]=0                  dev action 17/23 exact 17/23   cv action 224/282 exact 205/282
+perceptron weight[3]=6                  dev action 17/23 exact 17/23   cv action 242/282 exact 223/282
+perceptron weight[4]=0                  dev action 17/23 exact 17/23   cv action 241/282 exact 224/282
+perceptron weight[4]=6                  dev action 18/23 exact 18/23   cv action 232/282 exact 213/282
+perceptron weight[5]=0                  dev action 19/23 exact 19/23   cv action 229/282 exact 209/282
+perceptron weight[5]=6                  dev action 18/23 exact 18/23   cv action 242/282 exact 223/282
+perceptron weight[6]=0                  dev action 20/23 exact 20/23   cv action 233/282 exact 213/282
+perceptron weight[6]=6                  dev action 21/23 exact 21/23   cv action 237/282 exact 219/282
+perceptron weight[7]=0                  dev action 21/23 exact 21/23   cv action 234/282 exact 218/282
+perceptron weight[7]=6                  dev action 21/23 exact 21/23   cv action 225/282 exact 206/282
+## round 3 base: reflex bigram 0; nearest chars 0 (no change reaches +3)
+reflex     frozen                       dev action 21/23 exact 21/23   cv action 255/282 exact 234/282
+reflex     k=1                          dev action 21/23 exact 21/23   cv action 240/282 exact 222/282
+reflex     k=5                          dev action 22/23 exact 22/23   cv action 250/282 exact 229/282
+reflex     weight[0]=0                  dev action 22/23 exact 22/23   cv action 253/282 exact 232/282
+reflex     weight[0]=6                  dev action 21/23 exact 21/23   cv action 237/282 exact 220/282
+reflex     weight[1]=0                  dev action 21/23 exact 21/23   cv action 255/282 exact 234/282
+reflex     weight[1]=6                  dev action 21/23 exact 21/23   cv action 248/282 exact 229/282
+reflex     weight[2]=0                  dev action 23/23 exact 23/23   cv action 254/282 exact 233/282
+reflex     weight[2]=6                  dev action 19/23 exact 19/23   cv action 212/282 exact 200/282
+reflex     weight[3]=0                  dev action 21/23 exact 21/23   cv action 214/282 exact 197/282
+reflex     weight[3]=6                  dev action 21/23 exact 21/23   cv action 255/282 exact 234/282
+reflex     weight[4]=0                  dev action 22/23 exact 22/23   cv action 253/282 exact 232/282
+reflex     weight[4]=6                  dev action 21/23 exact 21/23   cv action 246/282 exact 225/282
+reflex     weight[5]=0                  dev action 23/23 exact 23/23   cv action 249/282 exact 228/282
+reflex     weight[5]=6                  dev action 21/23 exact 21/23   cv action 241/282 exact 220/282
+reflex     weight[6]=0                  dev action 21/23 exact 21/23   cv action 252/282 exact 231/282
+reflex     weight[6]=6                  dev action 21/23 exact 21/23   cv action 248/282 exact 227/282
+reflex     weight[7]=0                  dev action 21/23 exact 21/23   cv action 250/282 exact 229/282
+reflex     weight[7]=6                  dev action 21/23 exact 21/23   cv action 237/282 exact 216/282
+reflex     D=4096                       dev action 22/23 exact 22/23   cv action 253/282 exact 232/282
+reflex     D=16384                      dev action 21/23 exact 21/23   cv action 253/282 exact 232/282
+reflex     alpha=0                      dev action 22/23 exact 22/23   cv action 250/282 exact 229/282
+reflex     alpha=0.25                   dev action 23/23 exact 23/23   cv action 253/282 exact 232/282
+reflex     alpha=0.75                   dev action 21/23 exact 21/23   cv action 249/282 exact 228/282
+reflex     alpha=1                      dev action 21/23 exact 21/23   cv action 239/282 exact 223/282
+reflex     zero_band=0                  dev action 21/23 exact 21/23   cv action 252/282 exact 231/282
+reflex     zero_band=0.8                dev action 22/23 exact 22/23   cv action 253/282 exact 232/282
+reflex     epochs=0 eta=0.5             dev action 22/23 exact 22/23   cv action 251/282 exact 230/282
+reflex     epochs=10 eta=0.5            dev action 21/23 exact 21/23   cv action 254/282 exact 233/282
+reflex     epochs=40 eta=0.05           dev action 22/23 exact 22/23   cv action 252/282 exact 231/282
+reflex     epochs=40 eta=1              dev action 21/23 exact 21/23   cv action 254/282 exact 233/282
+nearest    frozen                       dev action 22/23 exact 22/23   cv action 245/282 exact 225/282
+nearest    k=1                          dev action 20/23 exact 20/23   cv action 219/282 exact 207/282
+nearest    k=5                          dev action 22/23 exact 22/23   cv action 245/282 exact 225/282
+nearest    weight[0]=0                  dev action 22/23 exact 22/23   cv action 248/282 exact 227/282
+nearest    weight[0]=6                  dev action 22/23 exact 22/23   cv action 238/282 exact 221/282
+nearest    weight[1]=0                  dev action 22/23 exact 22/23   cv action 247/282 exact 226/282
+nearest    weight[1]=6                  dev action 21/23 exact 21/23   cv action 241/282 exact 222/282
+nearest    weight[2]=0                  dev action 22/23 exact 22/23   cv action 245/282 exact 225/282
+nearest    weight[2]=6                  dev action 20/23 exact 20/23   cv action 212/282 exact 199/282
+nearest    weight[3]=0                  dev action 21/23 exact 21/23   cv action 206/282 exact 189/282
+nearest    weight[3]=6                  dev action 22/23 exact 22/23   cv action 245/282 exact 225/282
+nearest    weight[4]=0                  dev action 22/23 exact 22/23   cv action 246/282 exact 226/282
+nearest    weight[4]=6                  dev action 21/23 exact 21/23   cv action 244/282 exact 224/282
+nearest    weight[5]=0                  dev action 22/23 exact 22/23   cv action 245/282 exact 225/282
+nearest    weight[5]=6                  dev action 22/23 exact 22/23   cv action 241/282 exact 221/282
+nearest    weight[6]=0                  dev action 22/23 exact 22/23   cv action 240/282 exact 221/282
+nearest    weight[6]=6                  dev action 22/23 exact 22/23   cv action 245/282 exact 224/282
+nearest    weight[7]=0                  dev action 21/23 exact 21/23   cv action 235/282 exact 219/282
+nearest    weight[7]=6                  dev action 22/23 exact 22/23   cv action 236/282 exact 216/282
+## span fix (colon after a cue; cue-like words skipped after any cue), found by tests that leave a case family out; round 4 same configs
+reflex     frozen                       dev action 21/23 exact 21/23   cv action 255/282 exact 239/282
+reflex     k=1                          dev action 21/23 exact 21/23   cv action 240/282 exact 224/282
+reflex     k=5                          dev action 22/23 exact 22/23   cv action 250/282 exact 234/282
+reflex     weight[0]=0                  dev action 22/23 exact 22/23   cv action 253/282 exact 237/282
+reflex     weight[0]=6                  dev action 21/23 exact 21/23   cv action 237/282 exact 224/282
+reflex     weight[1]=0                  dev action 21/23 exact 21/23   cv action 255/282 exact 239/282
+reflex     weight[1]=6                  dev action 21/23 exact 21/23   cv action 248/282 exact 232/282
+reflex     weight[2]=0                  dev action 23/23 exact 23/23   cv action 254/282 exact 238/282
+reflex     weight[2]=6                  dev action 19/23 exact 19/23   cv action 212/282 exact 203/282
+reflex     weight[3]=0                  dev action 21/23 exact 21/23   cv action 214/282 exact 202/282
+reflex     weight[3]=6                  dev action 21/23 exact 21/23   cv action 255/282 exact 239/282
+reflex     weight[4]=0                  dev action 22/23 exact 22/23   cv action 253/282 exact 237/282
+reflex     weight[4]=6                  dev action 21/23 exact 21/23   cv action 246/282 exact 230/282
+reflex     weight[5]=0                  dev action 23/23 exact 23/23   cv action 249/282 exact 233/282
+reflex     weight[5]=6                  dev action 21/23 exact 21/23   cv action 241/282 exact 225/282
+reflex     weight[6]=0                  dev action 21/23 exact 21/23   cv action 252/282 exact 236/282
+reflex     weight[6]=6                  dev action 21/23 exact 21/23   cv action 248/282 exact 232/282
+reflex     weight[7]=0                  dev action 21/23 exact 21/23   cv action 250/282 exact 234/282
+reflex     weight[7]=6                  dev action 21/23 exact 21/23   cv action 237/282 exact 221/282
+reflex     D=4096                       dev action 22/23 exact 22/23   cv action 253/282 exact 237/282
+reflex     D=16384                      dev action 21/23 exact 21/23   cv action 253/282 exact 237/282
+reflex     alpha=0                      dev action 22/23 exact 22/23   cv action 250/282 exact 234/282
+reflex     alpha=0.25                   dev action 23/23 exact 23/23   cv action 253/282 exact 237/282
+reflex     alpha=0.75                   dev action 21/23 exact 21/23   cv action 249/282 exact 233/282
+reflex     alpha=1                      dev action 21/23 exact 21/23   cv action 239/282 exact 226/282
+reflex     zero_band=0                  dev action 21/23 exact 21/23   cv action 252/282 exact 236/282
+reflex     zero_band=0.8                dev action 22/23 exact 22/23   cv action 253/282 exact 237/282
+reflex     epochs=0 eta=0.5             dev action 22/23 exact 22/23   cv action 251/282 exact 235/282
+reflex     epochs=10 eta=0.5            dev action 21/23 exact 21/23   cv action 254/282 exact 238/282
+reflex     epochs=40 eta=0.05           dev action 22/23 exact 22/23   cv action 252/282 exact 236/282
+reflex     epochs=40 eta=1              dev action 21/23 exact 21/23   cv action 254/282 exact 238/282
+nearest    frozen                       dev action 22/23 exact 22/23   cv action 245/282 exact 229/282
+nearest    k=1                          dev action 20/23 exact 20/23   cv action 219/282 exact 207/282
+nearest    k=5                          dev action 22/23 exact 22/23   cv action 245/282 exact 229/282
+nearest    weight[0]=0                  dev action 22/23 exact 22/23   cv action 248/282 exact 232/282
+nearest    weight[0]=6                  dev action 22/23 exact 22/23   cv action 238/282 exact 225/282
+nearest    weight[1]=0                  dev action 22/23 exact 22/23   cv action 247/282 exact 231/282
+nearest    weight[1]=6                  dev action 21/23 exact 21/23   cv action 241/282 exact 225/282
+nearest    weight[2]=0                  dev action 22/23 exact 22/23   cv action 245/282 exact 229/282
+nearest    weight[2]=6                  dev action 20/23 exact 20/23   cv action 212/282 exact 203/282
+nearest    weight[3]=0                  dev action 21/23 exact 21/23   cv action 206/282 exact 193/282
+nearest    weight[3]=6                  dev action 22/23 exact 22/23   cv action 245/282 exact 229/282
+nearest    weight[4]=0                  dev action 22/23 exact 22/23   cv action 246/282 exact 230/282
+nearest    weight[4]=6                  dev action 21/23 exact 21/23   cv action 244/282 exact 228/282
+nearest    weight[5]=0                  dev action 22/23 exact 22/23   cv action 245/282 exact 229/282
+nearest    weight[5]=6                  dev action 22/23 exact 22/23   cv action 241/282 exact 225/282
+nearest    weight[6]=0                  dev action 22/23 exact 22/23   cv action 240/282 exact 225/282
+nearest    weight[6]=6                  dev action 22/23 exact 22/23   cv action 245/282 exact 229/282
+nearest    weight[7]=0                  dev action 21/23 exact 21/23   cv action 235/282 exact 222/282
+nearest    weight[7]=6                  dev action 22/23 exact 22/23   cv action 236/282 exact 220/282
+perceptron frozen                       dev action 20/23 exact 20/23   cv action 243/282 exact 227/282
+perceptron epochs=5                     dev action 20/23 exact 20/23   cv action 243/282 exact 227/282
+perceptron epochs=10                    dev action 20/23 exact 20/23   cv action 243/282 exact 227/282
+perceptron epochs=40                    dev action 20/23 exact 20/23   cv action 238/282 exact 222/282
+perceptron weight[0]=0                  dev action 20/23 exact 20/23   cv action 243/282 exact 227/282
+perceptron weight[0]=6                  dev action 17/23 exact 17/23   cv action 217/282 exact 205/282
+perceptron weight[1]=0                  dev action 20/23 exact 20/23   cv action 234/282 exact 218/282
+perceptron weight[1]=6                  dev action 18/23 exact 18/23   cv action 223/282 exact 213/282
+perceptron weight[2]=0                  dev action 17/23 exact 17/23   cv action 236/282 exact 220/282
+perceptron weight[2]=6                  dev action 20/23 exact 20/23   cv action 190/282 exact 185/282
+perceptron weight[3]=0                  dev action 17/23 exact 17/23   cv action 224/282 exact 209/282
+perceptron weight[3]=6                  dev action 17/23 exact 17/23   cv action 242/282 exact 227/282
+perceptron weight[4]=0                  dev action 17/23 exact 17/23   cv action 241/282 exact 227/282
+perceptron weight[4]=6                  dev action 18/23 exact 18/23   cv action 232/282 exact 217/282
+perceptron weight[5]=0                  dev action 19/23 exact 19/23   cv action 229/282 exact 213/282
+perceptron weight[5]=6                  dev action 18/23 exact 18/23   cv action 242/282 exact 226/282
+perceptron weight[6]=0                  dev action 20/23 exact 20/23   cv action 233/282 exact 217/282
+perceptron weight[6]=6                  dev action 21/23 exact 21/23   cv action 237/282 exact 222/282
+perceptron weight[7]=0                  dev action 21/23 exact 21/23   cv action 234/282 exact 220/282
+perceptron weight[7]=6                  dev action 21/23 exact 21/23   cv action 225/282 exact 210/282
+## round 5 base: nearest word 0
+reflex     frozen                       dev action 21/23 exact 21/23   cv action 255/282 exact 239/282
+reflex     k=1                          dev action 21/23 exact 21/23   cv action 240/282 exact 224/282
+reflex     k=5                          dev action 22/23 exact 22/23   cv action 250/282 exact 234/282
+reflex     weight[0]=0                  dev action 22/23 exact 22/23   cv action 253/282 exact 237/282
+reflex     weight[0]=6                  dev action 21/23 exact 21/23   cv action 237/282 exact 224/282
+reflex     weight[1]=0                  dev action 21/23 exact 21/23   cv action 255/282 exact 239/282
+reflex     weight[1]=6                  dev action 21/23 exact 21/23   cv action 248/282 exact 232/282
+reflex     weight[2]=0                  dev action 23/23 exact 23/23   cv action 254/282 exact 238/282
+reflex     weight[2]=6                  dev action 19/23 exact 19/23   cv action 212/282 exact 203/282
+reflex     weight[3]=0                  dev action 21/23 exact 21/23   cv action 214/282 exact 202/282
+reflex     weight[3]=6                  dev action 21/23 exact 21/23   cv action 255/282 exact 239/282
+reflex     weight[4]=0                  dev action 22/23 exact 22/23   cv action 253/282 exact 237/282
+reflex     weight[4]=6                  dev action 21/23 exact 21/23   cv action 246/282 exact 230/282
+reflex     weight[5]=0                  dev action 23/23 exact 23/23   cv action 249/282 exact 233/282
+reflex     weight[5]=6                  dev action 21/23 exact 21/23   cv action 241/282 exact 225/282
+reflex     weight[6]=0                  dev action 21/23 exact 21/23   cv action 252/282 exact 236/282
+reflex     weight[6]=6                  dev action 21/23 exact 21/23   cv action 248/282 exact 232/282
+reflex     weight[7]=0                  dev action 21/23 exact 21/23   cv action 250/282 exact 234/282
+reflex     weight[7]=6                  dev action 21/23 exact 21/23   cv action 237/282 exact 221/282
+reflex     D=4096                       dev action 22/23 exact 22/23   cv action 253/282 exact 237/282
+reflex     D=16384                      dev action 21/23 exact 21/23   cv action 253/282 exact 237/282
+reflex     alpha=0                      dev action 22/23 exact 22/23   cv action 250/282 exact 234/282
+reflex     alpha=0.25                   dev action 23/23 exact 23/23   cv action 253/282 exact 237/282
+reflex     alpha=0.75                   dev action 21/23 exact 21/23   cv action 249/282 exact 233/282
+reflex     alpha=1                      dev action 21/23 exact 21/23   cv action 239/282 exact 226/282
+reflex     zero_band=0                  dev action 21/23 exact 21/23   cv action 252/282 exact 236/282
+reflex     zero_band=0.8                dev action 22/23 exact 22/23   cv action 253/282 exact 237/282
+reflex     epochs=0 eta=0.5             dev action 22/23 exact 22/23   cv action 251/282 exact 235/282
+reflex     epochs=10 eta=0.5            dev action 21/23 exact 21/23   cv action 254/282 exact 238/282
+reflex     epochs=40 eta=0.05           dev action 22/23 exact 22/23   cv action 252/282 exact 236/282
+reflex     epochs=40 eta=1              dev action 21/23 exact 21/23   cv action 254/282 exact 238/282
+nearest    frozen                       dev action 22/23 exact 22/23   cv action 248/282 exact 232/282
+nearest    k=1                          dev action 18/23 exact 18/23   cv action 218/282 exact 203/282
+nearest    k=5                          dev action 22/23 exact 22/23   cv action 248/282 exact 232/282
+nearest    weight[0]=0                  dev action 22/23 exact 22/23   cv action 248/282 exact 232/282
+nearest    weight[0]=6                  dev action 22/23 exact 22/23   cv action 238/282 exact 225/282
+nearest    weight[1]=0                  dev action 21/23 exact 21/23   cv action 244/282 exact 228/282
+nearest    weight[1]=6                  dev action 21/23 exact 21/23   cv action 243/282 exact 229/282
+nearest    weight[2]=0                  dev action 22/23 exact 22/23   cv action 248/282 exact 232/282
+nearest    weight[2]=6                  dev action 20/23 exact 20/23   cv action 215/282 exact 205/282
+nearest    weight[3]=0                  dev action 18/23 exact 18/23   cv action 210/282 exact 194/282
+nearest    weight[3]=6                  dev action 22/23 exact 22/23   cv action 248/282 exact 232/282
+nearest    weight[4]=0                  dev action 22/23 exact 22/23   cv action 244/282 exact 228/282
+nearest    weight[4]=6                  dev action 22/23 exact 22/23   cv action 245/282 exact 229/282
+nearest    weight[5]=0                  dev action 21/23 exact 21/23   cv action 254/282 exact 238/282
+nearest    weight[5]=6                  dev action 22/23 exact 22/23   cv action 237/282 exact 221/282
+nearest    weight[6]=0                  dev action 22/23 exact 22/23   cv action 251/282 exact 235/282
+nearest    weight[6]=6                  dev action 22/23 exact 22/23   cv action 244/282 exact 228/282
+nearest    weight[7]=0                  dev action 19/23 exact 19/23   cv action 234/282 exact 221/282
+nearest    weight[7]=6                  dev action 21/23 exact 21/23   cv action 230/282 exact 214/282
+perceptron frozen                       dev action 20/23 exact 20/23   cv action 243/282 exact 227/282
+perceptron epochs=5                     dev action 20/23 exact 20/23   cv action 243/282 exact 227/282
+perceptron epochs=10                    dev action 20/23 exact 20/23   cv action 243/282 exact 227/282
+perceptron epochs=40                    dev action 20/23 exact 20/23   cv action 238/282 exact 222/282
+perceptron weight[0]=0                  dev action 20/23 exact 20/23   cv action 243/282 exact 227/282
+perceptron weight[0]=6                  dev action 17/23 exact 17/23   cv action 217/282 exact 205/282
+perceptron weight[1]=0                  dev action 20/23 exact 20/23   cv action 234/282 exact 218/282
+perceptron weight[1]=6                  dev action 18/23 exact 18/23   cv action 223/282 exact 213/282
+perceptron weight[2]=0                  dev action 17/23 exact 17/23   cv action 236/282 exact 220/282
+perceptron weight[2]=6                  dev action 20/23 exact 20/23   cv action 190/282 exact 185/282
+perceptron weight[3]=0                  dev action 17/23 exact 17/23   cv action 224/282 exact 209/282
+perceptron weight[3]=6                  dev action 17/23 exact 17/23   cv action 242/282 exact 227/282
+perceptron weight[4]=0                  dev action 17/23 exact 17/23   cv action 241/282 exact 227/282
+perceptron weight[4]=6                  dev action 18/23 exact 18/23   cv action 232/282 exact 217/282
+perceptron weight[5]=0                  dev action 19/23 exact 19/23   cv action 229/282 exact 213/282
+perceptron weight[5]=6                  dev action 18/23 exact 18/23   cv action 242/282 exact 226/282
+perceptron weight[6]=0                  dev action 20/23 exact 20/23   cv action 233/282 exact 217/282
+perceptron weight[6]=6                  dev action 21/23 exact 21/23   cv action 237/282 exact 222/282
+perceptron weight[7]=0                  dev action 21/23 exact 21/23   cv action 234/282 exact 220/282
+perceptron weight[7]=6                  dev action 21/23 exact 21/23   cv action 225/282 exact 210/282
+## round 6 base: nearest ctx 0 (no change reaches +3: stop, final)
+reflex     frozen                       dev action 21/23 exact 21/23   cv action 255/282 exact 239/282
+reflex     k=1                          dev action 21/23 exact 21/23   cv action 240/282 exact 224/282
+reflex     k=5                          dev action 22/23 exact 22/23   cv action 250/282 exact 234/282
+reflex     weight[0]=0                  dev action 22/23 exact 22/23   cv action 253/282 exact 237/282
+reflex     weight[0]=6                  dev action 21/23 exact 21/23   cv action 237/282 exact 224/282
+reflex     weight[1]=0                  dev action 21/23 exact 21/23   cv action 255/282 exact 239/282
+reflex     weight[1]=6                  dev action 21/23 exact 21/23   cv action 248/282 exact 232/282
+reflex     weight[2]=0                  dev action 23/23 exact 23/23   cv action 254/282 exact 238/282
+reflex     weight[2]=6                  dev action 19/23 exact 19/23   cv action 212/282 exact 203/282
+reflex     weight[3]=0                  dev action 21/23 exact 21/23   cv action 214/282 exact 202/282
+reflex     weight[3]=6                  dev action 21/23 exact 21/23   cv action 255/282 exact 239/282
+reflex     weight[4]=0                  dev action 22/23 exact 22/23   cv action 253/282 exact 237/282
+reflex     weight[4]=6                  dev action 21/23 exact 21/23   cv action 246/282 exact 230/282
+reflex     weight[5]=0                  dev action 23/23 exact 23/23   cv action 249/282 exact 233/282
+reflex     weight[5]=6                  dev action 21/23 exact 21/23   cv action 241/282 exact 225/282
+reflex     weight[6]=0                  dev action 21/23 exact 21/23   cv action 252/282 exact 236/282
+reflex     weight[6]=6                  dev action 21/23 exact 21/23   cv action 248/282 exact 232/282
+reflex     weight[7]=0                  dev action 21/23 exact 21/23   cv action 250/282 exact 234/282
+reflex     weight[7]=6                  dev action 21/23 exact 21/23   cv action 237/282 exact 221/282
+reflex     D=4096                       dev action 22/23 exact 22/23   cv action 253/282 exact 237/282
+reflex     D=16384                      dev action 21/23 exact 21/23   cv action 253/282 exact 237/282
+reflex     alpha=0                      dev action 22/23 exact 22/23   cv action 250/282 exact 234/282
+reflex     alpha=0.25                   dev action 23/23 exact 23/23   cv action 253/282 exact 237/282
+reflex     alpha=0.75                   dev action 21/23 exact 21/23   cv action 249/282 exact 233/282
+reflex     alpha=1                      dev action 21/23 exact 21/23   cv action 239/282 exact 226/282
+reflex     zero_band=0                  dev action 21/23 exact 21/23   cv action 252/282 exact 236/282
+reflex     zero_band=0.8                dev action 22/23 exact 22/23   cv action 253/282 exact 237/282
+reflex     epochs=0 eta=0.5             dev action 22/23 exact 22/23   cv action 251/282 exact 235/282
+reflex     epochs=10 eta=0.5            dev action 21/23 exact 21/23   cv action 254/282 exact 238/282
+reflex     epochs=40 eta=0.05           dev action 22/23 exact 22/23   cv action 252/282 exact 236/282
+reflex     epochs=40 eta=1              dev action 21/23 exact 21/23   cv action 254/282 exact 238/282
+nearest    frozen                       dev action 21/23 exact 21/23   cv action 254/282 exact 238/282
+nearest    k=1                          dev action 18/23 exact 18/23   cv action 228/282 exact 212/282
+nearest    k=5                          dev action 21/23 exact 21/23   cv action 254/282 exact 238/282
+nearest    weight[0]=0                  dev action 21/23 exact 21/23   cv action 254/282 exact 238/282
+nearest    weight[0]=6                  dev action 22/23 exact 22/23   cv action 239/282 exact 226/282
+nearest    weight[1]=0                  dev action 21/23 exact 21/23   cv action 255/282 exact 239/282
+nearest    weight[1]=6                  dev action 22/23 exact 22/23   cv action 247/282 exact 231/282
+nearest    weight[2]=0                  dev action 21/23 exact 21/23   cv action 254/282 exact 238/282
+nearest    weight[2]=6                  dev action 20/23 exact 20/23   cv action 213/282 exact 203/282
+nearest    weight[3]=0                  dev action 19/23 exact 19/23   cv action 221/282 exact 205/282
+nearest    weight[3]=6                  dev action 21/23 exact 21/23   cv action 254/282 exact 238/282
+nearest    weight[4]=0                  dev action 22/23 exact 22/23   cv action 255/282 exact 239/282
+nearest    weight[4]=6                  dev action 21/23 exact 21/23   cv action 252/282 exact 236/282
+nearest    weight[5]=0                  dev action 21/23 exact 21/23   cv action 254/282 exact 238/282
+nearest    weight[5]=6                  dev action 22/23 exact 22/23   cv action 237/282 exact 221/282
+nearest    weight[6]=0                  dev action 22/23 exact 22/23   cv action 246/282 exact 230/282
+nearest    weight[6]=6                  dev action 22/23 exact 22/23   cv action 254/282 exact 238/282
+nearest    weight[7]=0                  dev action 19/23 exact 19/23   cv action 244/282 exact 230/282
+nearest    weight[7]=6                  dev action 21/23 exact 21/23   cv action 239/282 exact 223/282
+perceptron frozen                       dev action 20/23 exact 20/23   cv action 243/282 exact 227/282
+perceptron epochs=5                     dev action 20/23 exact 20/23   cv action 243/282 exact 227/282
+perceptron epochs=10                    dev action 20/23 exact 20/23   cv action 243/282 exact 227/282
+perceptron epochs=40                    dev action 20/23 exact 20/23   cv action 238/282 exact 222/282
+perceptron weight[0]=0                  dev action 20/23 exact 20/23   cv action 243/282 exact 227/282
+perceptron weight[0]=6                  dev action 17/23 exact 17/23   cv action 217/282 exact 205/282
+perceptron weight[1]=0                  dev action 20/23 exact 20/23   cv action 234/282 exact 218/282
+perceptron weight[1]=6                  dev action 18/23 exact 18/23   cv action 223/282 exact 213/282
+perceptron weight[2]=0                  dev action 17/23 exact 17/23   cv action 236/282 exact 220/282
+perceptron weight[2]=6                  dev action 20/23 exact 20/23   cv action 190/282 exact 185/282
+perceptron weight[3]=0                  dev action 17/23 exact 17/23   cv action 224/282 exact 209/282
+perceptron weight[3]=6                  dev action 17/23 exact 17/23   cv action 242/282 exact 227/282
+perceptron weight[4]=0                  dev action 17/23 exact 17/23   cv action 241/282 exact 227/282
+perceptron weight[4]=6                  dev action 18/23 exact 18/23   cv action 232/282 exact 217/282
+perceptron weight[5]=0                  dev action 19/23 exact 19/23   cv action 229/282 exact 213/282
+perceptron weight[5]=6                  dev action 18/23 exact 18/23   cv action 242/282 exact 226/282
+perceptron weight[6]=0                  dev action 20/23 exact 20/23   cv action 233/282 exact 217/282
+perceptron weight[6]=6                  dev action 21/23 exact 21/23   cv action 237/282 exact 222/282
+perceptron weight[7]=0                  dev action 21/23 exact 21/23   cv action 234/282 exact 220/282
+perceptron weight[7]=6                  dev action 21/23 exact 21/23   cv action 225/282 exact 210/282
+## risk-coverage with the final configs (abstain -> clarify)
+reflex risk-coverage over 259 scored decisions (cv + dev)
+  t_margin  t_agree  answered  wrong_answered  exact_if_abstain_is_clarify
+  0         0             259              44    215/259
+  0         0.5           225              29    199/259
+  0         0.7           141              14    139/259
+  0.005     0             253              42    211/259
+  0.005     0.5           223              28    198/259
+  0.005     0.7           141              14    139/259
+  0.01      0             249              41    209/259
+  0.01      0.5           222              28    198/259
+  0.01      0.7           141              14    139/259
+  0.02      0             236              35    202/259
+  0.02      0.5           219              26    197/259
+  0.02      0.7           141              14    139/259
+  0.05      0             206              21    192/259
+  0.05      0.5           200              17    191/259
+  0.05      0.7           136              11    138/259
+  0.1       0             146              11    148/259
+  0.1       0.5           146              11    148/259
+  0.1       0.7           110              10    115/259
+nearest risk-coverage over 257 scored decisions (cv + dev)
+  t_margin  t_agree  answered  wrong_answered  exact_if_abstain_is_clarify
+  0         0             257              45    212/257
+  0         0.5           217              29    196/257
+  0         0.7           168              20    158/257
+  0.005     0             252              40    213/257
+  0.005     0.5           217              29    196/257
+  0.005     0.7           168              20    158/257
+  0.01      0             248              37    212/257
+  0.01      0.5           216              28    196/257
+  0.01      0.7           168              20    158/257
+  0.02      0             239              33    209/257
+  0.02      0.5           214              28    194/257
+  0.02      0.7           167              20    157/257
+  0.05      0             214              27    195/257
+  0.05      0.5           199              25    183/257
+  0.05      0.7           162              20    152/257
+  0.1       0             173              20    165/257
+  0.1       0.5           170              20    162/257
+  0.1       0.7           148              18    142/257
+perceptron risk-coverage over 267 scored decisions (cv + dev)
+  t_margin  t_agree  answered  wrong_answered  exact_if_abstain_is_clarify
+  0         0             267              57    210/267
+  0         0.5           267              57    210/267
+  0         0.7           267              57    210/267
+  0.005     0             265              56    209/267
+  0.005     0.5           265              56    209/267
+  0.005     0.7           265              56    209/267
+  0.01      0             265              56    209/267
+  0.01      0.5           265              56    209/267
+  0.01      0.7           265              56    209/267
+  0.02      0             264              55    209/267
+  0.02      0.5           264              55    209/267
+  0.02      0.7           264              55    209/267
+  0.05      0             254              49    208/267
+  0.05      0.5           254              49    208/267
+  0.05      0.7           254              49    208/267
+  0.1       0             244              46    201/267
+  0.1       0.5           244              46    201/267
+  0.1       0.7           244              46    201/267

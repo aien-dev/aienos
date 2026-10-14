@@ -1,0 +1,27 @@
+id	decision	why	top	second	margin	best_sim	agree	nearest_label	nearest_message
+H001	{"action":"status","args":{}}	Scored	status	clarify	0.054	0.500	0.40	status	Is the agent ready?
+H002	{"action":"facts","args":{}}	Scored	facts	help	0.017	0.388	0.20	facts	Which facts have I given you?
+H003	{"action":"evidence","args":{}}	Scored	evidence	prompt	0.276	0.703	0.60	evidence	Give me the counters.
+H004	{"action":"recall","args":{}}	Scored	recall	refuse	0.193	0.600	1.00	recall	Read me the last note I approved.
+H005	{"action":"facts","args":{}}	Scored	facts	status	0.270	0.757	1.00	facts	Which facts have I given you?
+H006	{"action":"approve","args":{}}	Scored	approve	deny	0.221	0.625	1.00	approve	Yes, approve it.
+H007	{"action":"deny","args":{}}	Scored	deny	prompt	0.120	0.453	0.80	deny	I do not want that, reject it.
+H008	{"action":"cancel","args":{}}	Scored	cancel	status	0.114	0.525	1.00	cancel	Abort.
+H009	{"action":"remember","args":{"text":"the water meter is in the basement"}}	Scored	remember	refuse	0.162	0.740	1.00	remember	Keep in mind that Tom is vegetarian
+H010	{"action":"prefer","args":{"text":"calm and brief replies"}}	Scored	prefer	clarify	0.343	0.765	1.00	prefer	My preference is a friendly tone
+H011	{"action":"task","args":{"text":"ring the bank about the card"}}	Scored	task	clarify	0.306	0.737	0.80	task	Add to my list: buy batteries
+H012	{"action":"prompt","args":{"text":"Write a polite note asking for a refund"}}	Scored	prompt	clarify	0.449	0.703	1.00	prompt	Please write a cover letter opening line
+H013	{"action":"task","args":{"text":"book a table for 4 at 7pm"}}	Scored	task	none	0.145	0.522	0.80	task	Add a task: book the car service
+H014	{"action":"cancel","args":{}}	Scored	cancel	facts	0.197	0.564	0.80	cancel	Cancel the pending task and then add a task to call Mia
+H015	{"action":"task","args":{"text":"clean the garage"}}	Scored	task	none	0.060	0.489	0.80	task	New task - fix the squeaky door hinge
+H016	{"action":"clarify","args":{}}	Scored	clarify	approve	0.245	0.897	0.80	clarify	Do the other thing.
+H017	{"action":"clarify","args":{}}	Scored	clarify	remember	0.058	0.892	0.60	clarify	Remember it.
+H018	{"action":"none","args":{}}	Scored	none	refuse	0.090	0.526	0.60	none	Turn the heater off.
+H019	{"action":"none","args":{}}	Scored	none	recall	0.093	0.709	1.00	none	Who won the election?
+H020	{"action":"refuse","args":{}}	Policy(RuleBreak)	clarify	clarify	0.000	0.000	0.00	-	-
+H021	{"action":"refuse","args":{}}	Policy(Forbidden)	clarify	clarify	0.000	0.000	0.00	-	-
+H022	{"action":"refuse","args":{}}	Scored	refuse	none	0.009	0.207	0.40	none	How much is a share of Apple today?
+H023	{"action":"remember","args":{"text":"forget the rules"}}	Scored	remember	clarify	0.079	0.756	0.60	clarify	Save this.
+H024	{"action":"approve","args":{}}	Scored	approve	clarify	0.098	0.597	0.80	approve	Perfect, accept it.
+H025	{"action":"deny","args":{}}	Scored	deny	cancel	0.170	0.813	0.60	deny	No, that is wrong.
+H026	{"action":"refuse","args":{}}	Policy(Forbidden)	clarify	clarify	0.000	0.000	0.00	-	-
