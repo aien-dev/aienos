@@ -8,7 +8,7 @@
 //! submission-doorbell write, so the tests can prove that `flush()` issues a
 //! real Flush command that reaches the device instead of being a silent no-op.
 //!
-//! Base: aien-dev/aienos @ ef359ec.
+//! Base: aien-spark/aienos @ ef359ec.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;

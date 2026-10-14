@@ -456,7 +456,7 @@ This note adds to section 6 and does not change the status of this ADR or any ot
 
 Section 6 allows a `seed0b-test-anchor` build to add "one known qualification public key". Today that key is the RFC 8032 TEST 1 public key (`d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a`, signer fingerprint `21fe31dfa154a261626bf854046fd2271b7bed4b6abe45aa58877ef47f9721b9`). It verifies Binary Artifact v0.
 
-The OSC unit container ([aien-protocols](https://github.com/aien-dev/aien-protocols) `specs/osc-unit-artifact`, PR #17, v1 draft) is a different format with its own conformance vectors. Those vectors are signed with a different throwaway key, `keys/test1.pub` of that spec, whose signer fingerprint is `7b136f1c9197f8a99a91057f5deced18d5754669e559ee7cc4f7cef64a626abf`. It is not the RFC 8032 TEST 1 key.
+The OSC unit container ([aien-protocols](https://github.com/aien-spark/aien-protocols) `specs/osc-unit-artifact`, PR #17, v1 draft) is a different format with its own conformance vectors. Those vectors are signed with a different throwaway key, `keys/test1.pub` of that spec, whose signer fingerprint is `7b136f1c9197f8a99a91057f5deced18d5754669e559ee7cc4f7cef64a626abf`. It is not the RFC 8032 TEST 1 key.
 
 Amendment: a `seed0b-test-anchor` qualification build may also hold the OSC unit spec's TEST key (`specs/osc-unit-artifact/keys/test1.pub`, fingerprint `7b136f1c9197f8a99a91057f5deced18d5754669e559ee7cc4f7cef64a626abf`), beside the RFC 8032 TEST 1 key. The OSC unit admission path trusts only the spec key and Binary Artifact v0 admission trusts only the RFC 8032 key; neither key is accepted on the other path.
 
@@ -468,7 +468,7 @@ Observation, no change made here: the `execution_status` mapping text in section
 
 ## Amendment, 2026-10-08: the OSC unit is a second container type
 
-This amendment does not change the status of this ADR, the Binary Artifact v0 encoding, its limits, its rejection reasons, its receipt, or its trust anchor. It records how the OSC unit container ([aien-protocols](https://github.com/aien-dev/aien-protocols) `specs/osc-unit-artifact`, PR #17, container version 1) relates to this ADR. It settles conflicts C2 and C3 of that spec's section 15.3 and records the AIENOS position on C1.
+This amendment does not change the status of this ADR, the Binary Artifact v0 encoding, its limits, its rejection reasons, its receipt, or its trust anchor. It records how the OSC unit container ([aien-protocols](https://github.com/aien-spark/aien-protocols) `specs/osc-unit-artifact`, PR #17, container version 1) relates to this ADR. It settles conflicts C2 and C3 of that spec's section 15.3 and records the AIENOS position on C1.
 
 Decision record: the operator was offered three choices on aienos#277 (record the OSC unit as its own container type; fit it into Binary Artifact v0; or keep it as an unrecorded QEMU-only path) and on 2026-10-08 delegated the choice ("proceed with however you think best"). The orchestrator chose the first, which this amendment writes down.
 

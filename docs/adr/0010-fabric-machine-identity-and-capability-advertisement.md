@@ -3,7 +3,7 @@
 Status: Proposed.
 
 Open for early discussion per
-[issue #37](https://github.com/aien-dev/aienos/issues/37). Not yet accepted.
+[issue #37](https://github.com/aien-spark/aienos/issues/37). Not yet accepted.
 Nothing in this record is active before native networking
 ([M6](../MILESTONES.md)) and the preconditions below are met. No code is
 mandated by this record.

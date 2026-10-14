@@ -12,7 +12,7 @@
 > stick: use it only from Ubuntu.
 
 This procedure builds and exercises the bootable recovery USB for
-[issue #17](https://github.com/aien-dev/aienos/issues/17) and TRUST-1 Gate 1.
+[issue #17](https://github.com/aien-spark/aienos/issues/17) and TRUST-1 Gate 1.
 The physical run on 2026-09-25 booted the USB once, mounted the internal root
 and ESP read-only, checked the fallback loader and recovery tools, and
 returned to Ubuntu. It made no filesystem or firmware changes. The evidence

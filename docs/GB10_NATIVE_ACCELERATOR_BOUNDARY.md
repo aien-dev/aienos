@@ -4,7 +4,7 @@ This document freezes the layering a future native GB10 driver must fit into.
 It does not design the driver. It defines the boundary so that GPU work can be
 built against a capability-bound contract instead of ambient hardware access.
 
-Governing: issue [#36](https://github.com/aien-dev/aienos/issues/36),
+Governing: issue [#36](https://github.com/aien-spark/aienos/issues/36),
 [GB10_HARDWARE_PROFILE.md](GB10_HARDWARE_PROFILE.md),
 [GB10_PLATFORM_TOPOLOGY.md](GB10_PLATFORM_TOPOLOGY.md),
 [ARCHITECTURE.md](ARCHITECTURE.md).

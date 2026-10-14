@@ -1,6 +1,6 @@
 # AIENOS Architectural Milestones Matrix & Execution Plan
 
-> **REFERENCE MILESTONE SPECIFICATION, NOT THE CURRENT EXECUTION ORDER.** Current AIENOS sequencing and status are in [../ROADMAP.md](../ROADMAP.md). Whole-system sequencing is owned by `aien-dev/aien-architecture/CURRENT_EXECUTION_PLAN.md`. See [PLAN_AUTHORITY.md](PLAN_AUTHORITY.md).
+> **REFERENCE MILESTONE SPECIFICATION, NOT THE CURRENT EXECUTION ORDER.** Current AIENOS sequencing and status are in [../ROADMAP.md](../ROADMAP.md). Whole-system sequencing is owned by `aien-spark/aien-architecture/CURRENT_EXECUTION_PLAN.md`. See [PLAN_AUTHORITY.md](PLAN_AUTHORITY.md).
 
 **Status:** Reference Architectural Specification; execution order superseded by `../ROADMAP.md`
 **Version:** 1.0.0

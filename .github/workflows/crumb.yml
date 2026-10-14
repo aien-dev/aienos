@@ -32,7 +32,7 @@ jobs:
       - name: Checkout pinned aien-architecture (crumb tool source)
         uses: actions/checkout@v4
         with:
-          repository: aien-dev/aien-architecture
+          repository: aien-spark/aien-architecture
           ref: ${{ steps.pins.outputs.crumb }}
           path: .crumb-tool-src
       - name: Build the crumb tool, then remove its source from this tree

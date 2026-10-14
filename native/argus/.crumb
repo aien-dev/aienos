@@ -27,8 +27,8 @@
           "purpose": "Directory native/argus/bridge. Purpose not yet described by a human."
         },
         {
-          "digest": "0778d413d1596682df475201b2ceaff4a79129c25b3b653d77fae290a19ba6af",
-          "last_commit": "a047289",
+          "digest": "c519b9b561e14e4c8017f79c86093d14b250c72e5c17258d77507130dd420a44",
+          "last_commit": "f78977a",
           "name": "docs",
           "purpose": "Directory native/argus/docs. Purpose not yet described by a human."
         },
@@ -39,15 +39,15 @@
           "purpose": "Directory native/argus/tests. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:28a1567c49aba8617588991d7384e2718eb7f339e6129fa5b0e585d6a245923f",
-      "compiled_at": "2026-10-04T13:47:18Z",
+      "children_root": "sha256:60f887eb1e514a9e647f622c81848e2accd452e38b157103e8a9f58a32bb1694",
+      "compiled_at": "2026-10-14T01:16:45Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:7a5972d5e7135c13af527ba7bc91f6532fcebc206df0686e742e98c1050c6c29",
+      "digest": "sha256:50aa2fbd6ca356b7703517bc7ecf439f7b6e0a6b935d0ca6ca4c6f7caf23ce34",
       "evidence_files": 0,
       "evidence_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "files": 47,
-      "generated_at_commit": "a863d5c1f5bd89c88c5f6671eecfd27b599ee512",
-      "source_tree": "sha256:72e4467af37f510ea67b093b8b6c5b713cfd841b3725d1eddcce9ea1c71ad930"
+      "generated_at_commit": "f78977a6ce33ea89a5b3b1952c0a0e403d4504fa",
+      "source_tree": "sha256:9511497343ad28d30fb7c58c0d11c87ab936d6e95ff561bf245ea2e5acbbb4f1"
     },
     "owner_lane": "",
     "provenance": {

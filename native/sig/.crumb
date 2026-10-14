@@ -42,7 +42,7 @@
         },
         {
           "lane": "lane10",
-          "note": "Verdict: PASS (software primitive). PR aien-dev/aienos #188 MERGED, merge commit 913b962 (main tree identical to the tested branch cea54be).",
+          "note": "Verdict: PASS (software primitive). PR aien-spark/aienos #188 MERGED, merge commit 913b962 (main tree identical to the tested branch cea54be).",
           "pr": 188,
           "ref": "2026-10-01-push-lane10-report.md",
           "sha": "913b962",

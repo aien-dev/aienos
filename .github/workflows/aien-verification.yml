@@ -83,7 +83,7 @@ jobs:
       - name: Checkout the pinned crumb tool source (aien-architecture @ d0f0b95d344b4c6628c3d868346932fd247ce168)
         uses: actions/checkout@v4
         with:
-          repository: aien-dev/aien-architecture
+          repository: aien-spark/aien-architecture
           ref: d0f0b95d344b4c6628c3d868346932fd247ce168
           path: .crumb-tool-src
 
@@ -107,7 +107,7 @@ jobs:
         if: steps.anchors.outputs.enrolled == 'true'
         uses: actions/checkout@v4
         with:
-          repository: aien-dev/aien-sovereign-core
+          repository: aien-spark/aien-sovereign-core
           ref: ${{ env.AIEN_TEST_PIN }}
           path: .aien-test-src
 

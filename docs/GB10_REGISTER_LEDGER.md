@@ -9,7 +9,7 @@ The repository supports exactly two GB10 registers today: PMC `BOOT_0` and PMC
 `BOOT_42`. There are no others. If a future milestone establishes more, they
 are added here with their own evidence.
 
-Governing: issue [#36](https://github.com/aien-dev/aienos/issues/36),
+Governing: issue [#36](https://github.com/aien-spark/aienos/issues/36),
 [GB10_HARDWARE_PROFILE.md](GB10_HARDWARE_PROFILE.md),
 [GB10_NATIVE_ACCELERATOR_BOUNDARY.md](GB10_NATIVE_ACCELERATOR_BOUNDARY.md).
 

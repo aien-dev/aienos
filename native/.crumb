@@ -49,14 +49,14 @@
     "generated": {
       "children": [
         {
-          "digest": "7a5972d5e7135c13af527ba7bc91f6532fcebc206df0686e742e98c1050c6c29",
-          "last_commit": "130aa20",
+          "digest": "50aa2fbd6ca356b7703517bc7ecf439f7b6e0a6b935d0ca6ca4c6f7caf23ce34",
+          "last_commit": "f78977a",
           "name": "argus",
           "purpose": "Directory native/argus. Purpose not yet described by a human."
         },
         {
           "digest": "19d19008ffb4cfcd93c43202081a84ecd1e37d1c60b9d7c355fd8b9db4d3d77e",
-          "last_commit": "e673bfb",
+          "last_commit": "e9d39a9",
           "name": "boot",
           "purpose": "Directory native/boot. Purpose not yet described by a human."
         },
@@ -79,8 +79,8 @@
           "purpose": "Directory native/disk. Purpose not yet described by a human."
         },
         {
-          "digest": "7df01cbf05b0e93aa9bbf47b2b862b110b001f9cce2283d181a91be5b3393507",
-          "last_commit": "e673bfb",
+          "digest": "1ea30e8921bc8f61835ecaa6e3896b1084c4b0a6034ff00493f21390a98f1b25",
+          "last_commit": "f78977a",
           "name": "kernel",
           "purpose": "Directory native/kernel. Purpose not yet described by a human."
         },
@@ -109,15 +109,15 @@
           "purpose": "Directory native/store. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:c8382b2f14968143480ff5b3dd2859dfb8a1671a60445d47a82204e06e8c5ba2",
-      "compiled_at": "2026-10-14T00:20:37Z",
+      "children_root": "sha256:f717850d29ca52ae372b396eee8f4323cb090798258f2b4eea23bbe5ce4f92cb",
+      "compiled_at": "2026-10-14T01:16:45Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:dc8479ff588f0d10dbfd65003c236db4cdeb9718a60d4fbf98822da677d908ff",
+      "digest": "sha256:c4788a6bd2633e3ad2933270f03e65212b0003f61e629a09f3b637ec9ff4a481",
       "evidence_files": 4,
       "evidence_root": "sha256:e410b845507e00568e15b51a5797af32a97e0e4b8ab4e8487bb7c98e7e0cf335",
       "files": 561,
-      "generated_at_commit": "a3e9c23dfc5b0ed0f9701132904b28edac14b71f",
-      "source_tree": "sha256:bfee5f6e8f8a64b1b0f1840dacc5dbd6659e62fa6b45b070ac27ddcfc775b666"
+      "generated_at_commit": "f78977a6ce33ea89a5b3b1952c0a0e403d4504fa",
+      "source_tree": "sha256:9bbd7b42a9f48a2cbc7b805a8ad5973bce1ef2f1950fc66d4933575f20f54d8c"
     },
     "owner_lane": "",
     "provenance": {
@@ -436,7 +436,7 @@
         },
         {
           "lane": "lane19",
-          "note": "Part A, aienos resend jitter: PASS (hosted).** PR aien-dev/aienos #193, merged 8d511d6. native/net only; no public signature, struct field or wire change.",
+          "note": "Part A, aienos resend jitter: PASS (hosted).** PR aien-spark/aienos #193, merged 8d511d6. native/net only; no public signature, struct field or wire change.",
           "pr": 193,
           "ref": "2026-10-01-push-lane19-report.md",
           "sha": "8d511d6",
@@ -468,7 +468,7 @@
         },
         {
           "lane": "lane16",
-          "note": "Pull request:** aien-dev/aienos #192, merged as 08cb905. Clean-tree receipt: native/net/receipts/m6a_net_host_83748f32...txt.",
+          "note": "Pull request:** aien-spark/aienos #192, merged as 08cb905. Clean-tree receipt: native/net/receipts/m6a_net_host_83748f32...txt.",
           "pr": 192,
           "ref": "2026-10-01-push-lane16-report.md",
           "sha": "08cb905",
@@ -604,7 +604,7 @@
         },
         {
           "lane": "lane10",
-          "note": "Verdict: PASS (software primitive). PR aien-dev/aienos #188 MERGED, merge commit 913b962 (main tree identical to the tested branch cea54be).",
+          "note": "Verdict: PASS (software primitive). PR aien-spark/aienos #188 MERGED, merge commit 913b962 (main tree identical to the tested branch cea54be).",
           "pr": 188,
           "ref": "2026-10-01-push-lane10-report.md",
           "sha": "913b962",
@@ -660,7 +660,7 @@
         },
         {
           "lane": "lane5",
-          "note": "PR: aien-dev/aienos #184, MERGED, merge sha 999b5aac1e5ad4ebee969fbce9ddbe2b71308b69",
+          "note": "PR: aien-spark/aienos #184, MERGED, merge sha 999b5aac1e5ad4ebee969fbce9ddbe2b71308b69",
           "pr": 184,
           "ref": "2026-10-01-push-lane5-report.md",
           "sha": "999b5aa",

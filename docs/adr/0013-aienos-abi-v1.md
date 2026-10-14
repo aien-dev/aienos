@@ -2,7 +2,7 @@
 
 Status: Proposed
 Date: 2026-09-24
-Governing: [ADR 0012](0012-self-construction-capability-growth-and-generations.md) (rule 5: no native admission without enforcement), [issue #30](https://github.com/aien-dev/aienos/issues/30) (IPC and capability handles), [PR #106](https://github.com/aien-dev/aienos/pull/106) (typed IPC).
+Governing: [ADR 0012](0012-self-construction-capability-growth-and-generations.md) (rule 5: no native admission without enforcement), [issue #30](https://github.com/aien-spark/aienos/issues/30) (IPC and capability handles), [PR #106](https://github.com/aien-spark/aienos/pull/106) (typed IPC).
 Code: [`crates/aienos-kernel/src/abi.rs`](../../crates/aienos-kernel/src/abi.rs).
 
 ## Context

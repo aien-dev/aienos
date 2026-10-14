@@ -6,7 +6,7 @@ M2C power, capture and input stay pending and boots stay attended.**
 
 Governing: [ADR 0011](adr/0011-machine-1-hardware-test-rig.md),
 [MILESTONES.md gate M2C](MILESTONES.md), [NATIVE_BOOT_ONE_TIME.md](NATIVE_BOOT_ONE_TIME.md),
-issue [#25](https://github.com/aien-dev/aienos/issues/25).
+issue [#25](https://github.com/aien-spark/aienos/issues/25).
 
 ## Why
 
@@ -47,7 +47,7 @@ part is replaceable with an equivalent.
 | Power/reset buttons | 2x reed or opto-isolated reed relays (for example Omron G3VM SIP MOSFET relays) | One across the Spark front-panel power-header pins, one across the reset-header pins; momentary closure only | ~4 USD |
 | Display capture | USB 3 HDMI capture dongle, UVC class, 1080p60 (for example an MS2109 or MS2130 based dongle) | Spark HDMI out to dongle input; appears as a webcam on the Pi; loop-through port passes the desk monitor | ~20 to 40 USD |
 | Input emulation | The Pi itself, USB OTG port in HID gadget mode (Linux `configfs`, `dwc2` overlay) | Presents a standard USB boot-protocol keyboard to the Spark | included |
-| Console capture | Pi GPIO UART (TX/RX) wired to the Spark UART at `0x16A00000` | Bounded serial console once [#22](https://github.com/aien-dev/aienos/issues/22) lands; 3.3 V levels only | jumper wires |
+| Console capture | Pi GPIO UART (TX/RX) wired to the Spark UART at `0x16A00000` | Bounded serial console once [#22](https://github.com/aien-spark/aienos/issues/22) lands; 3.3 V levels only | jumper wires |
 | Enclosure and safety | Fused mains inlet box for the relay, insulated standoffs, labeled header leads | Mains stays in a closed, fused box; low voltage leaves it | ~20 USD |
 
 Total new spend is roughly 50 to 70 USD. No part is on the Spark's boot
@@ -95,7 +95,7 @@ Two capture paths, both terminating on the Pi:
   lists as a gap.
 - **UART**: the kernel already has a bounded 16550-style UART writer at
   `0x16A00000`, 921600 baud (`crates/aienos-kernel/src/arch/aarch64.rs`),
-  skipped on the first boot because GB10 discovery failed. Once [#22](https://github.com/aien-dev/aienos/issues/22)
+  skipped on the first boot because GB10 discovery failed. Once [#22](https://github.com/aien-spark/aienos/issues/22)
   (SPCR-based discovery) lands, the Pi's GPIO UART records it at 3.3 V
   levels. Until then, HDMI capture is the only post-exit record and stays
   mandatory.
@@ -109,7 +109,7 @@ The Pi's OTG port runs the Linux HID gadget (`configfs` + `dwc2`) and appears
 to the Spark as a plain USB keyboard. The gadget implements the HID boot
 protocol, so it works in the firmware setup screen and boot menu where no OS
 driver exists, and later against the native xHCI/HID driver from
-[#24](https://github.com/aien-dev/aienos/issues/24).
+[#24](https://github.com/aien-spark/aienos/issues/24).
 
 Boot selection is deterministic: the rig never types blind. Each scripted
 sequence is a list of (wait for capture frame matching X, send keystrokes Y)
@@ -130,7 +130,7 @@ one exact commit, same rule as the staged image.
 ## Serialization through `aien-proof`
 
 `aien-proof` and its `machine-1` resource lock live in the
-[aien-sovereign-core](https://github.com/aien-dev/aien-sovereign-core)
+[aien-sovereign-core](https://github.com/aien-spark/aien-sovereign-core)
 repository; this repository holds the rig design and the contract the control
 surface must meet. The contract is the one already used for staging:
 
@@ -185,7 +185,7 @@ TRUST-1 100-boot campaign without a person in front of the machine.
    sees a UVC device and a frame.
 5. Enable the HID gadget on the Pi OTG port; verify the Spark firmware sees a
    keyboard (boot-menu navigation by script).
-6. Wire the UART (3.3 V only); leave it disconnected until [#22](https://github.com/aien-dev/aienos/issues/22)
+6. Wire the UART (3.3 V only); leave it disconnected until [#22](https://github.com/aien-spark/aienos/issues/22)
    makes the Spark side real.
 7. Run the attended procedure once under the rig, end to end, and record the
    ledger events as the rig's commissioning evidence.

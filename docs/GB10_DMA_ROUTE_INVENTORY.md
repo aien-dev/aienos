@@ -6,7 +6,7 @@ run was made. Base commit of aienos read: `a9b15b9` (main).
 Tags: [SOURCE file:line] read in the named file. [INFERRED] reasoned from sources,
 not directly shown. [UNKNOWN] nothing read answers it.
 Paths without a repo prefix are in aienos. `physics:` is the local checkout of
-aien-dev/physics at `e95e3ed` (the dependency map pins `6d7cf0d`; the nvrm.c
+aien-spark/physics at `e95e3ed` (the dependency map pins `6d7cf0d`; the nvrm.c
 lines cited below match the pinned lines in that map).
 
 ## 1. Short answer

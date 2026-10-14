@@ -9,10 +9,10 @@ AIENOS is one component of the wider AIEN project.
 
 Whole-system architecture and cross-project sequencing are owned by:
 
-- https://github.com/aien-dev/aien-architecture/blob/main/PLAN_AUTHORITY.md
-- https://github.com/aien-dev/aien-architecture/blob/main/CURRENT_EXECUTION_PLAN.md
-- https://github.com/aien-dev/aien-architecture/blob/main/doctrine/ARCHITECTURE.md
-- https://github.com/aien-dev/aien-architecture/blob/main/doctrine/ROADMAP.md
+- https://github.com/aien-spark/aien-architecture/blob/main/PLAN_AUTHORITY.md
+- https://github.com/aien-spark/aien-architecture/blob/main/CURRENT_EXECUTION_PLAN.md
+- https://github.com/aien-spark/aien-architecture/blob/main/doctrine/ARCHITECTURE.md
+- https://github.com/aien-spark/aien-architecture/blob/main/doctrine/ROADMAP.md
 
 AIENOS must not create a competing whole-system master plan.
 

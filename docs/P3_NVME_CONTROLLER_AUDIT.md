@@ -1,6 +1,6 @@
 # D1  -  NVMe Controller-State Audit (AIENOS P3 Native NVMe Read Substrate)
 
-Repo: `aien-dev/aienos` @ baseline `ff5de9c`
+Repo: `aien-spark/aienos` @ baseline `ff5de9c`
 Mirror (read-only): `/Users/drakestapleton/aienos-p3`
 Scope: `crates/aienos-kernel/src/nvme.rs`, `crates/aienos-kernel/src/nvme/driver.rs`, `crates/aienos-kernel/src/block.rs`
 Reference model: NVMe Base Specification (CAP / VS / CC / CSTS / AQA / ASQ / ACQ register layout; Identify Controller/Namespace layouts).

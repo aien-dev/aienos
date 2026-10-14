@@ -10,16 +10,16 @@ Firmware -> AIEN Boot -> AIEN Kernel -> AIEN Runtime -> AIEN Agent -> You
 
 ## Current state
 
-The kernel is being rewritten in C (the `native/` directory) and is IMPLEMENTED / NOT QUALIFIED: all 24 emulator gates pass in the [newest receipt](evidence/ck_gates_29ed03c97454354a18676f768273dd7f7a8e15462c4be1939d9994d277d0d639.json) (run at 7f0de7e on 2026-10-09, QEMU only), and `scripts/ck_gates.sh` now lists 26 gates, so a newer receipt is owed. It has not been booted on the DGX Spark. Its first runs on real hardware were on a Raspberry Pi 5 on 2026-10-13: a bring-up run that reached interrupts, four cores, user-mode tasks, scheduling and message passing and wrote its log to the SD card, then two runs that wrote and re-read a test region on the card's AIENOS partition (pull requests [#345](https://github.com/aien-dev/aienos/pull/345) and [#346](https://github.com/aien-dev/aienos/pull/346); the run logs are not stored in this repository). The earlier Rust kernel in `crates/` is legacy and is being replaced; it is not extended. Trust-chain and encrypted-storage work (TRUST-1 and M5) is NOT_QUALIFIED, with hardware and operator steps outstanding. Do not trust any number in this file over the live documents:
+The kernel is being rewritten in C (the `native/` directory) and is IMPLEMENTED / NOT QUALIFIED: all 24 emulator gates pass in the [newest receipt](evidence/ck_gates_29ed03c97454354a18676f768273dd7f7a8e15462c4be1939d9994d277d0d639.json) (run at 7f0de7e on 2026-10-09, QEMU only), and `scripts/ck_gates.sh` now lists 26 gates, so a newer receipt is owed. It has not been booted on the DGX Spark. Its first runs on real hardware were on a Raspberry Pi 5 on 2026-10-13: a bring-up run that reached interrupts, four cores, user-mode tasks, scheduling and message passing and wrote its log to the SD card, then two runs that wrote and re-read a test region on the card's AIENOS partition (pull requests [#345](https://github.com/aien-spark/aienos/pull/345) and [#346](https://github.com/aien-spark/aienos/pull/346); the run logs are not stored in this repository). The earlier Rust kernel in `crates/` is legacy and is being replaced; it is not extended. Trust-chain and encrypted-storage work (TRUST-1 and M5) is NOT_QUALIFIED, with hardware and operator steps outstanding. Do not trust any number in this file over the live documents:
 
 - [ROADMAP.md](ROADMAP.md): component status (its newest status block is dated 2026-10-01)
 - [native/kernel/GATES.md](native/kernel/GATES.md): what each emulator gate checks
 - [docs/TRUST-1-M5-GATE-MATRIX.md](docs/TRUST-1-M5-GATE-MATRIX.md) and [docs/TRUST-1-OPERATOR-STEPS.md](docs/TRUST-1-OPERATOR-STEPS.md)
-- [docs/PLAN_AUTHORITY.md](docs/PLAN_AUTHORITY.md): how this repository's plans relate to the whole-system plan in [aien-architecture](https://github.com/aien-dev/aien-architecture)
+- [docs/PLAN_AUTHORITY.md](docs/PLAN_AUTHORITY.md): how this repository's plans relate to the whole-system plan in [aien-architecture](https://github.com/aien-spark/aien-architecture)
 
 ## How this fits with the other repositories
 
-AIENOS owns the trusted operating substrate. [omega](https://github.com/aien-dev/omega) (the C reaction runtime and compiler) runs on top of it, [physics](https://github.com/aien-dev/physics) holds machine realization (FORGE), and [aien-architecture](https://github.com/aien-dev/aien-architecture) is the authority for status and sequencing. An optional compatibility island (for example Linux with vendor drivers) may sit beside AIENOS while native support is built; it shrinks over time.
+AIENOS owns the trusted operating substrate. [omega](https://github.com/aien-spark/omega) (the C reaction runtime and compiler) runs on top of it, [physics](https://github.com/aien-spark/physics) holds machine realization (FORGE), and [aien-architecture](https://github.com/aien-spark/aien-architecture) is the authority for status and sequencing. An optional compatibility island (for example Linux with vendor drivers) may sit beside AIENOS while native support is built; it shrinks over time.
 
 ## Principles
 
@@ -55,7 +55,7 @@ The legacy Rust workspace is still checked by `bash scripts/verify_all.sh` (need
 
 ## Contributing
 
-Start with [issues labelled `good first issue`](https://github.com/aien-dev/aienos/labels/good%20first%20issue) or [`emulator-ok`](https://github.com/aien-dev/aienos/labels/emulator-ok): they need no special hardware. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Open pull requests against `main` (protected; five checks must pass: `Analyze (c-cpp)`, `Analyze (actions)`, `crumb`, `AIEN Verification` and `workflow files accepted`) and lead with the commands you ran and their output. Questions go in [Discussions](https://github.com/aien-dev/aienos/discussions). Report vulnerabilities privately through GitHub security advisories.
+Start with [issues labelled `good first issue`](https://github.com/aien-spark/aienos/labels/good%20first%20issue) or [`emulator-ok`](https://github.com/aien-spark/aienos/labels/emulator-ok): they need no special hardware. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Open pull requests against `main` (protected; five checks must pass: `Analyze (c-cpp)`, `Analyze (actions)`, `crumb`, `AIEN Verification` and `workflow files accepted`) and lead with the commands you ran and their output. Questions go in [Discussions](https://github.com/aien-spark/aienos/discussions). Report vulnerabilities privately through GitHub security advisories.
 
 ## License
 

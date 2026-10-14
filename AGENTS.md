@@ -2,7 +2,7 @@
 
 Before using any roadmap or architecture plan, read `docs/PLAN_AUTHORITY.md` and `ROADMAP.md`.
 
-Whole-system execution order is owned by `aien-dev/aien-architecture/CURRENT_EXECUTION_PLAN.md`. This repository does not own a competing AIEN master plan.
+Whole-system execution order is owned by `aien-spark/aien-architecture/CURRENT_EXECUTION_PLAN.md`. This repository does not own a competing AIEN master plan.
 
 ---
 
@@ -85,7 +85,7 @@ Any validation or recovery flow must strictly separate and independently evaluat
 
 ## 6. Engineering & Implementation Standards
 
-- **Zero Interpreter Policy**: Rust is the scaffolding language for new work that is not hardware-bound, and Omega is the destination language. C, assembly and native interfaces are used only where a concrete hardware, boot, firmware, ABI, driver, toolchain or qualification reason exists (the C kernel, continuity and Recovery Core in C inside that kernel, and the loader frozen as temporary scaffolding). There is no external runtime and there are zero Python/Node dependencies, and Rust-side code stays `#![no_std]` where it runs in the kernel. Source of truth: ADR 0024 in aien-dev/aien-architecture (ACCEPTED, arch#91), `docs/adr/0024-rust-scaffolding-omega-destination.md`.
+- **Zero Interpreter Policy**: Rust is the scaffolding language for new work that is not hardware-bound, and Omega is the destination language. C, assembly and native interfaces are used only where a concrete hardware, boot, firmware, ABI, driver, toolchain or qualification reason exists (the C kernel, continuity and Recovery Core in C inside that kernel, and the loader frozen as temporary scaffolding). There is no external runtime and there are zero Python/Node dependencies, and Rust-side code stays `#![no_std]` where it runs in the kernel. Source of truth: ADR 0024 in aien-spark/aien-architecture (ACCEPTED, arch#91), `docs/adr/0024-rust-scaffolding-omega-destination.md`.
 - **Constant-Time Verification**: All cryptographic tag, MAC, and key comparisons must execute in constant time (`subtle::ConstantTimeEq` or constant-time loop).
 - **Zeroization**: Cryptographic keys, key schedules, derived subkeys, and scratchpads must be securely zeroized on drop.
 - **Idiomatic Rust 2021**:

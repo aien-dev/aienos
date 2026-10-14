@@ -1,6 +1,6 @@
 # D2 Flush Review  -  AIENOS P3 NVMe Flush lane
 
-Base: `aien-dev/aienos` @ `ef359ec` (read-only mirror `/Users/drakestapleton/aienos-nvme-rw`).
+Base: `aien-spark/aienos` @ `ef359ec` (read-only mirror `/Users/drakestapleton/aienos-nvme-rw`).
 Files read in full: `crates/aienos-kernel/src/nvme.rs`,
 `crates/aienos-kernel/src/nvme/driver.rs`, `crates/aienos-kernel/src/block.rs`.
 Companion tests: `nvme-rw-subagents/d2/nvme_flush.rs` (target `crates/aienos-kernel/tests/nvme_flush.rs`).

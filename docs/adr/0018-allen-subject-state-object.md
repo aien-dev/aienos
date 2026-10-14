@@ -1,6 +1,6 @@
 # ADR 0018: ALLEN Subject State Object (Continuity Kind 24)
 
-Status: **Proposed.** Companion to [ARCH-0035](https://github.com/aien-dev/aien-architecture/blob/main/docs/adr/0035-persistent-cognitive-entity-boundary-allen.md) (Persistent Cognitive Entity Boundary, PROPOSED). Format freeze needs operator approval, as for [ADR 0016](0016-continuity-objects-over-store-v1.md).  
+Status: **Proposed.** Companion to [ARCH-0035](https://github.com/aien-spark/aien-architecture/blob/main/docs/adr/0035-persistent-cognitive-entity-boundary-allen.md) (Persistent Cognitive Entity Boundary, PROPOSED). Format freeze needs operator approval, as for [ADR 0016](0016-continuity-objects-over-store-v1.md).  
 Related: [ADR 0007](0007-continuous-existence-provisioning-once.md) (Provisioning Once), [ADR 0015](0015-system-store-v1-format.md) (System Store v1), [ADR 0016](0016-continuity-objects-over-store-v1.md) (Continuity Objects), [ADR 0017](0017-m5-key-hierarchy-and-encrypted-store.md) (Sealed Store), omega ARCH-0022 (Cortex), omega R16 (orchestrator retirement).
 
 ---

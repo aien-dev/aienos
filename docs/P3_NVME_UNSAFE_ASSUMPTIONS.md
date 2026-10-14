@@ -1,6 +1,6 @@
 # D1  -  Unsupported / Unsafe Assumptions (prioritized)
 
-Repo: `aien-dev/aienos` @ `ff5de9c`. Read-only audit; no repo edits, no cargo, no hardware.
+Repo: `aien-spark/aienos` @ `ff5de9c`. Read-only audit; no repo edits, no cargo, no hardware.
 
 Only assumptions that are **UNSUPPORTED** or **UNSAFE-IF-DEVIATES** are listed. Each entry gives the minimal change.
 

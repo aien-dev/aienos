@@ -4,7 +4,7 @@ Status: PREPARATION DOCUMENT (2026-10-11). **None of this is executed without Dr
 window.** Writing this page changed nothing on the machine: no reboot, no firmware staging, no boot-entry change, no
 root command. Every PASS cited for the probe image is QEMU only, not physical.
 
-Owner issue: aien-dev/aienos#286 (native GB10, cut B7b). Authority: Drake's ruling of 2026-10-10 (aien-architecture#190,
+Owner issue: aien-spark/aienos#286 (native GB10, cut B7b). Authority: Drake's ruling of 2026-10-10 (aien-architecture#190,
 item 5) authorizes B7b *preparation*, not a boot; the boot needs "a first operator-confirmed, two-hour attended window
 after the recovery media, rollback, trust and preflight checks pass" (`docs/GB10_IORT_DECODE.md` section 10).
 Related, read first: `docs/native/PREFLIGHT-AND-RECOVERY.md`, `docs/NATIVE_BOOT_ONE_TIME.md`,
