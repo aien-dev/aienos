@@ -800,7 +800,7 @@ policy, ambiguities and the UNVERIFIED list: `docs/osc-receipts.md`.
   CK_OSC_RECEIPT_TEST=1` (TEST ONLY). The Store holds a01_valid_min.unit, 13 receipts minted by omega
   checker2 with its TEST key and one receipt signed with the owner key (`a01.owner.rcpt`, aienos#387). 18 launches
   of a01 add(a, b), one `osc_rcpt_launch:` line each: the valid receipt RETURNS 3 and, after every refusal, 42; the
-  owner receipt under the release policy RETURNS 35; no receipt 64 MISSING; altered 75 BAD_SIGNATURE; replayed 77
+  owner receipt in release mode (variant 1: the qualification policy with release set) RETURNS 35; no receipt 64 MISSING; altered 75 BAD_SIGNATURE; replayed 77
   STALE_EPOCH; revoked id 76 REVOKED (`revoked=receipt_id`); revoked TEST key 76 REVOKED (`revoked=signer_key`);
   expired 78; not yet valid 79; wrong target 80; l01's receipt 83 EXECUTABLE_MISMATCH; other program 82
   PROGRAM_MISMATCH; 417 bytes 65 SIZE; release policy 73 TEST_SIGNER_IN_PRODUCTION; firmware 81; dependency 88;

@@ -106,7 +106,8 @@ section 6; the first failure decides.
 - Mutants: `make osc-receipt-mutants` removes each of the 25 guards in `osc_receipt.c` one at a time; the
   test must fail for every one.
 - QEMU: `scripts/qemu_ck_osc_receipt_test.sh`, 18 launches of one unit: the valid receipt runs it (first and
-  last launch), the owner receipt runs it under the release policy; every other launch is refused with its own
-  named reason and maps nothing.
+  last launch), the owner receipt runs it in release mode (the qualification policy with release set, as for
+  the TEST-receipt release launch; the true release policy is covered by the host release build); every other
+  launch is refused with its own named reason and maps nothing.
 - Fixtures: `tests/fixtures/osc_receipt/make-receipts.sh` (provenance in `PROVENANCE.txt`); the owner receipt is
   copied from omega (`tests/fixtures/osc_receipt_owner/PROVENANCE.txt`).

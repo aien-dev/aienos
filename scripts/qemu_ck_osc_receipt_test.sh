@@ -12,8 +12,8 @@
 # image. One boot of the qualification image built with CK_SEED0B_TEST_ANCHOR=1 CK_OSC_LAUNCH_TEST=1
 # CK_OSC_RECEIPT_TEST=1 launches a01 add(a, b) eighteen times, each time with one receipt or none, and prints one
 # "osc_rcpt_launch:" line each. This gate checks:
-#   with the valid receipt the unit RETURNS the exact value (first and last launch), and with the owner receipt
-#   under the release policy (aienos#387);
+#   with the valid receipt the unit RETURNS the exact value (first and last launch), and with the owner receipt in
+#   release mode (aienos#387);
 #   no receipt, an altered, stale, revoked, expired, not-yet-valid, wrong-target, wrong-firmware, wrong-program,
 #   wrong-executable, wrong-length, wrong-dependencies or untrusted-checker receipt, the TEST key revoked, and a
 #   TEST receipt under the release policy are each REFUSED with its own named reason, and nothing is mapped;
@@ -151,7 +151,7 @@ rline "TEST receipt under the release policy: RECEIPT_TEST_SIGNER_IN_PRODUCTION 
 rline "receipt naming firmware: RECEIPT_WRONG_FIRMWARE (81)" '14,15' n_firmware.rcpt qualification "$(ref 81 WRONG_FIRMWARE)" -
 rline "receipt with a dependency: RECEIPT_DEPENDENCIES_MISMATCH (88)" '15,16' n_deps.rcpt qualification "$(ref 88 DEPENDENCIES_MISMATCH)" -
 rline "receipt from an unlisted checker: RECEIPT_UNTRUSTED_CHECKER (86)" '16,17' n_checker.rcpt qualification "$(ref 86 UNTRUSTED_CHECKER)" -
-rline "owner receipt (signed on the owner YubiKey) under the release policy: the unit runs, add(17,18) RETURNED 35" '17,18' a01.owner.rcpt release 'RETURNED value=35' - run
+rline "owner receipt (signed on the owner YubiKey) in release mode: the unit runs, add(17,18) RETURNED 35" '17,18' a01.owner.rcpt release 'RETURNED value=35' - run
 rline "after every refusal, the valid receipt still runs the unit: add(20,22) RETURNED 42" '20,22' a01.rcpt qualification 'RETURNED value=42' - run
 check "${serial}" "summary: 3 returned, 15 refused" "^osc_rcpt_launches: returned=3 trapped=0 refused=15 unknown=0; ${label}\$"
 nl=$(grep -c '^osc_rcpt_launch: ' "${serial}" || true)

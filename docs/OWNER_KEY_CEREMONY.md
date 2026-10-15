@@ -466,8 +466,8 @@ qualification build, has this key as its one OWNER receipt anchor.
   build still launches nothing.
 - **The exact bytes signed** (65): `"OMEGA-REALIZATION-RECEIPT-SIG-V1\0"` followed by
   SHA-256(`"OMEGA-REALIZATION-RECEIPT-V1\0"` and receipt bytes 0 to 351). The same key also signs owner
-  statements (they begin `AIENOS-OWNER-STATEMENT-V1`) and slot manifests (448 bytes beginning `AIENSLT1`). The
-  three messages differ in length and in their first bytes, and Ed25519 signs the exact bytes, so a signature made
+  statements (they begin `AIENOS-OWNER-STATEMENT-V1`) and slot manifests (signed over their first 448 bytes,
+  which begin `AIENSLT1`). The three messages differ in length and in their first bytes, and Ed25519 signs the exact bytes, so a signature made
   for one can never pass as another.
 - **Signing.** `yubico-piv-tool -a verify-pin --sign -s 9c -A ED25519` over the 65-byte message, the same call as
   `scripts/pi5-8/owner_ceremony.sh`. The tool asks for the PIN itself; nothing stores it.
@@ -478,4 +478,4 @@ qualification build, has this key as its one OWNER receipt anchor.
 - **Checks.** `native/kernel/tests/test_osc_receipt.c` (`owner_receipt`): the committed owner receipt is VALID under
   the release policy; every single-bit flip, another unit, another target, the epoch window edges, an unlisted
   checker, a revoked receipt id and a revoked owner key are refused; TEST receipts stay refused. QEMU gate
-  `scripts/qemu_ck_osc_receipt_test.sh`: the owner receipt runs a01 under the release receipt policy.
+  `scripts/qemu_ck_osc_receipt_test.sh`: the owner receipt runs a01 in release mode (qualification image).
