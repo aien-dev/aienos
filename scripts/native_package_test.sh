@@ -123,7 +123,7 @@ cp -r "$T/p1" "$T/t3"; sed -i 's/^generation 7$/generation 9/' "$T/t3/PACKAGE.tx
 expect_refused "tampered PACKAGE.txt with re-made SHA256SUMS" "PROVENANCE.txt package_sha256" "$np" verify --package "$T/t3" --test-key "${dirty[@]}"
 cp -r "$T/p1" "$T/t3b"; sed -i 's/^generation 7$/generation 9/' "$T/t3b/PACKAGE.txt"; remake_all "$T/t3b"
 expect_refused "tampered PACKAGE.txt with re-made SHA256SUMS and PROVENANCE.txt" "provenance does not bind" "$np" verify --package "$T/t3b" --test-key "${dirty[@]}"
-cp -r "$T/p1" "$T/t4"; printf '\x01' | dd of="$T/t4/slot/MANIFEST.signed.bin" bs=1 seek=460 conv=notrunc status=none
+cp -r "$T/p1" "$T/t4"; b=$(od -An -tu1 -j460 -N1 "$T/t4/slot/MANIFEST.signed.bin" | tr -d " "); printf "\\$(printf %o $(( b ^ 0xff )))" | dd of="$T/t4/slot/MANIFEST.signed.bin" bs=1 seek=460 conv=notrunc status=none
 expect_refused "flipped signature byte" "signature or digest" "$np" verify --package "$T/t4" --test-key "${dirty[@]}"
 cp -r "$T/p1" "$T/t5"; rm "$T/t5/SHA256SUMS"
 expect_refused "missing SHA256SUMS" "missing SHA256SUMS" "$np" verify --package "$T/t5" --test-key "${dirty[@]}"
