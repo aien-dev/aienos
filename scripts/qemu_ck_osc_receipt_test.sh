@@ -4,14 +4,16 @@
 # (AAVMF).
 #
 # Label: QEMU (aarch64 virt), TEST signer, not physical. Nothing here ran on a Spark or any real machine. The
-# receipts are minted by omega checker2 with its TEST key (tests/fixtures/osc_receipt/PROVENANCE.txt); the units
-# are signed with the container spec's THROWAWAY TEST key.
+# receipts are minted by omega checker2 with its TEST key (tests/fixtures/osc_receipt/PROVENANCE.txt), except
+# a01.owner.rcpt, signed with the owner key on the owner YubiKey (tests/fixtures/osc_receipt_owner/PROVENANCE.txt,
+# aienos#387); the units are signed with the container spec's THROWAWAY TEST key.
 #
-# One unit (a01_valid_min.unit) and thirteen receipts are written into the sealed C Store of a GPT boot disk
+# One unit (a01_valid_min.unit) and fourteen receipts are written into the sealed C Store of a GPT boot disk
 # image. One boot of the qualification image built with CK_SEED0B_TEST_ANCHOR=1 CK_OSC_LAUNCH_TEST=1
-# CK_OSC_RECEIPT_TEST=1 launches a01 add(a, b) seventeen times, each time with one receipt or none, and prints one
+# CK_OSC_RECEIPT_TEST=1 launches a01 add(a, b) eighteen times, each time with one receipt or none, and prints one
 # "osc_rcpt_launch:" line each. This gate checks:
-#   with the valid receipt the unit RETURNS the exact value (first and last launch);
+#   with the valid receipt the unit RETURNS the exact value (first and last launch), and with the owner receipt in
+#   release mode (aienos#387);
 #   no receipt, an altered, stale, revoked, expired, not-yet-valid, wrong-target, wrong-firmware, wrong-program,
 #   wrong-executable, wrong-length, wrong-dependencies or untrusted-checker receipt, the TEST key revoked, and a
 #   TEST receipt under the release policy are each REFUSED with its own named reason, and nothing is mapped;
@@ -57,9 +59,11 @@ simg="${out_prod}/host/ck_store_image"
 
 fix="native/kernel/tests/fixtures/osc_unit"
 rfix="native/kernel/tests/fixtures/osc_receipt"
+ofix="native/kernel/tests/fixtures/osc_receipt_owner"
 rcpts=(a01 l01 n_altered n_stale n_revoked_id n_expired n_future n_target n_program n_length n_firmware n_deps n_checker)
 files=("${fix}/vectors/a01_valid_min.unit")
 for r in "${rcpts[@]}"; do files+=("${rfix}/${r}.rcpt"); done
+files+=("${ofix}/a01.owner.rcpt")
 disk="${work}/nvme.img"
 "${out_prod}/host/ck_gpt_image" create "${disk}" 512 64 aienos-middle >/dev/null || fail "GPT boot disk image created"
 if "${simg}" build "${disk}" 512 "${files[@]}" >"${work}/build.txt" 2>&1; then pass "boot disk built: $(head -1 "${work}/build.txt")"
@@ -104,26 +108,27 @@ boot "${out_rcpt}/full/BOOTAA64.EFI" "${serial}" "${work}/disk-run.img"
 release_flag
 
 check "${serial}" "left firmware and entered the kernel" "kernel: alive"
-check "${serial}" "kernel read all fourteen candidates (one unit, thirteen receipts) from the boot disk Store" "^artifact_candidates: 14$"
+check "${serial}" "kernel read all fifteen candidates (one unit, fourteen receipts) from the boot disk Store" "^artifact_candidates: 15$"
 if has "${serial}" "^report-truncated:"; then fail "kernel report lines were truncated"; else pass "no kernel report line was truncated"; fi
 check "${serial}" "final report reached the console" "report_kind: final"
 if has "${serial}" "report_kind: (panic|fault)"; then fail "panic or fault reported"; else pass "no kernel panic or fault report"; fi
 check "${serial}" "a01 admitted (the container check is unchanged)" "^osc_unit: a01_valid_min\\.unit ACCEPT "
-check "${serial}" "receipt policy line: qualification, TEST receipt anchor, owner root listed but not trusted, launch requires a receipt" \
-    "^osc_receipt_policy: mode=qualification receipt_test_anchors=1 receipt_owner_anchors=0 \\(owner root listed, not trusted\\) checkers=1 target=aienos-ck-aarch64-el0 epoch_floor=10 epoch_now=20 revoked_ids=1 revoked_keys=0 firmware=none dependencies=none producer=none; launch requires a valid receipt; QEMU, not physical$"
-for r in "${rcpts[@]}"; do
-    b=$(stat -c %s "${rfix}/${r}.rcpt"); id=-
-    [[ "${b}" == 416 ]] && id=$(sha256sum "${rfix}/${r}.rcpt" | cut -c1-64)
-    check "${serial}" "${r}.rcpt stored from the Store (bytes=${b})" "^osc_receipt: ${r}\\.rcpt STORED bytes=${b} id=${id} "
+check "${serial}" "receipt policy line: qualification, TEST receipt anchor, the owner root as owner receipt anchor, launch requires a receipt" \
+    "^osc_receipt_policy: mode=qualification receipt_test_anchors=1 receipt_owner_anchors=1 \\(the owner root\\) checkers=1 target=aienos-ck-aarch64-el0 epoch_floor=10 epoch_now=20 revoked_ids=1 revoked_keys=0 firmware=none dependencies=none producer=none; launch requires a valid receipt; QEMU, not physical$"
+for rf in "${files[@]:1}"; do
+    r=$(basename "${rf}" .rcpt); b=$(stat -c %s "${rf}"); id=-
+    [[ "${b}" == 416 ]] && id=$(sha256sum "${rf}" | cut -c1-64)
+    check "${serial}" "${r}.rcpt stored from the Store (bytes=${b})" "^osc_receipt: ${r//./\\.}\\.rcpt STORED bytes=${b} id=${id} "
 done
-check "${serial}" "receipt totals: 13 seen, 13 stored" "^osc_receipts: seen=13 stored=13 dropped=0 "
-check "${serial}" "self-test announces 17 launches" "^osc_rcpt_selftest: launches=17 unit=a01_valid_min\\.unit; "
+check "${serial}" "receipt totals: 14 seen, 14 stored" "^osc_receipts: seen=14 stored=14 dropped=0 "
+check "${serial}" "self-test announces 18 launches" "^osc_rcpt_selftest: launches=18 unit=a01_valid_min\\.unit; "
 
 label='QEMU \(aarch64 virt\), TEST signer, not physical'
 a=a01_valid_min.unit
 # rline TEXT ARGS RECEIPT POLICY RESULT REVOKED [run]: one launch line. A refusal ran nothing: no tick, no page.
 rline() {
     local file="${rfix}/$3" id='-' t
+    [[ -e "${ofix}/$3" ]] && file="${ofix}/$3"
     [[ "$3" != none && $(stat -c %s "${file}") == 416 ]] && id=$(sha256sum "${file}" | cut -c1-16)
     t="ticks=0 pages_mapped=0 page_tables_zeroed=1 slot_free=1"
     [[ "${7:-}" == run ]] && t="ticks=[0-9]+ pages_mapped=[1-9][0-9]* page_tables_zeroed=1 slot_free=1"
@@ -146,11 +151,12 @@ rline "TEST receipt under the release policy: RECEIPT_TEST_SIGNER_IN_PRODUCTION 
 rline "receipt naming firmware: RECEIPT_WRONG_FIRMWARE (81)" '14,15' n_firmware.rcpt qualification "$(ref 81 WRONG_FIRMWARE)" -
 rline "receipt with a dependency: RECEIPT_DEPENDENCIES_MISMATCH (88)" '15,16' n_deps.rcpt qualification "$(ref 88 DEPENDENCIES_MISMATCH)" -
 rline "receipt from an unlisted checker: RECEIPT_UNTRUSTED_CHECKER (86)" '16,17' n_checker.rcpt qualification "$(ref 86 UNTRUSTED_CHECKER)" -
+rline "owner receipt (signed on the owner YubiKey) in release mode: the unit runs, add(17,18) RETURNED 35" '17,18' a01.owner.rcpt release 'RETURNED value=35' - run
 rline "after every refusal, the valid receipt still runs the unit: add(20,22) RETURNED 42" '20,22' a01.rcpt qualification 'RETURNED value=42' - run
-check "${serial}" "summary: 2 returned, 15 refused" "^osc_rcpt_launches: returned=2 trapped=0 refused=15 unknown=0; ${label}\$"
+check "${serial}" "summary: 3 returned, 15 refused" "^osc_rcpt_launches: returned=3 trapped=0 refused=15 unknown=0; ${label}\$"
 nl=$(grep -c '^osc_rcpt_launch: ' "${serial}" || true)
 names=$(grep -oE '^osc_rcpt_launch: .* name=RECEIPT_[A-Z_]+' "${serial}" | sed -E 's/.*name=//' | sort | uniq -d | tr '\n' ' ')
-[[ "${nl}" == 17 ]] && pass "exactly 17 receipt launch lines" || fail "receipt launch lines (${nl} of 17)"
+[[ "${nl}" == 18 ]] && pass "exactly 18 receipt launch lines" || fail "receipt launch lines (${nl} of 18)"
 # REVOKED appears twice on purpose (receipt id, signer key), told apart by the revoked= column
 [[ "${names}" == "RECEIPT_REVOKED " ]] && pass "every other refusal names a reason of its own" || fail "refusal reasons repeated: ${names}"
 if grep -E '^osc_launch: ' "${serial}" | grep -q .; then fail "a C3-3a launch line appeared in the receipt self-test"; else pass "only the receipt self-test ran"; fi

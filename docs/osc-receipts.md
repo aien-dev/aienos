@@ -51,11 +51,13 @@ section 6; the first failure decides.
   Executable = the unit's code hash. Firmware: none (all zero). Dependencies: the empty list. Producer: none (all zero).
 - Checker identity: one pinned identity, checker2 at omega 265ce82a (`artifact/osc_receipt_anchor.h`).
 - Epoch floor 10, current epoch 20 (compile-time constants: there is no epoch authority yet).
-- Qualification build (`CK_SEED0B_TEST_ANCHOR=1`): checker2's TEST key is the only receipt anchor
+- Owner receipt anchor (both builds, aienos#387): the owner root `578ada3c…` (`artifact/osc_receipt_anchor.h`), the
+  one OWNER anchor. `docs/OWNER_KEY_CEREMONY.md` section 7 records that it may sign realization receipts.
+- Qualification build (`CK_SEED0B_TEST_ANCHOR=1`): in addition, checker2's TEST key is the TEST receipt anchor
   (`artifact/osc_receipt_test_anchor.h`, separate from the unit TEST key) and one fixture receipt id is revoked.
-- Release build: release mode, no receipt anchor at all, so every receipt is refused. The owner root
-  `578ada3c…` is listed in `osc_receipt_anchor.h` but is not trusted for receipts: it is in no anchor set
-  until `docs/OWNER_KEY_CEREMONY.md` says it may sign receipts.
+- Release build: release mode and no TEST receipt anchor, so every TEST receipt is refused and an owner-signed
+  receipt can be valid. A release build still launches nothing: unit admission has no OWNER unit anchor until
+  TRUST-1, so no unit is admitted.
 
 ## Ambiguities in the spec, written down (no guess taken)
 
@@ -76,8 +78,8 @@ section 6; the first failure decides.
 ## UNVERIFIED (not done, not claimed)
 
 - **Physical Spark: NOT_RUN.** Only QEMU. No hardware, no GPU, no reboot.
-- **OWNER receipts:** none exist; the owner root is not trusted for receipts; a positive OWNER acceptance is
-  untested (refusals only).
+- **OWNER receipts:** one exists (`tests/fixtures/osc_receipt_owner/a01.owner.rcpt`, signed on the owner YubiKey,
+  omega#455). It is accepted on the host and in QEMU only; no OWNER-signed unit exists, so no release image has run it.
 - **Translation validation:** the executable is bound to the program by hash only (evidence class 1 says
   so). Nothing shows the code implements the IR.
 - **LRAT proofs** are not replayed in the kernel; class 2 is refused instead.
@@ -98,9 +100,14 @@ section 6; the first failure decides.
   every case of `tests/fixtures/osc_receipt/expected.txt` (checker2's own verdict recorded beside the kernel's),
   trust inputs against the fixtures, each structure reason and the order of the checks, epoch window edges,
   all 3328 single-bit flips of a valid receipt refused, in-memory receipts re-signed with the published TEST
-  seed (reproducing checker2's signature byte for byte), the Store receipt table.
+  seed (reproducing checker2's signature byte for byte), the owner-signed receipt (VALID under the release
+  policy; every single-bit flip and the binding, epoch, checker and revocation controls refused; aienos#387), the
+  Store receipt table.
 - Mutants: `make osc-receipt-mutants` removes each of the 25 guards in `osc_receipt.c` one at a time; the
   test must fail for every one.
-- QEMU: `scripts/qemu_ck_osc_receipt_test.sh`, 17 launches of one unit: the valid receipt runs it (first and
-  last launch); every other launch is refused with its own named reason and maps nothing.
-- Fixtures: `tests/fixtures/osc_receipt/make-receipts.sh` (provenance in `PROVENANCE.txt`).
+- QEMU: `scripts/qemu_ck_osc_receipt_test.sh`, 18 launches of one unit: the valid receipt runs it (first and
+  last launch), the owner receipt runs it in release mode (the qualification policy with release set, as for
+  the TEST-receipt release launch; the true release policy is covered by the host release build); every other
+  launch is refused with its own named reason and maps nothing.
+- Fixtures: `tests/fixtures/osc_receipt/make-receipts.sh` (provenance in `PROVENANCE.txt`); the owner receipt is
+  copied from omega (`tests/fixtures/osc_receipt_owner/PROVENANCE.txt`).

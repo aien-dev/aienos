@@ -27,6 +27,9 @@ private half never leaves the device. It does two jobs:
 2. Its public half is the owner public key built into images: `make -C native/kernel full CK_HARDWARE_STAGING=1
    CK_OWNER_PUBKEYS=<file> CK_MACHINE_ID=<file>` (see `native/kernel/README.md`, "Owner provisioning").
 
+Added after the ceremony (aienos#387): it also signs Omega realization receipts, and the kernel's receipt policy
+trusts it for them. The entry and its limits are in `docs/OWNER_KEY_CEREMONY.md` section 7.
+
 It is NOT the public-release signing key. That key is generated only at the first public release and is not touched here.
 
 ## Tools (installed on the Spark, verified)

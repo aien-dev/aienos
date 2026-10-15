@@ -99,7 +99,7 @@ struct osc_policy {
      * osc_unit_admit. Local authority, never taken from a receipt. `release` above also refuses TEST receipts. */
     const uint8_t (*rcpt_test_anchors)[32];   /* raw Ed25519 public keys, receipt class TEST */
     unsigned n_rcpt_test;
-    const uint8_t (*rcpt_owner_anchors)[32];  /* receipt class OWNER; empty until the owner key ceremony says so */
+    const uint8_t (*rcpt_owner_anchors)[32];  /* receipt class OWNER (the kernel: the owner root, aienos#387) */
     unsigned n_rcpt_owner;
     const uint8_t (*rcpt_checkers)[32];       /* accepted checker2 identities; none: every receipt is refused */
     unsigned n_rcpt_checkers;

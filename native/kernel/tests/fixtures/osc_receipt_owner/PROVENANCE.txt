@@ -1,0 +1,23 @@
+Owner-signed Omega realization receipt (receipt v1, 416 bytes; omega spec/one-layer-receipts.md) for aienos#387.
+PUBLIC data only. Not minted by make-receipts.sh (that script uses checker2's TEST key; this one needs the owner
+YubiKey), so it is kept apart from ../osc_receipt and pinned by hash in tests/test_osc_receipt.c.
+
+File:        a01.owner.rcpt
+sha256:      1348e78b0f88a5054f2b78b0a8d7c998ba70d166c711a2341528824685776034 (= the receipt id)
+Copied from: aien-dev/omega tests/checker2/fixtures/owner-receipt/a01.owner.rcpt at 710d438c (omega#455, merged),
+             byte for byte (`git show 710d438c:tests/checker2/fixtures/owner-receipt/a01.owner.rcpt`). Omega's
+             PROVENANCE.txt and a01.owner.check.txt in that folder record how it was made and checked.
+Signer:      class OWNER. Signed once on the owner YubiKey (serial 39017074, PIV slot 9c) on 2026-10-15T00:02:50Z by
+             ~/bin/owner-sign-receipt-test.sh. Owner root 578ada3cb0c2d154623ac089191023c8ad4bc5e63b8ccd1a38db2d679b8c9e76
+             (aienos#380 ceremony, docs/native/PI5-8-OWNER-CEREMONY.md; artifact/osc_receipt_anchor.h). The
+             fingerprint at offset 320 is SHA-256 of that key: 5e004d574c1ea0cba4c441665e3b0273de4e75d278d86eaa687ab921a12941c6.
+Binds:       unit osc_unit/vectors/a01_valid_min.unit (sha256 5711ca0a71062f7df709bde41ed80c8e724f4826b886ecc9b0ceb55f80682da4):
+             IR sha256 084803c232dc44effcc44704c9ed0600dec1231451e0b76693633e98a48d1a1d, code sha256
+             6163612fd91c0ce8eb8126d4b38534867428704d346795a5e369055eef10fcdb; target aienos-ck-aarch64-el0;
+             policy epoch 20, expiry epoch 100; checker2 identity d7aae601...cf3ba (omega 265ce82a).
+Re-checked:  2026-10-14 for aienos#387, independently of both verifiers: the 65-byte message
+             "OMEGA-REALIZATION-RECEIPT-SIG-V1\0" || SHA-256("OMEGA-REALIZATION-RECEIPT-V1\0" || bytes [0,352)) built
+             with printf/head/sha256sum equals omega's committed a01.owner-draft.tbs, and
+             `openssl pkeyutl -verify -rawin` with ~/aienos-owner-ceremony/20261014T114310Z/slot-9c-public.pem
+             over that message and bytes [352,416) prints "Signature Verified Successfully".
+Changing it: any byte changed breaks the signature; a new receipt needs a new YubiKey signature (PIN and touch).

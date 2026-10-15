@@ -2,13 +2,15 @@
  * the kernel's own policy (core/osc_admit.c ck_osc_policy, linked in).
  *
  * Built twice: with CK_SEED0B_TEST_ANCHOR=1 (the qualification policy: checker2's TEST key anchored) and without
- * it (the release policy: no receipt anchor, release mode). Checks:
+ * it (the release policy: release mode, the owner root as the only receipt anchor). Checks:
  *   - every line of tests/fixtures/osc_receipt/expected.txt: the receipt, minted by omega checker2, verified
  *     against the admitted unit gives the stated kernel verdict (checker2's own verdict for the same policy is
  *     recorded beside it by make-receipts.sh); in the release build every one is refused;
  *   - the trust inputs: the TEST key header against the fixtures, the pinned checker identity, the target hash,
- *     the revoked fixture id, the owner root listed but never trusted;
+ *     the revoked fixture id, the owner root as the one OWNER receipt anchor (aienos#387), never a TEST anchor;
  *   - each structure reason, the order of the checks, anchor rules, epoch window edges, every single-bit flip;
+ *   - the owner-signed receipt (fixtures/osc_receipt_owner, aienos#387): VALID under the release policy, every
+ *     single-bit flip and each binding, epoch and revocation control refused, TEST receipts still refused;
  *   - the Store receipt table of osc_admit.c (kept by name, oversize, full).
  * The mutation run (Makefile osc-receipt-mutants) requires this test to FAIL with any one MUT guard removed. */
 #include <stdarg.h>
@@ -173,10 +175,13 @@ static void trust_inputs(void)
     CHECK(rl == OSC_RCPT_BYTES && memcmp(h, osc_rcpt_qual_revoked_id, 32) == 0);
     struct osc_policy p;
     ck_osc_policy(&p);
-    CHECK(p.n_rcpt_owner == 0 && p.rcpt_owner_anchors == NULL);  /* owner root listed, not trusted */
+    /* aienos#387: the owner root is the one OWNER receipt anchor in both builds, and it is not a TEST anchor */
+    CHECK(p.n_rcpt_owner == 1 && p.rcpt_owner_anchors != NULL &&
+          memcmp(p.rcpt_owner_anchors[0], osc_rcpt_owner_root_pk, 32) == 0);
     CHECK(p.n_rcpt_checkers == 1 && p.rcpt_target != NULL && p.rcpt_producer == NULL && p.rcpt_firmware == NULL);
     CHECK(p.rcpt_epoch_floor == 10 && p.rcpt_epoch_now == 20 && p.n_rcpt_revoked_keys == 0);
     for (unsigned i = 0; i < p.n_rcpt_test; i++) CHECK(memcmp(p.rcpt_test_anchors[i], osc_rcpt_owner_root_pk, 32) != 0);
+    for (unsigned i = 0; i < p.n_rcpt_owner; i++) CHECK(memcmp(p.rcpt_owner_anchors[i], osc_rcpt_test_pk, 32) != 0);
 #ifdef CK_SEED0B_TEST_ANCHOR
     CHECK(!p.release && p.n_rcpt_test == 1 && memcmp(p.rcpt_test_anchors[0], osc_rcpt_test_pk, 32) == 0);
     CHECK(p.n_rcpt_revoked_ids == 1);
@@ -253,7 +258,7 @@ static void structure_and_order(void)
     MUTATE(r[303] ^= 1, OSC_RCPT_BAD_SIGNATURE);     /* last byte of the input digest, signed */
     MUTATE(r[351] ^= 1, OSC_RCPT_UNTRUSTED_SIGNER);   /* last fingerprint byte */
     MUTATE(r[320] ^= 1, OSC_RCPT_UNTRUSTED_SIGNER);    /* fingerprint names no anchor */
-    MUTATE(put16(r + 10, 2), OSC_RCPT_UNTRUSTED_SIGNER); /* OWNER class: no owner anchor in the kernel policy */
+    MUTATE(put16(r + 10, 2), OSC_RCPT_UNTRUSTED_SIGNER); /* OWNER class: the TEST fingerprint names no owner anchor */
     p.release = 1;
     MUTATE((void)0, OSC_RCPT_TEST_SIGNER_IN_PRODUCTION);
     MUTATE(put64(r + 312, 9), OSC_RCPT_EPOCH_ORDER);   /* structure before class policy */
@@ -435,6 +440,116 @@ static void resigned(void)
     CHECK(v(r, 416, &a, &p) == OSC_RCPT_NOT_YET_VALID);
 }
 
+/* aienos#387: the owner-signed receipt. fixtures/osc_receipt_owner/a01.owner.rcpt is omega
+ * tests/checker2/fixtures/owner-receipt/a01.owner.rcpt (omega#455, 710d438c) byte for byte, signed on the owner
+ * YubiKey (provenance in that folder). It is the one receipt here no TEST key made, so it is pinned by hash. */
+static const char owner_rcpt_sha256[] = "1348e78b0f88a5054f2b78b0a8d7c998ba70d166c711a2341528824685776034";
+
+/* the release policy: what ck_osc_policy gives in a release build, also when this binary is the qualification
+ * build (there the TEST anchor and the fixture revocation are dropped and release mode is set) */
+static struct osc_policy rel(void)
+{
+    struct osc_policy p;
+    ck_osc_policy(&p);
+    p.release = 1;
+    p.rcpt_test_anchors = NULL;
+    p.n_rcpt_test = 0;
+    p.rcpt_revoked_ids = NULL;
+    p.n_rcpt_revoked_ids = 0;
+    return p;
+}
+
+static void owner_receipt(void)
+{
+    uint8_t o[1024], t[1024], r[416], h[32], ofp[1][32], oid[1][32], other[32];
+    char hs[65];
+    size_t n = slurp("osc_receipt_owner/a01.owner.rcpt", o, sizeof o);
+    CHECK(n == OSC_RCPT_BYTES);
+    sha256_hash(o, n, h);
+    hex(h, 32, hs);
+    CHECK(!strcmp(hs, owner_rcpt_sha256));                      /* the committed bytes, nothing else */
+    memcpy(oid[0], h, 32);
+    sha256_hash(osc_rcpt_owner_root_pk, 32, ofp[0]);
+    CHECK(o[10] == OSC_SIGNER_OWNER && o[11] == 0 && memcmp(o + 320, ofp[0], 32) == 0); /* OWNER, owner root */
+    CHECK(rcpt("a01.rcpt", t) == OSC_RCPT_BYTES);
+    struct osc_accept a, l, x;
+    CHECK(admit("a01", &a) && admit("l01", &l) && admit("osh_lex", &x));
+    struct osc_receipt_info info;
+
+    /* VALID under the kernel's own policy, in release mode, and under the release policy */
+    struct osc_policy p;
+    ck_osc_policy(&p);
+    CHECK(v(o, 416, &a, &p) == 0);
+    p.release = 1;
+    memset(&info, 0, sizeof info);
+    CHECK(osc_receipt_verify(o, 416, &a, &p, &info) == 0);
+    p = rel();
+    memset(&info, 0, sizeof info);
+    unsigned got = osc_receipt_verify(o, 416, &a, &p, &info);
+    if (got) printf("  owner receipt under the release policy: got %u %s\n", got, osc_code_name(got));
+    CHECK(got == 0 && info.have_id && memcmp(info.id, oid[0], 32) == 0);
+    /* the TEST checker2 key stays out of the release policy: a TEST receipt is refused, and a TEST receipt relabelled
+     * OWNER names no owner anchor */
+    CHECK(v(t, 416, &a, &p) == OSC_RCPT_TEST_SIGNER_IN_PRODUCTION);
+    memcpy(r, t, 416);
+    put16(r + 10, OSC_SIGNER_OWNER);
+    CHECK(v(r, 416, &a, &p) == OSC_RCPT_UNTRUSTED_SIGNER);
+    /* negative control: the release policy as shipped before aienos#387 (no owner anchor) refuses it */
+    p.rcpt_owner_anchors = NULL;
+    p.n_rcpt_owner = 0;
+    CHECK(v(o, 416, &a, &p) == OSC_RCPT_UNTRUSTED_SIGNER);
+    /* the owner root anchored in both classes is refused */
+    p = rel();
+    static const uint8_t (*const ok)[32] = &osc_rcpt_owner_root_pk;
+    p.rcpt_test_anchors = ok;
+    p.n_rcpt_test = 1;
+    CHECK(v(o, 416, &a, &p) == OSC_RCPT_UNTRUSTED_SIGNER);
+    /* bound to a01 on this target and epoch window: wrong unit, wrong target, epoch edges, unlisted checker */
+    p = rel();
+    CHECK(v(o, 416, &l, &p) == OSC_RCPT_EXECUTABLE_MISMATCH);  /* l01: a01's program, other code */
+    CHECK(v(o, 416, &x, &p) == OSC_RCPT_PROGRAM_MISMATCH);     /* osh_lex: another program */
+    osc_receipt_target_hash("aienos-ck-x86_64-el0", 20, other);
+    p.rcpt_target = other;
+    CHECK(v(o, 416, &a, &p) == OSC_RCPT_WRONG_TARGET);
+    p = rel();
+    p.rcpt_epoch_now = 100;                                     /* expiry 100, inclusive */
+    CHECK(v(o, 416, &a, &p) == 0);
+    p.rcpt_epoch_now = 101;
+    CHECK(v(o, 416, &a, &p) == OSC_RCPT_EXPIRED);
+    p.rcpt_epoch_now = 19;                                      /* issued at epoch 20 */
+    CHECK(v(o, 416, &a, &p) == OSC_RCPT_NOT_YET_VALID);
+    p = rel();
+    p.rcpt_epoch_floor = 21;
+    CHECK(v(o, 416, &a, &p) == OSC_RCPT_STALE_EPOCH);
+    p = rel();
+    p.n_rcpt_checkers = 0;
+    CHECK(v(o, 416, &a, &p) == OSC_RCPT_UNTRUSTED_CHECKER);
+    /* revocation: the receipt id, then the owner key fingerprint */
+    p = rel();
+    p.rcpt_revoked_ids = (const uint8_t (*)[32])oid;
+    p.n_rcpt_revoked_ids = 1;
+    CHECK(osc_receipt_verify(o, 416, &a, &p, &info) == OSC_RCPT_REVOKED && info.revoked == OSC_RCPT_REVOKED_ID);
+    p = rel();
+    p.rcpt_revoked_keys = (const uint8_t (*)[32])ofp;
+    p.n_rcpt_revoked_keys = 1;
+    CHECK(osc_receipt_verify(o, 416, &a, &p, &info) == OSC_RCPT_REVOKED && info.revoked == OSC_RCPT_REVOKED_KEY);
+    /* every single-bit flip of the owner receipt is refused under the release policy */
+    p = rel();
+    int flips = 0, accepted = 0;
+    for (unsigned i = 0; i < 416; i++)
+        for (unsigned bit = 0; bit < 8; bit++) {
+            memcpy(r, o, 416);
+            r[i] ^= (uint8_t)(1u << bit);
+            if (v(r, 416, &a, &p) == 0) accepted++;
+            flips++;
+        }
+    CHECK(flips == 3328 && accepted == 0);
+    got = v(o, 416, &a, &p);
+    CHECK(got == 0);                                            /* the input was not written */
+    printf("  owner receipt a01.owner.rcpt under the release policy: %s; single-bit flips refused %d of %d\n",
+           got ? osc_code_name(got) : "VALID", flips - accepted, flips);
+}
+
 static void names(void)
 {
     CHECK(!strcmp(osc_code_name(OSC_RCPT_MISSING), "RECEIPT_MISSING"));
@@ -500,6 +615,7 @@ int main(void)
     policy_edges();
     names();
     resigned();
+    owner_receipt();
     store_table();
     return ck_t_verdict("test_osc_receipt");
 }
