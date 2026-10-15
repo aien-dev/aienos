@@ -52,12 +52,14 @@ static void hex(char *out, const uint8_t *b, size_t n)
 /* Realization receipt policy (artifact/osc_receipt.h, aienos#383), local to this build:
  *   - both builds: the accepted checker2 identities of osc_receipt_anchor.h, target aienos-ck-aarch64-el0, no
  *     firmware, no dependencies, no producer (all zero: the unit names no producer), epoch floor and current epoch
- *     fixed below (the kernel has no epoch authority yet, so they are compile-time constants), no OWNER receipt
- *     anchor (the owner root is listed, not trusted, until docs/OWNER_KEY_CEREMONY.md says so).
- *   - release build: release mode, so every TEST receipt is TEST_SIGNER_IN_PRODUCTION; no receipt anchor at all,
- *     so no receipt is valid and nothing can be launched.
- *   - qualification build (CK_SEED0B_TEST_ANCHOR=1): checker2's TEST key as the only receipt anchor and the
- *     fixture n_revoked_id.rcpt on the revoked-id list (osc_receipt_test_anchor.h). TEST ONLY. */
+ *     fixed below (the kernel has no epoch authority yet, so they are compile-time constants), and the owner root
+ *     osc_rcpt_owner_root_pk as the one OWNER receipt anchor (aienos#387: docs/OWNER_KEY_CEREMONY.md section 7
+ *     records that the owner root may sign realization receipts).
+ *   - release build: release mode, so every TEST receipt is TEST_SIGNER_IN_PRODUCTION; no TEST receipt anchor. An
+ *     owner-signed receipt is valid, but a release build still launches nothing: unit admission has no OWNER unit
+ *     anchor (OWNER anchors are not provisioned until TRUST-1), so no unit is admitted to launch.
+ *   - qualification build (CK_SEED0B_TEST_ANCHOR=1): in addition, checker2's TEST key as the TEST receipt anchor and
+ *     the fixture n_revoked_id.rcpt on the revoked-id list (osc_receipt_test_anchor.h). TEST ONLY. */
 #define CK_OSC_RCPT_EPOCH_FLOOR 10u
 #define CK_OSC_RCPT_EPOCH_NOW 20u
 static uint8_t rcpt_target[32];
@@ -80,6 +82,9 @@ void ck_osc_policy(struct osc_policy *p)
     p->rcpt_epoch_floor = CK_OSC_RCPT_EPOCH_FLOOR;
     p->rcpt_epoch_now = CK_OSC_RCPT_EPOCH_NOW;
     p->rcpt_target = rcpt_target;
+    static const uint8_t (*const roa)[32] = &osc_rcpt_owner_root_pk;
+    p->rcpt_owner_anchors = roa;
+    p->n_rcpt_owner = 1;
 #ifdef CK_SEED0B_TEST_ANCHOR
     static const uint8_t (*const ta)[32] = &osc_unit_test1_pk;
     static const uint8_t (*const rta)[32] = &osc_rcpt_test_pk;
@@ -309,9 +314,11 @@ static void lt_run(const struct lt_step *s)
 
 #ifdef CK_OSC_RECEIPT_TEST
 /* aienos#383 receipt self-test: every launch of a01_valid_min.unit add(a, b), each with one receipt from the Store
- * (tests/fixtures/osc_receipt, minted by omega checker2 with its TEST key) or none. Only the valid receipt may run
- * the unit; every refusal names its reason and maps nothing. Variant 1 and 2 change the policy for that one launch
- * (release mode; the TEST key fingerprint revoked), to show the release rule and key revocation in one boot. */
+ * (tests/fixtures/osc_receipt, minted by omega checker2 with its TEST key; a01.owner.rcpt, an OWNER receipt for the
+ * same unit signed with the owner key, tests/fixtures/osc_receipt_owner, aienos#387) or none. Only a valid
+ * receipt may run the unit; every refusal names its reason and maps nothing. Variant 1 and 2 change the policy for
+ * that one launch (release mode; the TEST key fingerprint revoked), to show the release rule, the owner receipt
+ * under it and key revocation in one boot. */
 static void rt_all(void)
 {
     static const struct lt_step steps[] = {
@@ -331,6 +338,7 @@ static void rt_all(void)
         { "a01_valid_min.unit", "add", 2, { 14, 15 }, 0, 0, 0, "n_firmware.rcpt", 0 },
         { "a01_valid_min.unit", "add", 2, { 15, 16 }, 0, 0, 0, "n_deps.rcpt", 0 },
         { "a01_valid_min.unit", "add", 2, { 16, 17 }, 0, 0, 0, "n_checker.rcpt", 0 },
+        { "a01_valid_min.unit", "add", 2, { 17, 18 }, 0, 0, 0, "a01.owner.rcpt", 1 },
         { "a01_valid_min.unit", "add", 2, { 20, 22 }, 0, 0, 0, "a01.rcpt", 0 },
     };
     ck_printf("osc_rcpt_selftest: launches=%u unit=a01_valid_min.unit; QEMU (aarch64 virt), TEST signer, not physical\n",
@@ -433,11 +441,12 @@ unsigned ck_osc_candidate(const char *name, const uint8_t *b, size_t len)
         ck_printf("osc_policy: mode=release test_anchors=0 owner_anchors=0 (none provisioned) "
                   "domains=1 gen_width=32; QEMU, not physical\n");
 #endif
-        ck_printf("osc_receipt_policy: mode=%s receipt_test_anchors=%u receipt_owner_anchors=0 (owner root listed, not "
-                  "trusted) checkers=%u target=%s epoch_floor=%u epoch_now=%u revoked_ids=%u revoked_keys=0 "
+        ck_printf("osc_receipt_policy: mode=%s receipt_test_anchors=%u receipt_owner_anchors=%u (the owner root) "
+                  "checkers=%u target=%s epoch_floor=%u epoch_now=%u revoked_ids=%u revoked_keys=0 "
                   "firmware=none dependencies=none producer=none; launch requires a valid receipt; QEMU, not "
                   "physical\n",
-                  p.release ? "release" : "qualification", p.n_rcpt_test, p.n_rcpt_checkers, OSC_RCPT_TARGET_NAME,
+                  p.release ? "release" : "qualification", p.n_rcpt_test, p.n_rcpt_owner, p.n_rcpt_checkers,
+                  OSC_RCPT_TARGET_NAME,
                   (unsigned)CK_OSC_RCPT_EPOCH_FLOOR, (unsigned)CK_OSC_RCPT_EPOCH_NOW, p.n_rcpt_revoked_ids);
     }
     unsigned rc = osc_unit_admit(b, len, &p, &acc);

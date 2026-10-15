@@ -444,3 +444,38 @@ Signed: ______________________   Date: ____________
 Keep the signed checklist with the passphrase sheet's location noted on it,
 not the passphrase itself. A photo of the checklist (no passphrase in view)
 may be committed next to the public folder as the owner's signed record.
+
+## 7. Realization receipts: the owner root may sign them (aienos#387)
+
+Recorded 2026-10-14 for aienos#387. The owner key that exists is the one made on 2026-10-14 by the YubiKey
+ceremony (`docs/native/PI5-8-OWNER-CEREMONY.md`, aienos#380), not by the MacBook procedure above: YubiKey serial
+39017074, PIV slot 9c, `owner_root_ed25519
+578ada3cb0c2d154623ac089191023c8ad4bc5e63b8ccd1a38db2d679b8c9e76`.
+
+**Entry: this owner root may sign Omega realization receipts** (omega `spec/one-layer-receipts.md`, receipt v1,
+signer class OWNER). This is the entry `native/kernel/artifact/osc_receipt_anchor.h` and
+`native/kernel/core/osc_admit.c` wait for: from aienos#387 the kernel's receipt policy, in the release and the
+qualification build, has this key as its one OWNER receipt anchor.
+
+- **Basis.** The owner signed the first realization receipt with this key himself (PIN and touch, 2026-10-15
+  00:02:50 UTC; omega#455, `tests/checker2/fixtures/owner-receipt/a01.owner.rcpt`). Omega's spec makes the owner
+  root the only owner anchor honoured in production mode (section 6, step 2).
+- **What such a signature says.** One checker2 identity accepted one exact program (the OSC IR), one executable is
+  bound to it by hash, for one target and one epoch window. It grants no capability and admits no unit: a unit
+  still needs its own container signature, and a release build has no OWNER unit anchor until TRUST-1, so a release
+  build still launches nothing.
+- **The exact bytes signed** (65): `"OMEGA-REALIZATION-RECEIPT-SIG-V1\0"` followed by
+  SHA-256(`"OMEGA-REALIZATION-RECEIPT-V1\0"` and receipt bytes 0 to 351). The same key also signs owner
+  statements (they begin `AIENOS-OWNER-STATEMENT-V1`) and slot manifests (448 bytes beginning `AIENSLT1`). The
+  three messages differ in length and in their first bytes, and Ed25519 signs the exact bytes, so a signature made
+  for one can never pass as another.
+- **Signing.** `yubico-piv-tool -a verify-pin --sign -s 9c -A ED25519` over the 65-byte message, the same call as
+  `scripts/pi5-8/owner_ceremony.sh`. The tool asks for the PIN itself; nothing stores it.
+- **Withdrawing.** Revocation in the kernel is compile-time (`rcpt_revoked_ids`, `rcpt_revoked_keys` in
+  `core/osc_admit.c`): withdrawing one receipt, or this permission, means building a new image with the receipt id
+  or the key fingerprint revoked, or with the anchor removed. There is no live revocation feed yet
+  (`docs/osc-receipts.md`, UNVERIFIED).
+- **Checks.** `native/kernel/tests/test_osc_receipt.c` (`owner_receipt`): the committed owner receipt is VALID under
+  the release policy; every single-bit flip, another unit, another target, the epoch window edges, an unlisted
+  checker, a revoked receipt id and a revoked owner key are refused; TEST receipts stay refused. QEMU gate
+  `scripts/qemu_ck_osc_receipt_test.sh`: the owner receipt runs a01 under the release receipt policy.

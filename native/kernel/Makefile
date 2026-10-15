@@ -1573,16 +1573,16 @@ $(OUT)/host-san/test_osc_admit: $(KDIR)/tests/test_osc_admit.c $(KDIR)/core/osc_
 OSC_RCPT_MUTANTS := 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25
 OSC_RCPT_TEST_DEF := -DOSC_RCPT_HOST_TEST -I$(KDIR)/include -DOSC_FIXTURE_DIR='"$(abspath $(KDIR)/tests/fixtures)"'
 OSC_RCPT_TEST_SRCS := $(KDIR)/tests/test_osc_receipt.c $(KDIR)/core/osc_admit.c $(ART_HOST_SRCS)
-$(OUT)/host/test_osc_receipt: $(KDIR)/tests/test_osc_receipt.c $(KDIR)/core/osc_admit.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h $(wildcard $(KDIR)/tests/fixtures/osc_receipt/*)
+$(OUT)/host/test_osc_receipt: $(KDIR)/tests/test_osc_receipt.c $(KDIR)/core/osc_admit.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h $(wildcard $(KDIR)/tests/fixtures/osc_receipt/*) $(wildcard $(KDIR)/tests/fixtures/osc_receipt_owner/*)
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(ART_HOST_INC) $(OSC_RCPT_TEST_DEF) -DCK_SEED0B_TEST_ANCHOR=1 -o $@ $(OSC_RCPT_TEST_SRCS)
 
-$(OUT)/host-san/test_osc_receipt: $(KDIR)/tests/test_osc_receipt.c $(KDIR)/core/osc_admit.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h $(wildcard $(KDIR)/tests/fixtures/osc_receipt/*)
+$(OUT)/host-san/test_osc_receipt: $(KDIR)/tests/test_osc_receipt.c $(KDIR)/core/osc_admit.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h $(wildcard $(KDIR)/tests/fixtures/osc_receipt/*) $(wildcard $(KDIR)/tests/fixtures/osc_receipt_owner/*)
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) $(ART_HOST_INC) $(OSC_RCPT_TEST_DEF) -DCK_SEED0B_TEST_ANCHOR=1 -o $@ $(OSC_RCPT_TEST_SRCS)
 
 # the same test against the release policy of core/osc_admit.c (no CK_SEED0B_TEST_ANCHOR): every TEST receipt refused
-$(OUT)/host/test_osc_receipt_release: $(KDIR)/tests/test_osc_receipt.c $(KDIR)/core/osc_admit.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h $(wildcard $(KDIR)/tests/fixtures/osc_receipt/*)
+$(OUT)/host/test_osc_receipt_release: $(KDIR)/tests/test_osc_receipt.c $(KDIR)/core/osc_admit.c $(ART_HOST_DEPS) $(KDIR)/tests/ck_test.h $(wildcard $(KDIR)/tests/fixtures/osc_receipt/*) $(wildcard $(KDIR)/tests/fixtures/osc_receipt_owner/*)
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(HCFLAGS) $(ART_HOST_INC) $(OSC_RCPT_TEST_DEF) -o $@ $(OSC_RCPT_TEST_SRCS)
 

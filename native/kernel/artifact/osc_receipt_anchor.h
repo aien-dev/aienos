@@ -1,11 +1,11 @@
 /* osc_receipt_anchor.h -- receipt trust inputs that are not TEST material (aienos#383).
  *
  * osc_rcpt_owner_root_pk: Drake's owner root public key from the aienos#380 ceremony
- * (docs/OWNER_KEY_CEREMONY.md; the private key lives on a YubiKey, PIV slot 9c). It is LISTED here so that a
- * release-mode verifier can honour no other owner anchor (omega spec/one-layer-receipts.md section 6 step 2),
- * but it is NOT TRUSTED for receipts: no kernel policy puts it in rcpt_owner_anchors until
- * docs/OWNER_KEY_CEREMONY.md records that it may sign realization receipts. Nothing in this repository signs
- * with it. tests/test_osc_receipt.c checks that the release and qualification policies do not trust it.
+ * (docs/native/PI5-8-OWNER-CEREMONY.md; the private key lives on a YubiKey, PIV slot 9c). A release-mode verifier
+ * honours no other owner anchor (omega spec/one-layer-receipts.md section 6 step 2). It is the one OWNER receipt
+ * anchor of both kernel policies (core/osc_admit.c ck_osc_policy, aienos#387): docs/OWNER_KEY_CEREMONY.md
+ * section 7 records that it may sign realization receipts. Nothing in this repository signs with it.
+ * tests/test_osc_receipt.c checks the bytes against the ceremony record and an owner-signed receipt against it.
  *
  * osc_rcpt_checker_ids: the accepted checker2 identities (spec section 5). One entry: checker2 of omega
  * 265ce82a (omega#448), `checker2 version` checker_id. A changed checker2 has a new identity and its receipts are
