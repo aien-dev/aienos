@@ -12,6 +12,9 @@ inputs:
   - Cargo.lock
   - vendor/
   - tests/gates/
+  - crates/
+  - .cargo/
+  - docs/adr/0015-golden-vectors.json
 run:
   exec: tests/gates/run.sh
   args: ["crypto-boundary"]

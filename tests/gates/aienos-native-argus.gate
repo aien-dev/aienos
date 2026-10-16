@@ -8,6 +8,7 @@ requires:
 inputs:
   - native/argus/
   - tests/gates/
+  - native/capability/
 run:
   exec: tests/gates/run.sh
   args: ["native-argus"]

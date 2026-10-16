@@ -10,6 +10,14 @@ inputs:
   - crates/
   - native/boot/
   - tests/gates/
+  - scripts/
+  - evidence/
+  - native/kernel/tests/fixtures/
+  - Cargo.toml
+  - Cargo.lock
+  - .cargo/
+  - vendor/
+  - docs/adr/0015-golden-vectors.json
 run:
   exec: tests/gates/run.sh
   args: ["verify-all"]
