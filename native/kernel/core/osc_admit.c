@@ -218,7 +218,7 @@ struct lt_step {
     int ws; /* 0 none, 1..2 which caller workspace */
     uint64_t cap;
     const char *rcpt; /* receipt Store entry; NULL: the unit's own (lt_rcpt_for), "-": none */
-    int variant;      /* receipt policy variant for this launch (ck_osc_rcpt_variant): 0 qual, 1 release, 2 revoked key */
+    int variant;      /* TEST ONLY: 0 qual, 1 release, 2 revoked key, 3 changed code under qual policy */
 };
 
 /* The receipt of each launched unit: a receipt binds the IR and the code, so l02 (l01 with a bigger stack) shares
@@ -270,8 +270,14 @@ static void lt_run(const struct lt_step *s)
         const char *rn = s->rcpt ? s->rcpt : lt_rcpt_for(s->unit);
         size_t rlen = 0;
         const uint8_t *rb = lt_streq(rn, "-") ? 0 : ck_osc_receipt_find(rn, &rlen);
-        ck_osc_rcpt_variant = s->variant;
+        ck_osc_rcpt_variant = s->variant == 3 ? 0 : s->variant;
+        /* Preserve the valid receipt and admitted view; alter only the bytes
+         * privately copied by the launcher, exercising its final rehash. */
+        if (s->variant == 3)
+            lt_unit[u].bytes[lt_unit[u].acc.code_off] ^= 1;
         ck_osc_launch(lt_unit[u].bytes, lt_unit[u].len, &lt_unit[u].acc, rb, rlen, &rq, &r, &info);
+        if (s->variant == 3)
+            lt_unit[u].bytes[lt_unit[u].acc.code_off] ^= 1;
         ck_osc_rcpt_variant = 0;
         char rs[96], as[80];
         ck_osc_result_str(&r, rs, sizeof rs);
@@ -295,7 +301,7 @@ static void lt_run(const struct lt_step *s)
             hex(idh, info.rcpt.id, 8);
         ck_printf("osc_rcpt_launch: %s %s(%s) receipt=%s policy=%s -> %s receipt_id=%s revoked=%s ticks=%llu "
                   "pages_mapped=%u page_tables_zeroed=%u slot_free=%u; QEMU (aarch64 virt), TEST signer, not physical\n",
-                  s->unit, s->fn, as, rb ? rn : "none", vname[s->variant], rs, idh,
+                  s->unit, s->fn, as, rb ? rn : "none", vname[s->variant == 3 ? 0 : s->variant], rs, idh,
                   info.rcpt.revoked == OSC_RCPT_REVOKED_ID ? "receipt_id"
                   : info.rcpt.revoked == OSC_RCPT_REVOKED_KEY ? "signer_key" : "-",
                   (unsigned long long)r.ticks, info.pages_mapped, (unsigned)info.tables_zeroed,
@@ -339,6 +345,7 @@ static void rt_all(void)
         { "a01_valid_min.unit", "add", 2, { 15, 16 }, 0, 0, 0, "n_deps.rcpt", 0 },
         { "a01_valid_min.unit", "add", 2, { 16, 17 }, 0, 0, 0, "n_checker.rcpt", 0 },
         { "a01_valid_min.unit", "add", 2, { 17, 18 }, 0, 0, 0, "a01.owner.rcpt", 1 },
+        { "a01_valid_min.unit", "add", 2, { 18, 19 }, 0, 0, 0, "a01.rcpt", 3 },
         { "a01_valid_min.unit", "add", 2, { 20, 22 }, 0, 0, 0, "a01.rcpt", 0 },
     };
     ck_printf("osc_rcpt_selftest: launches=%u unit=a01_valid_min.unit; QEMU (aarch64 virt), TEST signer, not physical\n",
