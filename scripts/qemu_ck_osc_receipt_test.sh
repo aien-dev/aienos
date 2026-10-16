@@ -121,7 +121,7 @@ for rf in "${files[@]:1}"; do
     check "${serial}" "${r}.rcpt stored from the Store (bytes=${b})" "^osc_receipt: ${r//./\\.}\\.rcpt STORED bytes=${b} id=${id} "
 done
 check "${serial}" "receipt totals: 14 seen, 14 stored" "^osc_receipts: seen=14 stored=14 dropped=0 "
-check "${serial}" "self-test announces 18 launches" "^osc_rcpt_selftest: launches=18 unit=a01_valid_min\\.unit; "
+check "${serial}" "self-test announces 19 launches" "^osc_rcpt_selftest: launches=19 unit=a01_valid_min\\.unit; "
 
 label='QEMU \(aarch64 virt\), TEST signer, not physical'
 a=a01_valid_min.unit
@@ -152,11 +152,12 @@ rline "receipt naming firmware: RECEIPT_WRONG_FIRMWARE (81)" '14,15' n_firmware.
 rline "receipt with a dependency: RECEIPT_DEPENDENCIES_MISMATCH (88)" '15,16' n_deps.rcpt qualification "$(ref 88 DEPENDENCIES_MISMATCH)" -
 rline "receipt from an unlisted checker: RECEIPT_UNTRUSTED_CHECKER (86)" '16,17' n_checker.rcpt qualification "$(ref 86 UNTRUSTED_CHECKER)" -
 rline "owner receipt (signed on the owner YubiKey) in release mode: the unit runs, add(17,18) RETURNED 35" '17,18' a01.owner.rcpt release 'RETURNED value=35' - run
+rline "valid receipt with code changed after admission: CODE_HASH_MISMATCH (16), nothing mapped or executed" '18,19' a01.rcpt qualification 'REFUSED_AT_ADMISSION code=16 name=CODE_HASH_MISMATCH' -
 rline "after every refusal, the valid receipt still runs the unit: add(20,22) RETURNED 42" '20,22' a01.rcpt qualification 'RETURNED value=42' - run
-check "${serial}" "summary: 3 returned, 15 refused" "^osc_rcpt_launches: returned=3 trapped=0 refused=15 unknown=0; ${label}\$"
+check "${serial}" "summary: 3 returned, 16 refused" "^osc_rcpt_launches: returned=3 trapped=0 refused=16 unknown=0; ${label}\$"
 nl=$(grep -c '^osc_rcpt_launch: ' "${serial}" || true)
 names=$(grep -oE '^osc_rcpt_launch: .* name=RECEIPT_[A-Z_]+' "${serial}" | sed -E 's/.*name=//' | sort | uniq -d | tr '\n' ' ')
-[[ "${nl}" == 18 ]] && pass "exactly 18 receipt launch lines" || fail "receipt launch lines (${nl} of 18)"
+[[ "${nl}" == 19 ]] && pass "exactly 19 receipt launch lines" || fail "receipt launch lines (${nl} of 19)"
 # REVOKED appears twice on purpose (receipt id, signer key), told apart by the revoked= column
 [[ "${names}" == "RECEIPT_REVOKED " ]] && pass "every other refusal names a reason of its own" || fail "refusal reasons repeated: ${names}"
 if grep -E '^osc_launch: ' "${serial}" | grep -q .; then fail "a C3-3a launch line appeared in the receipt self-test"; else pass "only the receipt self-test ran"; fi
