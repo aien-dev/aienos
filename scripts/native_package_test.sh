@@ -10,10 +10,7 @@ repo=$(cd "$here/.." && pwd)
 np="$here/native_package.sh"
 fix="$repo/native/kernel/tests/fixtures/owner"
 T=$(mktemp -d "${TMPDIR:-/tmp}/native-package-test.XXXXXX")
-cleanup() {
-    [ -d "$T/wt" ] && git -C "$repo" worktree remove --force "$T/wt" >/dev/null 2>&1
-    rm -rf "$T"
-}
+cleanup() { rm -rf "$T"; }
 trap cleanup EXIT
 export NATIVE_PACKAGE_TOOL_OUT="$T/tool"
 checks=0; fails=0
@@ -86,9 +83,10 @@ expect_refused "build refuses a bad pins line" "40 hex" "$np" build --out "$T/px
 expect_refused "build refuses owner files without hardware-staging" "only with --variant hardware-staging" "$np" build --out "$T/py" --generation 7 --owner-pubkeys "$fix/TEST-FIXTURE-owner-pubkeys.txt" --machine-id "$fix/TEST-FIXTURE-machine-id.txt" "${dirty[@]}"
 expect_refused "build refuses CK_* in the environment" "CK_EXTRA_CFLAGS" env CK_EXTRA_CFLAGS=-DX "$np" build --out "$T/pz" --generation 7 "${dirty[@]}"
 expect_refused "build refuses CK_* passed down in MAKEFLAGS" "CK_SERVICE" env MAKEFLAGS=" -- CK_SERVICE=1" "$np" build --out "$T/pz" --generation 7 "${dirty[@]}"
-# A dirty tree is refused: a detached worktree of HEAD with this script and one changed
-# tracked file (the real checkout is never touched).
-if git -C "$repo" -c core.hooksPath=/dev/null worktree add -q --detach "$T/wt" HEAD >/dev/null 2>&1; then
+# A dirty tree is refused: a scratch clone of HEAD with this script and one changed tracked
+# file (the real checkout is never touched). A plain clone into $T, not a worktree: a
+# worktree writes the repository's own git dir, which the local sandbox keeps read-only.
+if git -c core.hooksPath=/dev/null clone -q --no-hardlinks "$repo" "$T/wt" >/dev/null 2>&1; then
     cp "$np" "$T/wt/scripts/native_package.sh"
     echo "# dirty" >>"$T/wt/native/kernel/Makefile"
     expect_refused "build refuses a dirty tree" "working tree is dirty" "$T/wt/scripts/native_package.sh" build --out "$T/pd" --generation 7 --variant core
