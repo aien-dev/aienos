@@ -23,7 +23,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
 mkdir -p "${work}/esp/EFI/BOOT" "${work}/esp/EFI/AIENOS"
 touch "${work}/esp/EFI/AIENOS/BOOTREPORT.TXT"
-cp target/aarch64-unknown-uefi/release/aienos-handoff.efi "${work}/esp/EFI/BOOT/BOOTAA64.EFI"
+cp "${CARGO_TARGET_DIR:-target}"/aarch64-unknown-uefi/release/aienos-handoff.efi "${work}/esp/EFI/BOOT/BOOTAA64.EFI"
 cp "${vars_fd}" "${work}/vars.fd"
 log="${work}/serial.log"
 

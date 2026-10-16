@@ -105,7 +105,7 @@ fi
 
 # Test-only signing: debug build by design (release refuses the feature).
 cargo build --quiet -p aienos-artifact-tool --features seed0b-test-signing
-tool="target/debug/aienos-artifact-tool"
+tool="${CARGO_TARGET_DIR:-target}/debug/aienos-artifact-tool"
 esp_art="${work}/esp/EFI/AIENOS/ARTIFACTS"
 mkdir -p "${work}/esp/EFI/BOOT" "${esp_art}"
 "${fixtures}/pack.sh" "${tool}" "${esp_art}"
@@ -195,7 +195,7 @@ commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 build_image() { # features, output
     AIENOS_COMMIT="${commit}" AIENOS_RESTART_SECS=1 cargo build --quiet --release \
         -p aienos-boot --target aarch64-unknown-uefi --features "$1" --bin aienos-handoff
-    cp target/aarch64-unknown-uefi/release/aienos-handoff.efi "$2"
+    cp "${CARGO_TARGET_DIR:-target}"/aarch64-unknown-uefi/release/aienos-handoff.efi "$2"
 }
 if [[ -z "${captured}" ]]; then
     build_image seed0b-qualification "${work}/qualification.efi"

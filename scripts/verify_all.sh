@@ -94,9 +94,9 @@ echo "PASS  AArch64 build: aienos-kernel for aarch64-unknown-none"
 echo ""
 echo "--- [AArch64 UEFI Image Builds] ---"
 cargo build --release -p aienos-boot --target aarch64-unknown-uefi --features firmware --bin aienos-boot
-cargo run --quiet --release -p aienos-evidence -- verify-efi target/aarch64-unknown-uefi/release/aienos-boot.efi
+cargo run --quiet --release -p aienos-evidence -- verify-efi "${CARGO_TARGET_DIR:-target}"/aarch64-unknown-uefi/release/aienos-boot.efi
 cargo build --release -p aienos-boot --target aarch64-unknown-uefi --features handoff --bin aienos-handoff
-cargo run --quiet --release -p aienos-evidence -- verify-efi target/aarch64-unknown-uefi/release/aienos-handoff.efi
+cargo run --quiet --release -p aienos-evidence -- verify-efi "${CARGO_TARGET_DIR:-target}"/aarch64-unknown-uefi/release/aienos-handoff.efi
 echo "PASS  AArch64 build: aienos-boot.efi and aienos-handoff.efi PE headers verified"
 
 # Step 6: QEMU AArch64 UEFI Boot Verification (Emulator Boot Test)
