@@ -9,13 +9,37 @@
  * one-shot tryboot run: the next boot is the normal OS). A 180 s firmware watchdog
  * covers a hang before that. It links no kernel and never calls ExitBootServices.
  * Built as PI5DIAG.EFI (make -C native/kernel pi5-diag); on the card it is
- * EFI/BOOT/BOOTAA64.EFI. Test: scripts/qemu_ck_pi5_diag_test.sh. */
+ * EFI/BOOT/BOOTAA64.EFI. Test: scripts/qemu_ck_pi5_diag_test.sh.
+ *
+ * AIENOS-IMAC-BOOT-0: the same source built for x86_64 (make -C native/kernel
+ * imac-diag -> IMACDIAG.EFI, on the stick EFI/BOOT/BOOTX64.EFI) for the first
+ * boot on a 2017 iMac. diag_x86.c adds CPUID, SMBIOS identity, PCI devices,
+ * screen modes and disks; the report is \EFI\AIENOS\IMACBOOT.TXT; it holds the
+ * screen ~30 s and then powers the machine off (a Mac has no one-shot boot to
+ * fall back from). Test: scripts/qemu_ck_imac_diag_test.sh. */
 #include <stdarg.h>
 #include <string.h>
 #include "efi.h"
+#include "diag.h"
 #include "../kernel/core/fmt.h"
 
+#if defined(__x86_64__)
+#define DIAG_TITLE "AIENOS-IMAC-BOOT-0"
+#define DIAG_MILESTONE "AIENOS-IMAC-BOOT-0"
+#define DIAG_FILE "IMACBOOT.TXT"
+#define DIAG_HOLD_S 30ull
+#define DIAG_RESET EfiResetShutdown
+#define DIAG_RESET_NAME "shutdown"
+#define REPORT_BYTES 65536
+#else
+#define DIAG_TITLE "AIENOS-PI5-BOOT-0"
+#define DIAG_MILESTONE "AIENOS-PI5-ACPI-0"
+#define DIAG_FILE "PI5BOOT0.TXT"
+#define DIAG_HOLD_S 5ull
+#define DIAG_RESET EfiResetCold
+#define DIAG_RESET_NAME "cold"
 #define REPORT_BYTES 16384
+#endif
 #define MAP_BYTES (64u << 10)
 #define LINE_BYTES 256
 
@@ -37,17 +61,13 @@ static void line_emit(void *ctx, char c)
 }
 
 /* Format one line, print it on ConOut (CRLF) and append it (LF) to the report. */
-static void say(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-static void say(const char *fmt, ...)
+static void vsay(const char *fmt, va_list ap)
 {
     struct line l;
     CHAR16 w[2 * LINE_BYTES + 1];
     size_t k = 0;
-    va_list ap;
     l.n = 0;
-    va_start(ap, fmt);
     ck_vformat(line_emit, &l, fmt, ap);
-    va_end(ap);
     for (size_t i = 0; i < l.n; i++) {
         if (l.b[i] == '\n')
             w[k++] = '\r';
@@ -58,6 +78,23 @@ static void say(const char *fmt, ...)
     w[k] = 0;
     if (conout)
         conout->OutputString(conout, w);
+}
+
+static void say(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void say(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vsay(fmt, ap);
+    va_end(ap);
+}
+
+void diag_say(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vsay(fmt, ap);
+    va_end(ap);
 }
 
 
@@ -187,7 +224,7 @@ static EFI_STATUS write_report(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     EFI_STATUS s = open_dir(image, st, "\\EFI\\AIENOS", &dir);
     if (s != EFI_SUCCESS)
         return s;
-    s = write_file(dir, "PI5BOOT0.TXT", report, report_len);
+    s = write_file(dir, DIAG_FILE, report, report_len);
     dir->Close(dir);
     return s;
 }
@@ -309,20 +346,27 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 {
     EFI_BOOT_SERVICES *bs = st->BootServices;
     char vendor[80];
-    uint64_t el;
     conout = st->ConOut;
     /* 180 s: the firmware resets the machine if this app hangs (UEFI 2.x 7.5). */
     if (bs->SetWatchdogTimer)
         bs->SetWatchdogTimer(180, 0x10000, 0, 0);
-    __asm__ volatile("mrs %0, CurrentEL" : "=r"(el));
+#if defined(__x86_64__)
+    diag_x86_console(st);
+#endif
 
-    say("AIENOS-PI5-BOOT-0\n");
-    say("milestone: AIENOS-PI5-ACPI-0\n");
+    say(DIAG_TITLE "\n");
+    say("milestone: " DIAG_MILESTONE "\n");
     narrow(vendor, sizeof vendor, st->FirmwareVendor);
     say("firmware_vendor: %s\n", vendor);
     say("firmware_revision: 0x%x\n", st->FirmwareRevision);
     say("uefi_spec_revision: %u.%u\n", st->Hdr.Revision >> 16, st->Hdr.Revision & 0xffff);
+#if defined(__x86_64__)
+    diag_x86_cpu();
+#else
+    uint64_t el;
+    __asm__ volatile("mrs %0, CurrentEL" : "=r"(el));
     say("current_el: EL%u\n", (unsigned)((el >> 2) & 3));
+#endif
     memory_summary(bs);
     say("config_tables: %llu\n", (unsigned long long)st->NumberOfTableEntries);
     for (uint64_t i = 0; i < st->NumberOfTableEntries; i++) {
@@ -333,18 +377,21 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
             (unsigned long long)(uintptr_t)st->ConfigurationTable[i].VendorTable);
     }
     acpi_dump_all(image, st);
+#if defined(__x86_64__)
+    diag_x86_devices(st);
+#endif
 
-    say("AIENOS-PI5-BOOT-0 DONE\n"); /* last line of the file; the write result below is console only */
+    say(DIAG_TITLE " DONE\n"); /* last line of the file; the write result below is console only */
     EFI_STATUS s = write_report(image, st);
     if (s == EFI_SUCCESS)
-        say("report_file: written \\EFI\\AIENOS\\PI5BOOT0.TXT (%llu bytes)\n", (unsigned long long)report_len);
+        say("report_file: written \\EFI\\AIENOS\\" DIAG_FILE " (%llu bytes)\n", (unsigned long long)report_len);
     else
         say("report_file: write FAILED status=0x%llx\n", (unsigned long long)s);
-    bs->Stall(5ull * 1000 * 1000);
+    bs->Stall(DIAG_HOLD_S * 1000 * 1000);
     EFI_RUNTIME_SERVICES *rt = st->RuntimeServices;
-    say("reset: cold\n");
+    say("reset: " DIAG_RESET_NAME "\n");
     if (rt && rt->ResetSystem)
-        rt->ResetSystem(EfiResetCold, EFI_SUCCESS, 0, 0);
+        rt->ResetSystem(DIAG_RESET, EFI_SUCCESS, 0, 0);
     say("reset: ResetSystem returned\n");
     return EFI_SUCCESS;
 }

@@ -2152,7 +2152,7 @@ PI5DIAG_DIR := $(OUT)/pi5diag
 PI5DIAG_ELF := $(PI5DIAG_DIR)/pi5diag.elf
 PI5DIAG_EFI := $(OUT)/PI5DIAG.EFI
 PI5DIAG_OBJS := $(PI5DIAG_DIR)/diag_main.o $(PI5DIAG_DIR)/efi_entry.o $(PI5DIAG_DIR)/fmt.o $(PI5DIAG_DIR)/libc_min.o
-$(PI5DIAG_DIR)/diag_main.o: $(BOOT)/diag_main.c $(BOOT)/efi.h $(KDIR)/core/fmt.h
+$(PI5DIAG_DIR)/diag_main.o: $(BOOT)/diag_main.c $(BOOT)/diag.h $(BOOT)/efi.h $(KDIR)/core/fmt.h
 	@mkdir -p $(dir $@)
 	$(KCC) $(KCFLAGS) -c -o $@ $<
 $(PI5DIAG_DIR)/efi_entry.o: $(BOOT)/efi_entry.S
@@ -2173,6 +2173,62 @@ $(PI5DIAG_ELF): $(PI5DIAG_OBJS) $(BOOT)/image.ld
 $(PI5DIAG_EFI): $(PI5DIAG_ELF)
 	$(call pe_image,$<,$@)
 pi5-diag: $(PI5DIAG_EFI)
+
+# ---- IMACDIAG.EFI: AIENOS-IMAC-BOOT-0, the same diagnostic for x86_64 (2017 iMac) ----
+# diag_main.c + diag_x86.c (CPUID, SMBIOS identity, PCI, GOP, disks), report in
+# \EFI\AIENOS\IMACBOOT.TXT, then power off. The only x86_64 image in this tree: its own
+# cross toolchain and flags (-mabi=ms: every function uses the UEFI x64 convention),
+# its own entry (efi_entry_x86_64.S) and PE header (image_x86_64.ld, Machine 0x8664).
+# Copy to a FAT stick as EFI/BOOT/BOOTX64.EFI.
+#   make imac-diag    -> $(OUT)/IMACDIAG.EFI     QEMU test: scripts/qemu_ck_imac_diag_test.sh
+ifeq ($(HOST_ARCH),x86_64)
+X86_CROSS ?=
+else
+X86_CROSS ?= x86_64-linux-gnu-
+endif
+X86CC := $(X86_CROSS)gcc
+X86LD := $(X86_CROSS)ld
+X86OBJCOPY := $(X86_CROSS)objcopy
+X86NM := $(X86_CROSS)nm
+X86READELF := $(X86_CROSS)readelf
+X86CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -nostdlib -fno-builtin \
+	-fno-stack-protector -fno-tree-loop-distribute-patterns -mgeneral-regs-only -mno-red-zone \
+	-mabi=ms -fcf-protection=none -fno-asynchronous-unwind-tables -fpie -fvisibility=hidden -fno-plt \
+	-I$(KDIR)/core -I$(BOOT)
+X86LDFLAGS := -nostdlib -pie --no-dynamic-linker -z norelro -z noexecstack -z max-page-size=4096 \
+	--no-warn-rwx-segments -T $(BOOT)/image_x86_64.ld
+IMACDIAG_DIR := $(OUT)/imacdiag
+IMACDIAG_ELF := $(IMACDIAG_DIR)/imacdiag.elf
+IMACDIAG_EFI := $(OUT)/IMACDIAG.EFI
+IMACDIAG_OBJS := $(IMACDIAG_DIR)/diag_main.o $(IMACDIAG_DIR)/diag_x86.o $(IMACDIAG_DIR)/efi_entry_x86_64.o \
+	$(IMACDIAG_DIR)/fmt.o $(IMACDIAG_DIR)/libc_min.o
+$(IMACDIAG_DIR)/diag_main.o: $(BOOT)/diag_main.c $(BOOT)/diag.h $(BOOT)/efi.h $(KDIR)/core/fmt.h
+$(IMACDIAG_DIR)/diag_x86.o: $(BOOT)/diag_x86.c $(BOOT)/diag.h $(BOOT)/efi.h
+$(IMACDIAG_DIR)/efi_entry_x86_64.o: $(BOOT)/efi_entry_x86_64.S
+$(IMACDIAG_DIR)/fmt.o: $(KDIR)/core/fmt.c $(KDIR)/core/fmt.h
+$(IMACDIAG_DIR)/libc_min.o: $(KDIR)/core/libc_min.c
+$(IMACDIAG_OBJS):
+	@mkdir -p $(dir $@)
+	$(X86CC) $(X86CFLAGS) -c -o $@ $<
+$(IMACDIAG_ELF): $(IMACDIAG_OBJS) $(BOOT)/image_x86_64.ld
+	@if grep -nE -- '->ExitBootServices' $(BOOT)/diag_main.c $(BOOT)/diag_x86.c || grep -nE -- 'rt->' $(BOOT)/diag_main.c $(BOOT)/diag_x86.c | grep -vE -- 'rt->ResetSystem'; then \
+	  echo "the diagnostic calls a service it must never call (only ResetSystem is allowed)"; exit 1; fi
+	@mkdir -p $(dir $@)
+	$(X86LD) $(X86LDFLAGS) -o $@ $(IMACDIAG_OBJS)
+	@u=$$($(X86NM) -u $@ | grep -v ' w ' || true); \
+	if [ -n "$$u" ]; then echo "image has undefined symbols: $$u"; rm -f $@; exit 1; fi
+	@bad=$$($(X86READELF) -rW $@ | grep -E '^[0-9a-f]+ ' | grep -v R_X86_64_RELATIVE || true); \
+	if [ -n "$$bad" ]; then echo "image has non-RELATIVE relocations:"; echo "$$bad"; rm -f $@; exit 1; fi
+	@k=$$($(X86NM) $@ | grep -E ' [TtDdBbRr] (ck_kernel_entry|kmain|ck_boot_model_load|ck_printf)$$' || true); \
+	if [ -n "$$k" ]; then echo "IMACDIAG links kernel objects: $$k"; rm -f $@; exit 1; fi
+$(IMACDIAG_EFI): $(IMACDIAG_ELF)
+	$(X86OBJCOPY) -O binary $< $@
+	@sz=$$(stat -c %s $@); pad=$$(( (4096 - sz % 4096) % 4096 )); \
+	if [ $$pad -gt 0 ]; then head -c $$pad /dev/zero >> $@; fi
+	@[ "$$(head -c 2 $@)" = "MZ" ] || { echo "not a PE image"; rm -f $@; exit 1; }
+	@[ "$$(od -An -tx1 -j68 -N2 $@ | tr -d ' ')" = "6486" ] || { echo "PE Machine is not x86_64 (0x8664)"; rm -f $@; exit 1; }
+	@echo "built $@ (commit $(AIENOS_COMMIT))"
+imac-diag: $(IMACDIAG_EFI)
 
 # Raspberry Pi 5 board image (see CK_PI5 above): target/native-kernel-pi5/BOOTAA64.EFI
 pi5-store:
@@ -2261,7 +2317,7 @@ $(OUT)/host-san/test_pi5_rng: $(KDIR)/tests/test_pi5_rng.c $(PI5_RNG_SRCS) $(KDI
 	$(HOSTCC) $(HCFLAGS) $(SANFLAGS) -DCK_RNG200_SPINS=1000 -I$(KDIR)/dev -o $@ $< $(PI5_RNG_SRCS)
 
 FORCE:
-.PHONY: uefi-vars slot-loader slot-loader-check pi5-diag
+.PHONY: uefi-vars slot-loader slot-loader-check pi5-diag imac-diag
 .PHONY: artifact-tier-pi5 artifact-tier-mutant
 .PHONY: osc-receipt-mutants osc-receipt-release all full pi5 pi5-store pi5-infer pi5-unlock pi5-unlock-card pi5-fact pi5-agent pi5-lifecycle pi5-artifact artifact-card-mutant test sanitize context-mutant agent-cmd-mutant cortex-image handoff-mutant acpi-dev-mutant iort-mutants smmu-l2-mutants acpi-scan clean print-kcflags udp-echo tool store-image gpt-image cont-tool owner-gen fb-check continuity-mutants continuity-resolve-mutants FORCE
 
