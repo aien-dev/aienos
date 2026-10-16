@@ -9,6 +9,9 @@
  * Order, and what an interruption at each point leaves behind:
  *   1. refuse unless: control record present, no candidate staged, the
  *      booted slot is the active one; target = the other slot. Nothing read.
+ *      The recovery image (booted_slot CK_SLOT_BOOT_RECOVERY, P11 cut 4) is
+ *      exempt from the last two: staging replaces a stale (failed or exhausted)
+ *      candidate and it writes the slot that is not active.
  *   2. read the inbox manifest and image, ck_slot_verify against the image's
  *      trusted keys (signature over the manifest, SHA-512 of the image), and
  *      dry-run ck_slot_stage_candidate (generation above the floor) on a copy

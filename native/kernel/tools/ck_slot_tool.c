@@ -752,6 +752,57 @@ static void selftest_update(void)
                   neg[i].what);
         }
     }
+
+    /* P11 cut 4: the recovery image updates when both slots are unusable.
+     * Fixture: B staged by an update, then its tries exhausted and both slot
+     * manifests damaged (dual-invalid). */
+    {
+        struct memdisk md = {upd_slots, sizeof upd_slots, -1, 0};
+        disk_dev dd;
+        ts_device td;
+        ts_region r;
+        struct ck_slot_control ex;
+        uint64_t seq;
+        struct ck_slot_eval ev[2];
+        struct ck_slot_decision d;
+        upd_media(&m, upd_img, UPD_IMG_BYTES, inu);
+        rc = upd_run(&g, inu, -1, 0, &TEST1_PK, 1, &res, &why);
+        ex = *upd_control();
+        ex.tries_remaining = 0;
+        md_bind(&dd, &td, &md);
+        if (rc != 0 || ts_open(&r, &td, 0) != TS_OK || ts_recover(&r, (uint8_t *)&bad, &seq, 0) != TS_OK ||
+            ck_slot_control_commit(&r, &ex, &seq) != TS_OK)
+            check(0, "recovery update: rig");
+        upd_slots[au * CK_SLOT_UNIT + 300] ^= 1;
+        upd_slots[bu * CK_SLOT_UNIT + 300] ^= 1;
+        check(!upd_slot_valid(0, 0) && !upd_slot_valid(1, 0), "recovery update: fixture has both slots invalid");
+        ev[0] = (struct ck_slot_eval){0, 0, 0, "x"};
+        ev[1] = (struct ck_slot_eval){0, 0, 0, "x"};
+        ck_slot_select(upd_control(), ev, &d);
+        check(d.boot_slot < 0 && d.reason == CK_SLOT_R_RECOVERY_REQUIRED && !d.loader_write,
+              "recovery update: the loader finds no bootable slot (recovery required, no write)");
+        memcpy(upd_ref, upd_slots, sizeof upd_slots);
+        check(upd_run(&g, inu, -1, 0, &TEST1_PK, 1, &res, &why) != 0 && !res.wrote && g.ms.writes == 0 &&
+                  strstr(why, "already staged"),
+              "recovery update: an ordinary (slot-booted) update is still refused, nothing written");
+        bad = m;
+        sign_manifest(&bad, TEST2_SEED);
+        memcpy(upd_inbox, &bad, sizeof bad);
+        check(upd_run(&g, inu, -1, CK_SLOT_BOOT_RECOVERY, &TEST1_PK, 1, &res, &why) != 0 && !res.wrote &&
+                  g.ms.writes == 0 && memcmp(upd_slots, upd_ref, sizeof upd_slots) == 0,
+              "recovery update: wrong key refused, nothing written");
+        memcpy(upd_inbox, &m, sizeof m);
+        rc = upd_run(&g, inu, -1, CK_SLOT_BOOT_RECOVERY, &TEST1_PK, 1, &res, &why);
+        c = upd_control();
+        check(rc == 0 && res.target == 1 && c && c->active_slot == 0 && c->candidate_slot == 1 &&
+                  c->tries_remaining == CK_SLOT_MAX_TRIES && !(c->flags & CK_SLOT_CTL_FLAG_CANDIDATE_FAILED),
+              "recovery update: stale exhausted candidate replaced, B staged with fresh tries");
+        check(upd_slot_valid(1, 0) && upd_same(au, cap), "recovery update: B verifies, slot A bytes untouched");
+        ev[1] = (struct ck_slot_eval){1, 2, 2, 0};
+        ck_slot_select(c, ev, &d);
+        check(d.boot_slot == 1 && d.reason == CK_SLOT_R_CANDIDATE_TRY,
+              "recovery update: the loader's next decision is a candidate try of B");
+    }
 }
 
 static int selftest(void)
@@ -1023,7 +1074,9 @@ static int selftest(void)
               "boot record: one changed byte without a reseal refused (digest)");
         BM(bm.magic[0] ^= 1, "bad boot record magic", "bad magic refused");
         BM(bm.version = 2, "unsupported boot record version", "version 2 refused");
-        BM(bm.boot_slot = 2, "boot record slot out of range", "slot 2 refused");
+        BM(bm.boot_slot = 3, "boot record slot out of range", "slot 3 refused");
+        BM(bm.boot_slot = CK_SLOT_BOOT_RECOVERY, "recovery boot record with a slot reason",
+           "recovery slot with a slot reason refused");
         BM(bm.reason = CK_SLOT_R_NONE, "boot record reason out of range", "reason none refused");
         BM(bm.reason = CK_SLOT_R_RECOVERY_REQUIRED, "boot record reason out of range", "reason recovery_required refused");
         BM(bm.control_present = 2, "boot record control flag out of range", "control flag 2 refused");
@@ -1036,6 +1089,42 @@ static int selftest(void)
         BM(bm.reason = CK_SLOT_R_NO_CONTROL, "boot record claims no control with a control record",
            "no_control with a control record refused");
 #undef BM
+
+        /* P11 cut 4: the recovery image's boot record (both slots unusable). */
+        {
+            struct ck_slot_boot_record r = b, rm;
+            r.boot_slot = CK_SLOT_BOOT_RECOVERY;
+            r.reason = CK_SLOT_R_RECOVERY_REQUIRED;
+            r.tries = 0;
+            ck_slot_boot_seal(&r);
+            check(ck_slot_boot_check(&r, &why) == 0, "recovery boot record: sealed record is valid");
+#define RM(stmt, want, what)                                                                        \
+            do {                                                                                    \
+                rm = r;                                                                             \
+                stmt;                                                                               \
+                ck_slot_boot_seal(&rm);                                                             \
+                check(ck_slot_boot_check(&rm, &why) != 0 && strcmp(why, want) == 0,                 \
+                      "recovery boot record: " what);                                               \
+            } while (0)
+            RM(rm.tries = 1, "recovery boot record with tries", "tries refused");
+            RM(rm.reason = CK_SLOT_R_ACTIVE, "recovery boot record with a slot reason", "reason active refused");
+            RM(rm.generation = 0, "boot record generation fields", "generation 0 refused");
+            RM(rm.reserved[0] = 1, "boot record reserved bytes nonzero", "reserved byte refused");
+            RM((rm.control_present = 0, rm.control_seq = 7), "boot record claims a sequence without a control record",
+               "sequence without control refused");
+#undef RM
+            rm = r;
+            rm.control_present = 0;
+            rm.control_seq = 0;
+            ck_slot_boot_seal(&rm);
+            check(ck_slot_boot_check(&rm, &why) == 0, "recovery boot record: without a control record is valid");
+            ck_slot_control_init(&c, 0);
+            a = ck_slot_kernel_action(&r, &c, &man, 1, &out, &why);
+            check(a == CK_SLOT_A_NONE && why && strcmp(why, "recovery boot: no slot to promote or abandon") == 0,
+                  "kernel action: recovery boot promotes nothing even when healthy");
+            a = ck_slot_kernel_action(&r, 0, 0, 0, &out, &why);
+            check(a == CK_SLOT_A_NONE, "kernel action: recovery boot without a control record does nothing");
+        }
 
         /* Candidate B on its try, control still names it. */
         ck_slot_control_init(&c, 0);

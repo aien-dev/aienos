@@ -1,9 +1,10 @@
-# Native image slots: install, update and recovery without Linux (P11 cuts 1, 2a, 2b and 3)
+# Native image slots: install, update and recovery without Linux (P11 cuts 1, 2a, 2b, 3 and 4)
 
 STATUS: cut 1 (format, rules, host tool), cut 2a (SLOTLDR.EFI, a separate
 slot loader in front of the unchanged image, QEMU gate PASS) and cut 2b
 (kernel-side promote / abandon, section 8) and cut 3 (the inactive-slot
-updater and the loader in the package, section 9) done; the owner
+updater and the loader in the package, section 9) and cut 4 (the
+known-good native recovery image, section 10) done in QEMU; the owner
 approved the loader on 2026-10-12 (section 2). Nothing here has run on
 hardware (hardware NOT_RUN). The kernel image and its stub are unchanged.
 SECURITY_IMPACT: PERSISTENT_FORMAT + RECOVERY (a new on-disk format and a new
@@ -217,6 +218,8 @@ nothing and to re-release anything.
 4. **Known-good recovery image.** The same loader plus a slot image on
    recovery media built by our tools, for the dual-invalid case. Then N7 is
    run on the physical candidate inside an attended window.
+   **Cut 4 (done, QEMU; section 10).** The recovery image lives on the
+   loader's own ESP and runs only when neither slot may boot.
 
    **Cut 2b (done, QEMU; section 8): kernel-side promote.** After its health milestone the
    kernel writes the control record over its own NVMe path (promote the
@@ -432,5 +435,114 @@ stay refused by the Makefile (gate row 15) and by `keys-c`.
 - The package carries SLOTLDR.EFI (`docs/NATIVE_PACKAGE.md`, "Slot loader
   in the package").
 
-Not here: the known-good recovery image for the case where both slots are
-invalid (cut 4). Hardware NOT_RUN: nothing was written to a physical disk.
+The known-good recovery image for the case where both slots are invalid
+is cut 4 (section 10). Hardware NOT_RUN: nothing was written to a physical disk.
+
+## 10. The known-good native recovery image (cut 4)
+
+Cuts 2a to 3 cover one bad slot: the loader falls back to the other one. When
+both slots are unusable the loader used to stop with `recovery_required` and
+hand the machine back to the firmware. Cut 4 adds a small, signed AIENOS image
+that SLOTLDR.EFI starts in that case, and that can rewrite a slot without
+Linux.
+
+**What it is.** A service image built with `CK_RECOVERY=1`
+(`make -C native/kernel CK_SERVICE=1 CK_RECOVERY=1 full`; output directory
+suffix `-recovery`). It is the service kernel without a model and without an
+inference unit (make refuses `CK_RECOVERY` with `CK_INFER_LIB`), and it says so
+on its first lifecycle line: `recovery: AIENOS native recovery image (P11 cut
+4): no model, ...`. Its manifest has the slot format (section 4), is signed by
+the same trusted key as a slot image (today the Owner Root, see
+`docs/OWNER_KEY_CEREMONY.md`) and binds the image by SHA-512.
+
+**Where it lives and how it is selected** (`native/boot/slot_loader.c`,
+`slot_format.h`):
+
+- On the loader's own boot volume (the ESP): `\EFI\AIENOS\RECOVERY.MAN`
+  (exactly one 4096-byte manifest unit) and `\EFI\AIENOS\RECOVERY.EFI`
+  (at most 64 MiB, `CK_SLOT_RECOVERY_MAX_BYTES`).
+- Only after the loader has found the slots partition, read the control
+  record and both slots, and `ck_slot_select` returned `recovery_required`
+  (both slots invalid, below the floor, or the active one unusable while the
+  candidate is out of tries). Whenever a slot may boot, the recovery image is
+  never used, even if it is on the ESP.
+- Not for the earlier refusals: no trusted key built in, no slots partition
+  or two of them, a damaged primary GPT, a slots partition that is too small.
+  Then the loader still returns `EFI_LOAD_ERROR` to the firmware; this cut
+  does not repair the partition table.
+- Verified like a slot: manifest structure, a trusted signer, the Ed25519
+  signature over the manifest, and the image's SHA-512. A refused or missing
+  recovery image prints `slot_loader: recovery image refused (<why>): not
+  booted` and nothing starts. On success the loader prints `slot_loader:
+  boot=R reason=recovery_required gen=<n> ...`, hands the kernel a boot record
+  with slot 2 (`CK_SLOT_BOOT_RECOVERY`, shown as `R`), reason
+  `recovery_required` and tries 0, and starts the image with `LoadImage` +
+  `StartImage` from the verified bytes. The loader writes nothing on this
+  path.
+- The same image may also be staged into a slot like any other signed image.
+  Booted from a slot it is an ordinary slot image: the normal rules apply
+  (it is promoted after health, and its updater refuses unless it is the
+  active slot).
+
+**What it can do.**
+
+- Unlock the Store (the service image's `unlock` verb; in QEMU the TEST keys
+  open it at boot), show `status` and `evidence`, and `shutdown`.
+- Rewrite a slot from a package: the operator verb `update` runs the cut 3
+  updater (section 9) unchanged, with one difference: booted as the recovery
+  image it does not require to be the active slot or that no candidate is
+  staged. It writes the slot that is not active, after the same checks
+  (signature and digest before any write, generation above the floor and
+  above the last good generation, read back after the write), and stages it
+  as the candidate with fresh tries, replacing a stale (failed or exhausted)
+  candidate. The active slot and the loader are never written.
+- After `shutdown` and a reboot, the loader tries the rewritten slot
+  (`candidate_try`) and the kernel promotes it after its health milestone
+  (section 8). From then on the machine boots normally.
+
+**What it cannot do.**
+
+- Promote or abandon anything: its boot record names no slot, and the kernel
+  says `slot: booted the recovery image (both slots unusable) ...: nothing
+  promoted or abandoned`.
+- Write without a control record: a disk whose control region is empty or
+  corrupt is refused (`no control record on disk`, nothing written). The
+  control record is created at install time.
+- Install an image below the generation floor or not newer than the last
+  good generation (no rollback through recovery).
+- Repair the GPT, the ESP, the loader or itself; rotate keys; use the network
+  or a TPM; run a model.
+- Production unlock still follows the Store's own key rules: an image built
+  for hardware staging without its keys stays LOCKED and refuses `update`
+  (gate row 15).
+
+**Limits recorded here.** No generation floor applies to the recovery image
+itself: an older, owner-signed recovery image on the ESP would still start.
+It can only write a slot through the checks above, so it cannot install an
+image below the floor. The package (`docs/NATIVE_PACKAGE.md`) does not yet
+build or carry the recovery image, and putting it on the ESP is an attended
+desk step. Hardware NOT_RUN: nothing here has run on the Spark.
+
+**Linux is not recovery.** A development rescue through Linux (the BootNext
+return to Linux of aienos#273, a Linux USB stick, or a Linux shell writing the
+disk) does not satisfy the final N7 gate. N7 needs this path (both slots
+invalid, the recovery image, a slot rewritten, a reboot into it) on the
+physical candidate inside an attended window. That run is NOT_RUN.
+
+**Tests.**
+
+- `make -C native/kernel slot-test` (`ck_slot_tool selftest`, 172 checks): the
+  recovery boot record (valid; tries, a slot reason, generation 0, a reserved
+  byte and a sequence without a control record each refused), the kernel
+  action for a recovery boot (nothing, also when healthy), and a recovery
+  update over a disk with both slots damaged and an exhausted candidate
+  (an ordinary update still refused, a wrong key refused with nothing
+  written, B rewritten and staged with fresh tries, A's bytes untouched,
+  the loader's next decision a candidate try of B).
+- `scripts/qemu_ck_slot_loader_test.sh` row 7 (no recovery image on the ESP:
+  nothing starts), row 16 (both slots invalid, the recovery image starts,
+  `update` rewrites B, the next boot tries B and the kernel promotes it; the
+  recovery image is not used while B may boot) and row 17 (a recovery image
+  signed by the wrong key or with a flipped byte is refused, no kernel runs,
+  the slots partition is byte-identical; make refuses a recovery image with a
+  model). `native/kernel/GATES.md` rows 192, 215 and 216.
