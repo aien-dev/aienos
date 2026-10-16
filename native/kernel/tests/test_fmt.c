@@ -37,6 +37,6 @@ int main(void)
     const char *volatile nul = 0;
     CHECK(ck_snprintf(t, sizeof t, "%s", nul) == 6 && strcmp(t, "(null)") == 0);
     CHECK(ck_snprintf(t, sizeof t, "0123456789") == 10 && strcmp(t, "0123456") == 0);
-    CHECK(ck_snprintf(t, 0, "abc") == 3);
+    CHECK(ck_snprintf(t, 0, "abc") == 4);  /* A7 CONTROL: deliberately wrong, never merge */
     return ck_t_verdict("CK_FMT");
 }
