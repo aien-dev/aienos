@@ -8,6 +8,11 @@ requires:
 inputs:
   - native/store/
   - tests/gates/
+  - native/argus/
+  - native/crypto/
+  - native/disk/
+  - native/m5/
+  - docs/adr/0015-golden-vectors.json
 run:
   exec: tests/gates/run.sh
   args: ["store-native"]

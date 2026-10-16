@@ -16,6 +16,12 @@ inputs:
   - crates/aienos-infer-kernel/
   - tests/gates/
   - scripts/
+  - native/
+  - crates/
+  - Cargo.toml
+  - Cargo.lock
+  - .cargo/
+  - vendor/
 run:
   exec: tests/gates/run.sh
   args: ["ck-qemu-gates"]

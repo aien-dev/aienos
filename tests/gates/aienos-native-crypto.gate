@@ -8,6 +8,7 @@ requires:
 inputs:
   - native/crypto/
   - tests/gates/
+  - native/argus/
 run:
   exec: tests/gates/run.sh
   args: ["native-crypto"]

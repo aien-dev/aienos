@@ -15,6 +15,12 @@ inputs:
   - crates/aienos-fpu-probe/
   - crates/aienos-infer-kernel/
   - tests/gates/
+  - native/
+  - scripts/native_package_test.sh
+  - scripts/native_package.sh
+  - crates/aienos-infer/
+  - Cargo.toml
+  - .cargo/
 run:
   exec: tests/gates/run.sh
   args: ["ck-host-tests"]

@@ -10,6 +10,9 @@ inputs:
   - Cargo.toml
   - Cargo.lock
   - tests/gates/
+  - crates/
+  - .cargo/
+  - vendor/
 run:
   exec: tests/gates/run.sh
   args: ["infer-crate"]

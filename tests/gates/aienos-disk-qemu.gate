@@ -10,6 +10,7 @@ inputs:
   - scripts/qemu_native_nvme_test.sh
   - scripts/lib_gate_hold.sh
   - tests/gates/
+  - scripts/qemu_native_sdhci_test.sh
 run:
   exec: tests/gates/run.sh
   args: ["disk-qemu"]

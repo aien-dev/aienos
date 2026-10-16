@@ -15,6 +15,7 @@ inputs:
   - crates/aienos-fpu-probe/
   - crates/aienos-infer-kernel/
   - tests/gates/
+  - native/
 run:
   exec: tests/gates/run.sh
   args: ["ck-stage-tests"]

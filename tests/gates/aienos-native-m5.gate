@@ -8,6 +8,9 @@ requires:
 inputs:
   - native/m5/
   - tests/gates/
+  - native/argus/
+  - native/crypto/
+  - native/sig/
 run:
   exec: tests/gates/run.sh
   args: ["native-m5"]

@@ -16,6 +16,7 @@ inputs:
   - crates/aienos-infer-kernel/
   - tests/gates/
   - scripts/
+  - native/
 run:
   exec: tests/gates/run.sh
   args: ["ck-b7b-probe"]
