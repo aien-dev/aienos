@@ -1,0 +1,22 @@
+   Compiling allen-reflex v0.1.0 (~/workspace/allen-pispark/aienos-399/crates/allen-reflex)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.71s
+     Running tests/route.rs (/tmp/t399/debug/deps/route-0ef93bdb64008f47)
+
+running 14 tests
+test memory_scope_owner_consent_guest ... ok
+test prompt_without_local_model_goes_to_spark_and_says_not_ready ... ok
+test negative_control_false_approval ... ok
+test negative_control_overlong_and_non_ascii ... ok
+test negative_control_malicious_tool_instruction ... ok
+test spark_task_needs_the_owner_desk_and_builds_a_bounded_pst1_request ... ok
+test long_and_interrupted_conversations ... ok
+test negative_control_missing_subject ... ok
+test negative_control_incorrect_model ... ok
+test negative_control_prompt_injection_inside_stored_text ... ok
+test proposals_are_deterministic_and_off_calibration_never_abstains_on_score ... ok
+test truthful_not_ready_with_nothing_available ... ok
+test typed_routes_for_known_requests ... ok
+test routing_never_grants_authority ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 28.97s
+

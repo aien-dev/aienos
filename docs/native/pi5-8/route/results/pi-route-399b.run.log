@@ -1,0 +1,24 @@
+[20:03:53Z] run pi5-allen-route-399b: efi=~/workspace/allen-pispark/pi-route1/BOOTAA64-2613e56.EFI sha256=6e6ababdb875d8dcf8a2509d5ec4cf773e63015fece39510fb7a6d2ba46cf381
+users: 0
+card+stick ready
+
+/mnt/aienos/EFI/AIENOS/KLOG.BIN:
+ filesystem blocksize 512, begins at LBA 2048; assuming 512 byte sectors.
+ byte_offset  begin_LBA    end_LBA    sectors
+           0     186816     190911       4096
+klog_slot_ready
+[20:06:00Z] klog slot lba=186816 sectors=4096 nonce=85503fc59f9dc7ac5e554dfe9568b21d (raw card sector matches)
+allen_exm_placed
+[20:07:19Z] ALLEN.EXM placed on the card (QUALIFICATION ONLY, sha256 d9abc833306f592f4f77de8283ae05e8d394b7ec2fa4515d562f4e0b46de1726); will be deleted after the run
+[20:08:00Z] block appended; rebooting the hub with tryboot
+[20:11:24Z] hub answers ping again after 204 s; waiting 60 s for ssh
+tryboot_flag_now=00000000
+block_removed
+ 20:15:23 up 4 min,  2 users,  load average: 9.52, 6.73, 3.01
+[20:15:24Z] config.txt restored byte for byte
+allen_exm_deleted_verified
+[20:17:08Z] ALLEN.EXM deleted from the card (verified absent)
+[20:17:09Z] report copied: ~/workspace/pi5-runs/pi5-allen-route-399b/AIENOS: KLOG.BIN KLOG.MAP 
+klog: state=1 log_len=84797 log_total=84797 stage=final
+[20:17:09Z] kernel log: 509 lines in ~/workspace/pi5-runs/pi5-allen-route-399b/kernel.log
+[20:17:09Z] run pi5-allen-route-399b done

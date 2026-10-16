@@ -66,7 +66,8 @@ echo card+stick ready" 2>&1 | tee -a "${runs}/run.log"
 # card sector is read back and compared before the map is written, so the
 # kernel is never told a position that is not the file.
 if [[ "${KLOG:-0}" == 1 ]]; then
-    . "$(dirname "$0")/klog-lib.sh"
+    kl="$(dirname "$0")/klog-lib.sh"; [[ -r "${kl}" ]] || kl="$(dirname "$0")/pi5/klog-lib.sh" # ~/workspace/pi5 copy, or the repo
+    . "${kl}"
     slot_secs=4096
     ext=$(hs "set -e
 sudo mount /dev/mmcblk0p1 /mnt/aienos; trap 'sudo umount /mnt/aienos' EXIT

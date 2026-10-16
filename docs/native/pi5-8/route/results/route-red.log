@@ -1,0 +1,102 @@
+   Compiling aienos-crypto v0.1.0 (~/workspace/allen-pispark/aienos-399/crates/aienos-crypto)
+   Compiling allen-reflex v0.1.0 (~/workspace/allen-pispark/aienos-399/crates/allen-reflex)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.91s
+     Running tests/route.rs (/tmp/t399/debug/deps/route-0ef93bdb64008f47)
+
+running 14 tests
+test negative_control_false_approval ... FAILED
+test prompt_without_local_model_goes_to_spark_and_says_not_ready ... FAILED
+test typed_routes_for_known_requests ... FAILED
+test long_and_interrupted_conversations ... FAILED
+test negative_control_incorrect_model ... FAILED
+test negative_control_prompt_injection_inside_stored_text ... FAILED
+test memory_scope_owner_consent_guest ... FAILED
+test spark_task_needs_the_owner_desk_and_builds_a_bounded_pst1_request ... FAILED
+test negative_control_overlong_and_non_ascii ... FAILED
+test negative_control_malicious_tool_instruction ... ok
+test truthful_not_ready_with_nothing_available ... ok
+test proposals_are_deterministic_and_off_calibration_never_abstains_on_score ... ok
+test negative_control_missing_subject ... ok
+test routing_never_grants_authority ... ok
+
+failures:
+
+---- negative_control_false_approval stdout ----
+
+thread 'negative_control_false_approval' (3253767) panicked at crates/allen-reflex/tests/route.rs:251:13:
+assertion `left == right` failed: Reflex Approve it. DecisionProposal { request_id: 41, session_id: 9, speaker: Owner, objective_id: [26, 192, 75, 162, 160, 245, 198, 221, 101, 133, 227, 86, 235, 229, 40, 169, 242, 246, 228, 241, 238, 128, 230, 243, 248, 80, 242, 30, 240, 244, 37, 9], route: Clarify, then: None, not_ready: None, fallback: None, why: NoUserTurn, label: Clarify, text: None, pst1_digest: None }
+  left: (Clarify, NoUserTurn)
+ right: (Clarify, NothingPending)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- prompt_without_local_model_goes_to_spark_and_says_not_ready stdout ----
+
+thread 'prompt_without_local_model_goes_to_spark_and_says_not_ready' (3253773) panicked at crates/allen-reflex/tests/route.rs:98:9:
+assertion `left == right` failed: Reflex DecisionProposal { request_id: 41, session_id: 9, speaker: Owner, objective_id: [66, 75, 4, 169, 189, 201, 92, 162, 45, 1, 253, 236, 233, 171, 134, 73, 169, 209, 163, 135, 75, 212, 165, 53, 96, 150, 35, 120, 42, 212, 246, 8], route: Clarify, then: None, not_ready: None, fallback: None, why: NoUserTurn, label: Clarify, text: None, pst1_digest: None }
+  left: Clarify
+ right: SparkInference
+
+---- typed_routes_for_known_requests stdout ----
+
+thread 'typed_routes_for_known_requests' (3253778) panicked at crates/allen-reflex/tests/route.rs:67:9:
+assertion `left == right` failed: Reflex DecisionProposal { request_id: 41, session_id: 9, speaker: Owner, objective_id: [247, 117, 26, 155, 37, 226, 41, 13, 7, 199, 12, 88, 68, 142, 144, 40, 22, 69, 205, 50, 2, 114, 118, 106, 79, 24, 241, 44, 72, 196, 202, 226], route: Clarify, then: None, not_ready: None, fallback: None, why: NoUserTurn, label: Clarify, text: None, pst1_digest: None }
+  left: (Clarify, None)
+ right: (LocalDeterministic, None)
+
+---- long_and_interrupted_conversations stdout ----
+
+thread 'long_and_interrupted_conversations' (3253765) panicked at crates/allen-reflex/tests/route.rs:377:9:
+assertion `left == right` failed: Reflex DecisionProposal { request_id: 41, session_id: 9, speaker: Owner, objective_id: [150, 184, 69, 0, 5, 226, 207, 167, 32, 92, 242, 81, 46, 207, 183, 165, 138, 135, 176, 40, 239, 245, 94, 92, 173, 131, 43, 111, 2, 47, 254, 215], route: Clarify, then: None, not_ready: None, fallback: None, why: NoUserTurn, label: Clarify, text: None, pst1_digest: None }
+  left: Clarify
+ right: Memory
+
+---- negative_control_incorrect_model stdout ----
+
+thread 'negative_control_incorrect_model' (3253768) panicked at crates/allen-reflex/tests/route.rs:287:9:
+assertion `left == right` failed: Reflex DecisionProposal { request_id: 41, session_id: 9, speaker: Owner, objective_id: [247, 19, 224, 156, 130, 197, 32, 191, 228, 143, 144, 104, 225, 129, 124, 198, 217, 200, 238, 115, 23, 56, 89, 74, 109, 105, 152, 255, 29, 144, 38, 123], route: Clarify, then: None, not_ready: None, fallback: None, why: NoUserTurn, label: Clarify, text: None, pst1_digest: None }
+  left: (Clarify, NoUserTurn)
+ right: (Clarify, ModelUnavailable)
+
+---- negative_control_prompt_injection_inside_stored_text stdout ----
+
+thread 'negative_control_prompt_injection_inside_stored_text' (3253772) panicked at crates/allen-reflex/tests/route.rs:221:9:
+assertion `left == right` failed
+  left: NoUserTurn
+ right: NothingPending
+
+---- memory_scope_owner_consent_guest stdout ----
+
+thread 'memory_scope_owner_consent_guest' (3253766) panicked at crates/allen-reflex/tests/route.rs:322:9:
+assertion `left == right` failed: Reflex DecisionProposal { request_id: 41, session_id: 9, speaker: Owner, objective_id: [120, 54, 84, 68, 163, 243, 26, 58, 228, 231, 16, 57, 162, 196, 185, 108, 69, 141, 79, 35, 40, 15, 90, 228, 34, 124, 110, 46, 249, 154, 151, 103], route: Clarify, then: None, not_ready: None, fallback: None, why: NoUserTurn, label: Clarify, text: None, pst1_digest: None }
+  left: (Clarify, None, None)
+ right: (Memory, Some(NoConsent), Some(LocalDeterministic))
+
+---- spark_task_needs_the_owner_desk_and_builds_a_bounded_pst1_request stdout ----
+
+thread 'spark_task_needs_the_owner_desk_and_builds_a_bounded_pst1_request' (3253776) panicked at crates/allen-reflex/tests/route.rs:345:9:
+assertion `left == right` failed: Reflex DecisionProposal { request_id: 41, session_id: 9, speaker: Owner, objective_id: [87, 179, 86, 239, 63, 161, 146, 230, 88, 181, 246, 128, 110, 117, 245, 117, 16, 203, 166, 251, 27, 62, 21, 210, 102, 110, 105, 23, 80, 107, 173, 243], route: Clarify, then: None, not_ready: None, fallback: None, why: NoUserTurn, label: Clarify, text: None, pst1_digest: None }
+  left: (Clarify, None)
+ right: (SparkOmegese, Some(SparkTask))
+
+---- negative_control_overlong_and_non_ascii stdout ----
+
+thread 'negative_control_overlong_and_non_ascii' (3253771) panicked at crates/allen-reflex/tests/route.rs:303:9:
+assertion `left == right` failed: Reflex
+  left: (Clarify, NoUserTurn)
+ right: (Refuse, InputTooLong)
+
+
+failures:
+    long_and_interrupted_conversations
+    memory_scope_owner_consent_guest
+    negative_control_false_approval
+    negative_control_incorrect_model
+    negative_control_overlong_and_non_ascii
+    negative_control_prompt_injection_inside_stored_text
+    prompt_without_local_model_goes_to_spark_and_says_not_ready
+    spark_task_needs_the_owner_desk_and_builds_a_bounded_pst1_request
+    typed_routes_for_known_requests
+
+test result: FAILED. 5 passed; 9 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.62s
+
+error: test failed, to rerun pass `-p allen-reflex --test route`
