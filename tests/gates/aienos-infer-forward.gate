@@ -1,0 +1,26 @@
+# tests/gates/aienos-infer-forward.gate
+# Not hosted (the hosted runner has no model file): release-build Llama forward comparisons against llama.cpp
+# (crates/aienos-infer/tests/forward.rs) with the real model; FAILS if the model is missing or any test SKIPs
+# (measured 2026-10-16 on the Spark: 178 s test wall, release build warm; timeout 15m leaves room for a cold build)
+gate: AIENOS-INFER-FORWARD
+manifest_version: 2
+owner: aienos
+requires:
+  - host
+inputs:
+  - crates/aienos-infer/
+  - Cargo.toml
+  - Cargo.lock
+  - tests/gates/
+  - crates/
+  - .cargo/
+  - vendor/
+run:
+  exec: tests/gates/run.sh
+  args: ["infer-forward"]
+expects:
+  exit: 0
+  verdict: PASS
+timeout: 15m
+exactness: EXACT
+cache_scope: machine

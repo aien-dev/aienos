@@ -115,9 +115,34 @@ case "$step" in
     cargo test -p aienos-infer
     cargo build -p aienos-infer --target aarch64-unknown-none
     ;;
+  # Not hosted (the hosted runner has no model file): the real Llama forward comparisons in
+  # crates/aienos-infer/tests/forward.rs, release build. The sandbox finds the model at
+  # $HOME/models (aien-run-exec bind-mounts the operator's ~/models read-only there).
+  # A missing model or any SKIPPED line is a FAIL, never a silent pass.
+  infer-forward)
+    model="${AIENOS_MODEL:-$HOME/models/aien-mail/Llama-3.2-1B-Instruct-Q4_K_M.gguf}"
+    if [ ! -f "$model" ]; then
+      echo "::error::model file $model not present; infer-forward needs the real model" >&2
+      obs model_present false
+      exit 1
+    fi
+    obs model_present true
+    export AIENOS_MODEL="$model"
+    set -o pipefail
+    cargo test --release -p aienos-infer --test forward 2>&1 | tee "$TMP/forward.log"
+    if grep -q 'SKIPPED' "$TMP/forward.log"; then
+      echo "::error::forward tests printed SKIPPED" >&2
+      obs skipped_in_log true
+      exit 1
+    fi
+    obs skipped_in_log false
+    ;;
   # ci.yml (disabled on GitHub since the CK workflow took over): the suites it still names
   store-native)      make -C native/store test mutants ;;
-  verify-all)        bash scripts/verify_all.sh ;;
+  verify-all)
+    export AIENOS_MODEL="${AIENOS_MODEL:-/nonexistent/no-model.gguf}"  # hosted parity: the debug workspace sweep skips forward tests (they run in infer-forward)
+    bash scripts/verify_all.sh
+    ;;
   zero-disk-secrets)
     echo "Auditing repository for prohibited plaintext secret files..."
     if find . -maxdepth 4 -name ".env*" -not -path "*/.git/*" -not -path "*/target/*" -not -path "*/vendor/*" | grep -q .; then
