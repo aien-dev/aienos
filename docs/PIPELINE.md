@@ -30,6 +30,10 @@ Add the label **`ready-to-merge`** when the pull request is finished. The pipeli
 Pushing a new commit moves the head; the pipeline tests the new head before it merges anything.
 Without the label nothing is merged. Remove the label to stop a merge.
 
+To add the label from a terminal use the REST call (`gh pr edit --add-label` currently fails on
+this repository with a Projects (classic) error):
+`gh api -X POST repos/aien-spark/aienos/issues/<number>/labels -f 'labels[]=ready-to-merge'`.
+
 ## Changes to the pipeline itself
 
 A head that changes `.aien/`, `tests/gates/`, `.github/workflows/`, `.forgejo/` or
