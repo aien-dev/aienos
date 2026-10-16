@@ -139,14 +139,16 @@ echo model_map_placed" 2>&1 | tee -a "${runs}/run.log"
     grep -q model_map_placed "${runs}/run.log" || { log "MODEL.MAP placement FAILED; stopping before any reboot"; exit 1; }
     log "MODEL.MAP placed on the card (sha256 ${map_sha})"
 fi
-# ---- optional: ALLEN exam file for the pi5-allen image (ALLEN_EXM=<file, "AIENALX1 QUALIF-ALLEN-EXAM" header>) ----
+# ---- optional: ALLEN card for the pi5-allen image (ALLEN_EXM=<file, "AIENALX1 QUALIF-ALLEN-EXAM" or "AIENALR1 QUALIF-ALLEN-ROUTE" header>) ----
+# The route card (aienos#399, made by scripts/allen_route_card.sh, which also refuses held-out and sealed files) holds
+# interactive requests without expected answers; the same path, size and held-out rules apply.
 # QUALIFICATION ONLY, train/dev rehearsal or bounds cases (aienos native/kernel/core/allen.h: at most 131072 bytes, made by
 # scripts/allen_exam_card.sh, which refuses held-out and sealed files). Copied to \EFI\AIENOS\ALLEN.EXM before the run; deleted
 # from the card (and checked gone) after the run; a copy stays in the run directory as evidence.
 if [[ -n "${ALLEN_EXM:-}" ]]; then
     case "$(readlink -f "${ALLEN_EXM}")" in */sealed/*|*heldout*) log "ALLEN_EXM ${ALLEN_EXM} looks held-out or sealed; stopping"; exit 1 ;; esac
-    [[ -r "${ALLEN_EXM}" && "$(stat -c %s "${ALLEN_EXM}")" -le 131072 && "$(head -n1 "${ALLEN_EXM}")" == "AIENALX1 QUALIF-ALLEN-EXAM" ]] \
-        || { log "ALLEN_EXM ${ALLEN_EXM} is not an AIENALX1 exam file of at most 131072 bytes; stopping"; exit 1; }
+    [[ -r "${ALLEN_EXM}" && "$(stat -c %s "${ALLEN_EXM}")" -le 131072 && ( "$(head -n1 "${ALLEN_EXM}")" == "AIENALX1 QUALIF-ALLEN-EXAM" || "$(head -n1 "${ALLEN_EXM}")" == "AIENALR1 QUALIF-ALLEN-ROUTE" ) ]] \
+        || { log "ALLEN_EXM ${ALLEN_EXM} is not an AIENALX1 exam or AIENALR1 route card of at most 131072 bytes; stopping"; exit 1; }
     exm_sha=$(sha256sum "${ALLEN_EXM}" | cut -d" " -f1)
     cp "${ALLEN_EXM}" "${runs}/ALLEN.EXM.sent"
     scp -q -o BatchMode=yes "${ALLEN_EXM}" "${hub}:/tmp/aienos-allen.exm"

@@ -11,6 +11,7 @@ set -uo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 tgt=${1:-${CARGO_TARGET_DIR:-$repo/target}}
 fail=0
+mkdir -p "$tgt"
 run() { CARGO_TARGET_DIR="$tgt" cargo test -q --locked --manifest-path "$repo/Cargo.toml" -p allen-reflex --test route "$@" >"$tgt/route-mutant.log" 2>&1; }
 if run; then echo "route tests (no mutant): PASS"; else echo "route tests (no mutant): FAIL"; tail -20 "$tgt/route-mutant.log"; fail=1; fi
 for m in route-mutant-grant route-mutant-dialog-pending route-mutant-guest-memory; do

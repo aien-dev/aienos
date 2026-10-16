@@ -14,7 +14,7 @@ use core::arch::asm;
 use core::cell::UnsafeCell;
 use core::fmt::Write;
 
-use crate::card::{self, CaseRef};
+use crate::card::{self, CaseRef, Kind, RouteRef};
 use crate::heap::{Bump, Mark, Stats};
 use crate::runner::{self, Session};
 
@@ -97,6 +97,7 @@ struct State {
     card: *const u8,
     card_len: usize,
     cases: Option<Vec<CaseRef>>,
+    routes: Option<Vec<RouteRef>>,
     after_cases: Option<Mark>,
     session: Option<Session>,
     line: String,
@@ -109,6 +110,7 @@ static G: Global = Global(UnsafeCell::new(State {
     card: core::ptr::null(),
     card_len: 0,
     cases: None,
+    routes: None,
     after_cases: None,
     session: None,
     line: String::new(),
@@ -170,16 +172,27 @@ pub unsafe extern "C" fn aienos_allen_card_open(
     let s = st();
     s.session = None;
     s.cases = None;
+    s.routes = None;
     let b = core::slice::from_raw_parts(buf, len);
-    match card::parse(b) {
-        Ok(c) => {
-            let n = c.len() as i32;
+    let parsed = match card::kind(b) {
+        Some(Kind::Route) => card::parse_route(b).map(|r| {
+            let n = r.len();
+            s.routes = Some(r);
+            n
+        }),
+        _ => card::parse(b).map(|c| {
+            let n = c.len();
+            s.cases = Some(c);
+            n
+        }),
+    };
+    match parsed {
+        Ok(n) => {
             s.card = buf;
             s.card_len = len;
-            s.cases = Some(c);
             s.line = String::with_capacity(8192);
             s.after_cases = Some(HEAP.0.mark());
-            n
+            n as i32
         }
         Err(e) => {
             if !why.is_null() {
@@ -192,7 +205,12 @@ pub unsafe extern "C" fn aienos_allen_card_open(
 
 fn reason_cstr(e: &'static str) -> *const u8 {
     // Static, NUL-terminated copies of every reason card::parse can give.
-    const R: [&[u8]; 11] = [
+    const R: [&[u8]; 16] = [
+        b"no case line\0",
+        b"route line needs id|speaker:session|flags|turns\0",
+        b"speaker must be owner:<n> or guest:<n>\0",
+        b"session must be 1..999999999\0",
+        b"flags must be - or letters from CP\0",
         b"file size must be 1..131072 bytes\0",
         b"only printable ASCII and LF line ends are allowed\0",
         b"file does not end with a line feed\0",
@@ -326,12 +344,106 @@ pub unsafe extern "C" fn aienos_allen_decide(
     0
 }
 
+/// Kind of the open card: 0 exam (`ALLEN_D` lines through [`aienos_allen_decide`]), 1 route
+/// (`ALLEN_P` lines through [`aienos_allen_route`]), -1 no card open.
+#[no_mangle]
+pub extern "C" fn aienos_allen_card_kind() -> i32 {
+    let s = st();
+    match (s.cases.is_some(), s.routes.is_some()) {
+        (true, _) => 0,
+        (_, true) => 1,
+        _ => -1,
+    }
+}
+
+/// What one route proposal reports. `#[repr(C)]`, mirrored in `core/allen.c`.
+#[repr(C)]
+pub struct RouteInfo {
+    /// bytes of the line written (no NUL)
+    pub len: u64,
+    /// offset of the proposal JSON in the line
+    pub json_off: u64,
+    /// counter ticks of the proposal itself (escape decode + turn split + core.decide + route
+    /// policy + PST1 digest when a Spark route + JSON), not the line copy
+    pub ticks: u64,
+    /// 1 when the heap went back to its pre-proposal mark
+    pub heap_reset: u64,
+    /// `allen_reflex::route::Route` index
+    pub route: u32,
+    /// the core's `Action` index
+    pub label: u32,
+    /// 1 owner, 0 guest (from the card line)
+    pub owner: u32,
+    /// 1 ready, 0 not ready (fallback named in the JSON)
+    pub ready: u32,
+}
+
+/// Propose a route for request `i` of a route card with the trained core and write
+/// `ALLEN_P <mode> <id> <json>` into `line` (`cap` bytes, NUL-terminated). `caps` are the image's
+/// real capabilities (bit 1 store, 2 desk, 4 local model, 8 Spark link): the card cannot claim
+/// any. Request id is `i + 1`. 0 ok; -1 no core/route card/request; -2 line buffer too small.
+///
+/// # Safety
+/// `line[..cap]` writable; `out` null or writable.
+#[no_mangle]
+pub unsafe extern "C" fn aienos_allen_route(
+    i: u32,
+    caps: u32,
+    line: *mut u8,
+    cap: usize,
+    out: *mut RouteInfo,
+) -> i32 {
+    let s = st();
+    let (Some(sess), Some(routes)) = (s.session.as_ref(), s.routes.as_ref()) else {
+        return -1;
+    };
+    let Some(r) = routes.get(i as usize).copied() else {
+        return -1;
+    };
+    let card = core::slice::from_raw_parts(s.card, s.card_len);
+    // card::parse_route admitted printable ASCII only: both ranges are valid UTF-8.
+    let (Ok(id), Ok(turns)) = (
+        core::str::from_utf8(&card[r.id.0..r.id.1]),
+        core::str::from_utf8(&card[r.turns.0..r.turns.1]),
+    ) else {
+        return -1;
+    };
+    let mark = HEAP.0.mark();
+    let (json_off, dt, len, facts) = {
+        let t0 = ticks();
+        let (json, facts) = sess.propose_json(&r, turns, i as u64 + 1, caps);
+        let dt = ticks().wrapping_sub(t0);
+        let off = runner::route_line(&mut s.line, sess.mode(), id, &json);
+        (off, dt, s.line.len(), facts)
+    };
+    if len + 1 > cap {
+        return -2;
+    }
+    core::ptr::copy_nonoverlapping(s.line.as_ptr(), line, len);
+    *line.add(len) = 0;
+    let reset = HEAP.0.reset_to(mark);
+    if !out.is_null() {
+        *out = RouteInfo {
+            len: len as u64,
+            json_off: json_off as u64,
+            ticks: dt,
+            heap_reset: reset as u64,
+            route: facts.route,
+            label: facts.label,
+            owner: facts.owner,
+            ready: facts.ready,
+        };
+    }
+    0
+}
+
 /// Drop the trained core and the case index; the heap is back at its start (if all was freed).
 #[no_mangle]
 pub extern "C" fn aienos_allen_close() {
     let s = st();
     s.session = None;
     s.cases = None;
+    s.routes = None;
     s.line = String::new();
     s.after_cases = None;
     s.card = core::ptr::null();

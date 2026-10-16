@@ -95,3 +95,77 @@ pub fn line(out: &mut String, mode: Mode, id: &str, json: &str) -> usize {
     out.push_str(json);
     off
 }
+
+/// Line prefix of an interactive route proposal (aienos#399).
+pub const ROUTE_TAG: &str = "ALLEN_P";
+
+/// What the C side checks about one proposal (route, label, speaker, readiness).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProposalFacts {
+    /// `Route` index
+    pub route: u32,
+    /// the core's `Action` index
+    pub label: u32,
+    /// 1 owner, 0 guest
+    pub owner: u32,
+    /// 1 ready, 0 not ready
+    pub ready: u32,
+}
+
+impl Session {
+    /// The proposal JSON for one route card request in this image's context. `caps` are the
+    /// image's real capabilities (bits of [`allen_reflex::route::Caps::from_bits`]); the card
+    /// can only say who speaks, the consent and the pending state, never what the image has.
+    pub fn propose_json(
+        &self,
+        r: &crate::card::RouteRef,
+        turns_escaped: &str,
+        request_id: u64,
+        caps: u32,
+    ) -> (String, ProposalFacts) {
+        use allen_reflex::route::{self, Calibration, Caps, RouteCtx, RouteRequest, Speaker};
+        let decoded = route::pct_decode(turns_escaped);
+        let text = decoded.as_deref().unwrap_or("");
+        let t = exam_turns(text);
+        let ctx = RouteCtx {
+            speaker: if r.owner {
+                Speaker::Owner
+            } else {
+                Speaker::Guest
+            },
+            memory_consent: r.consent,
+            pending: r.pending,
+            caps: Caps::from_bits(caps),
+            installed_model: None,
+            subject_id: [0u8; 32],
+            cal: Calibration::frozen(self.mode()),
+        };
+        let req = RouteRequest {
+            request_id,
+            session_id: r.session,
+            turns: if decoded.is_some() { &t } else { &[] },
+        };
+        let p = route::propose(&self.core, &req, &ctx);
+        let facts = ProposalFacts {
+            route: p.route as u32,
+            label: p.label.idx() as u32,
+            owner: r.owner as u32,
+            ready: p.not_ready.is_none() as u32,
+        };
+        (p.json(), facts)
+    }
+}
+
+/// `ALLEN_P <mode> <id> <json>` into `out` (cleared first); returns the byte offset of the JSON.
+pub fn route_line(out: &mut String, mode: Mode, id: &str, json: &str) -> usize {
+    out.clear();
+    out.push_str(ROUTE_TAG);
+    out.push(' ');
+    out.push_str(mode.name());
+    out.push(' ');
+    out.push_str(id);
+    out.push(' ');
+    let off = out.len();
+    out.push_str(json);
+    off
+}

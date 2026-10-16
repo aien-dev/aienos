@@ -10,7 +10,9 @@
 //! accuracy for a grid of similarity thresholds, so the frozen calibration can be chosen.
 #[path = "common/mod.rs"]
 mod common;
-use allen_reflex::route::{pct_decode, propose, Calibration, Caps, Route, RouteCtx, RouteRequest, Speaker};
+use allen_reflex::route::{
+    pct_decode, propose, Calibration, Caps, Route, RouteCtx, RouteRequest, Speaker,
+};
 use allen_reflex::{exam_turns, Config, Mode};
 use common::*;
 
@@ -52,7 +54,13 @@ fn load(path: &str) -> Vec<Row> {
     out
 }
 
-fn score(rows: &[Row], r: &allen_reflex::Reflex, mode: Mode, cal: Calibration, print: bool) -> (usize, usize) {
+fn score(
+    rows: &[Row],
+    r: &allen_reflex::Reflex,
+    mode: Mode,
+    cal: Calibration,
+    print: bool,
+) -> (usize, usize) {
     let mut ok = 0;
     let (mut abst_true, mut abst_pred, mut abst_hit) = (0, 0, 0);
     for (i, row) in rows.iter().enumerate() {
@@ -130,12 +138,42 @@ fn main() {
         if sweep {
             for k in 0..=12 {
                 let s = k as f32 * 0.05;
-                let (ok, n) = score(&rows, &r, mode, Calibration { min_sim: s, min_margin: f32::MIN }, false);
-                println!("ROUTE_SWEEP mode={} min_sim={:.2} correct={}/{}", mode.name(), s, ok, n);
+                let (ok, n) = score(
+                    &rows,
+                    &r,
+                    mode,
+                    Calibration {
+                        min_sim: s,
+                        min_margin: f32::MIN,
+                    },
+                    false,
+                );
+                println!(
+                    "ROUTE_SWEEP mode={} min_sim={:.2} correct={}/{}",
+                    mode.name(),
+                    s,
+                    ok,
+                    n
+                );
             }
             for m in [0.0f32, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0] {
-                let (ok, n) = score(&rows, &r, mode, Calibration { min_sim: -1.0, min_margin: m }, false);
-                println!("ROUTE_SWEEP mode={} min_margin={:.2} correct={}/{}", mode.name(), m, ok, n);
+                let (ok, n) = score(
+                    &rows,
+                    &r,
+                    mode,
+                    Calibration {
+                        min_sim: -1.0,
+                        min_margin: m,
+                    },
+                    false,
+                );
+                println!(
+                    "ROUTE_SWEEP mode={} min_margin={:.2} correct={}/{}",
+                    mode.name(),
+                    m,
+                    ok,
+                    n
+                );
             }
         }
     }

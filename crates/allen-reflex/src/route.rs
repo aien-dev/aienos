@@ -470,7 +470,11 @@ fn take16(d: &[u8; 32]) -> [u8; 16] {
 /// so its exact bytes are on record; nothing here sends it, and a Spark task still needs the
 /// owner desk before any sender may take it. `None` when the payload exceeds the bound or
 /// the route is not a Spark route.
-pub fn pst1_request(p: &DecisionProposal, payload: &[u8], subject_id: &[u8; 32]) -> Option<Vec<u8>> {
+pub fn pst1_request(
+    p: &DecisionProposal,
+    payload: &[u8],
+    subject_id: &[u8; 32],
+) -> Option<Vec<u8>> {
     let effect_class: u8 = match p.route {
         Route::SparkInference | Route::SparkOmegese => 1, // COMPUTE: a claim, never a permission
         _ => return None,
@@ -517,13 +521,33 @@ pub fn pst1_request(p: &DecisionProposal, payload: &[u8], subject_id: &[u8; 32])
 /// Model family words a request may name. A named family that is not the installed model
 /// makes the turn `clarify` (`model_unavailable`) instead of silently using another model.
 const MODEL_WORDS: [&str; 14] = [
-    "gpt", "chatgpt", "claude", "gemini", "llama", "tinyllama", "mistral", "qwen", "danube",
-    "phi", "grok", "deepseek", "gemma", "copilot",
+    "gpt",
+    "chatgpt",
+    "claude",
+    "gemini",
+    "llama",
+    "tinyllama",
+    "mistral",
+    "qwen",
+    "danube",
+    "phi",
+    "grok",
+    "deepseek",
+    "gemma",
+    "copilot",
 ];
 
 /// Words that mark an explicit Spark task ("run the benchmark on the spark").
 const SPARK_TASK_VERBS: [&str; 10] = [
-    "run", "compile", "build", "benchmark", "train", "test", "verify", "execute", "measure",
+    "run",
+    "compile",
+    "build",
+    "benchmark",
+    "train",
+    "test",
+    "verify",
+    "execute",
+    "measure",
     "compute",
 ];
 
@@ -536,7 +560,7 @@ fn eq_ci(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
 }
 
-fn named_model<'m>(msg: &'m str) -> Option<&'m str> {
+fn named_model(msg: &str) -> Option<&str> {
     lower_words(msg).find(|w| MODEL_WORDS.iter().any(|m| eq_ci(w, m)))
 }
 
@@ -744,7 +768,7 @@ pub fn propose(core: &Reflex, req: &RouteRequest, ctx: &RouteCtx) -> DecisionPro
             }
             // MUTANT: an approval phrase runs directly instead of going to the owner desk.
             #[cfg(feature = "route-mutant-grant")]
-            {
+            if pending {
                 p.route = Route::LocalDeterministic;
                 return p;
             }

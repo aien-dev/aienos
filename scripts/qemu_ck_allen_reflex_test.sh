@@ -51,7 +51,15 @@ make -s -C native/kernel CROSS="${cross}" AIENOS_COMMIT="${commit}" OUT="${out_s
     CK_ALLEN_HEAP_KIB=1024 all >/dev/null
 CARGO_TARGET_DIR="${repo_root}/target/allen-host" cargo build -q --release --locked \
     --manifest-path crates/allen-reflex-kernel/Cargo.toml --example host_exam
+CARGO_TARGET_DIR="${repo_root}/target/allen-host" cargo build -q --release --locked \
+    --manifest-path crates/allen-reflex-kernel/Cargo.toml --example host_route
 host="${repo_root}/target/allen-host/release/examples/host_exam"
+host_route="${repo_root}/target/allen-host/release/examples/host_route"
+lib_mut="${repo_root}/target/allen-kernel-mutant/aarch64-unknown-none/release/liballen_reflex_kernel.a"
+out_mut="${repo_root}/target/native-kernel-allen-route-mutant"
+CARGO_TARGET_DIR="${repo_root}/target/allen-kernel-mutant" cargo build -q --release --locked --target aarch64-unknown-none \
+    --manifest-path crates/allen-reflex-kernel/Cargo.toml --features route-mutant-grant
+make -s -C native/kernel CROSS="${cross}" AIENOS_COMMIT="${commit}" OUT="${out_mut}" CK_ALLEN=1 CK_ALLEN_LIB="${lib_mut}" all >/dev/null
 
 # ---- static: build refusals ----
 for bad in "CK_ALLEN=1" "CK_ALLEN=2 CK_ALLEN_LIB=${lib}" "CK_ALLEN=1 CK_ALLEN_LIB=${lib} CK_PI5_STORE=1" \
@@ -159,6 +167,36 @@ grep -qx "AIENOS_CK_ALLEN: NOT_RUN" "${work}/none.log" && ! grep -q '^ALLEN_D ' 
 boot "${out}/BOOTAA64.EFI" "${work}/bad.exm" "${work}/bad.log"
 grep -q "allen: exam file refused (bad header line)" "${work}/bad.log" && grep -qx "AIENOS_CK_ALLEN: FAIL" "${work}/bad.log" &&
     ! grep -q '^ALLEN_D ' "${work}/bad.log" && pass "bad header: refused whole, no decision" || fail "bad header: wrong outcome"
+
+# ---- 5. route card (aienos#399) ----
+route_dir=docs/native/pi5-8/route
+scripts/allen_route_card.sh "${work}/route.exm" "${route_dir}/route-dev.psv" "${route_dir}/route-val.psv" >/dev/null
+nr=$(($(wc -l <"${work}/route.exm") - 1))
+boot "${out}/BOOTAA64.EFI" "${work}/route.exm" "${work}/route.log"
+"${host_route}" "${work}/route.exm" >"${work}/host_p.txt" 2>/dev/null
+grep '^ALLEN_P ' "${work}/route.log" >"${work}/kern_p.txt" || true
+if [[ $(wc -l <"${work}/host_p.txt") == $((3 * nr)) ]] && cmp -s "${work}/host_p.txt" "${work}/kern_p.txt"; then
+    pass "route: $((3 * nr)) proposal lines identical to the host harness"
+else
+    fail "route: proposal lines differ from the host harness ($(wc -l <"${work}/kern_p.txt") vs $(wc -l <"${work}/host_p.txt"))"
+    diff "${work}/host_p.txt" "${work}/kern_p.txt" | head -5 || true
+fi
+grep -qx "AIENOS_CK_ALLEN: PASS" "${work}/route.log" && pass "route: AIENOS_CK_ALLEN: PASS" || fail "route: no AIENOS_CK_ALLEN: PASS"
+ra=$(grep -c '^ALLEN_RAUTH .* authority_violations=0$' "${work}/route.log" || true)
+rh=$(grep -c '^ALLEN_RHEAP .* fails=0 resets=\([0-9]*\)/\1 repeat_identical=\([0-9]*\)/\2$' "${work}/route.log" || true)
+[[ "${ra}" == 3 && "${rh}" == 3 ]] && pass "route: every mode: authority held for every proposal, heap reset, pass 2 identical" ||
+    fail "route: rauth ${ra}/3 rheap ${rh}/3"
+grep -q '"grants":"none"' "${work}/kern_p.txt" && ! grep -v '"grants":"none"' "${work}/kern_p.txt" | grep -q . &&
+    pass "route: every proposal says it grants nothing" || fail "route: a proposal without grants:none"
+grep '^ALLEN_RSTAT \|^ALLEN_RAUTH ' "${work}/route.log" | sed 's/^/      /'
+{ head -n1 "${work}/route.exm"; echo 'CAPS1|owner:1|CX|Ask the spark to run the task'; } >"${work}/route_bad.exm"
+boot "${out}/BOOTAA64.EFI" "${work}/route_bad.exm" "${work}/route_bad.log"
+grep -q "allen: exam file refused (flags must be - or letters from CP)" "${work}/route_bad.log" && ! grep -q '^ALLEN_P ' "${work}/route_bad.log" &&
+    pass "route: a card claiming a capability flag is refused whole" || fail "route: capability flag not refused"
+boot "${out_mut}/BOOTAA64.EFI" "${work}/route.exm" "${work}/route_mut.log"
+mv_=$(grep -c '^ALLEN_Q .* authority=VIOLATED ' "${work}/route_mut.log" || true)
+[[ "${mv_}" -ge 1 ]] && grep -qx "AIENOS_CK_ALLEN: FAIL" "${work}/route_mut.log" &&
+    pass "route red: grant mutant caught by the kernel check (${mv_} VIOLATED, FAIL)" || fail "route red: grant mutant not caught"
 
 if [[ -n "${AIENOS_ALLEN_KEEP_LOGS:-}" ]]; then
     mkdir -p "${AIENOS_ALLEN_KEEP_LOGS}" && cp "${work}"/*.log "${work}"/*.exm "${AIENOS_ALLEN_KEEP_LOGS}/"

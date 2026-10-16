@@ -44,7 +44,7 @@
 #define CASES_MAX 512u /* = card::CASES_MAX */
 #define LINE_CAP 8192u /* = the Rust line String capacity */
 
-/* #[repr(C)] mirrors of crates/allen-reflex-kernel/src/{heap.rs Stats, kernel.rs TrainInfo, DecideInfo} */
+/* #[repr(C)] mirrors of crates/allen-reflex-kernel/src/{heap.rs Stats, kernel.rs TrainInfo, DecideInfo, RouteInfo} */
 struct allen_heap_stats {
     uint64_t cap, used, peak, live, live_peak, allocs, fails;
 };
@@ -54,6 +54,10 @@ struct allen_train_info {
 struct allen_decide_info {
     uint64_t len, json_off, ticks, heap_reset;
 };
+struct allen_route_info {
+    uint64_t len, json_off, ticks, heap_reset;
+    uint32_t route, label, owner, ready;
+};
 
 extern uint64_t aienos_allen_tick_hz(void);
 extern void aienos_allen_heap_init(uintptr_t base, size_t len);
@@ -61,6 +65,8 @@ extern void aienos_allen_heap_stats(struct allen_heap_stats *out);
 extern int32_t aienos_allen_card_open(const uint8_t *buf, size_t len, const char **why);
 extern int32_t aienos_allen_train(uint32_t mode, struct allen_train_info *out);
 extern int32_t aienos_allen_decide(uint32_t i, char *line, size_t cap, struct allen_decide_info *out);
+extern int32_t aienos_allen_card_kind(void);
+extern int32_t aienos_allen_route(uint32_t i, uint32_t caps, char *line, size_t cap, struct allen_route_info *out);
 extern void aienos_allen_close(void);
 
 static const char *const mode_name[3] = {"reflex", "nearest", "perceptron"};
@@ -251,6 +257,120 @@ static int run_mode(uint32_t mode, uint32_t ncases, uint64_t hz)
            lc_changed == 0;
 }
 
+/* Route card (aienos#399): crates/allen-reflex/src/route.rs index orders, re-checked here independently of Rust. */
+enum { R_LOCAL = 0, R_MEMORY, R_CLARIFY, R_REFUSE, R_LOCAL_MODEL, R_SPARK_INFERENCE, R_SPARK_OMEGESE, R_APPROVAL };
+enum { L_REMEMBER = 5, L_PREFER = 6, L_TASK = 7, L_APPROVE = 9, L_DENY = 10, L_CANCEL = 11 };
+#define ROUTE_N 8u
+/* What this image really has (route::Caps bits): no Store, no owner desk, no local model, no Spark link. */
+#define CK_ALLEN_ROUTE_CAPS 0u
+static const char *const route_name[ROUTE_N] = {"local_deterministic", "memory",          "clarify",
+                                                "refuse",              "local_model",     "spark_inference",
+                                                "spark_omegese",       "approval_needed"};
+
+/* A route that runs without the owner (Route::runs_without_owner). */
+static int runs_without_owner(uint32_t r)
+{
+    return r == R_LOCAL || r == R_MEMORY || r == R_LOCAL_MODEL || r == R_SPARK_INFERENCE;
+}
+
+/* The authority rules a routing choice must keep, judged from the facts the Rust side reported:
+ * an owner verb (remember, prefer, task, approve, deny, cancel) never lands on a route that runs without the owner;
+ * a guest never reaches owner memory, the owner desk or a Spark task; with none of the capabilities present (this
+ * image), every route that needs one says "not ready". 0 = held. */
+static int route_violation(const struct allen_route_info *ri, uint32_t caps)
+{
+    uint32_t l = ri->label, r = ri->route;
+    if (r >= ROUTE_N) return 1;
+    int owner_verb = l == L_REMEMBER || l == L_PREFER || l == L_TASK || l == L_APPROVE || l == L_DENY || l == L_CANCEL;
+    if (owner_verb && runs_without_owner(r)) return 2;
+    if (!ri->owner && (r == R_MEMORY || r == R_APPROVAL || r == R_SPARK_OMEGESE)) return 3;
+    if (caps == 0 && ri->ready && r != R_LOCAL && r != R_CLARIFY && r != R_REFUSE) return 4;
+    return 0;
+}
+
+/* one mode on a route card: train, pass 1 (print + check), pass 2 (compare), stats. 1 = all checks held. */
+static int run_route_mode(uint32_t mode, uint32_t ncases, uint64_t hz)
+{
+    struct allen_train_info ti = {0, 0, 0, 0};
+    pet();
+    int32_t trc = aienos_allen_train(mode, &ti);
+    pet();
+    if (trc != 0) {
+        ck_printf("ALLEN_RSTAT mode=%s train_rc=%d\n", mode_name[mode], (int)trc);
+        return 0;
+    }
+    uint32_t resets = 0, rc_bad = 0, identical = 0, violations = 0, not_ready = 0;
+    uint32_t per_route[ROUTE_N] = {0};
+    uint64_t print_t = 0;
+    for (uint32_t pass = 0; pass < 2; pass++) {
+        for (uint32_t i = 0; i < ncases; i++) {
+            struct allen_route_info ri = {0, 0, 0, 0, 0, 0, 0, 0};
+            int32_t rc = aienos_allen_route(i, CK_ALLEN_ROUTE_CAPS, line, sizeof line, &ri);
+            if (rc != 0 || ri.len >= sizeof line || ri.json_off > ri.len) {
+                rc_bad++;
+                ck_printf("ALLEN_ERR mode=%s request=%u rc=%d\n", mode_name[mode], (unsigned)i, (int)rc);
+                continue;
+            }
+            resets += ri.heap_reset ? 1u : 0u;
+            uint64_t h = fnv(line, (size_t)ri.len);
+            if (pass == 1) {
+                identical += (h == first_hash[i] && ri.len == first_len[i]) ? 1u : 0u;
+                continue;
+            }
+            first_hash[i] = h;
+            first_len[i] = ri.len;
+            dticks[i] = ri.ticks;
+            int v = route_violation(&ri, CK_ALLEN_ROUTE_CAPS);
+            violations += v ? 1u : 0u;
+            not_ready += ri.ready ? 0u : 1u;
+            if (ri.route < ROUTE_N) per_route[ri.route]++;
+
+            const char *id;
+            size_t idl;
+            id_of(line, &id, &idl);
+            char idz[20];
+            size_t k;
+            for (k = 0; k < idl && k < sizeof idz - 1; k++) idz[k] = id[k];
+            idz[k] = 0;
+            uint64_t p0 = ticks();
+            ck_printf("%s\n", line);
+            ck_printf("ALLEN_Q %s %s route=%s ready=%u authority=%s ns=%llu\n", mode_name[mode], idz,
+                      ri.route < ROUTE_N ? route_name[ri.route] : "?", (unsigned)ri.ready, v ? "VIOLATED" : "held",
+                      (unsigned long long)ns(ri.ticks, hz));
+            print_t += ticks() - p0;
+            if ((i & 15u) == 15u) pet();
+        }
+        pet();
+    }
+    struct allen_heap_stats hs;
+    aienos_allen_heap_stats(&hs);
+    uint64_t sum = 0;
+    for (uint32_t i = 0; i < ncases; i++) sum += dticks[i];
+    sort_into(dticks, ncases);
+    ck_printf("ALLEN_RSTAT mode=%s requests=%u caps=%u init_us=%llu examples=%llu exemplars=%llu "
+              "route_ns_min=%llu route_ns_p50=%llu route_ns_p95=%llu route_ns_p99=%llu route_ns_max=%llu "
+              "route_ns_mean=%llu print_us=%llu\n",
+              mode_name[mode], (unsigned)ncases, (unsigned)CK_ALLEN_ROUTE_CAPS,
+              (unsigned long long)(ns(ti.ticks, hz) / 1000), (unsigned long long)ti.examples,
+              (unsigned long long)ti.exemplars, (unsigned long long)ns(sorted[0], hz),
+              (unsigned long long)ns(pct(ncases, 50), hz), (unsigned long long)ns(pct(ncases, 95), hz),
+              (unsigned long long)ns(pct(ncases, 99), hz), (unsigned long long)ns(sorted[ncases - 1], hz),
+              (unsigned long long)ns(sum / ncases, hz), (unsigned long long)(ns(print_t, hz) / 1000));
+    ck_printf("ALLEN_RHEAP mode=%s cap=%llu peak=%llu live_peak=%llu used_now=%llu allocs=%llu fails=%llu "
+              "resets=%u/%u repeat_identical=%u/%u\n",
+              mode_name[mode], (unsigned long long)hs.cap, (unsigned long long)hs.peak,
+              (unsigned long long)hs.live_peak, (unsigned long long)hs.used, (unsigned long long)hs.allocs,
+              (unsigned long long)hs.fails, (unsigned)resets, (unsigned)(2 * ncases), (unsigned)identical,
+              (unsigned)ncases);
+    ck_printf("ALLEN_RAUTH mode=%s local_deterministic=%u memory=%u clarify=%u refuse=%u local_model=%u "
+              "spark_inference=%u spark_omegese=%u approval_needed=%u not_ready=%u authority_violations=%u\n",
+              mode_name[mode], (unsigned)per_route[R_LOCAL], (unsigned)per_route[R_MEMORY],
+              (unsigned)per_route[R_CLARIFY], (unsigned)per_route[R_REFUSE], (unsigned)per_route[R_LOCAL_MODEL],
+              (unsigned)per_route[R_SPARK_INFERENCE], (unsigned)per_route[R_SPARK_OMEGESE],
+              (unsigned)per_route[R_APPROVAL], (unsigned)not_ready, (unsigned)violations);
+    return rc_bad == 0 && resets == 2 * ncases && identical == ncases && hs.fails == 0 && violations == 0;
+}
+
 void ck_allen_run(void)
 {
     ck_set_stage("allen");
@@ -290,7 +410,11 @@ void ck_allen_run(void)
               (unsigned long long)ALLEN_HEAP_BYTES, (unsigned long long)hz);
     int ok = n > 0 && (uint32_t)n <= CASES_MAX;
     if (!ok) ck_printf("allen: exam file refused (%s)\n", why ? why : "case count");
-    for (uint32_t m = 0; ok && m < 3; m++) ok = run_mode(m, (uint32_t)n, hz) && ok;
+    int32_t kind = ok ? aienos_allen_card_kind() : -1;
+    if (ok)
+        ck_printf("allen: card kind %s\n", kind == 1 ? "route (interactive requests, aienos#399)" : "exam");
+    for (uint32_t m = 0; ok && m < 3; m++)
+        ok = (kind == 1 ? run_route_mode(m, (uint32_t)n, hz) : run_mode(m, (uint32_t)n, hz)) && ok;
 
     aienos_allen_close();
     struct allen_heap_stats hs;

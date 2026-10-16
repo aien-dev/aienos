@@ -29,3 +29,8 @@ panic = "abort"
 [[test]]
 name = "heap_budget"
 harness = false
+
+# Host/QEMU red runs only (scripts/qemu_ck_allen_reflex_test.sh): build the unit with a known-bad routing mutant so the
+# kernel's own authority check (core/allen.c route_violation) must catch it. Never in a Pi image.
+[features]
+route-mutant-grant = ["allen-reflex/route-mutant-grant"]

@@ -3,10 +3,14 @@
 //!
 //! What it adds around the unchanged core:
 //! - [`card`]: the exam card file `\EFI\AIENOS\ALLEN.EXM` (case id + turns only, never labels).
+//!   The same file may instead be a route card (aienos#399): interactive requests with speaker, session and
+//!   consent/pending flags, never expected routes and never capabilities.
 //! - [`pool`]: the training pool compiled into the image (exam train split + `cases-reflex-extra.psv`,
 //!   read exactly as `crates/allen-reflex/examples/common` reads them). Dev and held-out are never in it.
 //! - [`runner`]: one trained core per mode and one decision line per case,
 //!   `ALLEN_D <mode> <id> <decision JSON>`, byte-identical on the host and on the Pi.
+//!   On a route card: one typed routing proposal per request (`allen_reflex::route`),
+//!   `ALLEN_P <mode> <id> <proposal JSON>`, with the image's own capabilities.
 //! - [`heap`]: a bounded bump heap over one region the kernel hands over, with a mark/reset around
 //!   each decision so repeated decisions do not grow it, and live/peak counters for the report.
 //! - `kernel` (only for `target_os = "none"`): the global allocator, the panic handler (a panic or an
