@@ -1,0 +1,95 @@
+AIENOS-IMAC-BOOT-0
+milestone: AIENOS-IMAC-BOOT-0
+firmware_vendor: Apple
+firmware_revision: 0x10000
+uefi_spec_revision: 2.40
+cpu_vendor: GenuineIntel
+cpu_brand: Intel(R) Core(TM) i5-7500 CPU @ 3.40GHz
+cpu_signature: family=0x6 model=0x9e stepping=9 cpuid_max=0x16 ext_max=0x80000008
+cpu_topology: threads_per_core=1 threads_per_package=4
+cpu_address_bits: physical=39 linear=48
+cpu_features: sse3 ssse3 fma sse4.1 sse4.2 x2apic popcnt aes xsave avx f16c rdrand tsc apic sse2 bmi1 avx2 bmi2 erms invpcid rdseed adx smap smep nx pdpe1gb rdtscp lm invariant_tsc
+cpu_mode: cpl=0 paging=1 long_mode=1 cr0=0x80000013 cr4=0x40668 efer=0x500
+memory_map: entries=45 conventional_mib=16078 map_key=0x14ab
+config_tables: 15
+table 0: 674abea3-0fe5-11e5-988e-b8e8562cbafa unknown at 0x8a49ec98
+table 1: 026c0f80-22ec-11e2-aa02-3c07540e73b4 unknown at 0x8a498000
+table 2: a31280ad-481e-41b6-95e8-127f4c984779 unknown at 0x8a49ec18
+table 3: ee4e5898-3914-4259-9d6e-dc7bd79403cf unknown at 0x8a49e998
+table 4: 05ad34ba-6f02-4214-952e-4da0398e2bb9 unknown at 0x84a036f0
+table 5: 7739f24c-93d7-11d4-9a3a-0090273fc14d unknown at 0x8a443018
+table 6: 4c19049f-4137-4dd3-9c10-8b97a83ffdfa unknown at 0x84a03920
+table 7: 49152e77-1ada-4764-b7a2-7afefed95e8b unknown at 0x84b46620
+table 8: 2c8d93b0-b1f4-56d3-8698-ee2a61fbe720 unknown at 0x8ad0c230
+table 9: 59e24291-7139-11e5-9b99-b8e8562cbafa unknown at 0x89d17018
+table 10: c5cff4f1-379a-54e1-9edd-93219c6aa4fe unknown at 0x8abed3e0
+table 11: eb9d2d30-2d88-11d3-9a16-0090273fc14d ACPI 1.0 at 0x8affe000
+table 12: 8868e871-e4f1-11d3-bc22-0080c73c8881 ACPI 2.0 at 0x8affe014
+table 13: eb9d2d31-2d88-11d3-9a16-0090273fc14d SMBIOS at 0x8af00000
+table 14: f2fd1544-9794-4a2c-992e-e5bbcf20e394 SMBIOS3 at 0x8aefe000
+acpi_rsdp: rev=2 oem=APPLE  xsdt=0x8afc9188
+acpi_table: XSDT rev=1 len=212 at 0x8afc9188 checksum=ok via RSDP file=XSDT.BIN written
+acpi_table: FACP rev=5 len=244 at 0x8aff8000 checksum=ok via XSDT file=FACP.BIN written
+acpi_table: DSDT rev=2 len=24005 at 0x8afee000 checksum=ok via FADT file=DSDT.BIN written
+acpi_table: UEFI rev=1 len=66 at 0x8af7d000 checksum=ok via XSDT file=UEFI.BIN written
+acpi_table: ECDT rev=1 len=83 at 0x8affa000 checksum=ok via XSDT file=ECDT.BIN written
+acpi_table: HPET rev=1 len=56 at 0x8aff7000 checksum=ok via XSDT file=HPET.BIN written
+acpi_table: APIC rev=2 len=188 at 0x8aff6000 checksum=ok via XSDT file=APIC.BIN written
+acpi_table: MCFG rev=1 len=60 at 0x8aff5000 checksum=ok via XSDT file=MCFG.BIN written
+acpi_table: SBST rev=1 len=48 at 0x8aff4000 checksum=ok via XSDT file=SBST.BIN written
+acpi_table: SSDT rev=1 len=36 at 0x8afed000 checksum=ok via XSDT file=SSDT.BIN written
+acpi_table: SSDT rev=2 len=1810 at 0x8afec000 checksum=ok via XSDT file=SSDT1.BIN written
+acpi_table: SSDT rev=1 len=36 at 0x8afeb000 checksum=ok via XSDT file=SSDT2.BIN written
+acpi_table: SSDT rev=1 len=49 at 0x8afe8000 checksum=ok via XSDT file=SSDT3.BIN written
+acpi_table: SSDT rev=1 len=571 at 0x8afe7000 checksum=ok via XSDT file=SSDT4.BIN written
+acpi_table: SSDT rev=1 len=184 at 0x8afe6000 checksum=ok via XSDT file=SSDT5.BIN written
+acpi_table: SSDT rev=2 len=17564 at 0x8afe1000 checksum=ok via XSDT file=SSDT6.BIN written
+acpi_table: SSDT rev=2 len=4385 at 0x8afd0000 checksum=ok via XSDT file=SSDT7.BIN written
+acpi_table: SSDT rev=2 len=1719 at 0x8afcf000 checksum=ok via XSDT file=SSDT8.BIN written
+acpi_table: SSDT rev=2 len=1450 at 0x8afce000 checksum=ok via XSDT file=SSDT9.BIN written
+acpi_table: SSDT rev=2 len=661 at 0x8afcd000 checksum=ok via XSDT file=SSDT10.BIN written
+acpi_table: SSDT rev=2 len=281 at 0x8afcc000 checksum=ok via XSDT file=SSDT11.BIN written
+acpi_table: SSDT rev=2 len=3862 at 0x8afcb000 checksum=ok via XSDT file=SSDT12.BIN written
+acpi_table: DMAR rev=1 len=136 at 0x8afca000 checksum=ok via XSDT file=DMAR.BIN written
+acpi_table: VFCT rev=1 len=61572 at 0x8afb9000 checksum=ok via XSDT file=VFCT.BIN written
+acpi_dump: copied=24 failed=0
+smbios: entry=3 version=3.0 table=0x8aefd000 max_len=2624
+smbios_bios: vendor=Apple Inc. version=529.140.2.0.0 date=06/23/2024
+smbios_system: manufacturer=Apple Inc. product=iMac18,3 version=1.0
+smbios_board: manufacturer=Apple Inc. product=Mac-BE088AF8C5EB4FA2 version=iMac18,3
+pci: 00:00.0 8086:591f rev=05 class=060000 hdr=0 sub=106b:0180 host-bridge
+pci: 00:01.0 8086:1901 rev=05 class=060400 hdr=1 secondary=01 subordinate=01 pci-bridge
+pci: 00:02.0 8086:5912 rev=04 class=030000 hdr=0 sub=106b:0180 display-vga
+pci: 00:14.0 8086:a12f rev=31 class=0c0330 hdr=0 sub=8086:7270 usb-xhci
+pci: 00:16.0 8086:a13a rev=31 class=078000 hdr=0 sub=8086:7270 other
+pci: 00:17.0 8086:a102 rev=31 class=010601 hdr=0 sub=8086:7270 storage-sata
+pci: 00:1b.0 8086:a167 rev=f1 class=060400 hdr=1 secondary=02 subordinate=02 pci-bridge
+pci: 00:1c.0 8086:a110 rev=f1 class=060400 hdr=1 secondary=03 subordinate=03 pci-bridge
+pci: 00:1c.1 8086:a111 rev=f1 class=060400 hdr=1 secondary=04 subordinate=04 pci-bridge
+pci: 00:1c.4 8086:a114 rev=f1 class=060400 hdr=1 secondary=05 subordinate=7a pci-bridge
+pci: 00:1f.0 8086:a145 rev=31 class=060100 hdr=0 sub=8086:7270 isa-bridge
+pci: 00:1f.2 8086:a121 rev=31 class=058000 hdr=0 sub=8086:7270 other
+pci: 00:1f.3 8086:a170 rev=31 class=040300 hdr=0 sub=8086:7270 audio
+pci: 00:1f.4 8086:a123 rev=31 class=0c0500 hdr=0 sub=8086:7270 smbus
+pci: 01:00.0 1002:67df rev=c5 class=030000 hdr=0 sub=106b:0163 display-vga
+pci: 01:00.1 1002:aaf0 rev=00 class=040300 hdr=0 sub=1002:aaf0 audio
+pci: 02:00.0 144d:a806 rev=00 class=010802 hdr=0 sub=144d:a801 storage-nvme
+pci: 03:00.0 14e4:43ba rev=01 class=028000 hdr=0 sub=106b:016f net-other
+pci: 04:00.0 14e4:1686 rev=01 class=020000 hdr=0 sub=14e4:1686 net-ethernet
+pci: 04:00.1 14e4:16bc rev=01 class=080501 hdr=0 sub=14e4:0000 other
+pci: 05:00.0 8086:1578 rev=02 class=060400 hdr=1 secondary=06 subordinate=7a pci-bridge
+pci: 06:00.0 8086:15d3 rev=02 class=060400 hdr=1 secondary=07 subordinate=07 pci-bridge
+pci: 06:01.0 8086:15d3 rev=02 class=060400 hdr=1 secondary=09 subordinate=41 pci-bridge
+pci: 06:02.0 8086:15d3 rev=02 class=060400 hdr=1 secondary=08 subordinate=08 pci-bridge
+pci: 06:04.0 8086:15d3 rev=02 class=060400 hdr=1 secondary=42 subordinate=7a pci-bridge
+pci: 07:00.0 8086:15d2 rev=02 class=088000 hdr=0 sub=8086:0000 system-other
+pci: 08:00.0 8086:15d4 rev=02 class=0c0330 hdr=0 sub=8086:0000 usb-xhci
+pci_functions: 27
+gop 0: mode=0/1 3840x2160 format=1 stride=3840 fb=0xc0300000 fb_bytes=33177600
+gop 1: mode=0/1 3840x2160 format=1 stride=3840 fb=0xc0300000 fb_bytes=33177600
+block 0: disk removable=0 present=1 read_only=0 block_bytes=512 blocks=1953525168 mib=953869
+block 1: disk removable=0 present=1 read_only=0 block_bytes=4096 blocks=6835938 mib=26702
+block 2: disk removable=0 present=0 read_only=0 block_bytes=512 blocks=0 mib=0
+block 3: disk removable=1 present=1 read_only=0 block_bytes=512 blocks=30595072 mib=14939
+block_devices: disks=4 partitions=3
+AIENOS-IMAC-BOOT-0 DONE

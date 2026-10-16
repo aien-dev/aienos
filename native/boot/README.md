@@ -48,6 +48,22 @@ Build: `make -C native/kernel pi5-diag` (output `PI5DIAG.EFI`, copy to the card 
 `EFI/BOOT/BOOTAA64.EFI`); QEMU test: `scripts/qemu_ck_pi5_diag_test.sh`
 (`AIENOS_PI5_DIAG`; an emulator, nothing about a Pi 5 is qualified by it).
 
+**AIENOS-IMAC-BOOT-0 diagnostic, the same `diag_main.c` built for x86_64 ->
+`IMACDIAG.EFI`:** the first AIENOS code for an x86_64 machine, a 2017 iMac (Intel
+Core i7, AMD Radeon Pro, Fusion Drive; no T2 chip, so its firmware starts unsigned
+images). Same report and ACPI copies as the Pi diagnostic, plus `diag_x86.c`:
+CPUID identity, features, topology and CPU mode; SMBIOS type 0/1/2 identity (no
+serial numbers); every PCI function through configuration ports 0xCF8/0xCFC (reads
+only); every GOP mode; every whole-disk Block I/O device. It selects text mode
+through Apple's console-control protocol first (ConOut is invisible on a Mac
+otherwise), writes `\EFI\AIENOS\IMACBOOT.TXT`, holds the screen ~30 s and powers off
+through `ResetSystem(EfiResetShutdown)`. x86_64 pieces: `efi_entry_x86_64.S`
+(R_X86_64_RELATIVE relocations, Microsoft x64 entry), `image_x86_64.ld` (Machine
+0x8664), compiled `-mabi=ms` so `efi.h` stays unannotated. Build:
+`make -C native/kernel imac-diag` (output `IMACDIAG.EFI`, copy to a FAT stick as
+`EFI/BOOT/BOOTX64.EFI`); QEMU test: `scripts/qemu_ck_imac_diag_test.sh`
+(`AIENOS_IMAC_DIAG`, q35 + OVMF; an emulator, nothing about the iMac is qualified by it).
+
 **Parked, not here:** signature checks, BootNext staging, rollback and the
 boot-report file. The Rust `aienos-boot` crate has BootNext staging and a QEMU
 rollback test but no A/B slot selection (ADR 0024 Q3); it is frozen and
