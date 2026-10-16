@@ -94,6 +94,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential
+      - name: Install Rust toolchain (make test runs package-test, which builds the aarch64-unknown-none inference crate)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-none
       - name: Build and run (make -j)
         run: make -j"$(nproc)" -C native/kernel ${{ matrix.targets }}
       - name: Check the host tests left the tree clean (the gate runner refuses a dirty tree)
