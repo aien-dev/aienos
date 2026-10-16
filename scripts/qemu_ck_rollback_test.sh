@@ -256,7 +256,9 @@ echo "============================================================"
 
 echo "building aienos-rollback-mock (stager and Default, unchanged Rust mock) ..."
 cargo build --quiet --release -p aienos-boot --target aarch64-unknown-uefi --features handoff --bin aienos-rollback-mock
-mock="target/aarch64-unknown-uefi/release/aienos-rollback-mock.efi"
+# cargo writes under CARGO_TARGET_DIR when the caller sets one (the local sandbox does); the
+# hosted job leaves it unset and gets the repository's own target/.
+mock="${CARGO_TARGET_DIR:-target}/aarch64-unknown-uefi/release/aienos-rollback-mock.efi"
 [[ -f "${mock}" ]] || { echo "mock build failed"; echo "${verdict_name}: FAIL"; exit 1; }
 
 echo "building the C kernel images ..."
