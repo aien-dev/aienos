@@ -40,3 +40,34 @@ The image has not been installed, selected as the host boot target, or allowed
 to modify the existing Linux server. Host verification is `bash
 scripts/verify_all.sh`; a passing result proves build and unit-test readiness,
 not a successful native boot or model execution.
+
+## KV memory ownership on the native path
+
+Added 2026-10-16 for aien-spark/aien-architecture#233 (lane P1). The full
+source map for KV ownership, write rules, GPU visibility, queue bounds,
+cancellation, reuse and restart recovery lives with the code that owns the
+pool, in sovereign-core
+[`crates/aien-kv-cache/OWNERSHIP.md`](https://github.com/aien-spark/aien-sovereign-core/blob/a78ee68ab9a1285a7d4e8a983a7738ff2e1b7d4a/crates/aien-kv-cache/OWNERSHIP.md)
+(aien-spark/aien-sovereign-core#588). What it says about AIENOS, at aienos
+`b7ebf7c`:
+
+- Native GB10 GPU: no KV code exists. Nothing above allocates GPU memory,
+  so there is no native KV buffer, no visibility rule and no evidence.
+  NOT_RUN; the native GB10 model is aienos#327.
+- Native Pi 5 CPU: `aienos-infer` keeps one dense f32 cache per session,
+  `[layer][pos][kv_dim]`, allocated once
+  (`crates/aienos-infer/src/decode.rs` L21, L56-L62). `reset` only sets
+  `pos = 0` and keeps the buffers (L93-L96). No paging, no sharing, no
+  persistence. Native-hardware-tested for inference only:
+  `docs/native/PI5-6-INFER-RUNS.md` (1.20 tok/s, KV capacity 64 in that
+  probe).
+- Native storage: the NVMe driver allows one outstanding command, and
+  "Every request goes through the bounce buffer"
+  (`native/disk/disk_nvme.h` L17-L19). The planned KV slab, its step-budgeted
+  pump and the export/import calls are design only (sovereign-core ADR 0003
+  section 9); no code, NOT_RUN, tracked in aienos#367.
+- Emulator / QEMU: the native KV slab tests are PLANNED (ADR 0003 section
+  11); nothing runs yet.
+
+The Linux-hosted Spark results in that page (GB10 through the NVIDIA Linux
+driver) are not native evidence and are not claimed here.
