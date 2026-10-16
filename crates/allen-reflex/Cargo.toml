@@ -12,3 +12,10 @@ path = "src/lib.rs"
 
 [dependencies]
 aienos-crypto = { workspace = true }
+
+# Host-only mutants for crates/allen-reflex/tests/route.rs (red before green). Never enabled in an image:
+# scripts/allen_route_mutants.sh requires each one to make the route tests FAIL.
+[features]
+route-mutant-grant = []
+route-mutant-dialog-pending = []
+route-mutant-guest-memory = []

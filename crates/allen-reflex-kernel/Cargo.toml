@@ -1,0 +1,36 @@
+# Standalone (not a member of the host workspace, like aienos-infer-kernel): built for
+# aarch64-unknown-none and linked into the C kernel image of "make pi5-allen" (CK_ALLEN_LIB).
+# On the host the same exam code builds with std for the host harness (examples/host_exam.rs)
+# and the tests; the allocator, panic handler and C entry points exist only for target_os = "none".
+[package]
+name = "allen-reflex-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "Links the ALLEN REFLEX decision core into the C kernel: bounded bump heap, panic stop, card exam runner (PI5-8 cut K)."
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+allen-reflex = { path = "../allen-reflex" }
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+opt-level = 3
+lto = false
+codegen-units = 1
+
+[profile.dev]
+panic = "abort"
+
+[[test]]
+name = "heap_budget"
+harness = false
+
+# Host/QEMU red runs only (scripts/qemu_ck_allen_reflex_test.sh): build the unit with a known-bad routing mutant so the
+# kernel's own authority check (core/allen.c route_violation) must catch it. Never in a Pi image.
+[features]
+route-mutant-grant = ["allen-reflex/route-mutant-grant"]

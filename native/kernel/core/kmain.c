@@ -297,6 +297,9 @@ static __attribute__((noreturn)) void ck_el1_main(void *arg)
      * store stage and only after the Store opened, and closes it before committing. */
     ck_infer_run();
 #endif
+    /* PI5-8 cut K ALLEN exam stage (core/allen.c): pi5-allen image only, else a no-op. Before mm_usage so the
+     * stack high-water mark below includes the Rust decision core. */
+    ck_allen_run();
     struct ck_mm_usage mu;
     ck_mm_usage(&mu);
     ck_printf("mm_usage: stack_bytes=%llu stack_used=%llu heap_bytes=%llu heap_free=%llu heap_min_free=%llu\n",

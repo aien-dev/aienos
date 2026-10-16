@@ -34,6 +34,7 @@ pub mod hv;
 pub mod lexicon;
 pub mod model;
 pub mod policy;
+pub mod route;
 pub mod segment;
 pub mod span;
 pub mod text;

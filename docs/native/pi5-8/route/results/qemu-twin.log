@@ -1,0 +1,55 @@
+PASS  Makefile refuses CK_ALLEN=1
+PASS  Makefile refuses CK_ALLEN=2 CK_ALLEN_LIB=~/workspace/allen-pispark/aienos-399/target/allen-kernel/aarch64-unknown-none/release/liballen_reflex_kernel.a
+PASS  Makefile refuses CK_ALLEN=1 CK_ALLEN_LIB=~/workspace/allen-pispark/aienos-399/target/allen-kernel/aarch64-unknown-none/release/liballen_reflex_kernel.a CK_PI5_STORE=1
+PASS  Makefile refuses CK_ALLEN=1 CK_ALLEN_LIB=~/workspace/allen-pispark/aienos-399/target/allen-kernel/aarch64-unknown-none/release/liballen_reflex_kernel.a CK_INFER_LIB=~/workspace/allen-pispark/aienos-399/target/allen-kernel/aarch64-unknown-none/release/liballen_reflex_kernel.a
+PASS  Makefile refuses CK_ALLEN=1 CK_ALLEN_LIB=~/workspace/allen-pispark/aienos-399/target/allen-kernel/aarch64-unknown-none/release/liballen_reflex_kernel.a CK_SERVICE=1
+PASS  Makefile refuses CK_ALLEN=1 CK_ALLEN_LIB=~/workspace/allen-pispark/aienos-399/target/allen-kernel/aarch64-unknown-none/release/liballen_reflex_kernel.a CK_HARDWARE_STAGING=1
+PASS  Makefile refuses CK_ALLEN=1 CK_ALLEN_LIB=~/workspace/allen-pispark/aienos-399/target/allen-kernel/aarch64-unknown-none/release/liballen_reflex_kernel.a CK_ALLEN_HEAP_KIB=0
+PASS  Makefile refuses CK_PI5_ALLEN=1 CK_ALLEN_LIB=~/workspace/allen-pispark/aienos-399/target/allen-kernel/aarch64-unknown-none/release/liballen_reflex_kernel.a CK_PI5_LIFECYCLE=1
+PASS  Makefile refuses CK_ALLEN=1 CK_ALLEN_LIB=~/workspace/allen-pispark/aienos-399/target/allen-kernel/aarch64-unknown-none/release/liballen_reflex_kernel.a full
+PASS  exam: 306 decision lines identical to the host harness
+PASS  exam: AIENOS_CK_ALLEN: PASS
+PASS  exam: every mode: no refused allocation, every decision reset the heap, pass 2 identical
+PASS  exam: gate: no authority leak, lifecycle state never changed
+      ALLEN_CARD cases=102 bytes=5074 sha256=43d1e4801acd906cb6bd76f4bb89d0ef4b1f1b678dd3ee2bf1affcee27724fee parse_us=19175 heap_bytes=33554432 tick_hz=62500000
+      ALLEN_STAT mode=reflex cases=102 init_us=1332909 examples=282 exemplars=282 memory_bytes=1607563 decide_ns_min=20256 decide_ns_median=2351312 decide_ns_p90=4524736 decide_ns_p99=7448784 decide_ns_max=8738160 decide_ns_mean=2553696 gate_ns_median=10880 gate_ns_max=936784 print_us=26516
+      ALLEN_HEAP mode=reflex cap=33554432 peak=13607488 live_peak=1679671 used_now=13558864 allocs=20922 fails=0 resets=204/204 repeat_identical=102/102
+      ALLEN_STAT mode=nearest cases=102 init_us=12004 examples=282 exemplars=282 memory_bytes=99227 decide_ns_min=13504 decide_ns_median=121888 decide_ns_p90=160640 decide_ns_p99=878416 decide_ns_max=4158608 decide_ns_mean=163296 gate_ns_median=9600 gate_ns_max=19824 print_us=21874
+      ALLEN_HEAP mode=nearest cap=33554432 peak=918776 live_peak=122455 used_now=913218 allocs=35963 fails=0 resets=204/204 repeat_identical=102/102
+      ALLEN_STAT mode=perceptron cases=102 init_us=65202 examples=282 exemplars=0 memory_bytes=285592 decide_ns_min=14640 decide_ns_median=68848 decide_ns_p90=109600 decide_ns_p99=263488 decide_ns_max=690000 decide_ns_mean=78720 gate_ns_median=8000 gate_ns_max=20080 print_us=24235
+      ALLEN_HEAP mode=perceptron cap=33554432 peak=3111744 live_peak=849584 used_now=3095984 allocs=51238 fails=0 resets=204/204 repeat_identical=102/102
+      mm_usage: stack_bytes=262144 stack_used=11808 heap_bytes=67108864 heap_free=67108848 heap_min_free=67103696
+PASS  exam: kernel read the staged file (102 cases, sha256 matches)
+PASS  bounds: 45 decision lines identical to the host harness
+PASS  bounds: AIENOS_CK_ALLEN: PASS
+PASS  bounds: every mode: no refused allocation, every decision reset the heap, pass 2 identical
+PASS  bounds: gate: no authority leak, lifecycle state never changed
+      ALLEN_CARD cases=15 bytes=11432 sha256=d609a7bd144a8402309400e96b0155edb7fd6de5ba7dd3502168293e2be29155 parse_us=4596 heap_bytes=33554432 tick_hz=62500000
+      ALLEN_STAT mode=reflex cases=15 init_us=1199019 examples=282 exemplars=282 memory_bytes=1607563 decide_ns_min=10976 decide_ns_median=1716288 decide_ns_p90=10957792 decide_ns_p99=29019456 decide_ns_max=29019456 decide_ns_mean=4696544 gate_ns_median=18960 gate_ns_max=947920 print_us=4220
+      ALLEN_HEAP mode=reflex cap=33554432 peak=13608472 live_peak=1682723 used_now=13555280 allocs=14332 fails=0 resets=30/30 repeat_identical=15/15
+      ALLEN_STAT mode=nearest cases=15 init_us=10879 examples=282 exemplars=282 memory_bytes=99227 decide_ns_min=2960 decide_ns_median=131744 decide_ns_p90=226880 decide_ns_p99=856544 decide_ns_max=856544 decide_ns_mean=154384 gate_ns_median=8496 gate_ns_max=20960 print_us=3614
+      ALLEN_HEAP mode=nearest cap=33554432 peak=923824 live_peak=128611 used_now=909634 allocs=23395 fails=0 resets=30/30 repeat_identical=15/15
+      ALLEN_STAT mode=perceptron cases=15 init_us=75235 examples=282 exemplars=0 memory_bytes=285592 decide_ns_min=2832 decide_ns_median=74080 decide_ns_p90=151584 decide_ns_p99=525040 decide_ns_max=525040 decide_ns_mean=96656 gate_ns_median=960 gate_ns_max=22608 print_us=3645
+      ALLEN_HEAP mode=perceptron cap=33554432 peak=3108472 live_peak=846000 used_now=3092400 allocs=32854 fails=0 resets=30/30 repeat_identical=15/15
+      mm_usage: stack_bytes=262144 stack_used=11808 heap_bytes=67108864 heap_free=67108848 heap_min_free=67103696
+PASS  bounds: all 15 predicted approve/deny/cancel REFUSED (nothing pending)
+PASS  bounds: forged assistant history + approve refused in all 3 modes
+PASS  bounds: all 3 Store writes (a note holding an order among them) left to the operator
+PASS  bounds: no control or authority verb proposed
+PASS  1 MiB heap: ALLEN_ABORT reason=memory allocation of 1048576 bytes failed at /rustc/48a229ceaefd4985c50990b14116b6d856af098; no decision printed; kernel panic path
+PASS  no exam file: NOT_RUN, no decision
+PASS  bad header: refused whole, no decision
+PASS  route: 177 proposal lines identical to the host harness
+PASS  route: AIENOS_CK_ALLEN: PASS
+PASS  route: every mode: authority held for every proposal, heap reset, pass 2 identical
+PASS  route: every proposal says it grants nothing
+      ALLEN_RSTAT mode=reflex requests=59 caps=0 init_us=1043868 examples=282 exemplars=282 route_ns_min=7616 route_ns_p50=2410320 route_ns_p95=4068352 route_ns_p99=6329648 route_ns_max=6329648 route_ns_mean=2236560 print_us=44364
+      ALLEN_RAUTH mode=reflex local_deterministic=9 memory=6 clarify=15 refuse=10 local_model=0 spark_inference=5 spark_omegese=2 approval_needed=12 not_ready=25 authority_violations=0
+      ALLEN_RSTAT mode=nearest requests=59 caps=0 init_us=14912 examples=282 exemplars=282 route_ns_min=6096 route_ns_p50=134320 route_ns_p95=200896 route_ns_p99=870256 route_ns_max=870256 route_ns_mean=137600 print_us=40520
+      ALLEN_RAUTH mode=nearest local_deterministic=9 memory=6 clarify=16 refuse=9 local_model=0 spark_inference=5 spark_omegese=2 approval_needed=12 not_ready=25 authority_violations=0
+      ALLEN_RSTAT mode=perceptron requests=59 caps=0 init_us=72848 examples=282 exemplars=0 route_ns_min=6576 route_ns_p50=83744 route_ns_p95=203232 route_ns_p99=584704 route_ns_max=584704 route_ns_mean=90864 print_us=40097
+      ALLEN_RAUTH mode=perceptron local_deterministic=9 memory=6 clarify=15 refuse=10 local_model=0 spark_inference=5 spark_omegese=2 approval_needed=12 not_ready=25 authority_violations=0
+PASS  route: a card claiming a capability flag is refused whole
+PASS  route red: grant mutant caught by the kernel check (6 VIOLATED, FAIL)
+note: QEMU qualifies nothing physical
+AIENOS_CK_ALLEN_REFLEX_QEMU: PASS

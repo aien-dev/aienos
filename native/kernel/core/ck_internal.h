@@ -130,5 +130,6 @@ void ck_b7b_probe(void);
 #endif
 void ck_fpu_run(void); /* core/fpu.c: probe build only (CK_RUST_LIBS), else a no-op */
 void ck_infer_run(void); /* core/infer.c: probe build only (CK_INFER_LIB), else a no-op */
+void ck_allen_run(void); /* core/allen.c: pi5-allen exam stage only (CK_ALLEN, CK_ALLEN_LIB), else a no-op */
 
 #endif
