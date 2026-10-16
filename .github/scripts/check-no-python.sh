@@ -5,7 +5,9 @@
 # POSIX sh, git, grep and head only.
 # Usage: sh .github/scripts/check-no-python.sh   (from anywhere inside the repository)
 set -eu
-cd "$(git rev-parse --show-toplevel)"
+top=$(git rev-parse --show-toplevel) || { echo "no-python guard: FAIL. Not inside a git repository." >&2; exit 2; }
+cd "$top"
+[ -n "$(git ls-files | head -n 1)" ] || { echo "no-python guard: FAIL. No tracked files; refusing to pass an empty check." >&2; exit 2; }
 
 # File names are matched case-insensitively (Foo.PY counts).
 names='(^|/)(setup\.py|setup\.cfg|pyproject\.toml|pipfile|pipfile\.lock|poetry\.lock|uv\.lock|\.python-version|requirements[^/]*\.txt|requirements[^/]*\.in)$|\.(py|pyi|pyw|pyx|pyc|ipynb)$'
