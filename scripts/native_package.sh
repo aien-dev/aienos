@@ -34,8 +34,8 @@
 #                              -in MANIFEST.tbs -out MANIFEST.sig
 #   slot/MANIFEST.signed.bin  after `sign` (or `sign-test`, TEST key only)
 #
-#   native_package.sh build --out DIR --generation N [--variant core|full|hardware-staging]
-#       [--owner-pubkeys F --machine-id F]   (hardware-staging only)
+#   native_package.sh build --out DIR --generation N [--variant core|full|hardware-staging|service-hardware-staging]
+#       [--owner-pubkeys F --machine-id F]   (both hardware-staging profiles)
 #       [--policy-generation N] [--min-rollback N] [--pins FILE] [--model FILE]
 #       [--firmware FILE]... [--pubkey HEX64] [--allow-dirty]
 #   native_package.sh tbs --package DIR --pubkey HEX64
@@ -65,8 +65,11 @@ kdir="$repo/native/kernel"
 FORMAT=3 # 3: P11 cut 3 adds loader/SLOTLDR.EFI and its loader_* lines
 MAKEFILE_REL=native/kernel/Makefile
 IMAGE_LD_REL=native/boot/image.ld
+INFER_MANIFEST_REL=crates/aienos-infer-kernel/Cargo.toml
+INFER_LOCK_REL=crates/aienos-infer-kernel/Cargo.lock
+INFER_ARCHIVE=inputs/libaienos_infer_kernel.a
 
-refuse() { echo "refused: $*"; exit 1; }
+refuse() { echo "refused: $*" >&2; exit 1; }
 hex40() { [[ "$1" =~ ^[0-9a-f]{40}$ ]]; }
 hex64() { [[ "$1" =~ ^[0-9a-f]{64}$ ]]; }
 sha256_of() { sha256sum "$1" | cut -d' ' -f1; }
@@ -102,11 +105,47 @@ toolchain_lines() {
 # The make goal and variables build_once passes for a variant ($2/$3: owner file digests).
 make_goal_of() { case "$1" in core) echo all;; *) echo full;; esac; }
 make_vars_of() {
-    if [ "$1" = hardware-staging ]; then
+    if [ "$1" = service-hardware-staging ]; then
+        echo "CK_SERVICE=1 CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS=sha256:$2 CK_MACHINE_ID=sha256:$3 CK_INFER_LIB=sha256:$4"
+    elif [ "$1" = hardware-staging ]; then
         echo "CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS=sha256:$2 CK_MACHINE_ID=sha256:$3"
     else
         echo none
     fi
+}
+owner_variant() { [[ "$1" = hardware-staging || "$1" = service-hardware-staging ]]; }
+
+# Fresh Cargo home/target per build: user Cargo configuration, environment flags,
+# wrappers and incremental artifacts cannot silently select the inference image.
+infer_env() {
+    local home="$1"; shift
+    local wd="$home/work" parent
+    mkdir -p "$wd"
+    # Cargo discovers configuration from cwd and its ancestors even with a fresh
+    # CARGO_HOME. Never invoke it from the caller's or repository's directory.
+    parent=$(realpath "$wd")
+    while :; do
+        [ ! -f "$parent/.cargo/config" ] && [ ! -f "$parent/.cargo/config.toml" ] \
+            || refuse "unrecorded Cargo configuration above inference scratch directory"
+        [ "$parent" != / ] || break
+        parent=$(dirname "$parent")
+    done
+    (cd "$wd" && env -i PATH="$PATH" HOME="$HOME" RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" CARGO_HOME="$home" "$@")
+}
+infer_cargo() { local home="$1"; shift; infer_env "$home" cargo "$@"; }
+infer_toolchain_lines() {
+    local cv rv
+    cv=$(infer_cargo "$1" --version) || return 1
+    rv=$(infer_env "$1" rustc --version) || return 1
+    printf 'toolchain_cargo %s\ntoolchain_rustc %s\n' "$cv" "$rv"
+}
+build_infer_once() {
+    local out="$1"
+    mkdir -p "$out"
+    infer_cargo "$out/cargo-home" build --manifest-path "$repo/$INFER_MANIFEST_REL" --offline --locked --release \
+        --target aarch64-unknown-none --target-dir "$out/target" >"$out/build.log" 2>&1 \
+        || refuse "inference library build failed (see $out/build.log)"
+    echo "$out/target/aarch64-unknown-none/release/libaienos_infer_kernel.a"
 }
 ck_env() { # CK_* in the environment, or passed down from an outer make in MAKEFLAGS
     { env | sed -n 's/^\(CK_[A-Za-z0-9_]*\)=.*/\1/p'; echo "${MAKEFLAGS:-}" | tr ' ' '\n' | sed -n 's/^\(CK_[A-Za-z0-9_]*\)=.*/\1/p'; } | sort -u | tr '\n' ' ' | sed 's/ $//'
@@ -115,13 +154,17 @@ ck_env() { # CK_* in the environment, or passed down from an outer make in MAKEF
 # ---- build ---------------------------------------------------------------------
 build_once() {
     # $1 = OUT dir, $2 = variant, $3 = owner pubkeys, $4 = machine id
-    local out="$1" variant="$2" own="$3" mid="$4"
+    local out="$1" variant="$2" own="$3" mid="$4" infer="${5:-}"
     case "$variant" in
     core) make -s -C "$kdir" OUT="$out" >"$out.log" 2>&1 || refuse "build failed (see $out.log)"; echo "$out/BOOTAA64.EFI";;
     full) make -s -C "$kdir" OUT="$out" full >"$out.log" 2>&1 || refuse "build failed (see $out.log)"; echo "$out/full/BOOTAA64.EFI";;
     hardware-staging)
         make -s -C "$kdir" OUT="$out" full CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS="$own" CK_MACHINE_ID="$mid" >"$out.log" 2>&1 || refuse "build failed (see $out.log)"
         echo "$out/full-hardware-staging/BOOTAA64.EFI";;
+    service-hardware-staging)
+        make -s -C "$kdir" OUT="$out" full CK_SERVICE=1 CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS="$own" CK_MACHINE_ID="$mid" \
+            CK_INFER_LIB="$infer" >"$out.log" 2>&1 || refuse "build failed (see $out.log)"
+        echo "$out/full-service-hardware-staging/BOOTAA64.EFI";;
     *) refuse "unknown variant $variant";;
     esac
 }
@@ -130,11 +173,11 @@ build_once() {
 # "Slot loader in the package"). hardware-staging: the owner public keys file is the
 # loader's trusted-key table (ck_slot_tool keys-c refuses TEST keys in it); core and
 # full: the labelled RFC 8032 TEST key loader (never for hardware).
-loader_keys_of() { if [ "$1" = hardware-staging ]; then echo owner; else echo test; fi; }
+loader_keys_of() { if owner_variant "$1"; then echo owner; else echo test; fi; }
 build_loader_once() {
     # $1 = OUT dir, $2 = variant, $3 = owner pubkeys, $4 = machine id
     local out="$1" variant="$2" own="$3" mid="$4"
-    if [ "$variant" = hardware-staging ]; then
+    if owner_variant "$variant"; then
         make -s -C "$kdir" OUT="$out" slot-loader CK_HARDWARE_STAGING=1 CK_OWNER_PUBKEYS="$own" CK_MACHINE_ID="$mid" \
             CK_SLOT_KEYS="$own" >"$out.loader.log" 2>&1 || refuse "slot loader build failed (see $out.loader.log)"
     else
@@ -165,10 +208,20 @@ write_package_txt() {
         toolchain_lines "$cross"
         # inputs that select the image
         echo "input_make_goal $(make_goal_of "$variant")"
-        echo "input_make_vars $(make_vars_of "$variant" "$own_sha" "$mid_sha")"
+        echo "input_make_vars $(make_vars_of "$variant" "$own_sha" "$mid_sha" "$infer_sha")"
         echo "input_env_ck none"
         echo "input_makefile_sha256 $(sha256_of "$repo/$MAKEFILE_REL")"
         echo "input_image_ld_sha256 $(sha256_of "$repo/$IMAGE_LD_REL")"
+        if [ "$variant" = service-hardware-staging ]; then
+            printf '%s\n' "$infer_toolchain"
+            echo "input_infer_manifest_sha256 $(sha256_of "$repo/$INFER_MANIFEST_REL")"
+            echo "input_infer_lock_sha256 $(sha256_of "$repo/$INFER_LOCK_REL")"
+            echo "input_infer_build offline_locked_release_aarch64-unknown-none"
+            echo "infer_library $INFER_ARCHIVE"
+            echo "infer_library_bytes $(size_of "$dir/$INFER_ARCHIVE")"
+            echo "infer_library_sha256 $infer_sha"
+            echo "infer_reproducible two_clean_builds_identical"
+        fi
         if [ -n "$pins" ]; then
             while read -r r s; do
                 [ -z "$r" ] && continue
@@ -238,11 +291,13 @@ cmd_build() {
     [[ "$min_rollback" =~ ^[0-9]+$ ]] || refuse "--min-rollback must be an integer"
     [ -z "$pubkey" ] || hex64 "$pubkey" || refuse "--pubkey must be 64 hex characters"
     [ -e "$out" ] && refuse "--out $out already exists (packages are never overwritten)"
-    if [ "$variant" = hardware-staging ]; then
+    case "$variant" in core|full|hardware-staging|service-hardware-staging) ;; *) refuse "unknown variant $variant";; esac
+    if owner_variant "$variant"; then
         [ -n "$own" ] && [ -n "$mid" ] || refuse "hardware-staging needs --owner-pubkeys and --machine-id"
         [ -f "$own" ] && [ -f "$mid" ] || refuse "owner pubkeys or machine id file missing"
+        own=$(realpath "$own"); mid=$(realpath "$mid")
     else
-        [ -z "$own" ] && [ -z "$mid" ] || refuse "--owner-pubkeys/--machine-id only with --variant hardware-staging"
+        [ -z "$own" ] && [ -z "$mid" ] || refuse "--owner-pubkeys/--machine-id only with --variant hardware-staging or service-hardware-staging"
     fi
     [ -z "$pins" ] || [ -f "$pins" ] || refuse "pins file missing"
     if [ -n "$pins" ]; then
@@ -253,6 +308,14 @@ cmd_build() {
         done <"$pins"
     fi
     [ -z "$model" ] || [ -f "$model" ] || refuse "model file missing"
+    [ "$variant" != service-hardware-staging ] || [ -n "$model" ] || refuse "service-hardware-staging needs --model (boot-disk identity, not embedded model bytes)"
+    [ "$variant" != service-hardware-staging ] || [ -s "$model" ] || refuse "service model file is empty"
+    if [ "$variant" = service-hardware-staging ]; then
+        # Cargo auto-discovers build.rs and Rust modules, including ignored files.
+        # A tracked-only dirty check cannot attest those extra build inputs.
+        [ -z "$(git -C "$repo" ls-files --others -- crates/aienos-infer crates/aienos-infer-kernel)" ] \
+            || refuse "untracked inference build inputs (including ignored files)"
+    fi
     for f in "${firmware[@]}"; do [ -f "$f" ] || refuse "firmware file missing: $f"; done
     local envck
     envck=$(ck_env)
@@ -272,9 +335,17 @@ cmd_build() {
 
     local scratch
     scratch=$(mktemp -d "${TMPDIR:-/tmp}/native-package.XXXXXX")
-    local img_a img_b
-    img_a=$(build_once "$scratch/a" "$variant" "$own" "$mid")
-    img_b=$(build_once "$scratch/b" "$variant" "$own" "$mid")
+    local img_a img_b infer_a="" infer_b="" infer_sha="" infer_toolchain=""
+    if [ "$variant" = service-hardware-staging ]; then
+        infer_toolchain=$(infer_toolchain_lines "$scratch/cargo-version")
+        infer_a=$(build_infer_once "$scratch/infer-a")
+        infer_b=$(build_infer_once "$scratch/infer-b")
+        if [ -n "${NATIVE_PACKAGE_TEST_CORRUPT_INFER_SECOND:-}" ]; then printf '\0' >>"$infer_b"; fi
+        infer_sha=$(sha256_of "$infer_a")
+        [ "$infer_sha" = "$(sha256_of "$infer_b")" ] || refuse "two clean inference library builds differ: not reproducible, not signable"
+    fi
+    img_a=$(build_once "$scratch/a" "$variant" "$own" "$mid" "$infer_a")
+    img_b=$(build_once "$scratch/b" "$variant" "$own" "$mid" "$infer_b")
     if [ -n "${NATIVE_PACKAGE_TEST_CORRUPT_SECOND:-}" ]; then
         printf '\0' >>"$img_b"   # test hook: make the second build differ
     fi
@@ -298,9 +369,17 @@ cmd_build() {
     chmod 444 "$out/image/BOOTAA64.EFI"
     cp "$ldr_a" "$out/loader/SLOTLDR.EFI"
     chmod 444 "$out/loader/SLOTLDR.EFI"
+    if [ "$variant" = service-hardware-staging ]; then
+        mkdir -p "$out/inputs"
+        cp "$infer_a" "$out/$INFER_ARCHIVE"
+        chmod 444 "$out/$INFER_ARCHIVE"
+    fi
     rm -rf "$scratch"
     write_package_txt "$out"
     (cd "$out" && sha256sum image/BOOTAA64.EFI loader/SLOTLDR.EFI PACKAGE.txt >SHA256SUMS)
+    if [ "$variant" = service-hardware-staging ]; then
+        (cd "$out" && sha256sum "$INFER_ARCHIVE" >>SHA256SUMS)
+    fi
     local prov tool
     prov=$(sha256_of "$out/SHA256SUMS")
     echo "package_sha256 $prov" >"$out/PROVENANCE.txt"
@@ -334,6 +413,10 @@ check_package_files() {
     for f in image/BOOTAA64.EFI loader/SLOTLDR.EFI PACKAGE.txt; do
         [ -n "$(awk -v f="$f" '$2==f' "$dir/SHA256SUMS")" ] || refuse "SHA256SUMS does not cover $f"
     done
+    if [ "$(rec "$dir" variant)" = service-hardware-staging ]; then
+        [ -f "$dir/$INFER_ARCHIVE" ] || refuse "package is missing $INFER_ARCHIVE"
+        [ "$(awk -v f="$INFER_ARCHIVE" '$2==f{n++}END{print n+0}' "$dir/SHA256SUMS")" = 1 ] || refuse "SHA256SUMS must cover $INFER_ARCHIVE exactly once"
+    fi
     local fmt
     fmt=$(rec "$dir" format)
     [ "$fmt" = "$FORMAT" ] || refuse "PACKAGE.txt format $fmt is not $FORMAT"
@@ -383,15 +466,49 @@ check_record() {
     [ "$(rec "$dir" input_env_ck)" = none ] || refuse "PACKAGE.txt input_env_ck is not none"
     local variant own_sha mid_sha
     variant=$(rec "$dir" variant)
-    case "$variant" in core|full|hardware-staging) ;; *) refuse "PACKAGE.txt variant $variant is unknown";; esac
+    case "$variant" in core|full|hardware-staging|service-hardware-staging) ;; *) refuse "PACKAGE.txt variant $variant is unknown";; esac
     own_sha=$(rec "$dir" owner_pubkeys_sha256); mid_sha=$(rec "$dir" machine_id_sha256)
-    if [ "$variant" = hardware-staging ]; then
+    if owner_variant "$variant"; then
         hex64 "$own_sha" && hex64 "$mid_sha" || refuse "hardware-staging PACKAGE.txt lacks the owner file digests"
     else
         [ -z "$own_sha$mid_sha" ] || refuse "PACKAGE.txt has owner file digests on a $variant package"
     fi
     [ "$(rec "$dir" input_make_goal)" = "$(make_goal_of "$variant")" ] || refuse "PACKAGE.txt input_make_goal does not match variant $variant"
-    [ "$(rec "$dir" input_make_vars)" = "$(make_vars_of "$variant" "$own_sha" "$mid_sha")" ] || refuse "PACKAGE.txt input_make_vars does not match variant $variant"
+    local infer_sha=""
+    if [ "$variant" = service-hardware-staging ]; then
+        for k in toolchain_cargo toolchain_rustc input_infer_manifest_sha256 input_infer_lock_sha256 input_infer_build infer_library infer_library_bytes infer_library_sha256 infer_reproducible model_bytes model_sha256 owner_pubkeys_sha256 machine_id_sha256; do
+            [ "$(awk -v k="$k" '$1==k' "$dir/PACKAGE.txt" | wc -l)" = 1 ] || refuse "PACKAGE.txt must hold exactly one $k line"
+        done
+        infer_sha=$(rec "$dir" infer_library_sha256)
+        [ "$(rec "$dir" infer_library)" = "$INFER_ARCHIVE" ] || refuse "PACKAGE.txt infer_library is not $INFER_ARCHIVE"
+        [ "$infer_sha" = "$(sha256_of "$dir/$INFER_ARCHIVE")" ] || refuse "PACKAGE.txt infer_library_sha256 does not match the library"
+        [ "$(rec "$dir" infer_library_bytes)" = "$(size_of "$dir/$INFER_ARCHIVE")" ] || refuse "PACKAGE.txt infer_library_bytes does not match the library"
+        [ "$(rec "$dir" infer_reproducible)" = two_clean_builds_identical ] || refuse "PACKAGE.txt does not record a reproducible inference build"
+        [ "$(rec "$dir" input_infer_build)" = offline_locked_release_aarch64-unknown-none ] || refuse "PACKAGE.txt input_infer_build differs"
+        hex64 "$(rec "$dir" input_infer_manifest_sha256)" && hex64 "$(rec "$dir" input_infer_lock_sha256)" || refuse "service inference source digest is invalid"
+        [[ "$(rec "$dir" toolchain_cargo)" = cargo\ * ]] && [[ "$(rec "$dir" toolchain_rustc)" = rustc\ * ]] || refuse "service Rust toolchain record is invalid"
+        hex64 "$(rec "$dir" model_sha256)" || refuse "service model digest is invalid"
+        [[ "$(rec "$dir" model_bytes)" =~ ^[1-9][0-9]*$ ]] || refuse "service model size is invalid"
+        if [ "$same_host" = 1 ]; then
+            local ch; ch=$(mktemp -d)
+            local line got
+            got=$(infer_toolchain_lines "$ch") || { rm -rf "$ch"; refuse "could not resolve this host's Rust toolchain"; }
+            while read -r line; do
+                k=${line%% *}
+                [ "$(rec "$dir" "$k")" = "${line#* }" ] || { rm -rf "$ch"; refuse "$k differs from this host"; }
+            done <<<"$got"
+            rm -rf "$ch"
+        fi
+        for k in input_infer_build infer_library infer_library_bytes infer_library_sha256 infer_reproducible; do
+            echo "  checked  $k $(rec "$dir" "$k")"
+        done
+        for k in toolchain_cargo toolchain_rustc; do
+            echo "  $([ "$same_host" = 1 ] && echo checked || echo recorded) $k $(rec "$dir" "$k")"
+        done
+    elif awk '$1~/^(infer_|input_infer_|toolchain_cargo$|toolchain_rustc$)/{found=1}END{exit !found}' "$dir/PACKAGE.txt"; then
+        refuse "PACKAGE.txt has inference fields on a $variant package"
+    fi
+    [ "$(rec "$dir" input_make_vars)" = "$(make_vars_of "$variant" "$own_sha" "$mid_sha" "$infer_sha")" ] || refuse "PACKAGE.txt input_make_vars does not match variant $variant"
     echo "record:"
     for k in image image_bytes image_sha256 image_sha512 reproducible loader loader_keys loader_bytes loader_sha256 loader_reproducible tree_clean input_env_ck variant input_make_goal input_make_vars; do
         echo "  checked  $k $(rec "$dir" "$k")"
@@ -406,7 +523,11 @@ check_record() {
         echo "  checked  commit $commit"
         echo "  checked  commit_time $(rec "$dir" commit_time)"
         local f key have
-        for f in "$MAKEFILE_REL:input_makefile_sha256" "$IMAGE_LD_REL:input_image_ld_sha256"; do
+        local -a source_inputs=("$MAKEFILE_REL:input_makefile_sha256" "$IMAGE_LD_REL:input_image_ld_sha256")
+        if [ "$variant" = service-hardware-staging ]; then
+            source_inputs+=("$INFER_MANIFEST_REL:input_infer_manifest_sha256" "$INFER_LOCK_REL:input_infer_lock_sha256")
+        fi
+        for f in "${source_inputs[@]}"; do
             key=${f#*:}; f=${f%%:*}
             if [ "$tc" = yes ]; then
                 have=$(git -C "$repo" show "$commit:$f" | sha256sum | cut -d' ' -f1)

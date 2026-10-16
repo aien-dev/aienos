@@ -16,6 +16,42 @@ with the release candidate."
 
 ## What a package is
 
+### Integrated CPU service profile
+
+For the resident production CPU service, select `--variant service-hardware-staging`
+with `--owner-pubkeys`, `--machine-id` and `--model`. The recipe uses
+`CK_SERVICE=1 CK_HARDWARE_STAGING=1` and the in-tree inference library. The
+existing Makefile enforces owner provisioning, the resident lifecycle and
+boot-disk-only model ingest; no QEMU fw_cfg model fallback or TEST Store keys
+are selected. This profile builds a package only; it neither installs nor boots it.
+
+The standalone inference library is built offline, locked, in release mode for
+`aarch64-unknown-none` twice, using fresh Cargo homes and target directories.
+Inherited Rust environment flags and caller, repository and user Cargo
+configuration are excluded: Cargo runs from a fresh scratch directory with
+an absolute manifest path. Configuration in the scratch directory's ancestors
+is refused. The standalone crate has only local in-tree dependencies.
+Untracked files, including ignored files, in either inference crate are refused
+so Cargo cannot auto-discover an unrecorded `build.rs` or Rust module.
+Both libraries, both service images and both owner-key slot loaders must match.
+The package carries `inputs/libaienos_infer_kernel.a` in `SHA256SUMS`, binding
+the exact linked archive through the existing signed package provenance.
+
+Format 3 records the fixed inference recipe, Cargo/rustc versions, inference
+manifest and lock digests, archive bytes/digest and reproducibility result.
+`input_make_vars` binds the archive digest alongside the owner file digests.
+Verification requires exactly one of each service field, checks the archive
+and checksum coverage, and recomputes manifest/lock digests from the recorded
+revision when available. `--same-host` also compares Rust toolchain versions.
+Inference fields on other profiles are refused; existing profiles remain supported.
+
+`--model` records the supplied model's size and digest; its bytes are not embedded
+or decoded by packaging. Preparing and verifying `MODEL.MAP`, actual model
+inference, owner receipt authority, attended boot and recovery still require
+their own acceptance evidence. Public owner fixtures used by the self-test
+qualify the build recipe only and cannot authorize deployment. A dirty-tree
+package is test evidence, never a release candidate.
+
 `scripts/native_package.sh build --out DIR --generation N [...]` makes:
 
 | File | Content |
