@@ -17,7 +17,9 @@
  * count, the secondary cores started and parked (smp_x86.S), the AHCI and
  * NVMe disks read-only and a look at the Ethernet chip (pci_x86.c,
  * ahci_x86.c), and the final report. It holds the screen CK_X86_HOLD_S seconds and
- * powers off through ACPI S5 (FADT PM1 control + the DSDT's \_S5 package).
+ * powers off through ACPI S5 (FADT PM1 control + the DSDT's \_S5 package); the lab image
+ * (CK_X86_REPORT=1) restarts through the FADT reset register instead, back
+ * into its network loader (native/boot/net_loader.c).
  * Scheduling on the secondary cores, disk writes, the network driver and VT-d
  * are later cuts. No runtime service
  * is called. QEMU runs of this path qualify nothing physical. */
@@ -222,25 +224,60 @@ static void acpi_poweroff(void)
     ck_puts("power: still running after the S5 write\n");
 }
 
+#if CK_X86_REPORT
+/* Lab image only: restart instead of powering off, so the iMac comes back to
+ * its network loader (NETLDR.EFI) for the next test without a hand on the
+ * power button. The FADT reset register (ACPI 6.5 section 4.8.3.6; on the
+ * iMac18,3: flags bit 10 RESET_REG_SUP set, SystemIO port 0xCF9, value 0x06,
+ * read from its FACP table on 2026-10-17); without one, the same write to the
+ * PCH reset control port 0xCF9 that the FADT names. */
+static void acpi_reset(void)
+{
+    const uint8_t *fadt = hand && hand->rsdp ? ck_acpi_lookup(hand->rsdp, "FACP") : 0;
+    uint16_t port = 0xCF9;
+    uint8_t value = 0x06;
+    if (fadt && rd32(fadt, 4) >= 129 && (rd32(fadt, 112) & (1u << 10)) && fadt[116] == 1 /* SystemIO */ &&
+        rd64(fadt, 120) && rd64(fadt, 120) <= 0xffff) {
+        port = (uint16_t)rd64(fadt, 120);
+        value = fadt[128];
+        ck_printf("power: restart via the ACPI reset register port=0x%x value=0x%x\n", port, value);
+    } else {
+        ck_puts("power: restart via port 0xcf9 (no usable ACPI reset register)\n");
+    }
+    ck_outb(port, value);
+    for (volatile uint64_t i = 0; i < 100000000ull; i++)
+        __asm__ volatile("pause");
+    ck_puts("power: still running after the reset write\n");
+}
+#endif
+
 static __attribute__((noreturn)) void finish(void)
 {
     ck_cli();
     if (!tsc_hz) { /* no clock yet: keep the screen readable, never power off unseen */
+#if CK_X86_REPORT
+        ck_puts("power: no clock measured; lab image restarts\n");
+        acpi_reset();
+#endif
         ck_puts("power: halted before the clock was measured; hold the power button to turn the machine off\n");
         for (;;)
             __asm__ volatile("hlt");
     }
     if (CK_X86_HOLD_S) {
-        ck_printf("power: holding the screen %u s, then ACPI S5\n", (unsigned)CK_X86_HOLD_S);
 #if CK_X86_REPORT
         /* Lab build only (make imac-kernel CK_X86_REPORT=1): sends the
          * allowlisted, unauthenticated report if the network is up. */
+        ck_printf("power: holding the screen %u s, then restart\n", (unsigned)CK_X86_HOLD_S);
         ck_x86_report_hold(tsc_hz, CK_X86_HOLD_S);
 #else
         /* Default and resident builds: no report code is linked; nothing is sent. */
+        ck_printf("power: holding the screen %u s, then ACPI S5\n", (unsigned)CK_X86_HOLD_S);
         delay_ms((uint64_t)CK_X86_HOLD_S * 1000u);
 #endif
     }
+#if CK_X86_REPORT
+    acpi_reset();
+#endif
     acpi_poweroff();
     ck_puts("power: halted; hold the power button to turn the machine off\n");
     for (;;)
