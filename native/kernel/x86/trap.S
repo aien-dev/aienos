@@ -21,8 +21,10 @@ ck_x86_load_gdt:
     push %rdx
     push %rax
     lretq
-1:  ltr %r9w
-    ret
+1:  test %r9w, %r9w                    /* tss_sel 0: no task register (secondary cores) */
+    jz 2f
+    ltr %r9w
+2:  ret
 
 /* noreturn void ck_x86_call_on_stack(void (*fn)(void *), void *arg, u64 sp)
  * sp is 16-byte aligned; the call leaves the callee at sp - 40 = 8 mod 16,

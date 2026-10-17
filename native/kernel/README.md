@@ -14,7 +14,7 @@ QEMU qualifies nothing physical: a PASS here says nothing about real hardware.
 | `core/` | Console, printf, ACPI, reports/panic/PSCI reset, M3 (threads, scheduler, EL0, capabilities, IPC), `kmain.c`. |
 | `tests/` | Host unit tests. |
 | `third_party/omega/` | The canonical Omega Cortex store, byte for byte from the omega commit in `omega.lock` (checked by `scripts/omega_lock_check.sh`); built freestanding by `svc/cortex_store.c` over the sealed Store through `svc/cortex_journal.c` (native v1 plan P06). |
-| `x86/` | x86_64 port, first cut (AIENOS-IMAC-KERNEL-0, 2017 iMac): UEFI stub, descriptor tables and interrupt stubs, page tables, local APIC timer, ACPI power off, console, read-only AHCI SATA disks. |
+| `x86/` | x86_64 port, first cut (AIENOS-IMAC-KERNEL-0, 2017 iMac): UEFI stub, descriptor tables and interrupt stubs, page tables, local APIC timer, ACPI power off, console, secondary-core start, PCI walk, read-only AHCI and NVMe disks. |
 | `../boot/` | Minimal UEFI entry stub (one image with the kernel). |
 
 ## Build and test
@@ -157,21 +157,30 @@ own GDT, TSS and IDT (`x86/trap.S`), builds its own identity page tables (2 MiB
 pages: RAM write-back, everything else uncached, the framebuffer write-combining,
 a 4 KiB guard page under the stack), proves the guard page faults and the fault
 is contained, measures the TSC against the HPET, runs the local APIC timer
-(xAPIC) for 20 interrupts at 100 Hz, then finds the SATA disks behind every AHCI
-controller (`x86/ahci_x86.c`: PCI walk over the MCFG ECAM window, polled, no
-controller or port reset) and reads them without writing: only IDENTIFY DEVICE
-and READ DMA EXT exist in the driver (the build refuses any other ATA command),
-the disk_dev write hook always refuses, the IDENTIFY serial number is never read,
-and each disk's GPT is checked by the shared `dev/disk_part.c` (both copies, CRCs,
-the AIENOS partition located if present). It prints `kernel: alive`, holds the screen
+(xAPIC) for 20 interrupts at 100 Hz, starts every other core the MADT lists
+(INIT-SIPI-SIPI into the `x86/smp_x86.S` trampoline below 1 MiB; each core loads
+the kernel's tables, checks in and halts), then walks PCI (`x86/pci_x86.c`, MCFG
+ECAM window; device registers above the identity map are mapped on demand) and
+reads every disk without writing. SATA through `x86/ahci_x86.c` (polled, no
+controller or port reset, only IDENTIFY DEVICE and READ DMA EXT exist and the
+build refuses any other ATA command); NVMe through the shared
+`../disk/disk_nvme.c` (the build refuses any nvme_write or nvme_flush call from
+`x86/`). Both disk_dev write hooks always refuse, serial numbers and MAC
+addresses are never printed, and each disk's GPT is checked by the shared
+`dev/disk_part.c` (both copies, CRCs, the AIENOS partition located if present).
+A Broadcom Ethernet chip is only looked at: PCI identity, power state and, when
+awake, the PHY link through MII reads. The last line before the hold is a
+one-line `summary:` so one photo of the screen carries the result. It prints `kernel: alive`, holds the screen
 60 s and powers off through ACPI S5. Output: the GOP framebuffer
 (`core/fbcon.c`, lines from before ExitBootServices replayed onto it) and COM1
 when a 16550 answers there (QEMU; the iMac has none). Shared, unchanged:
 `core/fbcon.c`, `fmt.c`, `acpi.c`, `handoff_check.c`, `mm/frames.c`, `heap.c`,
-`dev/disk_part.c`, `../disk/disk.c`. The QEMU test also attaches a data disk with
-a GPT from `ck_gpt_image` and fails unless the kernel finds the AIENOS partition
-where the tool wrote it and the disk is byte-identical afterwards. Not yet:
-secondary cores, x2APIC, NX, disk writes, NVMe, VT-d, network, a store. QEMU
+`dev/disk_part.c`, `../disk/disk.c`, `../disk/disk_nvme.c`. The QEMU test runs four
+cores and attaches a SATA data disk and an NVMe disk, each with a GPT from
+`ck_gpt_image`, and fails unless three cores check in, the kernel finds each
+AIENOS partition where the tool wrote it and both disks are byte-identical
+afterwards. Not yet: work scheduled on the other cores, x2APIC, NX, disk writes,
+VT-d, a network driver, a store. QEMU
 qualifies nothing physical; copy the image to a FAT stick as
 `EFI/BOOT/BOOTX64.EFI` and start it from the Option-key boot picker.
 

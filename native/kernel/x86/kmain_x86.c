@@ -11,10 +11,12 @@
  * screen console (core/fbcon.c), heap (mm/heap.c), the guard page proven to
  * fault and the fault contained, the TSC measured against the HPET, the
  * local APIC (xAPIC) with its timer at 100 Hz for 20 ticks, the MADT CPU
- * count, the SATA disks behind any AHCI controller read-only (ahci_x86.c),
- * and the final report. It holds the screen CK_X86_HOLD_S seconds and
+ * count, the secondary cores started and parked (smp_x86.S), the AHCI and
+ * NVMe disks read-only and a look at the Ethernet chip (pci_x86.c,
+ * ahci_x86.c), and the final report. It holds the screen CK_X86_HOLD_S seconds and
  * powers off through ACPI S5 (FADT PM1 control + the DSDT's \_S5 package).
- * Secondary cores, NVMe, writes and VT-d are later cuts. No runtime service
+ * Scheduling on the secondary cores, disk writes, the network driver and VT-d
+ * are later cuts. No runtime service
  * is called. QEMU runs of this path qualify nothing physical. */
 #include "../core/ck_internal.h"
 #include "../core/handoff_check.h"
@@ -51,6 +53,7 @@ const char *ck_commit(void) { return AIENOS_COMMIT; }
 static struct ck_handoff *hand;
 static struct ck_frames frames;
 static struct ck_heap heap;
+static uint64_t tramp_pa; /* secondary-core trampoline page, below 1 MiB; 0 = none */
 
 /* ---- descriptor tables ---- */
 struct __attribute__((packed)) tss64 {
@@ -328,6 +331,10 @@ static void mm_build(void)
         ck_panic("memory: bad UEFI memory map");
     /* Page 0 stays out: a null pointer must never be a usable frame. */
     ck_frames_reserve(&frames, 0, CK_PAGE);
+    /* The secondary-core trampoline needs a page below 1 MiB; take the
+     * lowest free page before anything else does. */
+    if (ck_frames_alloc(&frames, 1, CK_PAGE, &tramp_pa) || tramp_pa >= 0x100000)
+        tramp_pa = 0;
 
     uint64_t top = 4ull << 30;
     for (uint64_t off = 0; off + h->desc_size <= h->map_size; off += h->desc_size) {
@@ -427,6 +434,35 @@ static void mm_build(void)
         __asm__ volatile("mov %0, %%cr4" ::"r"(cr4) : "memory");
     }
     __asm__ volatile("wbinvd" ::: "memory");
+}
+
+/* Device registers above the identity-mapped range (a 64-bit BAR the firmware
+ * placed high, as OVMF does with NVMe): 2 MiB uncached pages added to the live
+ * tables on demand. 0 ok, -1 refused (wraps or beyond 46 address bits). */
+static uint64_t *sub_table(uint64_t *t, unsigned i)
+{
+    if (!(t[i] & PTE_P))
+        t[i] = (uint64_t)(uintptr_t)table_new() | PTE_P | PTE_W;
+    return (uint64_t *)(uintptr_t)(t[i] & PTE_ADDR);
+}
+
+int ck_x86_map_mmio(uint64_t pa, uint64_t len)
+{
+    if (!len || pa + len < pa || pa + len > (1ull << 46))
+        return -1;
+    uint64_t *pml4 = (uint64_t *)(uintptr_t)mm.root;
+    for (uint64_t a = pa & ~((2ull << 20) - 1); a < pa + len; a += 2ull << 20) {
+        if (a < mm.top)
+            continue;
+        uint64_t *pd = sub_table(sub_table(pml4, (unsigned)(a >> 39) & 511), (unsigned)(a >> 30) & 511);
+        uint64_t *e = &pd[(a >> 21) & 511];
+        if (!(*e & PTE_P)) {
+            *e = a | PTE_P | PTE_W | PTE_PS | PTE_PCD | PTE_PWT;
+            mm.pages_uc++;
+        }
+        __asm__ volatile("invlpg (%0)" ::"r"(a) : "memory");
+    }
+    return 0;
 }
 
 /* ---- time ---- */
@@ -567,6 +603,132 @@ static void apic_start(struct apic_report *ar)
     }
 }
 
+/* ---- secondary cores ----
+ * Each enabled local APIC the MADT lists (other than this core's) gets INIT,
+ * SIPI, SIPI pointing at the trampoline (smp_x86.S). A started core loads the
+ * kernel's GDT (no task register) and IDT, sets the same PAT, enables its
+ * local APIC, records its APIC ID, checks in, and halts with interrupts off.
+ * Nothing is scheduled on it yet. */
+#define SMP_MAX 16u
+#define AP_STACK_PAGES 4u
+#define APIC_ICR_LO 0x300
+#define APIC_ICR_HI 0x310
+#define PAT_VALUE 0x0007040600070106ull
+
+struct smp_report {
+    unsigned listed, started, failed;
+    uint32_t ids[SMP_MAX], up_ids[SMP_MAX];
+    const char *why;
+};
+static volatile uint32_t ap_up, ap_ids[SMP_MAX];
+
+static void delay_us(uint64_t us)
+{
+    uint64_t t0 = ck_rdtsc(), n = tsc_hz / 1000000 * us;
+    while (ck_rdtsc() - t0 < n)
+        ck_pause();
+}
+
+static void ap_entry(void *arg)
+{
+    uint64_t idx = (uint64_t)(uintptr_t)arg;
+    struct dtr g = {sizeof gdt - 1, (uint64_t)(uintptr_t)gdt};
+    ck_x86_load_gdt(&g, SEL_CODE, SEL_DATA, 0);
+    struct dtr i = {sizeof idt - 1, (uint64_t)(uintptr_t)idt};
+    __asm__ volatile("lidt %0" ::"m"(i) : "memory");
+    ck_wrmsr(0x277, PAT_VALUE);
+    uint64_t base = ck_rdmsr(0x1b);
+    if (base & 1u << 10)
+        ck_wrmsr(0x1b, base & ~(3ull << 10));
+    ck_wrmsr(0x1b, (base & ~(1ull << 10)) | 1u << 11);
+    apic_wr(APIC_TPR, 0);
+    apic_wr(APIC_SVR, 0x100 | VEC_SPURIOUS);
+    ap_ids[idx] = apic_rd(APIC_ID) >> 24;
+    __atomic_fetch_add(&ap_up, 1, __ATOMIC_SEQ_CST);
+    for (;;)
+        __asm__ volatile("cli; hlt");
+}
+
+static int icr_send(uint32_t id, uint32_t lo)
+{
+    apic_wr(APIC_ICR_HI, id << 24);
+    apic_wr(APIC_ICR_LO, lo);
+    for (unsigned n = 0; n < 1000; n++) {
+        if (!(apic_rd(APIC_ICR_LO) & 1u << 12))
+            return 0;
+        delay_us(1);
+    }
+    return -1;
+}
+
+static void tramp_put32(const char *sym, uint32_t v)
+{
+    uint64_t off = (uint64_t)(uintptr_t)(sym - ck_x86_tramp_start);
+    memcpy((uint8_t *)(uintptr_t)tramp_pa + off, &v, 4);
+}
+static void tramp_put64(const char *sym, uint64_t v)
+{
+    uint64_t off = (uint64_t)(uintptr_t)(sym - ck_x86_tramp_start);
+    memcpy((uint8_t *)(uintptr_t)tramp_pa + off, &v, 8);
+}
+static uint32_t tramp_at(const char *sym)
+{
+    return (uint32_t)(tramp_pa + (uint64_t)(uintptr_t)(sym - ck_x86_tramp_start));
+}
+
+static void smp_start(const struct apic_report *ar, struct smp_report *sr)
+{
+    const uint8_t *m = ck_acpi_lookup(hand->rsdp, "APIC");
+    uint32_t len = rd32(m, 4);
+    for (uint32_t off = 44; off + 2 <= len; off += m[off + 1])
+        if (m[off] == 0 && m[off + 1] >= 8 && (rd32(m, off + 4) & 3) && sr->listed < SMP_MAX)
+            sr->ids[sr->listed++] = m[off + 3];
+    uint64_t size = (uint64_t)(uintptr_t)(ck_x86_tramp_end - ck_x86_tramp_start);
+    if (!tramp_pa)
+        sr->why = "no free page below 1 MiB";
+    else if (mm.root >= (1ull << 32))
+        sr->why = "page tables above 4 GiB";
+    else if (size > CK_PAGE)
+        sr->why = "trampoline larger than a page";
+    if (sr->why)
+        return;
+    memcpy((void *)(uintptr_t)tramp_pa, ck_x86_tramp_start, size);
+    tramp_put32(ck_x86_tramp_gdtr + 2, tramp_at(ck_x86_tramp_gdt));
+    tramp_put32(ck_x86_tramp_far32, tramp_at(ck_x86_tramp_pm32));
+    tramp_put32(ck_x86_tramp_far64, tramp_at(ck_x86_tramp_lm64));
+    tramp_put32(ck_x86_tramp_cr3, (uint32_t)mm.root);
+    tramp_put64(ck_x86_tramp_entry, (uint64_t)(uintptr_t)ap_entry);
+    for (unsigned k = 0; k < sr->listed; k++) {
+        uint32_t id = sr->ids[k];
+        if (id == ar->id)
+            continue;
+        uint64_t st;
+        if (ck_frames_alloc(&frames, AP_STACK_PAGES, CK_PAGE, &st)) {
+            sr->failed++;
+            continue;
+        }
+        unsigned before = ap_up;
+        tramp_put64(ck_x86_tramp_stack, st + AP_STACK_PAGES * CK_PAGE);
+        tramp_put64(ck_x86_tramp_arg, before);
+        __asm__ volatile("mfence" ::: "memory");
+        int bad = icr_send(id, 0x4500); /* INIT, assert */
+        delay_ms(10);
+        for (unsigned s = 0; s < 2 && ap_up == before; s++) {
+            bad |= icr_send(id, 0x4600 | (uint32_t)(tramp_pa >> 12)); /* start-up */
+            delay_us(200);
+        }
+        uint64_t t0 = ck_rdtsc();
+        while (ap_up == before && ck_rdtsc() - t0 < tsc_hz / 10)
+            ck_pause();
+        if (ap_up != before && !bad)
+            sr->up_ids[sr->started++] = ap_ids[before];
+        else
+            sr->failed++;
+        if (ap_up > before + 1)
+            break; /* a core checked in twice or out of turn: stop starting more */
+    }
+}
+
 /* ---- the kernel ---- */
 static void cpu_line(void)
 {
@@ -670,8 +832,27 @@ static __attribute__((noreturn)) void kernel_main(void *arg)
               (unsigned long long)ar.max_us, (unsigned long long)stray_irqs);
     if (ar.ticks < 20)
         ck_panic("timer: only %llu ticks", (unsigned long long)ar.ticks);
-    ck_x86_storage(h->rsdp, &frames, tsc_hz, mm.top);
+
+    struct smp_report sr = {0};
+    smp_start(&ar, &sr);
+    if (sr.why) {
+        ck_printf("smp: cpus=%u started=0 (%s)\n", sr.listed, sr.why);
+    } else {
+        char ids[SMP_MAX * 4 + 1];
+        unsigned n = 0;
+        for (unsigned k = 0; k < sr.started; k++)
+            n += (unsigned)ck_snprintf(ids + n, sizeof ids - n, k ? ",%u" : "%u", sr.up_ids[k]);
+        ids[n] = 0;
+        ck_printf("smp: cpus=%u started=%u failed=%u bsp_id=%u ap_ids=%s trampoline=0x%llx state=halted\n",
+                  sr.listed, sr.started, sr.failed, ar.id, sr.started ? ids : "none",
+                  (unsigned long long)tramp_pa);
+    }
+
+    const struct ck_x86_storage_result *st = ck_x86_storage(h->rsdp, &frames, tsc_hz, mm.top);
     ck_puts("kernel: alive\n");
+    ck_printf("summary: cores=%u/%u timer=ok sata_disks=%u nvme_disks=%u gpt_valid=%u writes=none net=%s\n",
+              sr.started + 1, sr.listed, st->ahci_disks, st->nvme_disks, st->gpt_valid,
+              !st->net_found ? "none" : st->net_link == 1 ? "link-up" : st->net_link == 2 ? "link-down" : "seen");
     ck_puts("AIENOS-IMAC-KERNEL-0 DONE\n");
     ck_puts("note: QEMU qualifies nothing physical\n");
     finish();

@@ -82,9 +82,24 @@ int ck_x86_com1_probe(void);
 int ck_x86_console_fb_on(volatile void *base, uint32_t width, uint32_t height, uint32_t pitch,
                          uint32_t format, uint32_t *scale, uint32_t *cols, uint32_t *rows);
 
-/* ahci_x86.c: PCI walk over the MCFG ECAM window and every SATA disk behind
- * an AHCI controller, read-only (IDENTIFY, READ DMA EXT and the GPT check). */
+/* pci_x86.c: PCI walk over the MCFG ECAM window; every AHCI and NVMe disk
+ * read-only (identify, read, GPT check), a look at the Ethernet chip. */
 struct ck_frames;
-void ck_x86_storage(uint64_t rsdp, struct ck_frames *fr, uint64_t tsc_hz, uint64_t map_top);
+struct ck_x86_storage_result {
+    unsigned pci_functions, ahci_ctrls, ahci_disks, nvme_ctrls, nvme_disks, gpt_valid;
+    unsigned net_found, net_link; /* net_link: 0 not read, 1 up, 2 down */
+};
+const struct ck_x86_storage_result *ck_x86_storage(uint64_t rsdp, struct ck_frames *fr, uint64_t tsc_hz,
+                                                   uint64_t map_top);
+/* kmain_x86.c: maps [pa, pa + len) uncached when it lies above the identity map. */
+int ck_x86_map_mmio(uint64_t pa, uint64_t len);
+/* ahci_x86.c: one AHCI controller at abar, polled, read-only. */
+void ck_x86_ahci_start(unsigned ctrl, uint64_t abar, struct ck_frames *fr, uint64_t tsc_hz);
+unsigned ck_x86_ahci_disks(void);
+
+/* smp_x86.S: the secondary-core trampoline, copied below 1 MiB and patched. */
+extern char ck_x86_tramp_start[], ck_x86_tramp_end[], ck_x86_tramp_gdt[], ck_x86_tramp_pm32[],
+    ck_x86_tramp_lm64[], ck_x86_tramp_gdtr[], ck_x86_tramp_far32[], ck_x86_tramp_far64[], ck_x86_tramp_cr3[],
+    ck_x86_tramp_stack[], ck_x86_tramp_entry[], ck_x86_tramp_arg[];
 
 #endif

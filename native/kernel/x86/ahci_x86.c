@@ -2,13 +2,12 @@
  * controller, READ-ONLY, for the 2017 iMac (Intel 8086:a102, the 1 TB hard
  * disk half of the Fusion Drive) and QEMU q35 (ICH9).
  *
- * PCI functions are found by walking the ECAM window the ACPI MCFG names
- * (config reads; the only config write is turning on memory decode and bus
- * mastering for the AHCI function itself). Each controller is driven polled,
+ * Each controller is driven polled,
  * with interrupts off: AHCI mode on, no controller or port reset (the links
  * the firmware brought up are used as they are), per port the command engine
  * stopped, the command list and received-FIS area moved into frames the
- * kernel owns, the engine started again.
+ * kernel owns, the engine started again. The PCI walk that finds the
+ * controllers is pci_x86.c.
  *
  * Only two ATA commands exist in this file: IDENTIFY DEVICE (0xEC) and READ
  * DMA EXT (0x25). issue() refuses every other opcode, and the disk_dev the
@@ -62,6 +61,9 @@
 
 #define ATA_IDENTIFY 0xec
 #define ATA_READ_DMA_EXT 0x25
+
+/* pci_x86.c: sector 0 and the GPT check of one disk, printed. */
+void ck_x86_disk_report(const char *tag, unsigned ctrl, unsigned index, const disk_dev *dev);
 
 struct ahci_disk {
     volatile uint8_t *port;
@@ -204,29 +206,6 @@ static void port_stop(volatile uint8_t *p)
     wait_reg(p, P_CMD, CMD_FR, 0, 500);
 }
 
-static void gpt_report(struct ahci_disk *d)
-{
-    static uint8_t blk[4096];
-    if (disk_read(&d->dev, 0, 1, blk) != DISK_OK) {
-        ck_printf("ahci_disk: ctrl=%u disk=%u lba0 read FAILED\n", d->ctrl, d->index);
-        return;
-    }
-    ck_printf("ahci_read: ctrl=%u disk=%u lba=0 bytes=%u boot_sig=%02x%02x first=%02x%02x%02x%02x\n", d->ctrl,
-              d->index, d->dev.block_size, blk[510], blk[511], blk[0], blk[1], blk[2], blk[3]);
-    ck_part part;
-    ck_gpt_info info;
-    int rc = ck_gpt_find_aienos(&d->dev, &part, &info);
-    if (rc == CK_GPT_OK)
-        ck_printf("ahci_gpt: ctrl=%u disk=%u gpt=valid used=%u aienos first_lba=%llu last_lba=%llu\n", d->ctrl,
-                  d->index, info.used, (unsigned long long)part.first_lba,
-                  (unsigned long long)(part.first_lba + part.blocks - 1));
-    else if (rc == CK_GPT_ENOPART)
-        ck_printf("ahci_gpt: ctrl=%u disk=%u gpt=valid used=%u last_lba=%llu, no AIENOS partition, nothing "
-                  "written\n", d->ctrl, d->index, info.used, (unsigned long long)info.last_lba);
-    else
-        ck_printf("ahci_gpt: ctrl=%u disk=%u refused: %s\n", d->ctrl, d->index, ck_gpt_strerror(rc));
-}
-
 static void port_bringup(unsigned ctrl, volatile uint8_t *hba, unsigned pn, struct ck_frames *fr, int low4g)
 {
     volatile uint8_t *p = hba + 0x100 + 0x80 * pn;
@@ -313,11 +292,12 @@ static void port_bringup(unsigned ctrl, volatile uint8_t *hba, unsigned pn, stru
     ck_printf("ahci_disk: ctrl=%u disk=%u port=%u link=gen%u model=\"%s\" blocks=%llu block=%u mib=%llu "
               "access=read-only\n", ctrl, d->index, pn, spd, model, (unsigned long long)sectors, bs,
               (unsigned long long)(sectors * bs >> 20));
-    gpt_report(d);
+    ck_x86_disk_report("ahci", d->ctrl, d->index, &d->dev);
 }
 
-static void ahci_start(unsigned ctrl, volatile uint8_t *cfg, uint64_t abar, struct ck_frames *fr)
+void ck_x86_ahci_start(unsigned ctrl, uint64_t abar, struct ck_frames *fr, uint64_t tsc_hz)
 {
+    g_tsc_hz = tsc_hz;
     volatile uint8_t *hba = (volatile uint8_t *)(uintptr_t)abar;
     uint32_t cap = mr(hba, HBA_CAP);
     /* Taking the controller from the firmware (AHCI 1.3 section 10.6): ask,
@@ -331,68 +311,9 @@ static void ahci_start(unsigned ctrl, volatile uint8_t *cfg, uint64_t abar, stru
     ck_printf("ahci: ctrl=%u abar=0x%llx version=%x.%x%x ports=%u implemented=0x%x s64a=%u polled=yes\n", ctrl,
               (unsigned long long)abar, vs >> 16, (vs >> 8) & 0xff, vs & 0xff, (cap & 0x1f) + 1, pi,
               (cap & CAP_S64A) ? 1u : 0u);
-    (void)cfg;
     for (unsigned pn = 0; pn < 32; pn++)
         if (pi & (1u << pn))
             port_bringup(ctrl, hba, pn, fr, !(cap & CAP_S64A));
 }
 
-static uint32_t cr32(volatile uint8_t *cfg, unsigned off) { return *(volatile uint32_t *)(cfg + off); }
-
-void ck_x86_storage(uint64_t rsdp, struct ck_frames *fr, uint64_t tsc_hz, uint64_t map_top)
-{
-    g_tsc_hz = tsc_hz;
-    const uint8_t *m = rsdp ? ck_acpi_lookup(rsdp, "MCFG") : 0;
-    if (!m) {
-        ck_puts("pci: no ACPI MCFG, no storage\n");
-        return;
-    }
-    uint32_t len;
-    memcpy(&len, m + 4, 4);
-    unsigned funcs = 0, nctrl = 0;
-    for (uint32_t off = 44; off + 16 <= len; off += 16) {
-        uint64_t base;
-        uint16_t seg;
-        memcpy(&base, m + off, 8);
-        memcpy(&seg, m + off + 8, 2);
-        uint8_t sb = m[off + 10], eb = m[off + 11];
-        if (!base || sb > eb || base + ((uint64_t)(eb + 1) << 20) > map_top) {
-            ck_printf("pci: ecam seg=%u at 0x%llx outside the mapped range, skipped\n", seg,
-                      (unsigned long long)base);
-            continue;
-        }
-        for (unsigned bus = sb; bus <= eb; bus++)
-            for (unsigned dev = 0; dev < 32; dev++)
-                for (unsigned fn = 0; fn < 8; fn++) {
-                    volatile uint8_t *cfg = (volatile uint8_t *)(uintptr_t)(base + ((uint64_t)bus << 20) +
-                                                                            ((uint64_t)dev << 15) +
-                                                                            ((uint64_t)fn << 12));
-                    uint32_t idr = cr32(cfg, 0);
-                    if ((idr & 0xffff) == 0xffff || (idr & 0xffff) == 0) {
-                        if (fn == 0)
-                            break;
-                        continue;
-                    }
-                    funcs++;
-                    uint32_t cls = cr32(cfg, 8) >> 8;
-                    uint8_t ht = (uint8_t)(cr32(cfg, 0x0c) >> 16);
-                    if (cls == 0x010601 && (ht & 0x7f) == 0 && nctrl < AHCI_MAX_CTRL) {
-                        uint32_t bar = cr32(cfg, 0x24);
-                        uint64_t abar = bar & ~0xfu;
-                        ck_printf("pci: ahci %02x:%02x.%u id=%04x:%04x bar5=0x%x\n", bus, dev, fn, idr & 0xffff,
-                                  idr >> 16, bar);
-                        if ((bar & 1) || (bar & 6) || !abar || abar + 0x1100 > map_top) {
-                            ck_puts("ahci: BAR5 is not a mapped 32-bit memory BAR, controller skipped\n");
-                        } else {
-                            volatile uint16_t *cmd = (volatile uint16_t *)(cfg + 4);
-                            *cmd = (uint16_t)(*cmd | 0x6); /* memory decode + bus master */
-                            ahci_start(nctrl, cfg, abar, fr);
-                        }
-                        nctrl++;
-                    }
-                    if (fn == 0 && !(ht & 0x80))
-                        break;
-                }
-    }
-    ck_printf("storage: pci_functions=%u ahci_controllers=%u disks=%u writes=none\n", funcs, nctrl, ndisks);
-}
+unsigned ck_x86_ahci_disks(void) { return ndisks; }
