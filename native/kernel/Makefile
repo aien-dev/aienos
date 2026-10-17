@@ -2241,17 +2241,32 @@ imac-diag: $(IMACDIAG_EFI)
 # (GDT/TSS/IDT, own page tables, guard page, HPET-timed TSC, local APIC timer, ACPI S5)
 # + x86/pci_x86.c (PCI walk; AHCI via x86/ahci_x86.c and NVMe via ../disk/disk_nvme.c, both
 # read-only, GPT checked by dev/disk_part.c; a look at the Ethernet chip) + x86/smp_x86.S
-# (secondary cores started and parked) + x86/tg3_x86.c (BCM57766 Ethernet, transmit only) and
-# x86/report_x86.c with ../../net/aienos_net.c (the screen sent as UDP broadcasts during the hold;
-# host test scripts/ck_imac_report_test.sh, receiver tools/ck_imac_report_listen.c)
+# (secondary cores started and parked) + x86/tg3_x86.c (BCM57766 Ethernet: link detection; no
+# transmit in the default image)
 # + x86/trap.S + x86/console_x86.c (COM1 when present, GOP framebuffer), on the
 # arch-neutral core: fbcon, fmt, acpi, handoff_check, frames, heap. Same toolchain and PE
 # header as IMACDIAG. Copy to a FAT stick as EFI/BOOT/BOOTX64.EFI.
 #   make imac-kernel  -> $(OUT)/IMACKERN.EFI     QEMU test: scripts/qemu_ck_imac_kernel_test.sh
+# The network report is a LAB-ONLY diagnostic, opt-in and default off:
+#   make imac-kernel CK_X86_REPORT=1 -> $(OUT)/IMACKERN-LAB.EFI (own object dir)
+# adds x86/report_x86.c + ../../net/aienos_net.c and tg3 transmit (-DCK_X86_REPORT=1): during the
+# hold it broadcasts only allowlisted console lines (ck_x86_report_filter, never the raw console)
+# as UDP to port 47031, header "AIENOS-IMAC-REPORT v=2 auth=none": UNAUTHENTICATED, never a
+# receipt, evidence or a command. Host test scripts/ck_imac_report_test.sh, receiver
+# tools/ck_imac_report_listen.c. The default image, and any resident or service (ALLEN) build,
+# must not contain it: the link step below fails a default image that has a report symbol.
+CK_X86_REPORT ?= 0
 X86K := $(KDIR)/x86
+ifeq ($(CK_X86_REPORT),1)
+IMACKERN_DIR := $(OUT)/imackern-lab
+IMACKERN_EFI := $(OUT)/IMACKERN-LAB.EFI
+else ifeq ($(CK_X86_REPORT),0)
 IMACKERN_DIR := $(OUT)/imackern
-IMACKERN_ELF := $(IMACKERN_DIR)/imackern.elf
 IMACKERN_EFI := $(OUT)/IMACKERN.EFI
+else
+$(error CK_X86_REPORT must be 0 (default) or 1 (lab-only network report))
+endif
+IMACKERN_ELF := $(IMACKERN_DIR)/imackern.elf
 IMACKERN_CFLAGS := $(X86CFLAGS) -I$(KDIR)/include -I$(KDIR)/mm -I$(KDIR)/dev -I$(NATIVE)/disk -I$(NATIVE)/net
 IMACKERN_OBJS := $(IMACKERN_DIR)/efi_entry_x86_64.o $(IMACKERN_DIR)/efi_x86.o $(IMACKERN_DIR)/efi_gop.o \
 	$(IMACKERN_DIR)/kmain_x86.o $(IMACKERN_DIR)/console_x86.o $(IMACKERN_DIR)/trap.o \
@@ -2259,7 +2274,14 @@ IMACKERN_OBJS := $(IMACKERN_DIR)/efi_entry_x86_64.o $(IMACKERN_DIR)/efi_x86.o $(
 	$(IMACKERN_DIR)/frames.o $(IMACKERN_DIR)/heap.o $(IMACKERN_DIR)/libc_min.o \
 	$(IMACKERN_DIR)/ahci_x86.o $(IMACKERN_DIR)/disk_part.o $(IMACKERN_DIR)/disk.o \
 	$(IMACKERN_DIR)/pci_x86.o $(IMACKERN_DIR)/smp_x86.o $(IMACKERN_DIR)/disk_nvme.o \
-	$(IMACKERN_DIR)/tg3_x86.o $(IMACKERN_DIR)/report_x86.o $(IMACKERN_DIR)/aienos_net.o
+	$(IMACKERN_DIR)/tg3_x86.o
+IMACKERN_REPORT_OBJS := $(IMACKERN_DIR)/report_x86.o $(IMACKERN_DIR)/aienos_net.o
+# Symbols only the lab image may contain; the default image is checked for them after linking.
+IMACKERN_REPORT_SYMS := ck_x86_report_hold|ck_x86_report_frame|ck_x86_report_filter|ck_x86_report_parts|ck_x86_tg3_send|ck_x86_tg3_drain|net_udp_build
+ifeq ($(CK_X86_REPORT),1)
+IMACKERN_OBJS += $(IMACKERN_REPORT_OBJS)
+IMACKERN_CFLAGS += -DCK_X86_REPORT=1
+endif
 IMACKERN_HDRS := $(X86K)/x86.h $(BOOT)/handoff.h $(BOOT)/efi.h $(KDIR)/core/ck_internal.h $(KDIR)/include/ck.h
 $(IMACKERN_DIR)/efi_entry_x86_64.o: $(BOOT)/efi_entry_x86_64.S
 $(IMACKERN_DIR)/efi_x86.o: $(X86K)/efi_x86.c $(IMACKERN_HDRS)
@@ -2283,7 +2305,7 @@ $(IMACKERN_DIR)/disk_nvme.o: $(NATIVE)/disk/disk_nvme.c $(NATIVE)/disk/disk_nvme
 $(IMACKERN_DIR)/tg3_x86.o: $(X86K)/tg3_x86.c $(IMACKERN_HDRS) $(KDIR)/mm/frames.h
 $(IMACKERN_DIR)/report_x86.o: $(X86K)/report_x86.c $(X86K)/report_x86.h $(IMACKERN_HDRS) $(NATIVE)/net/aienos_net.h
 $(IMACKERN_DIR)/aienos_net.o: $(NATIVE)/net/aienos_net.c $(NATIVE)/net/aienos_net.h
-$(IMACKERN_OBJS):
+$(sort $(IMACKERN_OBJS) $(IMACKERN_REPORT_OBJS)):
 	@mkdir -p $(dir $@)
 	$(X86CC) $(IMACKERN_CFLAGS) -DAIENOS_COMMIT='"$(AIENOS_COMMIT)"' -c -o $@ $<
 $(IMACKERN_ELF): $(IMACKERN_OBJS) $(BOOT)/image_x86_64.ld
@@ -2302,6 +2324,15 @@ $(IMACKERN_ELF): $(IMACKERN_OBJS) $(BOOT)/image_x86_64.ld
 	@n=$$($(X86NM) $@ | grep -c ' t isr_common$$' || true); s=$$($(X86NM) $@ | grep ' T ck_x86_isr_stubs$$' | cut -c1-16); \
 	e=$$($(X86NM) $@ | grep ' t isr_common$$' | cut -c1-16); \
 	if [ "$$n" != 1 ] || [ $$((0x$$e - 0x$$s)) != 4096 ]; then echo "interrupt stubs are not 256 x 16 bytes"; rm -f $@; exit 1; fi
+	@r=$$($(X86NM) $@ | grep -E ' [TtDdBbRr] ($(IMACKERN_REPORT_SYMS))$$' || true); \
+	if [ "$(CK_X86_REPORT)" = 1 ]; then \
+	  for s in ck_x86_report_hold ck_x86_report_filter ck_x86_report_frame; do \
+	    echo "$$r" | grep -q " $$s$$" || { echo "lab image lacks $$s"; rm -f $@; exit 1; }; done; \
+	elif [ -n "$$r" ]; then \
+	  echo "default iMac image links the lab-only network report (build it with CK_X86_REPORT=1 only):"; \
+	  echo "$$r"; rm -f $@; exit 1; fi
+	@if [ "$(CK_X86_REPORT)" != 1 ] && grep -aq "AIENOS-IMAC-REPORT" $@; then \
+	  echo "default iMac image carries the report header string"; rm -f $@; exit 1; fi
 $(IMACKERN_EFI): $(IMACKERN_ELF)
 	$(X86OBJCOPY) -O binary $< $@
 	@sz=$$(stat -c %s $@); pad=$$(( (4096 - sz % 4096) % 4096 )); \
