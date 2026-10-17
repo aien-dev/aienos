@@ -126,6 +126,12 @@ run() { # name, -cpu model, expected APIC mode
     else
         echo "PASS  ${name}: no panic"
     fi
+    # The default image carries no network report (lab-only, CK_X86_REPORT=1).
+    if grep -aqE '^report: ' "${txt}"; then
+        echo "FAIL  ${name}: default image ran the lab-only network report"; fails=$((fails + 1))
+    else
+        echo "PASS  ${name}: no network report in the default image"
+    fi
     [[ ${self_exit} == 1 ]] && echo "PASS  ${name}: QEMU powered off by itself" || { echo "FAIL  ${name}: QEMU still running"; fails=$((fails + 1)); }
     echo "---- ${name} serial ----"; cat "${txt}"; echo "----"
 }
