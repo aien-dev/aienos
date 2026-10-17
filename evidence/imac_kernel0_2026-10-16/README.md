@@ -51,6 +51,7 @@ the HPET (3.408 GHz, matching the i5-7500), saw the four cores in the ACPI MADT,
 masked every interrupt line it does not drive, and took 20 local APIC timer
 interrupts at exactly 10 ms each with no stray interrupts.
 
-Not shown: whether the ACPI S5 power-off after the 60 s hold switched the iMac
-off (the photo was taken during the hold). Not attempted: other CPU cores, NVMe,
+Power-off: the owner reported afterwards that the iMac switched itself off after
+the 60 s hold, so the ACPI S5 write (PM1a control 0x1804, SLP_TYP 7 from the
+DSDT `\_S5` package) works on this machine. Not attempted: other CPU cores, NVMe,
 SATA, network, the AMD GPU.
