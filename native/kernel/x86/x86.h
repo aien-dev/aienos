@@ -82,4 +82,9 @@ int ck_x86_com1_probe(void);
 int ck_x86_console_fb_on(volatile void *base, uint32_t width, uint32_t height, uint32_t pitch,
                          uint32_t format, uint32_t *scale, uint32_t *cols, uint32_t *rows);
 
+/* ahci_x86.c: PCI walk over the MCFG ECAM window and every SATA disk behind
+ * an AHCI controller, read-only (IDENTIFY, READ DMA EXT and the GPT check). */
+struct ck_frames;
+void ck_x86_storage(uint64_t rsdp, struct ck_frames *fr, uint64_t tsc_hz, uint64_t map_top);
+
 #endif

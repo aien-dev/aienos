@@ -11,9 +11,10 @@
  * screen console (core/fbcon.c), heap (mm/heap.c), the guard page proven to
  * fault and the fault contained, the TSC measured against the HPET, the
  * local APIC (xAPIC) with its timer at 100 Hz for 20 ticks, the MADT CPU
- * count, and the final report. It holds the screen CK_X86_HOLD_S seconds and
+ * count, the SATA disks behind any AHCI controller read-only (ahci_x86.c),
+ * and the final report. It holds the screen CK_X86_HOLD_S seconds and
  * powers off through ACPI S5 (FADT PM1 control + the DSDT's \_S5 package).
- * Secondary cores, devices, NVMe and VT-d are later cuts. No runtime service
+ * Secondary cores, NVMe, writes and VT-d are later cuts. No runtime service
  * is called. QEMU runs of this path qualify nothing physical. */
 #include "../core/ck_internal.h"
 #include "../core/handoff_check.h"
@@ -669,6 +670,7 @@ static __attribute__((noreturn)) void kernel_main(void *arg)
               (unsigned long long)ar.max_us, (unsigned long long)stray_irqs);
     if (ar.ticks < 20)
         ck_panic("timer: only %llu ticks", (unsigned long long)ar.ticks);
+    ck_x86_storage(h->rsdp, &frames, tsc_hz, mm.top);
     ck_puts("kernel: alive\n");
     ck_puts("AIENOS-IMAC-KERNEL-0 DONE\n");
     ck_puts("note: QEMU qualifies nothing physical\n");
