@@ -55,7 +55,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     ck_puts("kernel_impl: c (native/kernel/x86, x86_64)\n");
     char v[80];
     size_t n = 0;
-    for (; st->FirmwareVendor && st->FirmwareVendor[n] && n < sizeof v - 1; n++)
+    for (; st->FirmwareVendor && n < sizeof v - 1 && st->FirmwareVendor[n]; n++)
         v[n] = st->FirmwareVendor[n] < 0x80 ? (char)st->FirmwareVendor[n] : '?';
     v[n] = 0;
     ck_printf("firmware_vendor: %s\nfirmware_revision: 0x%x\n", v, st->FirmwareRevision);
