@@ -14,7 +14,7 @@ QEMU qualifies nothing physical: a PASS here says nothing about real hardware.
 | `core/` | Console, printf, ACPI, reports/panic/PSCI reset, M3 (threads, scheduler, EL0, capabilities, IPC), `kmain.c`. |
 | `tests/` | Host unit tests. |
 | `third_party/omega/` | The canonical Omega Cortex store, byte for byte from the omega commit in `omega.lock` (checked by `scripts/omega_lock_check.sh`); built freestanding by `svc/cortex_store.c` over the sealed Store through `svc/cortex_journal.c` (native v1 plan P06). |
-| `x86/` | x86_64 port, first cut (AIENOS-IMAC-KERNEL-0, 2017 iMac): UEFI stub, descriptor tables and interrupt stubs, page tables, local APIC timer, ACPI power off, console, secondary-core start, PCI walk, read-only AHCI and NVMe disks. |
+| `x86/` | x86_64 port, first cut (AIENOS-IMAC-KERNEL-0, 2017 iMac): UEFI stub, descriptor tables and interrupt stubs, page tables, local APIC timer, ACPI power off, console, secondary-core start, PCI walk, read-only AHCI and NVMe disks, transmit-only BCM57766 Ethernet report. |
 | `../boot/` | Minimal UEFI entry stub (one image with the kernel). |
 
 ## Build and test
@@ -168,10 +168,19 @@ build refuses any other ATA command); NVMe through the shared
 `x86/`). Both disk_dev write hooks always refuse, serial numbers and MAC
 addresses are never printed, and each disk's GPT is checked by the shared
 `dev/disk_part.c` (both copies, CRCs, the AIENOS partition located if present).
-A Broadcom Ethernet chip is only looked at: PCI identity, power state and, when
-awake, the PHY link through MII reads. The last line before the hold is a
-one-line `summary:` so one photo of the screen carries the result. It prints `kernel: alive`, holds the screen
-60 s and powers off through ACPI S5. Output: the GOP framebuffer
+The Broadcom BCM57766 Ethernet chip (14e4:1686) gets a transmit-only, polled
+driver (`x86/tg3_x86.c`: core reset, bootcode handshake, rings in one DMA block
+below 4 GiB, PHY autonegotiation; it never receives and the MAC address is
+never printed). The last line before the hold is a one-line `summary:`. It
+prints `kernel: alive`, holds the screen 60 s and powers off through ACPI S5.
+During the hold `x86/report_x86.c` sends the RAM copy of the console (first
+16 KiB) every 2 s while the link is up, as UDP broadcast from 0.0.0.0 to
+255.255.255.255 port 47031 (TTL 1), in 1 KiB parts that each start with
+`AIENOS-IMAC-REPORT v=1 run=<id> part=<i>/<n> bytes=<total>`.
+`tools/ck_imac_report_listen.c` (`make -C native/kernel imac-report-listen`,
+run as `ck_imac_report_listen 47031 OUTDIR SECONDS`) rebuilds each run into
+`OUTDIR/imac-<run>.txt`; `scripts/ck_imac_report_test.sh` checks frames and
+reassembly on the host, so a wired iMac no longer needs a photo of its screen. Output: the GOP framebuffer
 (`core/fbcon.c`, lines from before ExitBootServices replayed onto it) and COM1
 when a 16550 answers there (QEMU; the iMac has none). Shared, unchanged:
 `core/fbcon.c`, `fmt.c`, `acpi.c`, `handoff_check.c`, `mm/frames.c`, `heap.c`,
@@ -180,7 +189,7 @@ cores and attaches a SATA data disk and an NVMe disk, each with a GPT from
 `ck_gpt_image`, and fails unless three cores check in, the kernel finds each
 AIENOS partition where the tool wrote it and both disks are byte-identical
 afterwards. Not yet: work scheduled on the other cores, x2APIC, NX, disk writes,
-VT-d, a network driver, a store. QEMU
+VT-d, receiving on the network, a store. QEMU (no BCM57766 there)
 qualifies nothing physical; copy the image to a FAT stick as
 `EFI/BOOT/BOOTX64.EFI` and start it from the Option-key boot picker.
 

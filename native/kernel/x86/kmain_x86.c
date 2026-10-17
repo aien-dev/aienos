@@ -213,7 +213,7 @@ static __attribute__((noreturn)) void finish(void)
     }
     if (CK_X86_HOLD_S) {
         ck_printf("power: holding the screen %u s, then ACPI S5\n", (unsigned)CK_X86_HOLD_S);
-        delay_ms((uint64_t)CK_X86_HOLD_S * 1000);
+        ck_x86_report_hold(tsc_hz, CK_X86_HOLD_S); /* sends the report if the network is up */
     }
     acpi_poweroff();
     ck_puts("power: halted; hold the power button to turn the machine off\n");
@@ -852,7 +852,11 @@ static __attribute__((noreturn)) void kernel_main(void *arg)
     ck_puts("kernel: alive\n");
     ck_printf("summary: cores=%u/%u timer=ok sata_disks=%u nvme_disks=%u gpt_valid=%u writes=none net=%s\n",
               sr.started + 1, sr.listed, st->ahci_disks, st->nvme_disks, st->gpt_valid,
-              !st->net_found ? "none" : st->net_link == 1 ? "link-up" : st->net_link == 2 ? "link-down" : "seen");
+              !st->net_found          ? "none"
+              : st->net_driver == 2   ? "driver-failed"
+              : st->net_link == 1     ? "link-up"
+              : st->net_link == 2     ? "link-down"
+                                      : "seen");
     ck_puts("AIENOS-IMAC-KERNEL-0 DONE\n");
     ck_puts("note: QEMU qualifies nothing physical\n");
     finish();

@@ -7,7 +7,8 @@
  * And a RAM copy of the first CK_X86_LOG_BYTES written, replayed onto the
  * screen when it comes on, so the screen also shows the lines from before
  * ExitBootServices (UEFI ConOut is not used: on a Mac it is invisible unless
- * the firmware is switched to text mode). '\n' goes to COM1 as CR LF. A fault
+ * the firmware is switched to text mode); report_x86.c also sends that copy
+ * over the network. '\n' goes to COM1 as CR LF. A fault
  * while drawing turns the screen off for good. */
 #include "../core/ck_internal.h"
 #include "../core/fbcon.h"
@@ -55,11 +56,9 @@ static void fb_write(const char *s, size_t n)
 
 static void write_n(const char *s, size_t n)
 {
-    if (!fb_on) {
-        size_t k = n < CK_X86_LOG_BYTES - log_len ? n : CK_X86_LOG_BYTES - log_len;
-        memcpy(log_buf + log_len, s, k);
-        log_len += k;
-    }
+    size_t k = n < CK_X86_LOG_BYTES - log_len ? n : CK_X86_LOG_BYTES - log_len;
+    memcpy(log_buf + log_len, s, k);
+    log_len += k;
     fb_write(s, n);
     if (!com1_on)
         return;
@@ -81,6 +80,12 @@ int ck_x86_console_fb_on(volatile void *base, uint32_t width, uint32_t height, u
     *cols = fb.cols;
     *rows = fb.rows;
     return 0;
+}
+
+const char *ck_x86_console_log(size_t *len)
+{
+    *len = log_len;
+    return log_buf;
 }
 
 void ck_puts(const char *s)
