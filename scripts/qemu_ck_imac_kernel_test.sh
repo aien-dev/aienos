@@ -8,7 +8,11 @@
 # (two CPU models; the kernel drives the local APIC in xAPIC mode on both). Each run
 # must leave boot services, switch to the kernel's own page tables, prove the guard
 # page, measure the TSC against the HPET, take 20 local APIC timer interrupts, print
-# "kernel: alive", hold the screen and power QEMU off through ACPI S5 by itself.
+# find both SATA disks behind the q35 AHCI controller and read them without
+# writing (the ESP, and a data disk with a GPT whose AIENOS partition the kernel
+# must locate where ck_gpt_image wrote it; the data disk must be byte-identical
+# afterwards), print "kernel: alive", hold the screen and power QEMU off through
+# ACPI S5 by itself.
 # The kernel's report reaches the serial log through COM1, which QEMU has and the
 # iMac does not. Needs qemu-system-x86_64, OVMF, mtools and an x86_64 gcc. Final line:
 #     AIENOS_IMAC_KERNEL: PASS|FAIL|NOT_RUN [(...)]      exit 0 / 1 / 2 (tools) / 3 (NOT_RUN)
@@ -27,6 +31,7 @@ done
 out="${IMACKERN_OUT:-${repo_root}/target/native-kernel-imac-kernel}"
 commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 make -s -C native/kernel X86_CROSS="${cross}" OUT="${out}" AIENOS_COMMIT="${commit}" imac-kernel >/dev/null
+make -s -C native/kernel OUT="${out}" gpt-image >/dev/null
 
 . "${repo_root}/scripts/lib_gate_hold.sh"
 if ! gh_quiet_check || ! gh_lock_take qemu_ck_imac_kernel_test "${AIENOS_GATE_MINUTES:-60}"; then
@@ -47,6 +52,10 @@ truncate -s 64M "${img}"
 mformat -i "${img}" -F ::
 mmd -i "${img}" ::/EFI ::/EFI/BOOT
 mcopy -i "${img}" "${out}/IMACKERN.EFI" ::/EFI/BOOT/BOOTX64.EFI
+data="${work}/data.img"
+gpt_line="$("${out}/host/ck_gpt_image" create "${data}" 512 64 aienos-middle)"
+read -r a_first a_last < <(sed -E "s/.*aienos_first_lba=([0-9]+) aienos_last_lba=([0-9]+).*/\1 \2/" <<<"${gpt_line}")
+data_sum="$(sha256sum "${data}" | cut -d" " -f1)"
 
 fails=0
 chk() { # description, file, pattern
@@ -59,6 +68,7 @@ run() { # name, -cpu model, expected APIC mode
         -drive if=pflash,format=raw,readonly=on,file="${code_fd}" \
         -drive if=pflash,format=raw,file="${work}/vars.fd" \
         -drive if=none,id=esp,format=raw,file="${img}" -device ide-hd,drive=esp,bus=ide.0 \
+        -drive if=none,id=data,format=raw,file="${data}" -device ide-hd,drive=data,bus=ide.1 \
         -display none -nic none -serial file:"${log}" -no-reboot &
     qpid=$!
     local self_exit=0
@@ -86,6 +96,15 @@ run() { # name, -cpu model, expected APIC mode
     chk "${name}: APIC mode ${mode}" "${txt}" "^apic: mode=${mode} id=0 "
     chk "${name}: MADT two CPUs" "${txt}" '^madt: cpus=2 ioapics=1 ioapic_lines_masked=[1-9][0-9]*$'
     chk "${name}: 20 timer interrupts" "${txt}" '^timer_irq: 20 ticks in [0-9]+ ms$'
+    chk "${name}: AHCI controller found" "${txt}" "^pci: ahci [0-9a-f:.]+ id=8086:2922 "
+    chk "${name}: AHCI polled" "${txt}" "^ahci: ctrl=0 abar=0x[0-9a-f]+ version=1\\.[0-9]+ ports=[0-9]+ implemented=0x[0-9a-f]+ s64a=[01] polled=yes\$"
+    chk "${name}: ESP disk identified" "${txt}" "^ahci_disk: ctrl=0 disk=0 port=0 link=gen[0-9] model=\"QEMU HARDDISK\" blocks=131072 block=512 mib=64 access=read-only\$"
+    chk "${name}: ESP sector 0 read" "${txt}" "^ahci_read: ctrl=0 disk=0 lba=0 bytes=512 boot_sig=55aa "
+    chk "${name}: ESP has no GPT" "${txt}" "^ahci_gpt: ctrl=0 disk=0 refused: no protective MBR\$"
+    chk "${name}: data disk identified" "${txt}" "^ahci_disk: ctrl=0 disk=1 port=1 link=gen[0-9] model=\"QEMU HARDDISK\" blocks=131072 block=512 mib=64 access=read-only\$"
+    chk "${name}: data disk AIENOS partition where written" "${txt}" "^ahci_gpt: ctrl=0 disk=1 gpt=valid used=3 aienos first_lba=${a_first} last_lba=${a_last}\$"
+    chk "${name}: storage summary" "${txt}" "^storage: pci_functions=[1-9][0-9]* ahci_controllers=1 disks=2 writes=none\$"
+    [[ "$(sha256sum "${data}" | cut -d" " -f1)" == "${data_sum}" ]] && echo "PASS  ${name}: data disk unchanged" || { echo "FAIL  ${name}: data disk changed"; fails=$((fails + 1)); }
     chk "${name}: kernel alive" "${txt}" '^kernel: alive$'
     chk "${name}: DONE" "${txt}" '^AIENOS-IMAC-KERNEL-0 DONE$'
     chk "${name}: ACPI S5 power off" "${txt}" '^power: off via ACPI S5 pm1a=0x[0-9a-f]+ '

@@ -14,7 +14,7 @@ QEMU qualifies nothing physical: a PASS here says nothing about real hardware.
 | `core/` | Console, printf, ACPI, reports/panic/PSCI reset, M3 (threads, scheduler, EL0, capabilities, IPC), `kmain.c`. |
 | `tests/` | Host unit tests. |
 | `third_party/omega/` | The canonical Omega Cortex store, byte for byte from the omega commit in `omega.lock` (checked by `scripts/omega_lock_check.sh`); built freestanding by `svc/cortex_store.c` over the sealed Store through `svc/cortex_journal.c` (native v1 plan P06). |
-| `x86/` | x86_64 port, first cut (AIENOS-IMAC-KERNEL-0, 2017 iMac): UEFI stub, descriptor tables and interrupt stubs, page tables, local APIC timer, ACPI power off, console. |
+| `x86/` | x86_64 port, first cut (AIENOS-IMAC-KERNEL-0, 2017 iMac): UEFI stub, descriptor tables and interrupt stubs, page tables, local APIC timer, ACPI power off, console, read-only AHCI SATA disks. |
 | `../boot/` | Minimal UEFI entry stub (one image with the kernel). |
 
 ## Build and test
@@ -157,12 +157,21 @@ own GDT, TSS and IDT (`x86/trap.S`), builds its own identity page tables (2 MiB
 pages: RAM write-back, everything else uncached, the framebuffer write-combining,
 a 4 KiB guard page under the stack), proves the guard page faults and the fault
 is contained, measures the TSC against the HPET, runs the local APIC timer
-(xAPIC) for 20 interrupts at 100 Hz, prints `kernel: alive`, holds the screen
+(xAPIC) for 20 interrupts at 100 Hz, then finds the SATA disks behind every AHCI
+controller (`x86/ahci_x86.c`: PCI walk over the MCFG ECAM window, polled, no
+controller or port reset) and reads them without writing: only IDENTIFY DEVICE
+and READ DMA EXT exist in the driver (the build refuses any other ATA command),
+the disk_dev write hook always refuses, the IDENTIFY serial number is never read,
+and each disk's GPT is checked by the shared `dev/disk_part.c` (both copies, CRCs,
+the AIENOS partition located if present). It prints `kernel: alive`, holds the screen
 60 s and powers off through ACPI S5. Output: the GOP framebuffer
 (`core/fbcon.c`, lines from before ExitBootServices replayed onto it) and COM1
 when a 16550 answers there (QEMU; the iMac has none). Shared, unchanged:
-`core/fbcon.c`, `fmt.c`, `acpi.c`, `handoff_check.c`, `mm/frames.c`, `heap.c`.
-Not yet: secondary cores, x2APIC, NX, devices, NVMe, VT-d, a store. QEMU
+`core/fbcon.c`, `fmt.c`, `acpi.c`, `handoff_check.c`, `mm/frames.c`, `heap.c`,
+`dev/disk_part.c`, `../disk/disk.c`. The QEMU test also attaches a data disk with
+a GPT from `ck_gpt_image` and fails unless the kernel finds the AIENOS partition
+where the tool wrote it and the disk is byte-identical afterwards. Not yet:
+secondary cores, x2APIC, NX, disk writes, NVMe, VT-d, network, a store. QEMU
 qualifies nothing physical; copy the image to a FAT stick as
 `EFI/BOOT/BOOTX64.EFI` and start it from the Option-key boot picker.
 
