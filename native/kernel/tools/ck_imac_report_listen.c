@@ -15,6 +15,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <stdio.h>
@@ -59,11 +60,21 @@ static struct run *find_run(const char *id, unsigned parts, unsigned total)
     return r;
 }
 
+/* fopen with the file created owner-only (0600). */
+static FILE *open_private(const char *path, int flags, const char *mode)
+{
+    int fd = open(path, flags | O_WRONLY | O_CREAT | O_CLOEXEC, 0600);
+    FILE *f = fd < 0 ? 0 : fdopen(fd, mode);
+    if (fd >= 0 && !f)
+        close(fd);
+    return f;
+}
+
 static void finish_run(FILE *lg, const char *dir, struct run *r)
 {
     char path[4096];
     snprintf(path, sizeof path, "%s/imac-%s.txt", dir, r->id);
-    FILE *f = fopen(path, "w");
+    FILE *f = open_private(path, O_TRUNC, "w");
     if (!f || fwrite(r->data, 1, r->total, f) != r->total || fclose(f) != 0) {
         fprintf(lg, "write failed run=%s file=%s errno=%d (%s)\n", r->id, path, errno, strerror(errno));
         return;
@@ -88,7 +99,7 @@ int main(int argc, char **argv)
     }
     char lpath[4096];
     snprintf(lpath, sizeof lpath, "%s/listen.log", dir);
-    FILE *lg = fopen(lpath, "a");
+    FILE *lg = open_private(lpath, O_APPEND, "a");
     if (!lg) {
         perror("ck_imac_report_listen: log");
         return 2;

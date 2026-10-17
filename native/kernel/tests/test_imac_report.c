@@ -8,6 +8,7 @@
  *       check that ck_imac_report_listen rebuilds LOGFILE byte for byte. */
 #define _POSIX_C_SOURCE 200809L
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <string.h>
@@ -88,7 +89,8 @@ int main(int argc, char **argv)
     CHECK(got == len && memcmp(rebuilt, log_text, len) == 0);
 
     if (argc == 4 && !strcmp(argv[1], "send")) {
-        FILE *lf = fopen(argv[3], "w");
+        int lfd = open(argv[3], O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+        FILE *lf = lfd < 0 ? 0 : fdopen(lfd, "w");
         CHECK(lf && fwrite(log_text, 1, len, lf) == len && fclose(lf) == 0);
         int s = socket(AF_INET, SOCK_DGRAM, 0);
         struct sockaddr_in a;
