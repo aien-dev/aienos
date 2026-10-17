@@ -153,6 +153,10 @@ jobs:
             run: |
               sudo apt-get install -y mtools gcc-x86-64-linux-gnu binutils-x86-64-linux-gnu qemu-system-x86 ovmf
               bash scripts/qemu_ck_imac_diag_test.sh
+          - name: IMACKERN.EFI (x86_64 kernel)
+            run: |
+              sudo apt-get install -y mtools gcc-x86-64-linux-gnu binutils-x86-64-linux-gnu qemu-system-x86 ovmf
+              bash scripts/qemu_ck_imac_kernel_test.sh
           - name: GICv2 boot
             gic: "2"
             run: bash scripts/qemu_ck_boot_test.sh

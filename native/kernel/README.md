@@ -14,6 +14,7 @@ QEMU qualifies nothing physical: a PASS here says nothing about real hardware.
 | `core/` | Console, printf, ACPI, reports/panic/PSCI reset, M3 (threads, scheduler, EL0, capabilities, IPC), `kmain.c`. |
 | `tests/` | Host unit tests. |
 | `third_party/omega/` | The canonical Omega Cortex store, byte for byte from the omega commit in `omega.lock` (checked by `scripts/omega_lock_check.sh`); built freestanding by `svc/cortex_store.c` over the sealed Store through `svc/cortex_journal.c` (native v1 plan P06). |
+| `x86/` | x86_64 port, first cut (AIENOS-IMAC-KERNEL-0, 2017 iMac): UEFI stub, descriptor tables and interrupt stubs, page tables, local APIC timer, ACPI power off, console. |
 | `../boot/` | Minimal UEFI entry stub (one image with the kernel). |
 
 ## Build and test
@@ -141,6 +142,29 @@ of them:
   (`artifact/format.c`, used only by the `CK_SEED0B_TEST_ANCHOR` build and the
   host tools) are still present as data in every image, including hardware
   staging; the ordinary loader trusts no anchor.
+
+## 2017 iMac image (AIENOS-IMAC-KERNEL-0, x86_64)
+
+    make -C native/kernel imac-kernel        # target/native-kernel/IMACKERN.EFI
+    scripts/qemu_ck_imac_kernel_test.sh      # QEMU q35 + OVMF, two CPU models, ends AIENOS_IMAC_KERNEL
+
+The first cut of the C kernel core on x86_64, for the owner's 2017 iMac
+(iMac18,3, Core i5-7500; hardware facts in
+`evidence/imac_boot0_2026-10-16/`). `x86/efi_x86.c` is the UEFI stub (GOP via
+`../boot/efi_gop.c`, RSDP, memory map, ExitBootServices) and hands over the same
+CHANDOF3 record, checked by `core/handoff_check.c`; `x86/kmain_x86.c` loads its
+own GDT, TSS and IDT (`x86/trap.S`), builds its own identity page tables (2 MiB
+pages: RAM write-back, everything else uncached, the framebuffer write-combining,
+a 4 KiB guard page under the stack), proves the guard page faults and the fault
+is contained, measures the TSC against the HPET, runs the local APIC timer
+(xAPIC) for 20 interrupts at 100 Hz, prints `kernel: alive`, holds the screen
+60 s and powers off through ACPI S5. Output: the GOP framebuffer
+(`core/fbcon.c`, lines from before ExitBootServices replayed onto it) and COM1
+when a 16550 answers there (QEMU; the iMac has none). Shared, unchanged:
+`core/fbcon.c`, `fmt.c`, `acpi.c`, `handoff_check.c`, `mm/frames.c`, `heap.c`.
+Not yet: secondary cores, x2APIC, NX, devices, NVMe, VT-d, a store. QEMU
+qualifies nothing physical; copy the image to a FAT stick as
+`EFI/BOOT/BOOTX64.EFI` and start it from the Option-key boot picker.
 
 ## Raspberry Pi 5 image (AIENOS-PI5 step 1)
 
