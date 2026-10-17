@@ -22,7 +22,7 @@
       "children": [
         {
           "digest": "b5ced6fea583b485206b73ec08b91de68a5cfd2672ac448191831754c9e0907d",
-          "last_commit": "4bd49ca",
+          "last_commit": "7db773a",
           "name": "crates",
           "purpose": "Directory crates. Purpose not yet described by a human."
         },
@@ -33,27 +33,27 @@
           "purpose": "Directory docs. Purpose not yet described by a human."
         },
         {
-          "digest": "64cc87f8507bb580e1788d335c5a76039f3e3a016552595526718448ab5aa098",
-          "last_commit": "3037967",
+          "digest": "0f000acf8a40d0daecde441e94121543b8a45f88dc9e2dd53daf14473a9cf9f5",
+          "last_commit": "a8a1fd3",
           "name": "native",
           "purpose": "Directory native. Purpose not yet described by a human."
         },
         {
-          "digest": "9adb69cc749bc97fa48e268f0397b900da83c84191ab6a9373358e8b9ab57922",
-          "last_commit": "44cf2dd",
+          "digest": "8a783c03b1dab4e87a2c2df8933d490baf2fac25064667791f405046841d0d72",
+          "last_commit": "a8a1fd3",
           "name": "scripts",
           "purpose": "Directory scripts. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:19cc8f21ac13e49018f60836bdaf7c4c23477cf558624048754f1e83c6d88cac",
-      "compiled_at": "2026-10-17T01:49:45Z",
+      "children_root": "sha256:18713944ca20331761857bd26927bc55b46639bf94479bf226b0c5e61dcfbb7c",
+      "compiled_at": "2026-10-17T16:57:40Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:1b7f96caef28425fc1a0751dd671452aa26ef3561f79f663480e083341950199",
+      "digest": "sha256:a7838fbcdd77a37da85dc564cf180dccd9397fa2a232d7838bd8554a80f3ed33",
       "evidence_files": 211,
       "evidence_root": "sha256:3a8f56415109a697e4beb6048c85805c50c9c6c4089629057f4e8b3e76863981",
       "files": 3501,
-      "generated_at_commit": "30379678add587e388db4e11713d6bca8d159b08",
-      "source_tree": "sha256:4fa99ea1d4144da8067bb5d01898dc38984898b2c5d5fb06b0e19033c824b265"
+      "generated_at_commit": "a8a1fd36cfaa273afd67987fa250da4a0d8eac7a",
+      "source_tree": "sha256:7b41ce3c0f516e4a0d1baa47bba10c484fe3aa79ed74a894ec1ca07cd0d23a4d"
     },
     "owner_lane": "",
     "provenance": {
