@@ -5,9 +5,11 @@
  * ACPI MCFG names, buses start..end, honoring the multi-function bit. It
  * remembers each function, then drives, in this order: every AHCI controller
  * (ahci_x86.c), every NVMe controller (native/disk/disk_nvme.c through the
- * glue below) and a READ-ONLY look at a Broadcom Ethernet controller.
- * The only config writes are memory decode and bus mastering for the AHCI and
- * NVMe functions the kernel drives.
+ * glue below), a look at the Ethernet controller (PCI identity, power state,
+ * PHY link), then the BCM57766 driven for transmit by tg3_x86.c, which waits
+ * up to 8 s for a link. Config writes: memory decode and bus mastering for the
+ * functions the kernel drives, and the BCM57766's own register-access and
+ * PCIe settings (tg3_x86.c).
  *
  * Disks are read-only here. The NVMe driver resets and enables the controller
  * and creates its queues (no media is touched by that); the kernel then reads
@@ -202,6 +204,30 @@ static void net_look(const struct pfn *f)
               bmsr & 0x20 ? 1u : 0u);
 }
 
+/* Drives the BCM57766 (tg3_x86.c) and waits up to 8 s for the link, so the
+ * summary and the report can say whether the network is up. */
+static void net_drive(const struct pfn *f, struct ck_frames *fr)
+{
+    uint32_t lo = cr32(f->cfg, 0x10), hi = (lo & 6) == 4 ? cr32(f->cfg, 0x14) : 0;
+    uint64_t bar = ((uint64_t)hi << 32 | lo) & ~0xfull;
+    if (f->vendor != 0x14e4 || f->device != 0x1686 || !bar || ck_x86_map_mmio(bar, 0x10000))
+        return;
+    if (ck_x86_tg3_start((volatile uint8_t *)(uintptr_t)bar, f->cfg, fr, g_tsc_hz)) {
+        res.net_driver = 2;
+        return;
+    }
+    res.net_driver = 1;
+    uint64_t t0 = ck_rdtsc();
+    while (!ck_x86_tg3_link() && ck_rdtsc() - t0 < 8 * g_tsc_hz) {
+        uint64_t t1 = ck_rdtsc();
+        while (ck_rdtsc() - t1 < g_tsc_hz / 4)
+            ck_pause();
+    }
+    res.net_link = ck_x86_tg3_link() ? 1 : 2;
+    if (res.net_link != 1)
+        ck_puts("net_tg3: no link after 8 s (cable unplugged?); the report is sent if it comes up during the hold\n");
+}
+
 const struct ck_x86_storage_result *ck_x86_storage(uint64_t rsdp, struct ck_frames *fr, uint64_t tsc_hz,
                                                    uint64_t map_top)
 {
@@ -269,6 +295,9 @@ const struct ck_x86_storage_result *ck_x86_storage(uint64_t rsdp, struct ck_fram
     for (unsigned i = 0; i < nfound; i++)
         if ((found[i].cls >> 8) == 0x0200 && (found[i].ht & 0x7f) == 0)
             net_look(&found[i]);
+    for (unsigned i = 0; i < nfound; i++)
+        if ((found[i].cls >> 8) == 0x0200 && (found[i].ht & 0x7f) == 0 && !res.net_driver)
+            net_drive(&found[i], fr);
     if (!res.net_found)
         ck_puts("net: no Ethernet controller\n");
     ck_printf("storage: pci_functions=%u ahci_controllers=%u disks=%u nvme_controllers=%u nvme_disks=%u "

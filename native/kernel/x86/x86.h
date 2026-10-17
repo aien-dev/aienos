@@ -82,12 +82,17 @@ int ck_x86_com1_probe(void);
 int ck_x86_console_fb_on(volatile void *base, uint32_t width, uint32_t height, uint32_t pitch,
                          uint32_t format, uint32_t *scale, uint32_t *cols, uint32_t *rows);
 
+/* console_x86.c: the RAM copy of everything written so far (the first
+ * 16 KiB), for the network report. */
+const char *ck_x86_console_log(size_t *len);
+
 /* pci_x86.c: PCI walk over the MCFG ECAM window; every AHCI and NVMe disk
  * read-only (identify, read, GPT check), a look at the Ethernet chip. */
 struct ck_frames;
 struct ck_x86_storage_result {
     unsigned pci_functions, ahci_ctrls, ahci_disks, nvme_ctrls, nvme_disks, gpt_valid;
     unsigned net_found, net_link; /* net_link: 0 not read, 1 up, 2 down */
+    unsigned net_driver;          /* 0 not tried, 1 running, 2 failed */
 };
 const struct ck_x86_storage_result *ck_x86_storage(uint64_t rsdp, struct ck_frames *fr, uint64_t tsc_hz,
                                                    uint64_t map_top);
@@ -96,6 +101,19 @@ int ck_x86_map_mmio(uint64_t pa, uint64_t len);
 /* ahci_x86.c: one AHCI controller at abar, polled, read-only. */
 void ck_x86_ahci_start(unsigned ctrl, uint64_t abar, struct ck_frames *fr, uint64_t tsc_hz);
 unsigned ck_x86_ahci_disks(void);
+
+/* tg3_x86.c: the Broadcom BCM57766 Ethernet chip, transmit only, polled.
+ * start: regs = BAR0 (mapped), cfg = its ECAM config space; 0 when the chip
+ * is up (the link may still be negotiating). The rest report on or use it. */
+int ck_x86_tg3_start(volatile uint8_t *regs, volatile uint8_t *cfg, struct ck_frames *fr, uint64_t tsc_hz);
+int ck_x86_tg3_ready(void);
+int ck_x86_tg3_link(void);
+void ck_x86_tg3_mac(uint8_t mac[6]);
+int ck_x86_tg3_send(const uint8_t *frame, size_t len);
+int ck_x86_tg3_drain(unsigned ms);
+/* report_x86.c: holds `seconds`, sending the console's RAM copy over the
+ * network every 2 s while the link is up; returns the rounds sent. */
+unsigned ck_x86_report_hold(uint64_t tsc_hz, unsigned seconds);
 
 /* smp_x86.S: the secondary-core trampoline, copied below 1 MiB and patched. */
 extern char ck_x86_tramp_start[], ck_x86_tramp_end[], ck_x86_tramp_gdt[], ck_x86_tramp_pm32[],
