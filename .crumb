@@ -33,27 +33,27 @@
           "purpose": "Directory docs. Purpose not yet described by a human."
         },
         {
-          "digest": "1e87b515b9e823518e3c7bc4e8bff739f01678ab8422cabeb65bbc52ffaaff44",
-          "last_commit": "bfea771",
+          "digest": "4dbcd4e63adf8241a90f78c3034fa48d727ebb32ba0482ed7a1749804c003b7b",
+          "last_commit": "650ca8e",
           "name": "native",
           "purpose": "Directory native. Purpose not yet described by a human."
         },
         {
-          "digest": "80aaabcb7a78950e15c2fb832c6f4b14fbbe7fb1976a2e83bca19846146ceb4c",
-          "last_commit": "bfea771",
+          "digest": "471d790d9ca06fe80cd2caee811c1bcaf8a736ec9025a73d2233a3b959e3f4fd",
+          "last_commit": "d8257aa",
           "name": "scripts",
           "purpose": "Directory scripts. Purpose not yet described by a human."
         }
       ],
-      "children_root": "sha256:bd8f9554007109ed79d0ad5762b942fbc69576c9430b3632876791db95991455",
-      "compiled_at": "2026-10-16T23:40:06Z",
+      "children_root": "sha256:4c87269387230ce64fdc75320db91f532e72bc5791d8671ab91259274fe6c6c7",
+      "compiled_at": "2026-10-17T00:19:24Z",
       "compiler": "crumb-compile/1",
-      "digest": "sha256:572d90a1ffeaa6b8ec3bb8855504a10948ee83c5c14fc7445033e0c357938ba7",
-      "evidence_files": 209,
-      "evidence_root": "sha256:6615fbe1edf6e985713811605e43b89a117a0a163794add761bbf5002786ea46",
-      "files": 3484,
-      "generated_at_commit": "bfea771099aa29ea46e590f08e6a468f4e3b4523",
-      "source_tree": "sha256:3a90bafcb5c171ea4c677bb9537e0fe782002a279515af68730eefcc9fafd99b"
+      "digest": "sha256:3128ac221a853917496793d97ffdbf64cdc7ddd8beec4041f860a3e221cb20a2",
+      "evidence_files": 210,
+      "evidence_root": "sha256:00087526be6f0c3856ef27a9ff77db7e11c2394e2c54d29235c5de557eb8425a",
+      "files": 3491,
+      "generated_at_commit": "650ca8e470d53f3b3802e865d81337341899f3c9",
+      "source_tree": "sha256:649950edfa1ca46bd24e26de2111d0f3c1d4f1569dba5afb09dff2bf6f2a8522"
     },
     "owner_lane": "",
     "provenance": {
