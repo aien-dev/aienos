@@ -41,7 +41,8 @@ power: holding the screen 60 s, then ACPI S5
   links no report code, so nothing was broadcast.
 
 ## Limits
-- One run, one machine. The photo was taken during the hold; power-off is not in it.
+- One run, one machine. The photo was taken during the hold; the owner reported afterwards that
+  the iMac switched itself off after the 60 s hold (ACPI S5 still works with W^X on).
 - The mutation (negative) builds ran in QEMU only, not on the iMac.
 - W^X is not process isolation. VT-d DMA confinement (#411) is not done.
 - The NVMe GPT is refused (no protective MBR), as in earlier runs; unrelated to this change.
